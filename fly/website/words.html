@@ -1,0 +1,125 @@
+<html>
+<head>
+  <title>Fly Words</title>
+  <link rel="stylesheet" href="css/fly.css" type="text/css" media="screen" />
+</head>
+<body>
+
+<!--<div id="logo"><img src="dry.jpg" align="middle"/></div>-->
+
+<div id="head">
+  <div id="title">FLY</div>
+</div>
+
+<div id="main">
+
+  <div id="side">
+
+    <div id="menu">
+      <a href="index.html">Home</a> <br/>
+      <a href="overview.html">Overview</a> <br/>
+      <a href="spec.html">Specification</a> <br/>
+      <a href="words.html">Words</a>
+      <br/><br/>
+      <a href="http://en.wikipedia.org/wiki/Forth_programming_language">Wikipedia on Forth</a> <br/>
+      <a href="http://thinking-forth.sourceforge.net/">Thinking Forth</a>
+      <br/><br/>
+      <a href="http://en.wikipedia.org/wiki/YAML">Wikipedia on YAML</a> <br/>
+      <a href="http://www.yaml.org/">YAML.org</a> <br/>
+    </div>
+
+    <br/><br/>
+
+    <div class="quote">
+      How refreshingly simple. It's a wonder
+      no ones come up with something like this before.
+    </div>
+
+    <br/><br/>
+
+    <div class="google">
+      Google Ads Here
+    </div>
+
+  </div>
+
+  <h2>Words</h2><br/><div class="word"<span class="word">if</span>&nbsp;<sup>core</sup><pre class="form">
+f1 b1 b2 if
+</pre><p class="word"><b>Condition</b> <br/> Do b1 if f1 is true, otherwise do b2.</p></div><br/><div class="word"<span class="word"><=></span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 <=>
+</pre><p class="word"><b>Compare</b> <br/> Returns -1 if n1 < n2, 0 if n1 = n2, +1 if n1 > n2.</p></div><br/><div class="word"<span class="word"><</span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 <
+</pre><p class="word"><b>Less than</b> <br/> Returns -1 if n1 < n2, 0 otherwise.</p></div><br/><div class="word"<span class="word"><=</span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 <=
+</pre><p class="word"><b>Less than or equal to</b> <br/> Returns -1 if n1 <= n2, 0 otherwise.</p></div><br/><div class="word"<span class="word"><></span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 <>
+</pre><p class="word"><b>Not equal to</b> <br/> Returns -1 if n1 <> n2, 0 otherwise.</p></div><br/><div class="word"<span class="word">=</span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 =
+</pre><p class="word"><b>Equal to</b> <br/> Returns -1 if n1=n2, 0 otherwise.</p></div><br/><div class="word"<span class="word">></span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 >
+</pre><p class="word"><b>Greater than</b> <br/> Returns -1 if n1 > n2, 0 otherwise. (flag?)</p></div><br/><div class="word"<span class="word">>=</span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 >=
+</pre><p class="word"><b>Greater than or equal</b> <br/> Returns -1 if n1 >= n2, 0 otherwise.</p></div><br/><div class="word"<span class="word">+</span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 + -- n
+</pre><p class="word"><b>Addition</b> <br/> Adds number n1 and number n2 and leaves sum on stack.</p></div><br/><div class="word"<span class="word">-</span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 -
+</pre><p class="word"><b>Subtraction</b> <br/> Subtracts number n2 from n1 and leaves difference on stack.</p></div><br/><div class="word"<span class="word">*</span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 *
+</pre><p class="word"><b>Multiplication</b> <br/> Multiplies n1 and n2 and leaves product on stack.</p></div><br/><div class="word"<span class="word">/</span>&nbsp;<sup>math</sup><pre class="form">
+n1 n2 /
+</pre><p class="word"><b>Division</b> <br/> Divides n1 by n2 and leaves quotient on stack.</p></div><br/><div class="word"<span class="word">+</span>&nbsp;<sup>string</sup><pre class="form">
+s1 s2 +
+</pre><p class="word"><b>Concat</b> <br/> Concats string s1 and string s2 into a new string.</p></div><br/><div class="word"<span class="word">add</span>&nbsp;<sup>string</sup><pre class="form">
+s1 s2 add
+</pre><p class="word"><b>Concat</b> <br/> Concats string s1 and string s2 into a new string.</p></div><br/><div class="word"<span class="word">subt</span>&nbsp;<sup>string</sup><pre class="form">
+s1 s2 sub
+</pre><p class="word"><b>Subtract</b> <br/> Subtracts the substring s2 from the string s1 wherever it occurs.</p></div><br/><div class="word"<span class="word">-</span>&nbsp;<sup>string</sup><pre class="form">
+s1 s2 -
+</pre><p class="word"><b>Subtract</b> <br/> Subtracts the substring s2 from the string s1 wherever it occurs.</p></div><br/><div class="word"<span class="word">print</span>&nbsp;<sup></sup><pre class="form">
+o1 print
+</pre><p class="word"><b>Print</b> <br/> Convert object o1 to string via its .string method and pushes it to the console device.</p></div><br/><div class="word"<span class="word">.</span>&nbsp;<sup></sup><pre class="form">
+o1 print
+</pre><p class="word"><b>Print</b> <br/> Convert object o1 to string via its .string method and pushes it to the console device.</p></div><br/><div class="word"<span class="word">print-const</span>&nbsp;<sup></sup><pre class="form">
+
+</pre><p class="word"><b>Print constant</b> <br/> Immediately prints the string that follows in the input stream.</p></div><br/><div class="word"<span class="word">add</span>&nbsp;<sup></sup><pre class="form">
+l1 l2 +
+</pre><p class="word"><b></b> <br/> Concats elements of l2 to l1.</p></div><br/><div class="word"<span class="word">+</span>&nbsp;<sup></sup><pre class="form">
+l1 l2 +
+</pre><p class="word"><b></b> <br/> Concats elements of l2 to l1.</p></div><br/><div class="word"<span class="word">dump</span>&nbsp;<sup></sup><pre class="form">
+dump
+</pre><p class="word"><b>Dump stack</b> <br/> </p></div><br/><div class="word"<span class="word">caddr</span>&nbsp;<sup></sup><pre class="form">
+caddr w1
+</pre><p class="word"><b>Obtain compilation address</b> <br/> Places the compilation address of the following word on the stack.</p></div><br/><div class="word"<span class="word">'</span>&nbsp;<sup></sup><pre class="form">
+' w1
+</pre><p class="word"><b>Obtain compilation address</b> <br/> Places the compilation address of the following word on the stack.</p></div><br/><div class="word"<span class="word"></span>&nbsp;<sup></sup><pre class="form">
+w1 :
+</pre><p class="word"><b>Print immediate string</b> <br/> Prints the string literal that follows in line.</p></div><br/><div class="word"<span class="word">:</span>&nbsp;<sup></sup><pre class="form">
+w1 :
+</pre><p class="word"><b>Begin definition</b> <br/> Begins compilation of a word named w.</p></div><br/><div class="word"<span class="word">!</span>&nbsp;<sup></sup><pre class="form">
+i1 !
+</pre><p class="word"><b>Print indirect</b> <br/> Prints the value at the address at the top of the stack.</p></div><br/><div class="word"<span class="word"></span>&nbsp;<sup></sup><pre class="form">
+
+</pre><p class="word"><b>Store into address</b> <br/> Stores the value n into the address addr.</p></div><br/><div class="word"<span class="word">+!</span>&nbsp;<sup></sup><pre class="form">
+n1 +!
+</pre><p class="word"><b>Add indirect</b> <br/> Adds n1 to the word at address addr.</p></div><br/><div class="word"<span class="word">@</span>&nbsp;<sup></sup><pre class="form">
+i1 @
+</pre><p class="word"><b>Load address</b> <br/> Loads the value at i1 and leave it at the top of the stack.</p></div><br/><div class="word"<span class="word">addr</span>&nbsp;<sup></sup><pre class="form">
+i1 addr
+</pre><p class="word"><b>Load address</b> <br/> Loads the value at i1 and leave it at the top of the stack.</p></div><br/><div class="word"<span class="word"></span>&nbsp;<sup></sup><pre class="form">
+
+</pre><p class="word"><b>Set interpretive state</b> <br/> Within a compilation, returns to the interpretive state.</p></div><br/><div class="word"<span class="word"></span>&nbsp;<sup></sup><pre class="form">
+
+</pre><p class="word"><b>Push next word</b> <br/> Places the compile address of the following word in a definition onto the stack.</p></div><br/>
+
+  <br/>
+
+  <div id="copyright">
+    copyright (c) 2006 &psi;t corporation. All rights reserved.
+  </div>
+
+  <br/>
+
+</div>
+
+</body>
+</html>

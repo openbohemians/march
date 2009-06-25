@@ -1,0 +1,12 @@
+---
+
+gain (n n): !!fn |
+  &old &new
+  *new *old - *old /
+
+figures: !!fn
+  10 7.5
+
+start: !!fn |
+  figures gain .
+

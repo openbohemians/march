@@ -1,0 +1,81 @@
+#!/usr/bin/env ruby
+
+require 'rake'
+require 'yaml'
+#require 'rexml/document'
+
+$template = File.read('layout.htm')
+
+desc "Build all"
+task :all => [ :index, :overview, :spec, :words ]
+
+desc "Build index.html"
+task :index do
+  weaveFile( 'Home', 'index' )
+end
+
+desc "Build overview.html"
+task :overview do
+  weaveFile( 'Overview', 'overview' )
+end
+
+desc "Build spec.html"
+task :spec do
+  redFile( 'Specification', 'spec' )
+end
+
+desc "Build words.html"
+task :words do
+  words = YAML::load( File.new( "data/words.yaml" ) )
+  str = "<h2>Words</h2><br/>"
+  words.each do |w|
+    str << %{<div class="word"}
+    str << %{<span class="word">#{w['word']}</span>}
+    str << %{&nbsp;<sup>#{w['module']}</sup>}
+    str << %{<pre class="form">\n#{w['form']}\n</pre>}
+    str << %{<p class="word"><b>#{w['summary']}</b> <br/> #{w['description']}</p>}
+    str << "</div>"
+    str << "<br/>"
+  end
+  weaveStr( 'Words', 'words', str )
+end
+
+
+# support --------------------------------------------------------
+
+def weaveStr( title, fname, subf=nil )
+  puts "#{fname}"
+  newf = $template.dup
+  newf.gsub!('<var id="title"/>', title || fname.capitalize)
+  newf.gsub!('<var id="text"/>', subf)
+  File.open("#{fname}.html", "w") { |fw| fw << newf }
+end
+
+def weaveFile( title, fname )
+  unless File.exist?("#{fname}.htm")
+    puts "#{fname}.htm does not exist"
+    return
+  end
+  subf = File.read("#{fname}.htm")
+  puts "#{fname}"
+  newf = $template.dup
+  newf.gsub!('<var id="title"/>', title || fname.capitalize)
+  newf.gsub!('<var id="text"/>', subf)
+  File.open("#{fname}.html", "w") { |fw| fw << newf }
+end
+
+def redFile( title, fname )
+  require 'redcloth'
+  unless File.exist?("#{fname}.red")
+    puts "#{fname}.red does not exist"
+    return
+  end
+  subf = File.read("#{fname}.red")
+  subf = RedCloth.new(subf).to_html
+  puts "#{fname}"
+  newf = $template.dup
+  newf.gsub!('<var id="title"/>', title || fname.capitalize)
+  newf.gsub!('<var id="text"/>', subf)
+  File.open("#{fname}.html", "w") { |fw| fw << newf }
+end
+

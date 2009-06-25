@@ -1,0 +1,12 @@
+
+
+  hms_to_s(h:float, m:float, s:float) = {
+    h * 3600 + m * 30 + s
+  }
+
+  fib(n) = {
+    1 + fib(n - 1)
+  }
+
+  fib(0) = 0
+

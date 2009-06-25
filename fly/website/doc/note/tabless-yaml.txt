@@ -1,0 +1,20 @@
+
+  fish: {
+    type: Rock
+    length: 8 in.
+    string:
+      "%(type) Fish %(length)."
+  }
+
+  fisherman: {
+    catch: []
+    castnet:
+      catch fish push
+    showoff:
+      catch each console.print
+  }
+
+  main:
+    3 [ fisherman.castnet ] repeat
+    fisherman.showoff
+

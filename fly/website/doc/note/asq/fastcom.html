@@ -1,0 +1,170 @@
+<html>
+<head>
+  <title>Asqting</title>
+  <style>
+    pre.code i { font-style: normal; }
+    pre.code b { font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<h1>Asq</h1>
+
+<p>Asqting is an interesting language. It's based largely on Forth in that it is a stack based procedural language.
+But unlike Forth it uses many fewer crytpic words, has types and rather then stacks of words, has stacks of clauses.
+This later feature allows for statments to be made in non-reverse notation, though the core of the language
+sticks with reverse notation to emphesize the stack nature of the language.</p>
+
+<p>Template for building a new word.</p>
+
+<pre>
+  [<i>:type:</i>|<i>:word:</i>]... <b>-></b> <i>:block:</i> <b>!</b>
+</pre>
+
+
+<h2>Built in Types</h2>
+<pre class="code">
+  Symbol       Example
+
+  :<i>type</i>:       :<i>type</i>:
+  :<i>word</i>:       <b>word</b>
+  :<i>number</i>:     9.9
+  :<i>integer</i>:    9
+  :<i>text</i>:       "text"
+  :<i>block</i>:      [code]
+  :<i>address</i>:    @00FF23AB99@
+  :<i>register</i>:   $R1$
+</pre>
+
+<h2>Built in Words</h2>
+
+<h3>Special Words</h3>
+<pre class="code">
+    define, :
+    type
+</pre>
+
+<h3>Bitwise Operators</h3>
+<pre class="code">
+  <i>:value:</i> <b>not</b>.
+  <i>:value:</i> <b>~</b>.
+
+  <i>:value:</i> <i>:value:</i> <b>and</b>.
+  <i>:value:</i> <i>:value:</i> <b>**</b>.
+
+  <i>:value:</i> <i>:value:</i> <b>or</b>.
+  <i>:value:</i> <i>:value:</i> <b>++</b>.
+
+  <i>:value:</i> <i>:value:</i> <b>xor</b>.
+  <i>:value:</i> <i>:value:</i> <b>^^</b>.
+
+  <i>:value:</i> <i>:value:</i> <b>nand</b>.
+  <i>:value:</i> <i>:value:</i> <b>~**</b>.
+
+  <i>:value:</i> <i>:value:</i> <b>nor</b>.
+  <i>:value:</i> <i>:value:</i> <b>~++</b>.
+
+  <i>:value:</i> <i>:value:</i> <b>xnor</b>.
+  <i>:value:</i> <i>:value:</i> <b>~^^</b>.
+</pre>
+
+<h3>Mathematics</h3>
+<pre class="code">
+  <i>:value</i> <i>:value</i> add.
+  <i>:value</i> <i>:value</i> +.
+
+  <i>:value</i> <i>:value</i> sub.
+  <i>:value</i> <i>:value</i> ~.
+
+  <i>:value</i> <i>:value</i> mul.
+  <i>:value</i> <i>:value</i> *.
+
+  <i>:value</i> <i>:value</i> div.
+  <i>:value</i> <i>:value</i> /.
+
+  <i>:value</i> <i>:value</i> pow.
+  <i>:value</i> <i>:value</i> ^.
+
+  <i>:value</i> <i>:value</i> log.
+  <i>:value</i> <i>:value</i> root.
+  <i>:value</i> <i>:value</i> exp.
+
+  <i>:value</i> <i>:value</i> mod.
+  <i>:value</i> <i>:value</i> |.
+</pre>
+
+<h3>Input/Output</h3>
+<pre class="code">
+  <i>:block</i> <i>:datastore</i> <b>write</b>.
+  <i>:datastore</i> <b>read</b>.
+</pre>
+
+<h3>Assembly</h3>
+<pre class="code">
+  <i>:value</i>    <i>:register</i>  <b>stor</b>.
+  <i>:value</i>    <i>:address</i>   <b>stor</b>.
+  <i>:register</i> <i>:register</i>  <b>swap</b>.
+  <i>:address</i>  <i>:address</i>   <b>swap</b>.
+  <i>:register</i> <i>:register</i>  <b>add</b>.
+  <i>:address</i>  <i>:address</i>   <b>add</b>.
+</pre>
+
+<h3>Conditionals</h3>
+<pre class="code">
+  :block &lt;- :block .
+  :block -&gt; :block .
+  if :block then :block.
+  if :block then :block else :block.
+  if :block then :block [elsif :block then :block]... else :block.
+</pre>
+
+<h3>Equality</h3>
+<pre class="code">
+  :value :value eql ?
+  :value :value = ?
+
+  :value :value gt ?
+  :value :value > ?
+
+  :value :value lt ?
+  :value :value < ?
+
+  :value :value gte ?
+  :value :value >= ?
+
+  :value :value lte ?
+  :value :value <= ?
+
+  :value :value ~= ?
+  :value :value neq ?
+</pre>
+
+<h2>Examples</h2>
+
+<pre class="code">
+  :integer: :integer: multiple? -> [ modulo. 0 eql? ] !
+  > :rule: multiple? .
+
+  4 2 multiple?
+  > true.
+
+  :integer + :integer -> [
+    add.
+  ] !
+
+  2 + 2.
+  > 4.
+</pre>
+
+<h3>Prolog-like Rules</h3>
+<pre>
+  [ :word: man! ] -> [ mortal! pop. ] !
+
+  socrates man !
+
+  :word: mortal ?
+  > [ socrates ].
+</pre>
+
+</body>
+</html>

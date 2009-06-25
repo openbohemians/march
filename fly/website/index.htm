@@ -1,0 +1,80 @@
+
+  <h1>FORTH <img src="image/heart.gif" height="30px"/> YAML</h1>
+
+  <p>Fly is a object-oriented programming language based on FORTH and YAML.
+  It is an exceptionally powerful blend of form and function.
+  </p>
+
+  <p>PLEASE NOTE! Fly is ALPHA status. The specification and this website
+     are under construction and changing rapidly.</p>
+
+  <br/>
+
+  <h1>YAML in Form</h1>
+
+  <p>YAML ain't markup language. Indeed, YAML is in fact a data serialization syntax.
+     And as anyone knows from Lisp, code is data. Which is exactly what FLy
+     explots by organizing code into YAML data structures, specifically
+     mappings. Fly uses YAML to define prototype object structures.</p>
+
+  <p>Only one variation to the current YAML 1.1 standard is neccessary to support Fly.
+     FLy requires string interpolation, both internal and from external files. It is
+     more suitably defined in the YAML specification then as part of Fly's underlying Forth
+     implementation. We hope to get iterpolation into the upcoming 1.2 or 1.3 specs.
+   </p>
+
+  <br/>
+
+  <h1>FORTH in Function</h1>
+
+  <p>Fly uses a <b>variant</b> of Forth. It differs in some important ways:<p>
+
+    <ul>
+      <li>Few non-alphanumeric words</li>
+      <li>Uniquely object-oriented</i>
+      <li>Supports collection and string types</li>
+    </ul>
+
+  <p>Fly's Forth variation, like Forth itself, uses postfix notation.
+     Most people are not used to this syntax
+     having been taught infix and prefix notations in school.
+     Yet postfix notation has some clear advantages once the initial
+     accustomization is made. It has a naturally object-oriented in
+     that objects must be given prior to an operation. Indeed, Fly is in
+     effect "polyobject-oriented". And it naturally applies to stack-based
+     computation which is highly effcient and suitable equally to
+     low-level programming as it is high-level.</p>
+
+  <br/>
+
+  <h1>Hello Word Example</h1>
+
+  <p>Getting started with Fly will be increadibly easy. In fact, if you are currently
+     familiar with YAML and Forth, it's should be almost trivial. The main learning
+     curve comes from familiarizing oneself with the variation of words Fly uses and
+     the libraries available.</p>
+
+  <p>Here's the traditional example of Hello World written in Fly.</p>
+
+  <pre>
+    # The traditional Hello World progam
+
+    --- !fly-program
+
+    main: !fn
+      "Hello, World!" console.print
+
+
+    <b>&gt; Hello, World!</b>
+  </pre>
+
+  <p>To learn more about Fly's syntax have a look at the <a href="overview.html">overview</a> page.</p>
+
+  <br/>
+
+  <h1>Support</h1>
+
+  <p>Interested in Fly and have good programming skills in Assembly, C and/or Forth?
+     We could really use your help.</p>
+
+  <br/>

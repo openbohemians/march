@@ -1,0 +1,18 @@
+# What if LISP + FORTH?
+
+((1 2 +) 3 +)
+
+funds {
+  (2005-10-20 $100)
+  (2005-10-21 $200)
+  (2005-10-24 $300)
+}
+
+subtotal {
+  funds 2 column sum
+}
+
+total {
+  subtotal dup 0.06 * +
+}
+

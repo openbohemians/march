@@ -1,0 +1,13 @@
+;; defcode "SWAP",4,,SWAP
+;; pop %eax		// swap top two elements on stack
+;; pop %ebx
+;; push %eax
+;; push %ebx
+;; NEXT
+
+swap:
+  pop %eax		// swap top two elements on stack
+  pop %ebx
+  push %eax
+  push %ebx
+

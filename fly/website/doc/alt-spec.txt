@@ -1,0 +1,106 @@
+
+
+== Preface
+
+... was born originally out of an idea to merge the essense of FORTH with structure of YAML.
+In the process of weaving these two, very differnt, technologies together I arrived at something
+not quite FORTH and not quite YAML. In both cases though I say the result is better. Synergy is truly
+and wonderful gift.
+
+=== Example: Traditional Hello World
+
+  'Hello, World!' console.print
+
+
+== Types
+
+... has two fundamental types: Value and List. Internally a value is essentially a number, but
+it can represent different things, such as a character. A list, on the other hand, is an order
+collection of values. In more technical parlance these types can be refered to as a Scalar
+and Vector respectively. And from a Lisp background a value may also be refered to as an atom.
+
+On top of the fundamental types are built additional standard types. From Value dervies Null,
+Boolean True and Boolean False, a variety of Number types, Integer, Float, Rational, and Complex,
+Date and Character, &c. Here is a table of representation of each type:
+
+  Integer    0-9+
+  Float      0-9+.0-9+
+  ...
+
+Dervided from List is the String. A String is simply a List of Character Codes.
+
+  String    'any character sequence -- no escaping'
+            "any character sequence -- with escaping"
+
+Like Lisp a list is represented with ( ).
+
+
+== The Stack
+
+As with it's FORTH heiritage ... is a stack based language. The processing stack is the central
+... of the entire execution chain.
+
+Execution moves from left to right. As a value is read it is placed on the top of the stack. The system
+will then decide what to do with it based on it's type relative to the current State which can be effected
+by values that may have been evaluated prior and also base on the very next value. The the system never looks
+further head than the upcoming value, which is called the Deck, as in "on deck" from baseball terminology.
+
+In traditional procedural langages one assigns a value to a symbol. In ... all assignments are simply
+colocated associations. For instance:
+
+  tax 0.06
+
+Heirarchical associations
+
+  customer (
+    name 'John'
+    age 30
+  )
+
+To reference a subassocation use dot-notation.
+
+  customer.name console.print
+
+  => John
+
+The dot-notation lookup rules are very liberal. They only jey off of symbols and there subsequent values.
+
+=== Example: Sum It Up
+
+  tax' 0.06
+
+  tax' 0.07
+
+  funds' table (
+    ( 2006-10-10  55.00 )
+    ( 2006-10-11  35.00 )
+    ( 2006-10-13  20.00 )
+  )
+
+  total' (
+    funds 2 column sum dup tax * +
+  )
+
+  start' total
+
+
+== Example: Represent XML
+
+  doc' (
+
+    html (
+
+      @style ( padding 20px )
+
+      head (
+        title ( Is it XML? )
+      )
+
+      body (
+        h1 ( Just like back home )
+        "Let the text flow..."
+      )
+
+    )
+  )
+

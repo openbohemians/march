@@ -1,0 +1,146 @@
+#:title: Bit and Byte Convenience Methods for Numeric
+#--
+# numeric-bits.yuby
+# v 0.3.0
+#
+# Copyright (c) 2004 Rich Kilmer
+# Copyright (c) 2005 Thomas Sawyer
+#
+# Ruby License
+#
+# This module is free software. You may use, modify, and/or redistribute this
+# software under the same terms as Ruby.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.
+#
+# ==========================================================================
+# Revision History ::
+# YYYY.MM.DD  Ver.  Dev.    Description
+# --------------------------------------------------------------------------
+# 2005.07.28  0.2   Trans   * Rewrote lib to work in bits.
+# 2005.04.28  0.2   Trans   * Ported from Rich Kilmer's lib.
+# ==========================================================================
+#
+# Credit goes to Richard Kilmer for a great idea.
+# And thanks to Ruby On Rails for making them readily available.
+# And finally thanks to Alexander Kellett for suggesting that
+# Facets offer them. And thanks to myself for making them
+# more comprehensive ;)
+#
+#++
+
+# = Description
+#
+# Adds numerous methods to Numeric to make working with
+# bit and bytes figures easier.
+#
+# == Usage
+#
+#   require 'bits'
+#
+#   1.byte            #=> 8
+#   1.kilobyte        #=> 8192
+#   8.as_byte         #=> 1
+#   8192.as_kilobyte  #=> 1
+#
+# == Author(s)
+#
+# * Rich Kilmer
+# * Thomas Sawyer
+#
+
+Numeric:
+
+  bits: &bits
+    self ;
+
+  as_bits: *bits
+
+  kilobits: &kilobits
+    self * 1024 ;
+
+  as_kilobits: &as_kilobits
+    self.to_f / 1024 ;
+
+  megabits: &megabits
+    self * (1024 ** 2) ;
+
+  as_megabits: &as_megabits
+    self.to_f / (1024 ** 2) ;
+
+  gigabits: &gigabits
+    self * (1024 ** 3) ;
+
+  as_gigabits: &as_gigbits
+    self.to_f / (1024 ** 3) ;
+
+  terabits: &terabits
+    self * (1024 ** 4) ;
+
+  as_terabits: &as_terabits
+    self.to_f / (1024 ** 4) ;
+
+  bytes: &bytes
+    self * 8 ;
+
+  as_bytes: &as_bytes
+    self.to_f / 8 ;
+
+  kilobytes: &kilobytes
+    self * 8 * 1024 ;
+
+  as_kilobytes: &as_kilobytes
+    self.to_f / (8 * 1024) ;
+
+  megabytes: &megabytes
+    self * 8 * (1024 ** 2) ;
+
+  as_megabytes: &as_megabytes
+    self.to_f / (8 * (1024 ** 2)) ;
+
+  gigabytes: &gigabytes
+    self * 8 * (1024 ** 3) ;
+
+  as_gigabytes: &as_gigabytes
+    self.to_f / (8 * (1024 ** 3)) ;
+
+  terabytes: &terabytes
+    self * 8 * (1024 ** 4);
+
+   as_terabytes: &as_terabytes
+     self.to_f / (8 * (1024 ** 4)) ;
+
+  bit: *bits
+  kilobit: *kilobits
+  megabit: *megabits
+  gigabit: *gigabits
+  terabit: *terabits
+
+  kb: *kilobits
+  mb: *megabits
+  gb: *gigabits
+  tb: *terabits
+
+  as_kb: *as_kilobits
+  as_mb: *as_megabits
+  as_gb: *as_gigabits
+  as_tb: *as_terabits
+
+  byte: *bytes
+  kilobyte: *kilobytes
+  megabyte: *megabytes
+  gigabyte: *gigabytes
+  terabyte: *terabytes
+
+  kB: *kilobytes
+  mB: *megabytes
+  gB: *gigabytes
+  tB: *terabytes
+
+  as_kB: *as_kilobytes
+  as_mB: *as_megabytes
+  as_gB: *as_gigabytes
+  as_tB: *as_terabytes
+

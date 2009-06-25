@@ -1,0 +1,103 @@
+
+    body { margin: 0; padding: 0; font-family: sans-serif; }
+
+    p { text-align: justify; }
+
+    pre { background: #EEFFEE; padding-top: 10px;
+          margin-top: 20px; margin-bottom: 20px;
+          font-size: 1.1em;
+        }
+
+    pre.output {
+      background: #EEEEFF; font-weight: normal; margin-top: 0;
+    }
+
+    img { margin: 0; }
+
+    h1 { margin-top: 10px; }
+    h2 { margin-top: 10px; }
+    h3 { margin-top: 10px; }
+
+    div#head {
+      width: 720px;
+      margin: 10 auto;
+      color: white;
+      font-size: 1em; font-weight: bold;
+      height: 250px;
+      border: 1px solid lightgreen;
+      padding: 0;
+      background: black 140px 40px no-repeat;
+      margin-bottom: 20px;
+    }
+
+    div#title { font-size: 5em; margin-left: 30px; margin-top: 20px; }
+
+    div#side {
+      float: right;
+      width: 140px;
+      text-align: left;
+      font: sans-serif .7em;
+      color: red;
+      margin-left: 20px;
+      //border: 1px solid lightgreen;
+      background: white;
+      padding-left: 10px;
+    }
+
+    div#menu {
+      background: white;
+      text-align: left;
+      line-height: 2em;
+    }
+
+    div#menu a {
+      color: green;
+    }
+
+    div.google {
+      text-align: center;
+      font-family: sans-serif;
+      z-index: 0;
+      height: 250px;
+      color: blue;
+      border: 1px solid lightgreen;
+      padding: 5px;
+    }
+
+    div#main {
+      font-size: .75em;
+      margin: 0 auto;
+      width: 710px;
+      padding-left: 15px;
+      padding-right: 5px;
+      z-index: 1;
+    }
+
+    div.quote {
+      background: lightyellow;
+      font-style: italic;
+      padding: 3px;
+      text-align: center;
+      margin-top: 10px;
+      margin-bottom: 10px;
+      padding-top: 5px;
+      padding-bottom: 5px;
+    }
+
+    div#copyright { font-size: 8pt; border-top: 1px solid lightgray; }
+
+
+    /* words.html */
+
+    div.word { border: 0px solid lightgray; }
+
+    pre.form { margin-left: 30px; }
+
+    sup { color: orange; }
+
+    span.word { font-size: 14pt; font-family: monospace; color: green; }
+
+    p.word { font-size: 12pt; font-family: monospace; }
+
+    pre.form { font-family: monospace; }
+

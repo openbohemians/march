@@ -1,0 +1,32 @@
+# this simply calls the add assembly routine.
+
+<<: assembly
+
+# Add integers.
+# Replaces two integers from the top of the stack
+# and replaces them with the sum of the integers.
+
+i i +:
+  add
+
+# Subtract integers.
+
+i i -:
+  sub
+  
+# Multiply integers.
+
+i i *:
+  mul
+
+# Exp integers.
+
+i i ^:
+  j' [dup *] j times
+
+# Divide numbers.
+
+n n /:
+  div
+
+

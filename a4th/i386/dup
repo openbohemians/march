@@ -1,0 +1,5 @@
+defcode "DUP",3,,DUP
+mov (%esp),%eax		// duplicate top of stack
+push %eax
+NEXT
+

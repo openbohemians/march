@@ -1,0 +1,45 @@
+---------------------------------
+
+Okay. I took a step back and thought about this a little more carfully.
+
+Peter's execution engine (but with "optimized" lookup, not backtracing). Definitions can be defined to expect symbols, so a symbol indicator is rarely needed. { } brackets represent a "lazy" block --they are taken as a whole, unevaluated and assigned to the symbol proceeding them. These block can be treated in differnt way. The can be executed as functions
+by reference the association symbol (where a symbols is not expected) or they can be treated as associative arrays, arrays, or even strings (is that reasonable?). There are no types per se and instead types are defined as "facts" about
+a things associations. For example a thing can be "tagged" a square if it's width and length associations are equal. Now, the question is how to access these blocks. If we have an operator say '.' which means fetch, it takes two symbols, the first references the block and the second reference the key in the block. fetch treats a block as an associative array of key-value pairs. Those pairs are deliminated by a new line or a comma. Eg.
+
+  person {
+    name "John"
+     age  22
+  } .
+
+  shape {
+    square { width 10 , length 20 }
+    circle { radius 5 }
+  } .
+
+  n 10 .
+
+  shape square . width . console println !
+
+  shape square" width" console println"
+
+The '!' means fetch and evaluate. Probably that can just be '.' and we can define the functions as such so they will be executed automaticly upon being fetched (unless another command supress it). Unfortuantely this is the only part I don't really care for. I don't want to have to put the '!' or '.' at the end b/c it will be too common, but if we don't then println would try to fetch for itself (b/c it's an unexpected symbol). If we could just fudge things a little to allow:
+
+  shape.square.width console.println
+
+Then it would be fine. 
+
+The only other problem I see is how to do immediate execution in a lazy block (eval like). Can we punch a "hole" through it.
+
+  shape {
+    square { width |pop| , length 20 } .
+    circle { radius 5 } .
+  } .
+
+I'm not sure how to handle parameters. It needs to be something akin to your < n=expr* > notation --we need to incorpaorate those definitions directly into the syntax.
+
+  hms_to_s { h m s } {
+    h' 3600 * m' 60 * s' add' add'
+  } .
+
+The parameters list could indicate that this should be evaluated when fetched.
+

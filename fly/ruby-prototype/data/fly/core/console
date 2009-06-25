@@ -1,0 +1,16 @@
+---
+
+# Console Interface Words
+
+console: &console
+
+  print: !!ruby
+    puts drop
+
+  show: !!ruby
+    puts top
+
+  shell (s): !!ruby
+    system drop
+
+

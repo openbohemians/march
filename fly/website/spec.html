@@ -1,0 +1,178 @@
+<html>
+<head>
+  <title>Fly Specification</title>
+  <link rel="stylesheet" href="css/fly.css" type="text/css" media="screen" />
+</head>
+<body>
+
+<!--<div id="logo"><img src="dry.jpg" align="middle"/></div>-->
+
+<div id="head">
+  <div id="title">FLY</div>
+</div>
+
+<div id="main">
+
+  <div id="side">
+
+    <div id="menu">
+      <a href="index.html">Home</a> <br/>
+      <a href="overview.html">Overview</a> <br/>
+      <a href="spec.html">Specification</a> <br/>
+      <a href="words.html">Words</a>
+      <br/><br/>
+      <a href="http://en.wikipedia.org/wiki/Forth_programming_language">Wikipedia on Forth</a> <br/>
+      <a href="http://thinking-forth.sourceforge.net/">Thinking Forth</a>
+      <br/><br/>
+      <a href="http://en.wikipedia.org/wiki/YAML">Wikipedia on YAML</a> <br/>
+      <a href="http://www.yaml.org/">YAML.org</a> <br/>
+    </div>
+
+    <br/><br/>
+
+    <div class="quote">
+      How refreshingly simple. It's a wonder
+      no ones come up with something like this before.
+    </div>
+
+    <br/><br/>
+
+    <div class="google">
+      Google Ads Here
+    </div>
+
+  </div>
+
+  <h1>Fly Language Specification, v0.1</h1>
+
+
+	<p>Thomas Sawyer, 2005-11-29</p>
+
+
+	<h2>Introduction</h2>
+
+
+	<p>Fly is not a new scripting language. It does however borrow a great many fresh ideas from the present height of agile programming languages. Fly is a &#8220;post-agile&#8221; language, returning to a more traditional lanaguage construction yet with lessons learned. Its aim is not to gain share against the likes of Perl, Python, Ruby, Lua, Io, VisualBasic and a litany of other such similiar very high-level languages (although it will becasue it compares to them). But more importantly Fly seaks to compete with the beheamoth itself, C&#8212;a thrown not even the venerable Lisp could stand against or even the reared-for-the-purpose Ada was able to undo. So it may seem a fool heary goal, but once you understand Fly, once you see how it handles, how it combines old an new into a new synthesis&#8230;</p>
+
+
+	<p>Fly is based on the functionality of Forth, but structured as a prototype object-oriented language via <span class="caps">YAML</span>. This turns out to be an incredably powerful combination. Forth has always been known for its agility, like <span class="caps">LISP</span>, but it&#8217;s highly terse syntax and reverse notation proved too obtuse, even more so than Lisp&#8217;s hyper-parenthetics, which largely inhibited its later-day adoption. <span class="caps">YAML</span> goes a long way toward correcting this issue by breaking up the code into smaller, more managable chunks. Combined with object-oriented features and more natural-language labels, Fly&#8217;s syntax as remarakable for its elegance as it is for its distinctiveness.</p>
+
+
+	<h2>System Structure</h2>
+
+
+	<p>The core lib is implemented in pure assemby language and is organized by platform architecture for maximum speed and compatability. Adding support for another platform is just a matter of coding the core function set. In this early specification the achitectures are represented solely on the terms of the <span class="caps">CPU</span>&#8212;i386, i686, <span class="caps">PPC</span>, etc. In the future this will likely take on more a specific targeting structure to include a greater variety of reference platforms, including individual components like GPUs. The <em>ultimate</em> goal is to have Fly itself provide the hardware abstraction layer in the form of small tools (i.e. functions). This is not something to be accomplished overnight though, obviously. In the mean time Fly can bind to other libraries for needed capabilities.</p>
+
+
+	<p>The next layer up, the standard lib, is built on top of the core. So this code is pure &#8220;low-level&#8221; Fly code. Altough per architecture assembly optimizations might occassionaly be made at this level.</p>
+
+
+	<p>The site/ directory stores 3rd party, very-high level libraries. While these too can have architecture specific optimizations, they are stongely discourged&#8212;they should only be required for bindings to external libs until such time as Fly versions of such libs can be made.</p>
+
+
+	<pre><code>/fly
+  /core
+    /i386
+    /i686
+    /ppc
+  /std
+    /i386
+    /i686
+    /ppc
+    ...no-arch...
+  /site
+    /i386
+    /i686
+    /ppc
+    ...no-arch...</code></pre>
+
+
+	<h2>Precluded Top-level Mixins</h2>
+
+
+	<p>The &#8216;core&#8217; module is merged directly into the top-level which provides all the core functionality.
+Other core modules exist at the top-level:</p>
+
+
+	<pre><code>system
+console</code></pre>
+
+
+	<h2>A Simple Example</h2>
+
+
+	<pre><code>fish:
+  type: Rock
+  length: 8 in.
+  string:
+    "%(type) Fish %(length)."</code></pre>
+
+
+	<pre><code>fisherman:
+  catch: []
+  castnet:
+    catch fish push
+  showoff:
+    catch each console.print</code></pre>
+
+
+	<pre><code>main:
+  3 [ fisherman.castnet ] repeat
+  fisherman.showoff</code></pre>
+
+
+	<p><em>produces</em></p>
+
+
+	<pre><code>Rock Fish 8 in.
+Rock Fish 8 in.
+Rock Fish 8 in.</code></pre>
+
+
+	<h2>Types</h2>
+
+
+	<p>Fly has these fundamental types.</p>
+
+
+	<pre><code>number
+  integer
+  float
+  complex
+flag
+  true
+  false
+  null
+string
+stack</code></pre>
+
+
+	<h2>Apply Functions Elementwise</h2>
+
+
+	<p>A arbitray stack can have its elements used as parameters to a function using the elementwise word, each (#). This works by applying the elements in sequence to the element prior. For instance</p>
+
+
+	<pre><code>[ 1 2 3 ] each +</code></pre>
+
+
+	<p>will add 3 2 1 for a sum of 6 and leave it on the top of the stack.</p>
+
+
+	<h2>Core Library (Primatives)</h2>
+
+
+	<p>Continue&#8230;</p>
+
+  <br/>
+
+  <div id="copyright">
+    copyright (c) 2006 &psi;t corporation. All rights reserved.
+  </div>
+
+  <br/>
+
+</div>
+
+</body>
+</html>

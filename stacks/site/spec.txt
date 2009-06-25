@@ -1,0 +1,67 @@
+High Stacks
+===========
+
+Programming, at it's root, is about a data, segemented and enumerated.
+Some of that data is simply that --a representation of some semantic
+reality. Other data are instructions for maninpulating the former. This
+description becomes very clear in assembly language --the language
+abstracted a single level from the raw digits of data themselves.
+
+  [Insert Example]
+
+Assembly proves too difficult to work with in general. Higher level languages
+are required to productively create highly complex systems. There many such
+languages, LISP, COBOL, BASIC, JAVA, PROLOG, RUBY, HASKEL, etc. By far the 
+most common on language in use today is C. The reason is simple. It is a 
+high-level abstraction, but it still close enough to the underlying machine
+code as to produce fast, efficient code. Just about every other language
+provide a greater level of abstraction, to the degree in which they do so
+they tend become slower in execution and higher in memory consumption --in
+return they tend to provide improved productivity. There a diminishing return
+on such a trade off however, can C, by and large remains the sweet spot betweem
+abstraction and production.
+
+THre is one language that stand out with a great deal of potential however, both
+in it's proximity to the underlying data systems and it's ability to abstract
+awasy from it. That language is FORTH. Unfortunately FORTH has suffered from
+a lack of evotution and has remained largely the same since it's original
+design.... factors that have led to this, RPN and odd charcet for words...
+this is changing however with the advent of new expirmental languages like
+Joy, Cat and Factor.
+
+High Stacks intends to ...
+
+Returning then to the first concept of data, we require a way to label address
+of memeory. Much like ASSEMBLY, we assgn such a location "label:" For exmaple:
+
+  message: "Hello, World!"
+
+"message" is the label and it reference a @string@ of data, "Hello, World".
+
+  mapping:
+    section-A: 1
+    section-B: 2
+    section-C: 3
+
+How does this differ from FORTH's design? Where as Forth is base solely on a 
+stack. Hier Stack, ads and hierarchical index to the data mix. Wit this index
+we able to *randomly access* and data point in the stack. That's the key difference.
+
+Beyond that there is the use of words rathe then sysbols, for all but the most
+recognized forms (+, -, *, etc.) and the direct assemby language base that
+high-stacks is built.
+
+Lastly this is full-reflection, via an internalizae macro-lanaguage --in other words,
+HSX is own macro language.
+
+Hier-Stacks was born out of my original concept: FLY, FORTH LOVES YAML.
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,14 @@
+
+String:
+ 
+ push: self << %x
+ 
+ jossle:
+   each_char: 
+     r = []
+     r << %c.modulo 2 ? %c.upcase : %c.downcase
+     r
+
+--- !main
+     
+p "This".jossle

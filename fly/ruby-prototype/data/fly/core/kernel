@@ -1,0 +1,91 @@
+---
+
+# Kernel Words
+# (The most important methods on the planet!)
+
+kernel: &kernel
+
+  # get top of stack
+  top: !!ruby
+    stack.first
+
+  # remove top of stack (returns nil if empty)
+  drop: !!ruby
+    stack.shift
+
+  # remove top of stack (returns nil if empty)
+  #--
+  # NOTE could there be location objects (eg. @5) that regular drop
+  #       could see is on the stack and use instead?
+  #++
+  drop_at (i): !!ruby
+    i = pop;
+    check i;
+    stack.delete_at( i )
+
+  # drop all elements from index on
+  drop_from (i): !!ruby
+    i = pop;
+    #check i;
+    stack.slice!(0,i)
+
+  # remove top of stack (raises error if empty)
+  pop: !!ruby
+    check
+    @stack.shift
+
+  # empty stack
+  clear: !!ruby
+    stack.clear
+
+  # duplicate the top of the stack
+  dup: !!ruby
+    #return unary do |num|
+    #  push( num )
+    #  num
+    #end
+    check;
+    push stack.first
+
+  # swap top two elements from stack
+  swap: !!ruby
+    #return binary do |l, r|
+    #  push( r )
+    #  l
+    #end
+    #r, l = @stack.slice!(0,2)
+    check 2;
+    stack[0], stack[1] = stack[1], stack[0]
+
+  # dup second item
+  over: !!ruby
+    push stack[1].dup
+
+  # arbitrary stack position swap (up)
+  roll (i): !!ruby
+    push drop_at( i )
+
+  # arbitrary stack position swap (down)
+  rolld: !!ruby
+    i = pop;
+    o = pop;
+    check i;
+    stack.insert(i, o)
+
+  '+ (n n)':  !!ruby  drop + drop
+  '* (n n)':  !!ruby  drop * drop
+  '- (n n)':  !!ruby  a,b = drop,drop; b - a
+  '% (n n)':  !!ruby  a,b = drop,drop; b % a
+
+  '** (n n)': !!ruby  a,b = drop,drop; b ** a
+
+  '/ (n n)':  !!ruby |
+    a,b = drop,drop;
+    # defeat Ruby's integer division
+    if a.integer? and b.integer? and b % a != 0;
+      b / a.to_f;
+    else
+      b / a;
+    end
+
+<<: *kernel

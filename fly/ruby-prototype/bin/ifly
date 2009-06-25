@@ -1,0 +1,31 @@
+#!/usr/bin/env ruby
+
+require 'fly/rpn'
+
+# basic stand-alone interface, just process lines and show the stack...
+
+if __FILE__ == $0
+
+  rpn = RPNCalc.new
+
+  print "\n" + rpn.to_s + "\n"
+  print ">  " if STDIN.tty?
+
+  while line = ARGF.gets
+    line.chomp!
+    if STDIN.tty? and line =~ /^q(?:uit)?|exit$/i
+      break
+    else
+      begin
+        rpn.calc line
+      rescue SyntaxError
+        puts "Syntax Error:  " + $!
+      rescue
+        puts "Error: " + $!
+      end
+      print "\n" + rpn.to_s + "\n"
+      print ">  " if STDIN.tty?
+    end
+  end
+
+end

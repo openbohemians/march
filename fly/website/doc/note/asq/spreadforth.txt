@@ -1,0 +1,60 @@
+
+
+  tax:   { 0.051 }
+
+  funds: { 2005-10-20 $100
+           2005-10-21 $200
+           2005-10-24 $300 }
+
+  total: fn { funds 2 column /^\$/ '' gsub sum dup tax * add }
+
+
+
+  tax: 0.051
+
+  funds: 
+    2005-10-20 $100
+    2005-10-21 $200
+    2005-10-24 $300
+
+  total:
+    funds 2 column sum dup tax *  add
+
+  subtotal:
+    2 column sum
+
+  *:
+    console: total
+
+
+
+---
+
+  ((2 2 +) r set)
+
+  r = "x"
+  r' = 4
+  x => 4
+
+  ( x + y ): x y +
+
+  x Num + y Num : x y +
+
+---
+
+  s' v' o' p1' n1' p2' n2' ->
+    s'.v'(o', p1'=>n1', p2'=>n2')
+
+  ( if a' then c' ) -> ( a' -> c' )
+
+  if ( a* sum ) then ( a* + map )
+
+  console: (1 2 3 sum)
+
+  ( a* each do f' [ skip n' ] ) ->
+    ( a* f' map (n' ? skip n') )
+
+
+
+
+

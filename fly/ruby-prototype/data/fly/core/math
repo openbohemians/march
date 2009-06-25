@@ -1,0 +1,33 @@
+---
+
+# Advanced Mathematical Words
+
+math: &math
+
+  floor (n): !!ruby  push drop.floor
+  ceil  (n): !!ruby  push drop.ceil
+  round (n): !!ruby  push drop.round
+
+  abs   (n): !!ruby  push drop.abs
+  sqrt  (n): !!ruby  push Math.sqrt( drop )
+
+  exp   (n): !!ruby  push Math.exp( drop )
+  log   (n): !!ruby  push Math.log( drop )
+  log10 (n): !!ruby  push Math.log10( drop )
+
+  sin   (n): !!ruby  push Math.sin( drop )
+  cos   (n): !!ruby  push Math.cos( drop )
+  tan   (n): !!ruby  push Math.tan( drop )
+  sinh  (n): !!ruby  push Math.sinh( drop )
+  cosh  (n): !!ruby  push Math.cosh( drop )
+  tanh  (n): !!ruby  push Math.tanh( drop )
+  asin  (n): !!ruby  push Math.asin( drop )
+  acos  (n): !!ruby  push Math.acos( drop )
+  atan  (n): !!ruby  push Math.atan( drop )
+  sinh  (n): !!ruby  push Math.asinh( drop )
+  acosh (n): !!ruby  push Math.acosh( drop )
+  atanh (n): !!ruby  push Math.atanh( drop )
+
+  atan2 (n n): !!ruby |
+    a,b = drop,drop;
+    push Math.atan2( b, a )

@@ -1,0 +1,72 @@
+--- %YAML:1.0
+
+TITLE    : FLY
+NAME     : fly
+VERSION  : '0.1'
+DATE     : '2006-04-01'
+STATUS   : 'beta/stable'
+
+AUTHOR   : Thomas Sawyer 
+EMAIL    : transfire@gmail.com
+HOMEPAGE : ""
+SUMMARY  : FORTH LOVES YAML
+
+DESCRIPTION: >
+  FORTH LOVES YAML is a new programming language based on Forth
+  and structure by YAML.
+
+DISTRIBUTE   : [ tar.bz2 ]  # zip, tar.gz, tbz, tgz, deb
+DEPENDENCIES : [ facets, calibre ]
+EXECUTABLES  : [ fly ]
+
+PACKAGE:
+  dir: '../DISTRIBUTION'
+  exclude:
+    - dist
+    - dev
+    - scrap
+    - web
+
+#RUBYFORGE:
+#  project  : fly
+#  username : transami
+
+#RELEASE:
+#  host       : rubyforge.org  # only one supported currently
+#  project_id :
+
+#PUBLISH:
+#  type     : web
+#  host     : rubyforge.org
+#  username : transami
+#  dir      : web
+
+RDOC:
+  dir: 'web/doc/api'
+  include:
+    - 'A-Z*'
+    - 'lib/**/*'
+  exclude:
+    - 'lib/fly/data'
+
+#ANNOUNCE:
+#  to       : transfire@gmail.com  # ruby-talk@ruby-lang.org
+#  from     : *email
+#  domain   : unit.rubyforge.org
+#  server   : smtp.gmail.com
+#  port     : 587
+#  account  : *email # transfire@gmail.com
+#  authtype : login  # cram_md5, plain
+#  sectype  : tls    # ~, tls, ssl (not working yet)
+#  file     : ANN    # which file contains announcement
+#  slogan   : REAP THE REWARDS!
+#  links    :
+#    - http://reap.rubyforge.org
+#    - http://roll.rubyforge.org
+
+PERM:
+  filemod: 644
+  dirmod: 755
+  user: trans
+  group: users
+

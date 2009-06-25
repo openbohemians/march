@@ -1,0 +1,4 @@
+defcode "DROP",4,,DROP
+pop %eax		// drop top of stack
+NEXT
+

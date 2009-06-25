@@ -1,0 +1,75 @@
+
+[ <a = expr*> ] :
+   a
+
+Actually, what this says is that if the execution encounters a ]
+preceded by a number of expressions preceded by a [, then put the list
+of expressions in a as an array and return it.
+
+Defining a fibonacci function is less "special", and would look like this:
+
+  <n = integer> fib: n 2 - fib n 1 - fib +
+  1 fib: 1
+  0 fib: 0
+
+Forth moves from left to write, this seems pretty important if you consider how Forth systems are generally implemented. Adding in the multi-dispatch word defintions we can using a "pairing-down" approach to matching proper definitions. This should be quite fast. 
+
+Execution of '2 fib'.
+
+  s  : 2 fib
+  p  : 
+  e  : {}
+
+Since 2 is literal so it's pushed on the stack.
+
+  s  : fib
+  p  : 2
+  e  : {}
+
+Now with 2 on the stack we already can see that only defintions that comply with an integer as the initial parameter will apply. The next step looks at fib. fib has a defintion that matches the stack. So we move the parameter from the exe stack and refernce it in the environment, and replace fib with it's definition.
+
+  s : n 2 - fib n 1 - fib +
+  p : 
+  e : n=2
+
+Next we look at n and see that it has a definition in the local environment. So we can replace it.
+
+  s : 2 2 - fib n 1 - fib +
+  p :
+  e : n=2
+
+It literal so it moves to the exe stack -- so does then next 2.
+
+  s : - fib n 1 - fib +
+  p : 2 2
+  e : n=2
+
+The - is built in of course, so we just jump to the next step.
+
+  s : fib n 1 - fib +
+  p : 0
+  e : n=2
+
+Then fib is replaced again, but this time with 0 fib defintion.
+
+  s : 0
+      n 1 - fib +
+  p : 
+  e : n=0
+      n=2
+
+Notice the stack of stack here too, to handle the differnt environments (albeit a trivial example).
+
+  s :
+      n 1 - fib +
+  p : 0 
+  e : n=0
+      n=2
+
+The stack is empty so pop it.
+
+  s : n 1 - fib +
+  p : 0 
+  e : n=2
+
+And so on.

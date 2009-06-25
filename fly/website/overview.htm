@@ -1,0 +1,287 @@
+
+  <h1>Overview</h1>
+
+  <p>Learning Fly is increadibly easy. In fact, if you are currently
+     familiar with YAML and Forth, it will be almost trivial.</p>
+
+
+  <h2>Hello World</h2>
+
+  <pre>
+    --- !fly-program
+
+    start: !fn
+      "Hello, World!" console.print
+
+
+    <b>&gt; Hello, World!</b>
+  </pre>
+
+  <p>As you can see the syntax is straight forward YAML. The start
+     method is where all application begin execution. </p>
+
+  <p>Lets look at a little more advanced and interesting example.</p>
+
+  <pre>
+    --- !fly-program
+
+    tax: 0.051
+
+    funds: !table
+      2005-10-20 $100
+      2005-10-21 $200
+      2005-10-24 $300
+
+    total: !fn
+      funds 2 column sum dup tax * +
+
+    start: !fn
+      total console.print
+  </pre>
+
+  <pre class="output">
+    $700
+  </pre>
+
+  <p>Now lets add a subroutine called 'subtotal'.</p>
+
+  <pre>
+    subtotal:
+      2 column sum
+
+    total:
+      funds subtotal dup tax * add
+  </pre>
+
+
+  <h2>Don't Indent</h2>
+
+  <p>Programmers familiar with Python will likely take to YAML's indention signifcant syntax
+     readily. But others might not care for it. Thanksfully YAML is fully capabaly of
+     indentionless notation.</p>
+
+  <pre>
+  </pre>
+
+  <p>So feel free to use which ever you most prefer.</p>
+
+  <pre>
+    a: {
+      x: 1,
+      y: !fn x.a
+    }
+
+    b: [
+      1,
+      2,
+      3
+    ]
+
+    c: "
+      Text
+      Text
+      Text
+    "
+
+  </pre>
+
+  <h2>Traits and Inheritance</h2>
+
+  <p>Fly is in an prototype-based object-oriented programming language.
+  Unlike class-based object-oriented lanaguages, there is no distinction
+  made between archetypes and functional objects. Becuase of this
+  direct "inheritance" is nothing more than calling on the same function
+  of a "parental" object.</p>
+
+  <pre>
+    x:
+      a: 1
+      b: 2
+
+    y:
+      a: !fn x.a
+  </pre>
+
+  <p>Clearly Fly supports multiple inheritance just as trivially. So trivial, in fact, that it doesn't
+     even seem like inheritance. But that is part of the elegance of a prototype-base lanaguage.
+     The line between calling a method in another object and simple inheritance is mute.</p>
+
+  <p>To inherit whole groups of methods at a time, <i>link inheritance</i> come into play.
+     Link inherritance is a simply matter of using the YAML <b>merge key</b> with an anchor reference.
+  </p>
+
+  <pre>
+    login: &amp;login
+      adapter: mysql
+      host: localhost
+      username: portly
+      password: pencil
+
+    development:
+      database: rails_dev
+      &lt;&lt;: *login
+
+    test:
+      database: rails_test
+      &lt;&lt;: *login
+
+    production:
+      database: rails_prod
+      &lt;&lt;: *login
+  </pre>
+
+  <p>Note how we have used inheiritance here and yet not a single mapping is a function.
+     Fly doesn't distinguish between instance members and instance methods, they are
+     stored and referenced in the exact same way.</p>
+
+  <p>The last form of inheritance, <i>copy inheritance</i>, is similar to link inheritance,
+     but it uses interpolation to copy the YAML node rather then reference it.
+     Interpolation is loosely based on YIP.
+
+  <pre>
+    x: &x
+      a: 1
+      b: 2
+
+    y:
+      &lt;&lt;: %x
+      a: !fn x.a + 1   # redines a
+  </pre>
+
+  <h2>Dynamic and Agile</h2>
+
+  <p>Of course creating static object is not always enough. Fly also facilitates
+     dynamic object creation via the 'new' word.</p>
+
+  <pre>
+    x:
+      a: 1
+      b: 2
+
+    start:
+      x new .a console.print
+  </pre>
+
+  <pre class="output">
+    1
+  </pre>
+
+  <p>Notice the word '.a'. The initial dot indicates that the call is acting on the object on the top of the stack.
+     In fact, this is effectively how all calls work. The example 'console.print' is equivalent to 'console .print' too.
+     The console object is placed on the top of the stack and the .print refereneces the print mapping of that object.
+   </p>
+
+   <p>So we can creat new objects and place them on the stack. What about modifying objects statically defined?</p>
+
+   <pre>
+    x:
+      a: 1
+      b: 2
+
+    start: !fn
+      x.a 3 =
+      x.b x.b 1 + =
+      x.b 1 +=
+  </pre>
+
+   <p>Now what if we wanted to alter a function.</p>
+
+   <pre>
+    x:
+      a: 1
+      b: 2
+
+    y: !fn x.a
+
+    start:
+      y$ "+ 3" cats
+      y$ console.print
+      y.a
+  </pre>
+
+  <pre class="output">
+    !fn x new + 3
+    4
+  </pre>
+
+  <p>In this case you can see that any word ending in $ refers to the literal definition --all evaluation is surpressed.
+     With this one can dynamically alter a program on the fly.
+  </p>
+
+<!--
+  <h2>Relational Logic</h2>
+
+  <p>Fly also supports prolog-like logical deduction from rule-sets.</p>
+
+  <pre>
+    mortality: !rule
+      - man: &man
+          socrates
+      - mortal:
+          &lt;&lt;: *man
+  </pre>
+
+  <p></p>
+
+  <pre>
+    loves:
+      - [ tom, mary ]
+      - [ *loves/_x/1 , *loves/_x/0 ]
+  </pre>
+-->
+
+  <h2> Types </h2>
+
+  <p>Fly also handle custom type definitions.</p>
+
+  <pre>
+    customer: !type
+      type:       map
+      mapping:
+        name:
+          type:      str
+          required:  yes
+        email:
+          type:      str
+          pattern:   /@/
+        age:
+          type:      int
+        birth:
+          type:      date
+
+    customer1: !customer
+      name:  John Doe
+      email: john@email.com
+      age:   31
+      birth: 1974-10-10
+  </pre>
+
+
+  <h2> Database Conectivity </h2>
+
+  <p>Database connectivity is directly integrated into the Fly system.
+     Lets expound on the customer example above.</p>
+
+  <pre>
+    persist: !datastore
+      adapter: psql
+      database: test
+
+    start: !fn
+      customer persist.store
+      customer1 persist.save
+  </pre>
+
+<!--
+  <h2> GUtopIa and MarkUps </h2>
+
+  <p>Finally, Fly has an integrated GUI binding...
+     A powerful XML-based markup language...
+  </p>
+-->
+
+  <h2> Wrap-up </h2>
+
+  <p>So there you have it...</p>
+
+<br/>

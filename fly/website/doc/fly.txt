@@ -1,0 +1,26 @@
+
+The alternative:
+
+  person :
+    name   : "John"
+    age    : 22
+
+  shape :
+    square :
+      width  : 1
+      length : 1
+    circle :
+      radius : 1
+
+  main ::
+    shape.square new
+    width:50
+    update
+    console.println
+
+  hms_to_s ::
+    (n n n -- n) 
+    (h m s)
+    3600 h * 60 * m s + +
+
+

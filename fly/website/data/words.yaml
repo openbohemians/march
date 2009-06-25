@@ -1,0 +1,233 @@
+---
+
+# core module
+
+- word    : if
+  form    : f1 b1 b2 if
+  module  : core
+  summary : Condition
+  description:
+    Do b1 if f1 is true, otherwise do b2.
+
+
+# math module
+
+- word    : "<=>"
+  form    : n1 n2 <=>
+  module  : math
+  summary : Compare
+  description:
+    Returns -1 if n1 < n2, 0 if n1 = n2, +1 if n1 > n2.
+
+- word    : "<"
+  form    : n1 n2 <
+  module  : math
+  summary : Less than
+  description:
+    Returns -1 if n1 < n2, 0 otherwise.
+
+- word    : "<="
+  form    : n1 n2 <=
+  module  : math
+  summary : Less than or equal to
+  description:
+    Returns -1 if n1 <= n2, 0 otherwise.
+
+- word    : "<>"
+  form    : n1 n2 <>
+  module  : math
+  summary : Not equal to
+  description:
+    Returns -1 if n1 <> n2, 0 otherwise.
+
+- word    : "="
+  form    : n1 n2 =
+  module  : math
+  summary : Equal to
+  description:
+    Returns -1 if n1=n2, 0 otherwise.
+
+- word    : ">"
+  form    : n1 n2 >
+  module  : math
+  summary : Greater than
+  description:
+    Returns -1 if n1 > n2, 0 otherwise. (flag?)
+
+- word    : ">="
+  form    : n1 n2 >=
+  module  : math
+  summary : Greater than or equal
+  description:
+    Returns -1 if n1 >= n2, 0 otherwise.
+
+- word    : "+"
+  form    : n1 n2 + -- n
+  module  : math
+  summary : Addition
+  description :
+    Adds number n1 and number n2 and leaves sum on stack.
+
+- word    : "-"
+  form    : n1 n2 -
+  module  : math
+  summary : Subtraction
+  description:
+    Subtracts number n2 from n1 and leaves difference on stack.
+
+- word    : "*"
+  form    : n1 n2 *
+  module  : math
+  summary : Multiplication
+  description:
+    Multiplies n1 and n2 and leaves product on stack.
+
+- word    : "/"
+  form    : n1 n2 /
+  module  : math
+  summary : Division
+  description:
+    Divides n1 by n2 and leaves quotient on stack.
+
+
+# string module
+
+- word    : "+"
+  form    : s1 s2 +
+  module  : string
+  summary : Concat
+  description:
+    Concats string s1 and string s2 into a new string.
+
+- word    : add
+  form    : s1 s2 add
+  module  : string
+  summary : Concat
+  description:
+    Concats string s1 and string s2 into a new string.
+
+- word    : subt
+  form    : s1 s2 sub
+  module  : string
+  summary : Subtract
+  description:
+    Subtracts the substring s2 from the string s1 wherever it occurs.
+
+- word    : "-"
+  form    : s1 s2 -
+  module  : string
+  summary : Subtract
+  description:
+    Subtracts the substring s2 from the string s1 wherever it occurs.
+
+
+# console module
+
+- word    : print
+  symbol  : "."    # maybe
+  form    : o1 print
+  summary : Print
+  description:
+    Convert object o1 to string via its .string method and pushes it to the console device.
+
+- word    : "."
+  form    : o1 print
+  summary : Print
+  description:
+    Convert object o1 to string via its .string method and pushes it to the console device.
+
+- word    : print-const
+  symbol  : ".S"
+  summary : Print constant
+  description :
+    Immediately prints the string that follows in the input stream.
+
+
+# list module
+
+- word   : add
+  form   : l1 l2 +
+  description:
+    Concats elements of l2 to l1.
+
+- word   : "+"
+  form   : l1 l2 +
+  description:
+    Concats elements of l2 to l1.
+
+
+# system module
+
+- word   : dump
+  form   : dump
+  summary   : Dump stack
+  descirption:
+    Prints entire contents of stack to console.
+
+
+# assembly module
+
+- word    : caddr
+  form    : "caddr w1"
+  summary : Obtain compilation address
+  description:
+    Places the compilation address of the following word on the stack.
+
+- word    : "'"
+  form    : "' w1"
+  summary : Obtain compilation address
+  description:
+    Places the compilation address of the following word on the stack.
+
+- word    :
+  form    : "w1 :"
+  summary : Print immediate string
+  description:
+    Prints the string literal that follows in line.
+
+- word    : ":"
+  form    : "w1 :"
+  summary : Begin definition
+  description:
+    Begins compilation of a word named w.
+
+- word    : "!"
+  form    : i1 !
+  summary : Print indirect
+  description:
+    Prints the value at the address at the top of the stack.
+
+- word    :
+  summary : Store into address
+  description:
+    Stores the value n into the address addr.
+
+- word    : "+!"
+  form    : n1 +!
+  summary : Add indirect
+  description:
+    Adds n1 to the word at address addr.
+
+- word    : "@"
+  form    : i1 @
+  summary : Load address
+  description:
+    Loads the value at i1 and leave it at the top of the stack.
+
+- word    : addr
+  form    : i1 addr
+  summary : Load address
+  description:
+    Loads the value at i1 and leave it at the top of the stack.
+
+- word    :
+  form    :
+  summary : Set interpretive state
+  description:
+    Within a compilation, returns to the interpretive state.
+
+- word    :
+  form    :
+  summary : Push next word
+  description:
+    Places the compile address of the following word in a definition onto the stack.

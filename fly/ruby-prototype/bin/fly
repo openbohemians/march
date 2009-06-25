@@ -1,0 +1,10 @@
+#!/usr/bin/env ruby
+
+$DEBUG = false
+
+require 'fly/program'
+
+program = Fly::Program.load( File.new( ARGV[0] ) )
+#program.compile\
+program.start
+

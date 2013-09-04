@@ -1,8 +1,10 @@
 "TYPE","COMMON NAME","ALIASES","COMPOSITION"
 "number.integral", "integer", "int", "int- | zero | int+"
 "number.integral.zero", "zero", "0", "(concrete)"
-"number.integral.positive", "natural", "int+, z+, nat", "int- | zero"
-"number.integral.negative", "unnatural", "int-, z-, unt", "int- | zero"
+"number.integral.positive", "natural", "int+ z+ nat", "(concrete)"
+"number.integral.negative", "unnatural", "int- z- unt", "(concrete)"
 "number.integral.non-positive", "?", "int*", "int- | zero"
 "number.integral.non-negative", "?", "int~", "zero | int+"
-
+"number.rational", "ratio", "q r", "ratio+ | ratio-"
+"number.rational.positive", "ratio+", "q+ r+", "(concrete)"
+"number.rational.negative", "ratio-", "q- r-", "(concrete)"

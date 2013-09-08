@@ -1,6 +1,0 @@
-
-principle : console 1 index
-rate	  : .10
-return	  : principle copy rate * +
-main	  : return console print
-

@@ -1,0 +1,7 @@
+MODULE euler
+
+1000 i.
+( ( 3 mod. 0? | 5 mod. 0? ) or. ) filter.
+( + ) reduce.
+print. ln.
+

@@ -1,7 +1,16 @@
 MODULE euler
 
 1000 i.
-( ( 3 mod. 0? | 5 mod. 0? ) or. ) filter.
+( ( 3 mod. 0? | 5 mod. 0? ) plex. or. ) filter.
 ( + ) reduce.
 print. ln.
 
+;; using idention
+1000 i. filter.
+  or. 
+    plex.
+      3 mod. 0? ,
+      5 mod. 0?
+reduce.
+  +
+print. ln.

@@ -2,14 +2,18 @@ MODULE euler
 
 1000 i 
 { 3 mod 0? , 5 mod 0? or } filter
-{ + } reduce
+{ plus } reduce
 print cr
 
 ;; using idention
 1000 i filter
+  3 mod. 0? ,
+  5 mod. 0? 
   or
-    3 mod. 0? ,
-    5 mod. 0?
 reduce
-  +
+  plus
+print cr
+
+;; using symbols
+1000 i { 3 \ 0? , 5 \ 0? ; } filter { + } reduce
 print cr

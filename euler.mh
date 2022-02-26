@@ -25,3 +25,12 @@ MODULE euler
   index
   ( + ) reduce
   print cr
+
+: euler1-c ( )
+  1000 iota
+  <
+  " 3 mod not
+  " 5 mod not or
+  > index
+  #' +
+  print cr

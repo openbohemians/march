@@ -1,18 +1,21 @@
 MODULE euler
 
+: multiple ( int int -- bool )
+  mod not
+
 (* Classic approach *)
 : euler1-a ( )
   0 1000 { (r) 
-    (r) 3 mod not
-     ~  5 mod not or 
+    (r) 3 multiple
+     ~  5 multiple or 
     { + | drop } }
   print cr ;
 
 (* Functional approach *)
 : euler1-b ( )
   1000 iota
-  ( ( 3 mod not )
-    ( 5 mod not ) ) || or
+  ( ( 3 multiple )
+    ( 5 multiple ) ) || or
   ) filter
   ( + ) reduce
   print cr
@@ -20,24 +23,24 @@ MODULE euler
 (* Array Processing *)
 : euler1-c ( )
   1000 iota (r)
-  (r) 3 mod not
-   ~  5 mod not or
+  (r) 3 multiple
+   ~  5 multiple or
   index
   ( + ) reduce
   print cr
 
 : euler1-c ( )
   1000 iota :r
-  r 3 mod not
-  r 5 mod not or
+  r 3 multiple
+  r 5 multiple or
   index
   +' reduce
   print cr
 
 euler1-c ( )
   1000 iota
-  |> 3 mod not
-  |> 5 mod not or
+  |> 3 multiple 
+  |> 5 multiple or
   |> index
   #' +
   print cr

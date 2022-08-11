@@ -2,19 +2,17 @@
 
 March Forth is a modern derivative of Forth. 
 
-APL and Lisp.
+Borrowing from APL, Lisp and ML.
 
 ## Features
 
-* Higher-Order "adverb" functions
-
-* Typed
-
-* Array processing
-
-* Lazy 
-
-
+* Namespaces/Modules 🥳
+* Static Type System 🤓
+* Multiple Dispatch 😎
+* Higher-Order Functions 😇
+* Array Processing 🤩
+* Parallel Processing 😱
+* Lazy Evaluation 🤯
 
 Read the [overview](https://github.com/openbohemians/march/wiki/Overview).
 

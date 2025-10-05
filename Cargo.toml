@@ -1,0 +1,22 @@
+[package]
+name = "march"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+num-bigint = "0.4"
+num-rational = "0.4"
+rusqlite = "0.31"
+sha2 = "0.10"
+
+[[bin]]
+name = "demo_persistence"
+path = "demo_persistence.rs"
+
+[[bin]]
+name = "demo_content_addressing"
+path = "demo_content_addressing.rs"
+
+[[bin]]
+name = "demo_multimodal"
+path = "demo_multimodal.rs"

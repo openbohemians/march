@@ -25,6 +25,9 @@ pub enum ConcreteType {
     String,
     Array { element_type: Box<ConcreteType>, size: usize },
     Ptr { target_type: Box<ConcreteType> },
+    // Type system types
+    TypeOf(AbstractType),                           // Type-of-type
+    ConstrainedType(AbstractType, Vec<Constraint>), // Constrained type
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,6 +38,19 @@ pub enum Value {
     String(String),
     Array(Vec<Value>),
     Ptr(usize),
+    // Type-of-types for constraint building
+    TypeOf(AbstractType),                           // Type-of-type (Int', String', etc)
+    ConstrainedType(AbstractType, Vec<Constraint>), // Constrained type
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Constraint {
+    GreaterThan(Value),
+    GreaterThanOrEqual(Value),
+    LessThan(Value),
+    LessThanOrEqual(Value),
+    OneOf(Vec<Value>),
+    // Future: custom constraint words
 }
 
 #[derive(Debug)]
@@ -339,7 +355,12 @@ impl Interpreter {
             ".state" => { self.print_state(); Ok(()) },
             "&" => self.logical_and(),
             "=" => self.equals(),
-            ">" => self.greater_than(),
+            ">" => self.greater_than_or_constraint(),
+            "<" => self.less_than_or_constraint(),
+            // Type-of-type words
+            "Int" => self.push_int_type(),
+            "String" => self.push_string_type(),
+            "Rational" => self.push_rational_type(),
             _ => {
                 // Try hash-based lookup first
                 if let Some(word_hash) = self.db.find_word_hash(input, None)? {
@@ -652,6 +673,10 @@ impl Interpreter {
             Value::Ptr(_) => ConcreteType::Ptr {
                 target_type: Box::new(ConcreteType::I64)
             }, // TODO: Better pointer type inference
+            Value::TypeOf(abstract_type) => ConcreteType::TypeOf(abstract_type.clone()),
+            Value::ConstrainedType(abstract_type, constraints) => {
+                ConcreteType::ConstrainedType(abstract_type.clone(), constraints.clone())
+            }
         }
     }
 
@@ -972,6 +997,83 @@ impl Interpreter {
             _ => 0, // Type mismatch defaults to false
         };
         self.push(Value::I64(result), ConcreteType::I64);
+        Ok(())
+    }
+
+    /// Smart > operator: comparison for values, constraint building for types
+    pub fn greater_than_or_constraint(&mut self) -> Result<(), RuntimeError> {
+        let (b, b_type) = self.pop()?;
+        let (a, a_type) = self.pop()?;
+
+        match (&a, &b) {
+            // Type-of-type + value = constrained type
+            (Value::TypeOf(base_type), value) => {
+                let constraint = Constraint::GreaterThan(value.clone());
+                let constrained = Value::ConstrainedType(base_type.clone(), vec![constraint]);
+                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), vec![constraint]));
+                Ok(())
+            }
+            // Constrained type + value = add another constraint
+            (Value::ConstrainedType(base_type, mut constraints), value) => {
+                constraints.push(Constraint::GreaterThan(value.clone()));
+                let constrained = Value::ConstrainedType(base_type.clone(), constraints.clone());
+                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), constraints));
+                Ok(())
+            }
+            // Regular values = comparison
+            _ => {
+                self.push(a, a_type);
+                self.push(b, b_type);
+                self.greater_than()
+            }
+        }
+    }
+
+    /// Smart < operator: comparison for values, constraint building for types
+    pub fn less_than_or_constraint(&mut self) -> Result<(), RuntimeError> {
+        let (b, b_type) = self.pop()?;
+        let (a, a_type) = self.pop()?;
+
+        match (&a, &b) {
+            // Type-of-type + value = constrained type
+            (Value::TypeOf(base_type), value) => {
+                let constraint = Constraint::LessThan(value.clone());
+                let constrained = Value::ConstrainedType(base_type.clone(), vec![constraint]);
+                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), vec![constraint]));
+                Ok(())
+            }
+            // Constrained type + value = add another constraint
+            (Value::ConstrainedType(base_type, mut constraints), value) => {
+                constraints.push(Constraint::LessThan(value.clone()));
+                let constrained = Value::ConstrainedType(base_type.clone(), constraints.clone());
+                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), constraints));
+                Ok(())
+            }
+            // Regular values = comparison (would need less_than implementation)
+            _ => {
+                self.push(a, a_type);
+                self.push(b, b_type);
+                // For now, return error since we don't have less_than implemented
+                Err(RuntimeError::ParseError)
+            }
+        }
+    }
+
+    /// Push Int type-of-type onto stack
+    pub fn push_int_type(&mut self) -> Result<(), RuntimeError> {
+        self.push(Value::TypeOf(AbstractType::Int), ConcreteType::TypeOf(AbstractType::Int));
+        Ok(())
+    }
+
+    /// Push String type-of-type onto stack
+    pub fn push_string_type(&mut self) -> Result<(), RuntimeError> {
+        self.push(Value::TypeOf(AbstractType::String), ConcreteType::TypeOf(AbstractType::String));
+        Ok(())
+    }
+
+    /// Push Rational type-of-type onto stack
+    pub fn push_rational_type(&mut self) -> Result<(), RuntimeError> {
+        self.push(Value::TypeOf(AbstractType::Rational), ConcreteType::TypeOf(AbstractType::Rational));
         Ok(())
     }
 }

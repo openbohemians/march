@@ -53,6 +53,70 @@ pub enum Constraint {
     // Future: custom constraint words
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ErrorType {
+    pub name: String,
+    pub parent: Option<String>,  // For hierarchy: extends parent
+}
+
+pub struct ErrorRegistry {
+    errors: HashMap<String, ErrorType>,
+}
+
+impl ErrorRegistry {
+    pub fn new() -> Self {
+        let mut registry = ErrorRegistry {
+            errors: HashMap::new(),
+        };
+
+        // Add built-in error types
+        registry.register_builtin_errors();
+        registry
+    }
+
+    fn register_builtin_errors(&mut self) {
+        // Root error type
+        self.register_error("Error", None);
+
+        // Common error categories
+        self.register_error("MathError", Some("Error"));
+        self.register_error("DivisionByZero", Some("MathError"));
+        self.register_error("Overflow", Some("MathError"));
+
+        self.register_error("NetworkError", Some("Error"));
+        self.register_error("NetworkTimeout", Some("NetworkError"));
+        self.register_error("ConnectionLost", Some("NetworkError"));
+    }
+
+    pub fn register_error(&mut self, name: &str, parent: Option<&str>) {
+        let error_type = ErrorType {
+            name: name.to_string(),
+            parent: parent.map(|p| p.to_string()),
+        };
+        self.errors.insert(name.to_string(), error_type);
+    }
+
+    pub fn is_registered(&self, name: &str) -> bool {
+        self.errors.contains_key(name)
+    }
+
+    pub fn get_parent(&self, name: &str) -> Option<String> {
+        self.errors.get(name).and_then(|e| e.parent.clone())
+    }
+
+    pub fn is_subtype_of(&self, child: &str, parent: &str) -> bool {
+        if child == parent {
+            return true;
+        }
+
+        if let Some(child_parent) = self.get_parent(child) {
+            self.is_subtype_of(&child_parent, parent)
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum RuntimeError {
     StackUnderflow,
@@ -140,6 +204,7 @@ pub struct Interpreter {
     pub runtime: hash::Runtime,  // Hash-based execution engine
     execution_mode: ExecutionMode,  // Multi-modal execution
     pub type_analysis_stack: Vec<ConcreteType>,  // For type checking mode
+    pub errors: ErrorRegistry,  // Error type system
 }
 
 impl Interpreter {
@@ -154,6 +219,7 @@ impl Interpreter {
             runtime: hash::Runtime::new(),
             execution_mode: ExecutionMode::Runtime,
             type_analysis_stack: Vec::new(),
+            errors: ErrorRegistry::new(),
         })
     }
 
@@ -168,6 +234,7 @@ impl Interpreter {
             runtime: hash::Runtime::new(),
             execution_mode: ExecutionMode::Runtime,
             type_analysis_stack: Vec::new(),
+            errors: ErrorRegistry::new(),
         })
     }
 
@@ -331,6 +398,11 @@ impl Interpreter {
         // Handle context declarations with ?
         if input.trim().starts_with('?') {
             return self.parse_context_declaration(input);
+        }
+
+        // Handle error declarations with Error:
+        if input.trim().starts_with("Error:") {
+            return self.parse_error_declaration(input);
         }
 
         // Handle state access operations
@@ -591,6 +663,46 @@ impl Interpreter {
         let constraint_count = constraints.len();
         self.state.declare_variable(name, abstract_type, constraints, initial_value)?;
         println!("Declared state variable: {} with {} constraints", name, constraint_count);
+        Ok(())
+    }
+
+    fn parse_error_declaration(&mut self, input: &str) -> Result<(), RuntimeError> {
+        // Parse: "Error: DivisionByZero extends MathError ;"
+        let input = input.trim();
+
+        // Remove "Error:" prefix
+        let declaration = input.strip_prefix("Error:").unwrap().trim();
+
+        // Check for trailing semicolon
+        let declaration = if declaration.ends_with(';') {
+            declaration.strip_suffix(';').unwrap().trim()
+        } else {
+            declaration
+        };
+
+        // Split by whitespace
+        let tokens: Vec<&str> = declaration.split_whitespace().collect();
+        if tokens.is_empty() {
+            println!("Invalid error declaration. Use: Error: ErrorName [extends ParentError] ;");
+            return Err(RuntimeError::ParseError);
+        }
+
+        let error_name = tokens[0];
+        let parent = if tokens.len() >= 3 && tokens[1] == "extends" {
+            Some(tokens[2])
+        } else {
+            None
+        };
+
+        // Register the error type
+        self.errors.register_error(error_name, parent);
+
+        if let Some(parent_name) = parent {
+            println!("Declared error: {} extends {}", error_name, parent_name);
+        } else {
+            println!("Declared error: {}", error_name);
+        }
+
         Ok(())
     }
 

@@ -323,8 +323,8 @@ impl Interpreter {
             return self.parse_definition(input);
         }
 
-        // Handle state declarations
-        if input.trim().starts_with("State:") {
+        // Handle state declarations with $
+        if input.trim().starts_with('$') {
             return self.parse_state_declaration(input);
         }
 
@@ -547,16 +547,16 @@ impl Interpreter {
     }
 
     fn parse_state_declaration(&mut self, input: &str) -> Result<(), RuntimeError> {
-        // Parse: "State page_number Int 0 > total_pages @ <"
+        // Parse: "$ page_number Int 0 > 100 <"
         let input = input.trim();
 
-        // Remove "State" prefix
-        let declaration = input.strip_prefix("State").unwrap().trim();
+        // Remove "$" prefix
+        let declaration = input.strip_prefix('$').unwrap().trim();
 
         // Split by whitespace
         let tokens: Vec<&str> = declaration.split_whitespace().collect();
         if tokens.len() < 2 {
-            println!("Invalid state declaration. Use: State name Type [constraints...]");
+            println!("Invalid state declaration. Use: $ name Type [constraints...]");
             return Err(RuntimeError::ParseError);
         }
 

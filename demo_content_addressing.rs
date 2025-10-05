@@ -52,7 +52,7 @@ fn main() -> Result<(), RuntimeError> {
 
     // Demonstrate state with content addressing
     println!("\n📊 State Management:");
-    interp.execute_word("State: counter : Integer")?;
+    interp.execute_word("$ counter Int 0 >")?;
     interp.execute_word(": increment counter @ 1 + counter ! ;")?;
 
     interp.execute_word("increment")?;

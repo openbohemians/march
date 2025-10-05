@@ -328,8 +328,8 @@ impl Interpreter {
             return self.parse_state_declaration(input);
         }
 
-        // Handle context declarations
-        if input.trim().starts_with("Context") {
+        // Handle context declarations with ?
+        if input.trim().starts_with('?') {
             return self.parse_context_declaration(input);
         }
 
@@ -903,20 +903,20 @@ impl Interpreter {
     fn parse_context_declaration(&mut self, input: &str) -> Result<(), RuntimeError> {
         let input = input.trim();
 
-        // Parse "Context condition-word?" or "Context ( default )"
-        if input == "Context ( default )" {
+        // Parse "? condition-word" or "? default"
+        if input == "? default" {
             self.current_context = None;
             println!("Set context to default");
-        } else if let Some(condition) = input.strip_prefix("Context ") {
+        } else if let Some(condition) = input.strip_prefix("? ") {
             let condition = condition.trim();
             if condition.is_empty() {
-                println!("Invalid context declaration. Use: Context condition-word?");
+                println!("Invalid context declaration. Use: ? condition-word");
                 return Err(RuntimeError::ParseError);
             }
             self.current_context = Some(condition.to_string());
             println!("Set context to: {}", condition);
         } else {
-            println!("Invalid context syntax. Use: Context condition-word? or Context ( default )");
+            println!("Invalid context syntax. Use: ? condition-word or ? default");
             return Err(RuntimeError::ParseError);
         }
 

@@ -588,8 +588,9 @@ impl Interpreter {
             }
         };
 
+        let constraint_count = constraints.len();
         self.state.declare_variable(name, abstract_type, constraints, initial_value)?;
-        println!("Declared state variable: {} with {} constraints", name, constraints.len());
+        println!("Declared state variable: {} with {} constraints", name, constraint_count);
         Ok(())
     }
 
@@ -1009,15 +1010,17 @@ impl Interpreter {
             // Type-of-type + value = constrained type
             (Value::TypeOf(base_type), value) => {
                 let constraint = Constraint::GreaterThan(value.clone());
-                let constrained = Value::ConstrainedType(base_type.clone(), vec![constraint]);
-                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), vec![constraint]));
+                let constraints = vec![constraint.clone()];
+                let constrained = Value::ConstrainedType(base_type.clone(), constraints.clone());
+                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), constraints));
                 Ok(())
             }
             // Constrained type + value = add another constraint
-            (Value::ConstrainedType(base_type, mut constraints), value) => {
-                constraints.push(Constraint::GreaterThan(value.clone()));
-                let constrained = Value::ConstrainedType(base_type.clone(), constraints.clone());
-                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), constraints));
+            (Value::ConstrainedType(base_type, constraints), value) => {
+                let mut new_constraints = constraints.clone();
+                new_constraints.push(Constraint::GreaterThan(value.clone()));
+                let constrained = Value::ConstrainedType(base_type.clone(), new_constraints.clone());
+                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), new_constraints));
                 Ok(())
             }
             // Regular values = comparison
@@ -1038,15 +1041,17 @@ impl Interpreter {
             // Type-of-type + value = constrained type
             (Value::TypeOf(base_type), value) => {
                 let constraint = Constraint::LessThan(value.clone());
-                let constrained = Value::ConstrainedType(base_type.clone(), vec![constraint]);
-                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), vec![constraint]));
+                let constraints = vec![constraint.clone()];
+                let constrained = Value::ConstrainedType(base_type.clone(), constraints.clone());
+                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), constraints));
                 Ok(())
             }
             // Constrained type + value = add another constraint
-            (Value::ConstrainedType(base_type, mut constraints), value) => {
-                constraints.push(Constraint::LessThan(value.clone()));
-                let constrained = Value::ConstrainedType(base_type.clone(), constraints.clone());
-                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), constraints));
+            (Value::ConstrainedType(base_type, constraints), value) => {
+                let mut new_constraints = constraints.clone();
+                new_constraints.push(Constraint::LessThan(value.clone()));
+                let constrained = Value::ConstrainedType(base_type.clone(), new_constraints.clone());
+                self.push(constrained, ConcreteType::ConstrainedType(base_type.clone(), new_constraints));
                 Ok(())
             }
             // Regular values = comparison (would need less_than implementation)

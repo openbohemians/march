@@ -179,28 +179,25 @@ impl From<rusqlite::Error> for RuntimeError {
 }
 
 pub struct Memory {
-    heap: Vec<Value>,
-    addresses: HashMap<usize, (ConcreteType, usize)>,
-    next_addr: usize,
+    // Future: Heap-based memory management
 }
 
 impl Memory {
     pub fn new() -> Self {
         Memory {
-            heap: Vec::new(),
-            addresses: HashMap::new(),
-            next_addr: 1000,
+            // Future: Initialize heap and address management
         }
     }
 }
 
 pub struct Interpreter {
-    value_stack: Vec<Value>,
+    pub value_stack: Vec<Value>,
     type_stack: Vec<ConcreteType>,
-    memory: Memory,
+    // memory: Memory,  // Future: Heap-based memory management
     pub db: database::Database,
     pub state: state::ProgramState,
     current_context: Option<String>,
+    current_executing_word: Option<String>,  // Track current word for re-dispatch
     pub runtime: hash::Runtime,  // Hash-based execution engine
     execution_mode: ExecutionMode,  // Multi-modal execution
     pub type_analysis_stack: Vec<ConcreteType>,  // For type checking mode
@@ -212,10 +209,11 @@ impl Interpreter {
         Ok(Interpreter {
             value_stack: Vec::new(),
             type_stack: Vec::new(),
-            memory: Memory::new(),
+            // memory: Memory::new(),  // Future: Heap-based memory management
             db: database::Database::in_memory()?,
             state: state::ProgramState::new(),
             current_context: None,
+            current_executing_word: None,
             runtime: hash::Runtime::new(),
             execution_mode: ExecutionMode::Runtime,
             type_analysis_stack: Vec::new(),
@@ -227,10 +225,11 @@ impl Interpreter {
         Ok(Interpreter {
             value_stack: Vec::new(),
             type_stack: Vec::new(),
-            memory: Memory::new(),
+            // memory: Memory::new(),  // Future: Heap-based memory management
             db: database::Database::new(db_path)?,
             state: state::ProgramState::new(),
             current_context: None,
+            current_executing_word: None,
             runtime: hash::Runtime::new(),
             execution_mode: ExecutionMode::Runtime,
             type_analysis_stack: Vec::new(),
@@ -433,13 +432,24 @@ impl Interpreter {
             "Int" => self.push_int_type(),
             "String" => self.push_string_type(),
             "Rational" => self.push_rational_type(),
+            // Control flow
+            "if" => self.if_condition(),
+            "then" => Ok(()),  // No-op for now
             // Error handling
             "raise" => self.raise_error(),
             _ => {
                 // Try hash-based lookup first
-                if let Some(word_hash) = self.db.find_word_hash(input, None)? {
+                if let Some(word_hash) = self.db.find_word_hash(input, self.current_context.as_deref())? {
+                    // Track current word for error re-dispatch
+                    self.current_executing_word = Some(input.to_string());
+
                     // Use runtime execution for legacy compatibility
-                    self.execute_word_hash_runtime(&word_hash)
+                    let result = self.execute_word_hash_runtime(&word_hash);
+
+                    // Clear tracking after execution
+                    self.current_executing_word = None;
+
+                    result
                 } else if let Ok(n) = input.parse::<i64>() {
                     // Try to parse as number
                     self.push(Value::I64(n), ConcreteType::I64);
@@ -1041,6 +1051,7 @@ impl Interpreter {
         Ok(())
     }
 
+    #[allow(dead_code)]  // Future: Advanced context resolution
     fn resolve_word_with_context(&mut self, name: &str) -> Result<Option<String>, RuntimeError> {
         let definitions = self.db.get_all_definitions(name, None)?;
 
@@ -1059,6 +1070,7 @@ impl Interpreter {
         Ok(None)
     }
 
+    #[allow(dead_code)]  // Future: Advanced context conditions
     fn evaluate_context_condition(&mut self, context_word: &str) -> Result<bool, RuntimeError> {
         // Save current stack state
         let saved_stack_size = self.value_stack.len();
@@ -1225,10 +1237,48 @@ impl Interpreter {
         self.current_context = Some(error_name.clone());
         println!("Raised error: {} (context changed)", error_name);
 
-        // TODO: Re-dispatch current word in new context
-        // For now, just change context - re-dispatch will be next step
+        // THE MAGIC: Re-dispatch current word in new context
+        // If we're currently executing 'foo' and raise 'DivisionByZero',
+        // look for 'foo' defined in DivisionByZero context and call it
+        if let Some(current_word) = self.current_executing_word.clone() {
+            println!("  Looking for '{}' in context '{}'...", current_word, error_name);
+
+            // Try to find word in error context
+            if let Ok(Some(_)) = self.db.lookup_word(&current_word, Some(&error_name)) {
+                println!("  Found! Re-dispatching '{}' in error context", current_word);
+
+                // Execute the context-specific version
+                let result = self.execute_word(&current_word);
+
+                // Clear current context after handling
+                self.current_context = None;
+
+                return result;
+            } else {
+                println!("  No error handler found for '{}' in context '{}'", current_word, error_name);
+                // Clear context and continue normally
+                self.current_context = None;
+            }
+        }
 
         Ok(())
+    }
+
+    fn if_condition(&mut self) -> Result<(), RuntimeError> {
+        // For simple demo - if TOS is non-zero, continue; if zero, skip next word
+        let (condition, _) = self.pop()?;
+
+        match condition {
+            Value::I64(0) => {
+                // Condition is false - for demo purposes, just continue
+                // In a full implementation, this would skip to 'else' or 'then'
+                Ok(())
+            }
+            _ => {
+                // Condition is true - continue execution
+                Ok(())
+            }
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "march"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -20,3 +20,7 @@ path = "demo_content_addressing.rs"
 [[bin]]
 name = "demo_multimodal"
 path = "demo_multimodal.rs"
+
+[[bin]]
+name = "demo_error_handling"
+path = "demo_error_handling.rs"

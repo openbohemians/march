@@ -157,12 +157,12 @@ impl Interpreter {
 
     /// Set the execution mode for multi-modal execution
     pub fn set_execution_mode(&mut self, mode: ExecutionMode) {
-        self.execution_mode = mode;
-
         // Reset type analysis stack when switching to type checker mode
         if matches!(mode, ExecutionMode::TypeChecker) {
             self.type_analysis_stack.clear();
         }
+
+        self.execution_mode = mode;
     }
 
     /// Get the current execution mode
@@ -387,11 +387,15 @@ impl Interpreter {
         // Use current context if set
         let context = self.current_context.as_deref();
 
-        // Compile the word using the hash-based runtime
-        let word_hash = self.runtime.define_word(&body)?;
+        // Compile the word body to hash sequence with user-word resolution
+        let definition = self.compile_word_body(&body)?;
+        let word_hash = hash::WordHash::content_hash(&definition);
+
+        // Store the execution token in runtime
+        self.runtime.hash_to_xt.insert(word_hash.clone(), hash::ExecutionToken::UserWord(definition.clone()));
 
         // Store in database with content addressing
-        self.db.store_word(&word_hash, &body, None, context, None)?;
+        self.db.store_word(&word_hash, &body, Some(&definition), context, None)?;
 
         // Create local name alias
         self.db.alias_word(name, None, &word_hash)?;
@@ -402,6 +406,63 @@ impl Interpreter {
             println!("Defined word: {}", name);
         }
         Ok(())
+    }
+
+    /// Compile word body to sequence of hashes with user-word resolution
+    fn compile_word_body(&mut self, body: &str) -> Result<Vec<hash::WordHash>, RuntimeError> {
+        let mut definition = Vec::new();
+
+        for token in body.split_whitespace() {
+            let word_hash = self.resolve_token_to_hash(token)?;
+
+            // Handle literal value registration
+            if let Some(num) = word_hash.get_literal_i64() {
+                self.runtime.hash_to_xt.insert(word_hash.clone(), hash::ExecutionToken::PushI64(num));
+            }
+
+            definition.push(word_hash);
+        }
+
+        Ok(definition)
+    }
+
+    /// Resolve a token to a word hash (primitives + user-defined words)
+    fn resolve_token_to_hash(&self, token: &str) -> Result<hash::WordHash, RuntimeError> {
+        use hash::primitives::*;
+
+        // First try to find user-defined word
+        if let Ok(Some(user_hash)) = self.db.find_word_hash(token, None) {
+            return Ok(user_hash);
+        }
+
+        // Try to parse as number
+        if let Ok(num) = token.parse::<i64>() {
+            return Ok(hash::WordHash::literal_i64(num));
+        }
+
+        // Map primitive tokens to hashes
+        let word_hash = match token {
+            "dup" => hash::WordHash::primitive(DUP),
+            "drop" => hash::WordHash::primitive(DROP),
+            "swap" => hash::WordHash::primitive(SWAP),
+            "over" => hash::WordHash::primitive(OVER),
+            "rot" => hash::WordHash::primitive(ROT),
+            "+" => hash::WordHash::primitive(ADD),
+            "-" => hash::WordHash::primitive(SUB),
+            "*" => hash::WordHash::primitive(MUL),
+            "/" => hash::WordHash::primitive(DIV),
+            "=" => hash::WordHash::primitive(EQ),
+            ">" => hash::WordHash::primitive(GT),
+            "<" => hash::WordHash::primitive(LT),
+            "&" => hash::WordHash::primitive(AND),
+            "|" => hash::WordHash::primitive(OR),
+            "@" => hash::WordHash::state_get(),
+            "!" => hash::WordHash::state_set(),
+            ";" => hash::WordHash::primitive(EXIT),
+            _ => return Err(RuntimeError::ParseError),
+        };
+
+        Ok(word_hash)
     }
 
     fn execute_body(&mut self, body: &str) -> Result<(), RuntimeError> {
@@ -584,7 +645,6 @@ impl Interpreter {
 
     /// Type checking execution mode
     fn execute_type_check(&mut self, word_hash: &hash::WordHash) -> Result<TypeSignature, RuntimeError> {
-        use hash::primitives::*;
 
         // Check if it's a primitive with known type signature
         if word_hash.is_primitive() {

@@ -11,7 +11,7 @@ fn main() {
         let mut interp = Interpreter::with_database(db_path).unwrap();
 
         interp.execute_word(": square dup * ;").unwrap();
-        interp.execute_word(": cube dup square * ;").unwrap();
+        interp.execute_word(": cube dup dup * * ;").unwrap();
         interp.execute_word(": double dup + ;").unwrap();
 
         println!("Defined: square, cube, double");
@@ -38,13 +38,13 @@ fn main() {
             _ => "?".to_string(),
         });
 
-        // Define new words using old words
-        interp.execute_word(": sixth_power cube cube ;").unwrap();
-        println!("Defined: sixth_power (using cube)");
+        // Define new word with primitive operations
+        interp.execute_word(": quad dup dup dup * * * ;").unwrap();
+        println!("Defined: quad (x^4 using primitives)");
 
         interp.execute_word("2").unwrap();
-        interp.execute_word("sixth_power").unwrap();
-        println!("2 sixth_power = {}", match interp.pop().unwrap().0 {
+        interp.execute_word("quad").unwrap();
+        println!("2 quad = {}", match interp.pop().unwrap().0 {
             Value::I64(n) => n.to_string(),
             _ => "?".to_string(),
         });

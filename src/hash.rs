@@ -146,7 +146,7 @@ pub enum ExecutionToken {
 /// Runtime execution context
 pub struct Runtime {
     /// Maps word hashes to their execution tokens
-    hash_to_xt: HashMap<WordHash, ExecutionToken>,
+    pub hash_to_xt: HashMap<WordHash, ExecutionToken>,
 
     /// Primitive function table for ITC execution
     primitive_table: Vec<fn(&mut crate::Interpreter) -> Result<(), crate::RuntimeError>>,

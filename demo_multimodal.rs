@@ -220,5 +220,5 @@ fn main() -> Result<(), RuntimeError> {
 }
 
 fn separator() {
-    println!("\n" + &"=".repeat(50) + "\n");
+    println!("\n{}\n", "=".repeat(50));
 }

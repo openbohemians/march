@@ -1,6 +1,6 @@
 use rusqlite::{Connection, Result, params};
 use std::path::Path;
-use crate::hash::{WordHash, ExecutionToken};
+use crate::hash::WordHash;
 
 #[derive(Debug, Clone)]
 pub struct WordDefinition {

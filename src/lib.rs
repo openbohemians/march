@@ -384,15 +384,15 @@ impl Interpreter {
             return Err(RuntimeError::ParseError);
         }
 
-        // Use current context if set
-        let context = self.current_context.as_deref();
-
         // Compile the word body to hash sequence with user-word resolution
         let definition = self.compile_word_body(&body)?;
         let word_hash = hash::WordHash::content_hash(&definition);
 
         // Store the execution token in runtime
         self.runtime.hash_to_xt.insert(word_hash.clone(), hash::ExecutionToken::UserWord(definition.clone()));
+
+        // Get context after mutable operations
+        let context = self.current_context.as_deref();
 
         // Store in database with content addressing
         self.db.store_word(&word_hash, &body, Some(&definition), context, None)?;
@@ -526,32 +526,35 @@ impl Interpreter {
     }
 
     fn parse_state_declaration(&mut self, input: &str) -> Result<(), RuntimeError> {
-        // Parse: "State: velocity : Integer where velocity >= 0"
+        // Parse: "State page_number Int 0 > total_pages @ <"
         let input = input.trim();
 
-        // Remove "State:" prefix
-        let declaration = input.strip_prefix("State:").unwrap().trim();
+        // Remove "State" prefix
+        let declaration = input.strip_prefix("State").unwrap().trim();
 
-        // Split on the first ":"
-        let parts: Vec<&str> = declaration.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            println!("Invalid state declaration. Use: State: name : Type");
+        // Split by whitespace
+        let tokens: Vec<&str> = declaration.split_whitespace().collect();
+        if tokens.len() < 2 {
+            println!("Invalid state declaration. Use: State name Type [constraints...]");
             return Err(RuntimeError::ParseError);
         }
 
-        let name = parts[0].trim();
-        let type_part = parts[1].trim();
+        let name = tokens[0];
+        let type_name = tokens[1];
 
-        // For now, simple type parsing (no constraints yet)
-        let abstract_type = match type_part {
+        // Parse base type
+        let abstract_type = match type_name {
             "Integer" | "Int" => AbstractType::Int,
             "Rational" => AbstractType::Rational,
             "String" => AbstractType::String,
             _ => {
-                println!("Unknown type: {}", type_part);
+                println!("Unknown type: {}", type_name);
                 return Err(RuntimeError::ParseError);
             }
         };
+
+        // Parse constraints from remaining tokens
+        let constraints = self.parse_constraints(&tokens[2..])?;
 
         // Default initial values
         let initial_value = match abstract_type {
@@ -564,9 +567,63 @@ impl Interpreter {
             }
         };
 
-        self.state.declare_variable(name, abstract_type, vec![], initial_value)?;
-        println!("Declared state variable: {}", name);
+        self.state.declare_variable(name, abstract_type, constraints, initial_value)?;
+        println!("Declared state variable: {} with {} constraints", name, constraints.len());
         Ok(())
+    }
+
+    /// Parse constraint expressions from tokens
+    /// Example: ["0", ">", "total_pages", "@", "<"]
+    /// Becomes: [GreaterThan(0), LessThan(dynamic_ref(total_pages))]
+    fn parse_constraints(&self, tokens: &[&str]) -> Result<Vec<state::Constraint>, RuntimeError> {
+        let mut constraints = Vec::new();
+        let mut i = 0;
+
+        while i < tokens.len() {
+            // Look for constraint patterns
+            if i + 1 < tokens.len() {
+                let value_str = tokens[i];
+                let operator = tokens[i + 1];
+
+                // Parse the value (could be literal or variable reference)
+                let value = if let Ok(num) = value_str.parse::<i64>() {
+                    Value::I64(num)
+                } else {
+                    // For now, treat as literal 0 - TODO: handle variable references
+                    println!("Warning: Variable references in constraints not yet implemented: {}", value_str);
+                    Value::I64(0)
+                };
+
+                // Parse the operator and create constraint
+                match operator {
+                    ">" => {
+                        constraints.push(state::Constraint::GreaterThan(value));
+                        i += 2;
+                    }
+                    ">=" => {
+                        constraints.push(state::Constraint::GreaterThanOrEqual(value));
+                        i += 2;
+                    }
+                    "<" => {
+                        constraints.push(state::Constraint::LessThan(value));
+                        i += 2;
+                    }
+                    "<=" => {
+                        constraints.push(state::Constraint::LessThanOrEqual(value));
+                        i += 2;
+                    }
+                    _ => {
+                        // Unknown operator, skip this token
+                        i += 1;
+                    }
+                }
+            } else {
+                // Single token, skip
+                i += 1;
+            }
+        }
+
+        Ok(constraints)
     }
 
     fn state_get(&mut self, name: &str) -> Result<(), RuntimeError> {

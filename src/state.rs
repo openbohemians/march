@@ -147,16 +147,42 @@ impl ProgramState {
     fn validate_constraints(value: &Value, constraints: &[Constraint]) -> Result<(), RuntimeError> {
         for constraint in constraints {
             match constraint {
+                Constraint::GreaterThan(threshold) => {
+                    if !Self::value_gt(value, threshold) {
+                        return Err(RuntimeError::TypeMismatch); // TODO: Add ConstraintViolation error
+                    }
+                }
                 Constraint::GreaterThanOrEqual(threshold) => {
                     if !Self::value_gte(value, threshold) {
                         return Err(RuntimeError::TypeMismatch); // TODO: Add ConstraintViolation error
                     }
                 }
-                // TODO: Implement other constraints
-                _ => {} // For now, skip other constraints
+                Constraint::LessThan(threshold) => {
+                    if !Self::value_lt(value, threshold) {
+                        return Err(RuntimeError::TypeMismatch); // TODO: Add ConstraintViolation error
+                    }
+                }
+                Constraint::LessThanOrEqual(threshold) => {
+                    if !Self::value_lte(value, threshold) {
+                        return Err(RuntimeError::TypeMismatch); // TODO: Add ConstraintViolation error
+                    }
+                }
+                Constraint::OneOf(valid_values) => {
+                    if !valid_values.iter().any(|v| Self::values_equal(value, v)) {
+                        return Err(RuntimeError::TypeMismatch); // TODO: Add ConstraintViolation error
+                    }
+                }
             }
         }
         Ok(())
+    }
+
+    fn value_gt(value: &Value, threshold: &Value) -> bool {
+        match (value, threshold) {
+            (Value::I64(a), Value::I64(b)) => a > b,
+            // TODO: Implement for other value types
+            _ => true, // For now, assume constraint is satisfied
+        }
     }
 
     fn value_gte(value: &Value, threshold: &Value) -> bool {
@@ -164,6 +190,30 @@ impl ProgramState {
             (Value::I64(a), Value::I64(b)) => a >= b,
             // TODO: Implement for other value types
             _ => true, // For now, assume constraint is satisfied
+        }
+    }
+
+    fn value_lt(value: &Value, threshold: &Value) -> bool {
+        match (value, threshold) {
+            (Value::I64(a), Value::I64(b)) => a < b,
+            // TODO: Implement for other value types
+            _ => true, // For now, assume constraint is satisfied
+        }
+    }
+
+    fn value_lte(value: &Value, threshold: &Value) -> bool {
+        match (value, threshold) {
+            (Value::I64(a), Value::I64(b)) => a <= b,
+            // TODO: Implement for other value types
+            _ => true, // For now, assume constraint is satisfied
+        }
+    }
+
+    fn values_equal(value: &Value, other: &Value) -> bool {
+        match (value, other) {
+            (Value::I64(a), Value::I64(b)) => a == b,
+            // TODO: Implement for other value types
+            _ => false, // For now, assume not equal
         }
     }
 }

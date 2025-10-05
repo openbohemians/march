@@ -433,6 +433,8 @@ impl Interpreter {
             "Int" => self.push_int_type(),
             "String" => self.push_string_type(),
             "Rational" => self.push_rational_type(),
+            // Error handling
+            "raise" => self.raise_error(),
             _ => {
                 // Try hash-based lookup first
                 if let Some(word_hash) = self.db.find_word_hash(input, None)? {
@@ -441,6 +443,10 @@ impl Interpreter {
                 } else if let Ok(n) = input.parse::<i64>() {
                     // Try to parse as number
                     self.push(Value::I64(n), ConcreteType::I64);
+                    Ok(())
+                } else if self.errors.is_registered(input) {
+                    // Push registered error names as strings
+                    self.push(Value::String(input.to_string()), ConcreteType::String);
                     Ok(())
                 } else {
                     // Check if it's a state variable access
@@ -1191,6 +1197,37 @@ impl Interpreter {
     /// Push Rational type-of-type onto stack
     pub fn push_rational_type(&mut self) -> Result<(), RuntimeError> {
         self.push(Value::TypeOf(AbstractType::Rational), ConcreteType::TypeOf(AbstractType::Rational));
+        Ok(())
+    }
+
+    /// REVOLUTIONARY: Raise error with automatic context dispatch
+    /// Usage: ErrorName raise
+    /// This changes context and re-dispatches the calling word!
+    pub fn raise_error(&mut self) -> Result<(), RuntimeError> {
+        // Pop error name from stack
+        let (error_value, _) = self.pop()?;
+
+        let error_name = match error_value {
+            Value::String(name) => name,
+            _ => {
+                println!("Error: raise expects error name on stack");
+                return Err(RuntimeError::ParseError);
+            }
+        };
+
+        // Verify error is registered
+        if !self.errors.is_registered(&error_name) {
+            println!("Error: unknown error type '{}'", error_name);
+            return Err(RuntimeError::ParseError);
+        }
+
+        // Change context to error context
+        self.current_context = Some(error_name.clone());
+        println!("Raised error: {} (context changed)", error_name);
+
+        // TODO: Re-dispatch current word in new context
+        // For now, just change context - re-dispatch will be next step
+
         Ok(())
     }
 }

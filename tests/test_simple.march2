@@ -1,0 +1,5 @@
+-- Simple tests to verify TEST. works
+
+TEST. 2 2 + 4 eq ;
+TEST. 10 5 - 5 eq ;
+TEST. 3 4 * 12 eq ;

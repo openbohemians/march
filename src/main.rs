@@ -237,6 +237,7 @@ struct Forth {
     max_recursion_depth: usize,  // Maximum allowed recursion depth
     iteration_count: usize,  // Track total iterations in loops
     max_iterations: usize,  // Maximum allowed iterations
+    test_failed: bool,  // Track if any test has failed
 }
 
 impl Forth {
@@ -259,6 +260,7 @@ impl Forth {
             max_recursion_depth: 1000,  // Prevent stack overflow
             iteration_count: 0,
             max_iterations: 1_000_000,  // Prevent infinite loops
+            test_failed: false,
         };
 
         // Initialize built-in type hierarchy
@@ -1283,6 +1285,8 @@ impl Forth {
                     return Err("Expected ';' to end test".to_string());
                 }
 
+                let test_expr = test_tokens.join(" ");
+
                 // Execute test expression
                 let test_words = self.parse_tokens(&test_tokens)?;
                 for word in &test_words {
@@ -1295,9 +1299,11 @@ impl Forth {
                 }
                 let result = self.pop_num()?;
                 if result == 0 {
-                    return Err(format!("TEST. FAILED: {:?}", test_tokens.join(" ")));
+                    println!("✗ FAIL {}", test_expr);
+                    self.test_failed = true;
+                } else {
+                    println!("✓ PASS {}", test_expr);
                 }
-                // Test passed, continue silently
             }
             // Handle state variable declarations
             else if token == "$" {
@@ -2128,8 +2134,14 @@ fn main() {
                 forth.show_stack();
             }
             Err(e) => {
-                println!("Error: {}", e);
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
             }
         }
+    }
+
+    // Exit with error status if any test failed
+    if forth.test_failed {
+        std::process::exit(1);
     }
 }

@@ -4,9 +4,9 @@
 = {a} a -> {a} ;
 : [*]
   swap
-  dup array-len
+  dup array.len
   [ {
-    over i0 array-get
+    over i0 array.get
     rot
     [*]
     swap
@@ -14,28 +14,7 @@
   drop
 ;
 
--- Test with +
-"Broadcasting { 1 2 3 } + 10 =" .
-{ 1 2 3 } 10 +
-"Result: " .
-dup 0 array-get . " " .
-dup 1 array-get . " " .
-2 array-get .
-"" .
+TEST. { 1 2 3 } 10 + { 11 12 13 }  eq? ;  -- test broadcast of +. 
+TEST. { 5 10 15 } 2 * { 10 20 30 } eq? ;  -- test broadcast of *.
+TEST. { 90 } 5 - { 85 } eq? ;             -- test broadcast of -.
 
--- Test with *
-"Broadcasting { 5 10 15 } * 2 =" .
-{ 5 10 15 } 2 *
-"Result: " .
-dup 0 array-get . " " .
-dup 1 array-get . " " .
-2 array-get .
-"" .
-
--- Test with -
-"Broadcasting { 100 50 25 } - 5 =" .
-{ 100 50 25 } 5 -
-"Result: " .
-dup 0 array-get . " " .
-dup 1 array-get . " " .
-2 array-get .

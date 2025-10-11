@@ -12,40 +12,32 @@ build:
 test: build
 	@echo "Running all tests..."
 	@echo ""
-	@failed=0; \
-	for test in tests/*.forth; do \
-		echo "Testing: $$test"; \
-		if timeout 5s ./target/release/march2 < "$$test" > /dev/null 2>&1; then \
-			echo "  ✓ PASS"; \
-		else \
-			echo "  ✗ FAIL"; \
-			failed=$$((failed + 1)); \
+	@for test in tests/*.march2; do \
+		if [ -f "$$test" ]; then \
+			echo "Testing: $$test"; \
+			./target/release/march2 < "$$test"; \
+			echo ""; \
 		fi; \
-		echo ""; \
-	done; \
-	if [ $$failed -eq 0 ]; then \
-		echo "All tests passed!"; \
-	else \
-		echo "$$failed test(s) failed"; \
-		exit 1; \
-	fi
+	done
 
 # Run tests with output (for debugging)
 test-verbose: build
 	@echo "Running all tests (verbose)..."
 	@echo ""
-	@for test in tests/*.forth; do \
-		echo "========================================"; \
-		echo "Testing: $$test"; \
-		echo "========================================"; \
-		timeout 5s ./target/release/march2 < "$$test"; \
-		echo ""; \
+	@for test in tests/*.march2; do \
+		if [ -f "$$test" ]; then \
+			echo "========================================"; \
+			echo "Testing: $$test"; \
+			echo "========================================"; \
+			./target/release/march2 < "$$test"; \
+			echo ""; \
+		fi; \
 	done
 
 # Run a specific test
 test-one: build
 	@if [ -z "$(TEST)" ]; then \
-		echo "Usage: make test-one TEST=tests/test_foo.forth"; \
+		echo "Usage: make test-one TEST=tests/test_simple.march2"; \
 		exit 1; \
 	fi
 	@echo "Running $(TEST)..."

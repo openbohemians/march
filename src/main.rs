@@ -1486,6 +1486,7 @@ impl Forth {
         let token = tokens[start];
         let is_sugar = token == "#[";
 
+        // Note: { } are array literals, not nested in [ ] depth tracking
         let mut depth = 1;
         let mut i = start + 1;
         let mut quote_tokens = Vec::new();
@@ -1553,12 +1554,13 @@ impl Forth {
             return Ok(start + 2);  // Skip both raise and error type
         } else if token == "[" {
             // Collect quotation until ]
+            // Note: { } are array literals, not nested in [ ] depth tracking
             let mut depth = 1;
             let mut i = start + 1;
             let mut quote_tokens = Vec::new();
 
             while i < tokens.len() && depth > 0 {
-                if tokens[i] == "[" {
+                if tokens[i] == "[" || tokens[i] == "#[" {
                     depth += 1;
                 } else if tokens[i] == "]" {
                     depth -= 1;
@@ -1576,7 +1578,7 @@ impl Forth {
 
             let body = self.parse_tokens(&quote_tokens)?;
             self.current_definition.push(Word::Quote(body));
-            Ok(i + 1)  // Skip past the ]
+            Ok(i + 1)  // i points at ], skip past it
         } else if token == "#[" {
             // Syntactic sugar: #[ ... ] => [ ... ] swap #do
             let mut depth = 1;
@@ -1604,7 +1606,7 @@ impl Forth {
             self.current_definition.push(Word::Quote(body));
             self.current_definition.push(Word::Swap);
             self.current_definition.push(Word::Times);
-            Ok(i + 1)  // Skip past the ]
+            Ok(i + 1)  // i points at ], skip past it
         } else {
             // Check if this is an immediate word
             if self.immediate_words.contains(token) {
@@ -1802,12 +1804,13 @@ impl Forth {
                 continue;
             } else if token == "[" {
                 // Collect quotation until ]
+                // Note: { } are array literals, not nested in [ ] depth tracking
                 let mut depth = 1;
                 let mut j = i + 1;
                 let mut quote_tokens = Vec::new();
 
                 while j < tokens.len() && depth > 0 {
-                    if tokens[j] == "[" {
+                    if tokens[j] == "[" || tokens[j] == "#[" {
                         depth += 1;
                     } else if tokens[j] == "]" {
                         depth -= 1;
@@ -1830,6 +1833,7 @@ impl Forth {
             } else if token == "#[" {
                 // Syntactic sugar: #[ ... ] => [ ... ] swap #do
                 // Collect quotation until ]
+                // Note: { } are array literals, not nested in [ ] depth tracking
                 let mut depth = 1;
                 let mut j = i + 1;
                 let mut quote_tokens = Vec::new();
@@ -2104,12 +2108,19 @@ impl Forth {
 fn main() {
     let mut forth = Forth::new();
 
-    println!("March2 FORTH v0.1");
-    println!("Type 'quit' to exit\n");
+    // Check if stdin is a terminal (interactive mode)
+    let is_interactive = atty::is(atty::Stream::Stdin);
+
+    if is_interactive {
+        println!("March2 FORTH v0.1");
+        println!("Type 'quit' to exit\n");
+    }
 
     loop {
-        print!("> ");
-        io::stdout().flush().unwrap();
+        if is_interactive {
+            print!("> ");
+            io::stdout().flush().unwrap();
+        }
 
         let mut input = String::new();
         let bytes_read = io::stdin().read_line(&mut input).unwrap();
@@ -2131,7 +2142,9 @@ fn main() {
 
         match forth.eval(input) {
             Ok(_) => {
-                forth.show_stack();
+                if is_interactive {
+                    forth.show_stack();
+                }
             }
             Err(e) => {
                 eprintln!("Error: {}", e);

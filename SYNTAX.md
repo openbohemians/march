@@ -1,79 +1,34 @@
 # SYNTAX THOUGHTS
 
-## Encased
-
-```
-[#] NAME
-[<] mylib
-[>] hello
-
-[?] informal? ;
-
-[=] string -> ;
-[:] hello [ "Hi" print ] ;
-[:] bye-bye [ "Bye" print ] ;
-[:] thanks [ "Thanks" print ] ;
-
-[?] formal? ;
-
-[=] string -> ;
-[:] hello [ "Hello" print ] ;
-[:] bye-bye [ "Good Bye" print ] ;
-[:] thanks [ "Thank you" print ] ;
-```
-
-## One-sided
-
-```
-#] NAME
-<] mylib
->] hello
-
-?] informal? ;
-
-=] string -> ;
-:] hello [ "Hi" print ] ;
-:] bye-bye [ "Bye" print ] ;
-:] thanks [ "Thanks" print ] ;
-
-?] formal? ;
-
-=] string -> ;
-:] hello [ "Hello" print ] ;
-:] bye-bye [ "Good Bye" print ] ;
-:] thanks [ "Thank you" print ] ;
-```
-
 ## Bare
 
 ```
-# NAME
-< mylib
+# mylib
+< yourlib
 > hello
+? informal?
+=   string ->
+:     hello   [ "Hi" print ]
+:     bye-bye [ "Bye" print ]
+:     thanks  [ "Thanks" print ]
+? formal?
+=   string ->
+:     hello   [ "Hello" print ]
+:     bye-bye [ "Good Bye" print ]
+:     thanks  [ "Thank you" print ]
 
-? informal? ;
-
-= string -> ;
-: hello [ "Hi" print ] ;
-: bye-bye [ "Bye" print ] ;
-: thanks [ "Thanks" print ] ;
-
-? formal? ;
-
-= string -> ;
-: hello [ "Hello" print ] ;
-: bye-bye [ "Good Bye" print ] ;
-: thanks [ "Thank you" print ] ;
-
-= -> ;
-!: now ... ;
+# mylib!
+$ age 0
+=   ->
+:     now do-now
 ```
+
 
 ## COBOL Like
 
 ```
-PROGRM. NAME
-IMPORT. mylib
+PROGRM. mylib
+IMPORT. yourlib
 EXPORT. hello
 
 RUNTIME.
@@ -101,9 +56,10 @@ COMPTIME.
 Would this approach also allow grouping?
 
 ```
-PROGRM. NAME
-IMPORT. mylib
-EXPORT. hello
+PROGRAM. mylib
+
+IMPORT. yourlib ;
+EXPORT. hello ;
 
 RUNTIME.
 
@@ -131,4 +87,15 @@ COMPTIME.
 ```
 
 Indention is still optional, I think.
+
+```
+program. mylib
+  import. yourlib
+  export. hello
+
+  context. informal? ;
+    type. string -> ;
+      define. hello [ "Hi" print ] ;
+```
+
 

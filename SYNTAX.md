@@ -1,5 +1,36 @@
 # SYNTAX THOUGHTS
 
+#
+
+Are types names the same a namespaces? Or do they *need* to be separate?
+
+```
+version: 0 1 0 ;   -- constant
+
+< string -- > ==       -- put type (vec of types) on comptime stack, make part of current type signature.
+[ informal? ] ??         -- put condition block on comptime stack, make part of current context.
+
+hello   [ "Hi" print ].   -- runtime word definition
+hye-bye [ "Bye" Print ].
+thanks  [ "Thanks print" ].
+
+[ formal? ] ??
+hello   : "Hello" print ;
+bye-bye : "Good Bye" print ;
+thanks  : "Thank you" print ;
+
+:=: string -- ;
+:?: informal? ;
+: age $ 12 ;
+: version < 1 0 0 > ;
+: hello ( "Hello" print ) ;
+
+
+
+
+
+```
+
 ## Bare
 
 ```
@@ -36,16 +67,16 @@ RUNTIME.
   CONTEXT. informal? ;
 
   TYPE. string -> ;
-  DEFINE. hello [ "Hi" print ] ;
+  DEFINE. hello   [ "Hi" print ] ;
   DEFINE. bye-bye [ "Bye" print ] ;
-  DEFINE. thanks [ "Thanks" print ] ;
+  DEFINE. thanks  [ "Thanks" print ] ;
 
   CONTEXT. formal? ;
 
   TYPE. string -> ;
-  DEFINE. hello [ "Hello" print ] ;
+  DEFINE. hello   [ "Hello" print ] ;
   DEFINE. bye-bye [ "Good Bye" print ] ;
-  DEEFNE. thanks [ "Thank you" print ] ;
+  DEEFNE. thanks  [ "Thank you" print ] ;
   
 COMPTIME.
 
@@ -87,6 +118,8 @@ COMPTIME.
 ```
 
 Indention is still optional, I think.
+
+Lower case?
 
 ```
 program. mylib

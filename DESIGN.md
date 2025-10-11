@@ -2,7 +2,8 @@
 
 ## Vision
 
-A FORTH-like language that compiles through interaction nets to optimal native code across multiple architectures. Explicit state management, context-based dispatch, and content-addressed primitives enable both clarity and performance.
+A FORTH language that compiles through interaction nets to optimal native code across multiple architectures. 
+Explicit state management, context-based dispatch, and content-addressed primitives enable both clarity and performance.
 
 ## Core Principles
 
@@ -13,9 +14,191 @@ A FORTH-like language that compiles through interaction nets to optimal native c
 5. **Tail recursion only** - Simplifies compilation, prevents stack overflow
 6. **Architecture portability** - Same source compiles optimally for any target
 
+## Key Features
+
+### 1. Context-Based Dispatch
+
+Multiple implementations selected by guards:
+
+```forth
+= Enemy ;
+? laser-on?
+: attack  fire-laser 100 damage ;
+
+? not laser-on?
+: attack  fire-bullets 20 damage ;
+
+= Ally ;
+? type = Ally ;
+: attack  heal 50 ;
+```
+
+At compile time, generates conditional inet with three branches.
+
+### 2. Explicit State Management
+
+State variables declared up front:
+
+```forth
+$ laser-on? : boolean = false ;
+$ ammo : int = 100 ;
+$ targets : list Enemy = [] ;
+
+: fire-weapon
+  laser-on? if
+    fire-laser
+  else
+    ammo 1 - !ammo
+    fire-bullet
+  then ;
+```
+
+State queries become special inet nodes that read global state cells.
+
+### 3. Dependent Types (Future)
+
+Type constraints based on values:
+
+```forth
+-- Returns: first n elements
+? swap vec.size lt? ; 
+: take ( vec n -- vec' )
+
+? swap vec.len > ;
+: take  "Index out of bounds" error ;
+```
+
+Guards check type constraints at compile time when possible, runtime otherwise.
+
+### 4. Pure Functions
+
+Mark functions as pure for aggressive optimization:
+
+```forth
+pure : square  dup * ;
+pure : distance  square swap square + sqrt ;
+```
+
+Pure functions:
+- No side effects
+- Deterministic output
+- Can be memoized
+- Can be reordered
+- Can be parallelized
+
+Not sure we need this, compiler should be able to tell automatically.
+
+### 5. Content-Addressed Distribution
+
+Share compiled functions across network:
+
+```
+Function compilation:
+  FORTH source → Inet IR → Optimize → Hash
+
+Share:
+  Upload inet + metadata to content-addressed store
+  Others download by hash
+  Verify integrity before use
+
+Import:
+  Reference function by hash
+  Local compiler optimizes for target architecture
+```
+
 ---
 
-## Architecture Overview
+## Phase 1: FORTH Interpretor
+
+### Traditional FORTH
+
+First requirement is a word dictionary.
+
+We also need a mode switch. Start with two modes: runtime and comptime.
+
+Then a small compile time evaluation loop.
+
+Then a small runtimes evaluation loop. The loop should basically take the pre-compiled tokens to lookup in jump table for where to send execution,
+a return stack tracks where we jumped from so it cen return to it (sub-routines). 
+
+We will enhance this later to handle dyanamic dispatch as well for context constraints that can't be determined at runtime. 
+FORTH doesn't have this so it's compiled "tokens" are essentially direct jump (via an indirect pointer) gernally called *xt*. 
+Maybe we can do that too.
+
+Pre-define and pre-load dictionary with required immediate words for compile-time execution.
+
+* `:` and `;` to define new runtime words.
+* `::` and `;;` to define new immediate words (words that run immediately at compile time).
+
+Define core primative runtime words and preload the dictionary with them as well.
+
+### Silly Example
+
+```forth
+: square  dup * ;
+: distance  square swap square + sqrt ;
+
+\ Parser creates word definitions:
+square → [dup, *]
+distance → [square, swap, square, +, sqrt]
+```
+
+This provides the word dictionary mapping names to token lists.
+
+### No Innovations Here
+
+FORTH is well-understood. Use standard approach with immediate words, compilation semantics, and interpretation semantics.
+
+Remarks use `-- ` word (another immediate mode word) to end of line.
+
+---
+
+### Context System
+
+Words can have multiple implementations based on runtime conditions:
+
+`?` is used to define a context. We need another mode switch for compiling constraints.
+
+Now we are in the context compiler evalution procedure, until we hit ';'. So `;` is a very special word that
+decides what to do with all that has come before.
+
+Context are compiled just like regular words, but get attached to words as part of their context rather than as regular word in the dictionary.
+A one-to-many relation -- one word can have many possible contexts, and with order priority (at least for tie breaking if we can determine specificity score).
+
+```forth
+-- Context 1: laser is on
+? laser-on? ;
+: fire  "Pew pew!" print ;
+
+-- Context 2: laser is off
+? not laser-on? ;
+: fire  "Click click" print ;
+
+-- Context 3: base case for recursion
+? dup 1 eq? ;
+: factorial  drop 1 ;
+
+-- Context 4: recursive case
+? ;   -- empty context
+: factorial  dup 1 - factorial * ;
+```
+
+Static types are context gaurds too, but they are compile time guards.
+
+`=` defines a new type guard/context.
+
+```
+= string -> string ;
+: do-something-to-string-and-output-a-string ;
+```
+
+STOP HERE. WE ARE ON PHASE 1.
+
+----
+
+## Phase 2: Toward Compilation
+
+### Architecture Overview - Compilation Pipeline 
 
 ```
 ┌─────────────────┐
@@ -53,62 +236,6 @@ A FORTH-like language that compiles through interaction nets to optimal native c
 │  Native Binary  │
 └─────────────────┘
 ```
-
----
-
-## Phase 1: FORTH Parsing
-
-### Traditional FORTH Parser
-
-Uses immediate words for compile-time execution:
-
-```forth
-: square  dup * ;
-: distance  square swap square + sqrt ;
-
-\ Parser creates word definitions:
-square → [dup, *]
-distance → [square, swap, square, +, sqrt]
-```
-
-**Output:** Word dictionary mapping names to token lists.
-
-### No Innovations Here
-
-FORTH parsing is well-understood. Use standard approach with immediate words, compilation semantics, and interpretation semantics.
-
----
-
-## Phase 2: Context-Based Expansion
-
-### Context System
-
-Words can have multiple implementations based on runtime conditions:
-
-```forth
-\ Context 1: laser is on
-context laser-on?
-: fire  "Pew pew!" print ;
-
-\ Context 2: laser is off
-context not laser-on?
-: fire  "Click click" print ;
-
-\ Context 3: base case for recursion
-context dup 1 =
-: factorial  drop 1 ;
-
-\ Context 4: recursive case
-context
-: factorial  dup 1 - factorial * ;
-```
-
-### Context Guards
-
-Guards can check:
-- **State conditions:** `laser-on?`, `ammo > 0`
-- **Type conditions:** `type = Enemy`, `length > 0`
-- **Value conditions:** `dup 1 =`, `> 0`
 
 ### Expansion Algorithm
 
@@ -521,142 +648,6 @@ primitive_add:
 
 ---
 
-## Key Features
-
-### 1. Context-Based Dispatch
-
-Multiple implementations selected by guards:
-
-```forth
-context type = Enemy and laser-on?
-: attack  fire-laser 100 damage ;
-
-context type = Enemy and not laser-on?
-: attack  fire-bullets 20 damage ;
-
-context type = Ally
-: attack  heal 50 ;
-```
-
-At compile time, generates conditional inet with three branches.
-
-### 2. Explicit State Management
-
-State variables declared up front:
-
-```forth
-state laser-on? : boolean = false ;
-state ammo : int = 100 ;
-state targets : list Enemy = [] ;
-
-: fire-weapon
-  laser-on? if
-    fire-laser
-  else
-    ammo 1 - !ammo
-    fire-bullet
-  then ;
-```
-
-State queries become special inet nodes that read global state cells.
-
-### 3. Dependent Types (Future)
-
-Type constraints based on values:
-
-```forth
-: take ( vec n -- vec' )
-  \ Requires: n <= length(vec)
-  \ Returns: first n elements
-  
-context n <= length(vec)
-: take  ... implementation ... ;
-
-context n > length(vec)
-: take  "Index out of bounds" error ;
-```
-
-Guards check type constraints at compile time when possible, runtime otherwise.
-
-### 4. Pure Functions
-
-Mark functions as pure for aggressive optimization:
-
-```forth
-pure : square  dup * ;
-pure : distance  square swap square + sqrt ;
-```
-
-Pure functions:
-- No side effects
-- Deterministic output
-- Can be memoized
-- Can be reordered
-- Can be parallelized
-
-### 5. Content-Addressed Distribution
-
-Share compiled functions across network:
-
-```
-Function compilation:
-  FORTH source → Inet IR → Optimize → Hash
-
-Share:
-  Upload inet + metadata to content-addressed store
-  Others download by hash
-  Verify integrity before use
-
-Import:
-  Reference function by hash
-  Local compiler optimizes for target architecture
-```
-
----
-
-## Implementation Phases
-
-### Phase 0: Proof of Concept (2-4 weeks)
-- [x] Basic FORTH parser
-- [ ] Word expansion (no contexts yet)
-- [ ] Simple inet IR
-- [ ] Inet → textual representation
-- [ ] One primitive (add) in assembly
-- **Goal:** `5 10 + .` compiles and runs
-
-### Phase 1: Core Language (2-3 months)
-- [ ] Full FORTH semantics
-- [ ] Context system
-- [ ] All basic primitives
-- [ ] Inet optimizer (inline, constant fold)
-- [ ] x86_64 code generation
-- [ ] Stack-trace debugger
-- **Goal:** Factorial, fibonacci, fizzbuzz work
-
-### Phase 2: Advanced Features (3-4 months)
-- [ ] Dependent types
-- [ ] Complex guards
-- [ ] State management system
-- [ ] Primitive database with selection
-- [ ] Multiple architectures (ARM, WASM)
-- [ ] Inet visualizer
-- **Goal:** Real programs compile efficiently
-
-### Phase 3: Performance (2-3 months)
-- [ ] JIT compilation option
-- [ ] Parallel execution
-- [ ] Profile-guided optimization
-- [ ] Benchmark suite
-- [ ] Comparison with C/Rust
-- **Goal:** Competitive performance
-
-### Phase 4: Production (ongoing)
-- [ ] Standard library
-- [ ] Package manager
-- [ ] Content-addressed distribution
-- [ ] IDE/editor integration
-- [ ] Documentation and tutorials
-- **Goal:** Usable by others
 
 ---
 
@@ -722,7 +713,7 @@ The language succeeds when:
 
 ---
 
-**Version:** 0.1  
+**Version:** 0.2  
 **Date:** 2025-10-06  
 **Status:** Design phase - ready for prototyping
 

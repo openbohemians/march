@@ -1,10 +1,10 @@
 # PROGRESS.md - March2 FORTH Development
 
-## Current Status: Variables & Type System Complete ✅
+## Current Status: Compile-Time Type Checking Complete ✅
 
 **Date:** 2025-10-12
-**Branch:** main
-**Version:** v0.3 - Variables & Types Edition
+**Branch:** bootstrap-forth
+**Version:** v0.4 - Type Checking Edition
 
 ---
 
@@ -190,6 +190,48 @@ TEST. bad-test 1 2 eq? ;         ( ✗ FAIL: bad-test )
 
 - [x] **`--` line comments** - Everything after `--` is ignored
 
+### ✅ Type Signatures
+
+- [x] **SIGNATURE. word** - Declare type signatures for word definitions
+- [x] **Stateful signatures** - Applies to all subsequent definitions until changed
+- [x] **Multi-input/output** - Supports multiple input and output types
+- [x] **sig word** - Introspect and display word signatures
+- [x] **Signature verification** - Final type stack checked against declared outputs
+
+Examples:
+```forth
+SIGNATURE. i64 i64 -> i64 ;
+: add + ;                    ( add has signature i64 i64 -> i64 )
+: mul * ;                    ( mul also has i64 i64 -> i64 )
+
+sig add                      ( prints: (core.i64 core.i64 -> core.i64) )
+
+SIGNATURE. i64 -> i64 ;
+: square dup * ;             ( square has signature i64 -> i64 )
+```
+
+### ✅ Compile-Time Type Checking
+
+- [x] **Type stack tracking** - Parallel type stack during compilation
+- [x] **Literal type tracking** - Literals push types onto type stack
+- [x] **Word signature checking** - Verify type stack matches word signatures
+- [x] **Type error reporting** - Clear errors at compile time, not runtime
+- [x] **Signature-based initialization** - Type stack starts with signature inputs
+- [x] **Output verification** - Type stack verified against signature outputs
+- [x] **Primitive signatures** - Built-in arithmetic ops have type signatures
+
+Examples:
+```forth
+SIGNATURE. i64 i64 -> i64 ;
+: add + ;                    ( compiles successfully )
+
+5 3 add .                    ( prints: 8 )
+
+: bad "hello" + ;            ( ERROR at compile time:
+                              Type error in '+': expected core.i64
+                              at position 1 but got core.string )
+```
+
 ---
 
 ## Key Design Decisions
@@ -272,28 +314,33 @@ All global state is immutable by default (using `im` crate for persistent data s
 
 ## Next Steps
 
-### Immediate Priorities
+### Immediate Priorities - CID/Database Layer
 
-- [ ] **Array/Collection operations** - Build out array manipulation words
-- [ ] **String operations** - Comparison, concatenation, substring, etc.
-- [ ] **Map operations** - Key/value manipulation for dictionaries
-- [ ] **Loops** - Simple loop construct (using quotations?)
-- [ ] **File I/O** - Read/write files
-- [ ] **More type conversions** - Expand the `!` operator coverage
+- [ ] **Content-addressed IR** - Replace XT sequences with CID sequences
+- [ ] **Hash computation** - Content-based hashing for words and literals
+- [ ] **Database abstraction** - Store (name, signature) → CID and CID → IR
+- [ ] **Literal CIDs** - Content-address literals by type and value
+- [ ] **CID resolution** - Load CID → resolve to XT for execution
+- [ ] **Monomorphization** - Generate concrete versions from abstract signatures
 
-### Near Term
+### Near Term - Language Features
 
 - [ ] **Abstract types** - `Integer` parent type for i64/i32/i16/etc
-- [ ] **Type polymorphism** - Multiple implementations per type
+- [ ] **Type-based dispatch** - Multiple implementations selected by types
+- [ ] **Array/Collection operations** - Build out array manipulation words
+- [ ] **String operations** - Comparison, concatenation, substring, etc.
 - [ ] **Error dispatch** - `raise` mechanism with error types
-- [ ] **Modules/Packages** - Load code from files
 - [ ] **Standard library** - Core utility functions in namespaces
 
-### Design Questions to Explore
+### Architecture Vision
 
-1. **Arrays vs Tuples** - Should `[ 1 2 3 ]` be array or tuple?
-2. **Type hierarchy** - How to implement abstract types with concrete dispatch?
-3. **Effect system** - How to track I/O and other effects?
+The system will follow a **ColorForth-inspired** content-addressed model:
+1. **Compile**: Source → CIDs (content-addressed IR in database)
+2. **Load**: CID → XT sequences (runtime execution)
+3. **Execute**: XT-based interpreter (current model)
+4. **AOT**: CID → native code compilation
+
+Benefits: Deduplication, sharing, verification, caching, portability
 
 ---
 
@@ -303,15 +350,19 @@ Test files in `tests/`:
 - **basic.fth** - 25 tests for arithmetic, stack ops, comparisons, definitions
 - **variables.fth** - 5 tests for variable creation, storage, computation
 - **types.fth** - 8 tests for type predicates and casting
+- **signatures.fth** - 5 tests for type signature definitions
+- **typechecking.fth** - 4 tests for compile-time type checking
 
 Run tests:
 ```bash
 ./target/debug/march2 < tests/basic.fth
 ./target/debug/march2 < tests/variables.fth
 ./target/debug/march2 < tests/types.fth
+./target/debug/march2 < tests/signatures.fth
+./target/debug/march2 < tests/typechecking.fth
 ```
 
-**All 38 tests passing!** ✓
+**All 47 tests passing!** ✓
 
 ---
 
@@ -332,15 +383,17 @@ make test   (once we convert old tests)
 
 ## Summary
 
-We now have a **feature-rich FORTH** with:
+We now have a **typed FORTH with compile-time checking** featuring:
 - ✅ Proper bootstrap architecture
 - ✅ Quotations (code as data)
 - ✅ String literals with escapes
 - ✅ Namespaces with qualified names
 - ✅ Variables with immutable state
 - ✅ First-class type system
-- ✅ Testing framework
-- ✅ Clean modular code structure (~900 lines)
+- ✅ **Type signatures** (SIGNATURE. word)
+- ✅ **Compile-time type checking** with clear error messages
+- ✅ Testing framework (47 tests passing!)
+- ✅ Clean modular code structure (~1100 lines)
 - ✅ Great REPL experience
 
-**Core language features complete. Ready for collections and standard library!** 🚀
+**Next: Content-addressed IR (CID-based compilation) for code sharing and AOT compilation!** 🚀

@@ -1,10 +1,10 @@
 # PROGRESS.md - March2 FORTH Development
 
-## Current Status: Bootstrap Architecture Complete ✅
+## Current Status: Variables & Type System Complete ✅
 
-**Date:** 2025-10-11
-**Branch:** bootstrap-forth
-**Version:** v0.2 - Bootstrap Edition
+**Date:** 2025-10-12
+**Branch:** main
+**Version:** v0.3 - Variables & Types Edition
 
 ---
 
@@ -54,7 +54,7 @@ src/
 - `+` `-` `*` `/`
 
 **Stack manipulation:**
-- `dup` `drop` `swap`
+- `dup` `drop` `swap` `over` `rot`
 
 **Comparison operators:**
 - `lt?` `gt?` `lte?` `gte?` `eq?` `neq?`
@@ -100,6 +100,96 @@ Examples:
 - [x] **Ctrl+C handling** - Graceful exit
 - [x] **Command history** - Up/Down arrows navigate history
 
+### ✅ String Literals
+
+- [x] **`"..."` syntax** - String literals with escape sequences
+- [x] **Escape sequences** - `\"`, `\\`, `\n`, `\t` supported
+- [x] **Whitespace preservation** - Spaces and formatting preserved correctly
+
+Examples:
+```forth
+"Hello World" .           ( prints: Hello World )
+"Line 1\nLine 2" .        ( prints across two lines )
+"She said \"Hi\"" .       ( prints: She said "Hi" )
+```
+
+### ✅ Namespaces
+
+- [x] **NAMESPACE. word** - Create new namespaces
+- [x] **Dotted qualified names** - `io.net.http.request` style
+- [x] **Namespace stack** - Efficient O(1) qualified lookups, O(k) unqualified
+- [x] **IMPORT. word** - Import namespace onto stack for unqualified access
+- [x] **ALIAS. word** - Create word aliases across namespaces
+
+Examples:
+```forth
+NAMESPACE. mylib
+: mylib.greet "Hello from mylib" . ;
+mylib.greet                          ( qualified call )
+
+IMPORT. mylib
+greet                                ( unqualified after import )
+
+ALIAS. hello mylib.greet
+hello                                ( using alias )
+```
+
+### ✅ Variables (Immutable State)
+
+- [x] **VARIABLE. word** - Create variables with compile-time computed values
+- [x] **Optional = syntax** - `VARIABLE. x 10 ;` or `VARIABLE. x = 10 ;`
+- [x] **Compile-time computation** - Values computed during variable definition
+- [x] **-> operator** - Store values to variables
+- [x] **Automatic fetch** - Variables auto-push their values when referenced
+- [x] **Immutable storage** - All state stored as immutable (using `im` crate)
+- [x] **mutable/immutable operators** - Convert between mutable/immutable collections
+
+Examples:
+```forth
+VARIABLE. x 10 ;              ( create with value 10 )
+x .                           ( prints: 10 )
+20 -> x                       ( store new value )
+x .                           ( prints: 20 )
+
+VARIABLE. sum = 5 5 + ;       ( compile-time computation )
+sum .                         ( prints: 10 )
+```
+
+### ✅ Type System (First-Class Types)
+
+- [x] **Type as Value** - Types are first-class values on the stack
+- [x] **Type constants** - `i64`, `string`, `quotation`, `array`, `map`
+- [x] **Generic type check** - `value type ?` → bool (replaces specific predicates)
+- [x] **Generic type cast** - `value type !` → converted-value
+- [x] **type word** - Get type name as string
+
+Examples:
+```forth
+10 i64 ? .                    ( prints: 1  - is i64? )
+"hello" i64 ? .               ( prints: 0  - not i64 )
+"42" i64 ! .                  ( prints: 42 - string to i64 )
+123 string ! .                ( prints: 123 - i64 to string )
+10 type .                     ( prints: core.i64 )
+i64 type .                    ( prints: core.type )
+```
+
+### ✅ Testing Framework
+
+- [x] **TEST. word** - Define and run tests
+- [x] **Pass/Fail reporting** - Visual output with ✓/✗
+- [x] **Stack isolation** - Tests don't affect each other
+- [x] **Test files** - `tests/basic.fth`, `tests/variables.fth`, `tests/types.fth`
+
+Example:
+```forth
+TEST. addition 2 3 + 5 eq? ;     ( ✓ PASS: addition )
+TEST. bad-test 1 2 eq? ;         ( ✗ FAIL: bad-test )
+```
+
+### ✅ Comments
+
+- [x] **`--` line comments** - Everything after `--` is ignored
+
 ---
 
 ## Key Design Decisions
@@ -126,6 +216,20 @@ Proper FORTH-style input buffer that:
 - Refills from source when exhausted
 - Supports multiple input sources (stdin, files, strings)
 - Enables words like `:` to read ahead for the word name
+
+### 5. First-Class Types
+
+Types are values that can be on the stack, stored in variables, and passed to functions. This enables:
+- **Generic operators**: `?` and `!` work for all types
+- **Extensibility**: Adding new types doesn't require new operators
+- **Metaprogramming**: Types can be computed and manipulated
+
+### 6. Immutable State
+
+All global state is immutable by default (using `im` crate for persistent data structures):
+- Values can be converted to mutable for fast operations
+- Storage automatically converts back to immutable
+- Enables structural sharing and efficient copying
 
 ---
 
@@ -170,40 +274,44 @@ Proper FORTH-style input buffer that:
 
 ### Immediate Priorities
 
-- [ ] **Comments** - `--` line comments
-- [ ] **More stack words** - `over`, `rot`, `nip`, `tuck`
+- [ ] **Array/Collection operations** - Build out array manipulation words
+- [ ] **String operations** - Comparison, concatenation, substring, etc.
+- [ ] **Map operations** - Key/value manipulation for dictionaries
 - [ ] **Loops** - Simple loop construct (using quotations?)
-- [ ] **String type** - Add strings to Value enum
-- [ ] **Print without newline** - `emit` or similar
+- [ ] **File I/O** - Read/write files
+- [ ] **More type conversions** - Expand the `!` operator coverage
 
 ### Near Term
 
-- [ ] **Arrays/Collections** - `{ 1 2 3 }` syntax
-- [ ] **State variables** - `$` declarations with immutable data structures
+- [ ] **Abstract types** - `Integer` parent type for i64/i32/i16/etc
+- [ ] **Type polymorphism** - Multiple implementations per type
 - [ ] **Error dispatch** - `raise` mechanism with error types
-- [ ] **Multi-methods** - Multiple implementations based on types
+- [ ] **Modules/Packages** - Load code from files
+- [ ] **Standard library** - Core utility functions in namespaces
 
 ### Design Questions to Explore
 
-1. **Compile-time quotations** - `(! ... !)` for metaprogramming?
-2. **Loop syntax** - `value { true | false }` unified construct?
-3. **Comments** - Use `--` for line comments, what about block comments?
+1. **Arrays vs Tuples** - Should `[ 1 2 3 ]` be array or tuple?
+2. **Type hierarchy** - How to implement abstract types with concrete dispatch?
+3. **Effect system** - How to track I/O and other effects?
 
 ---
 
 ## Testing
 
-Currently using simple echo-based tests:
+Test files in `tests/`:
+- **basic.fth** - 25 tests for arithmetic, stack ops, comparisons, definitions
+- **variables.fth** - 5 tests for variable creation, storage, computation
+- **types.fth** - 8 tests for type predicates and casting
+
+Run tests:
 ```bash
-echo -e "test code here\nbye" | ./target/debug/march2
+./target/debug/march2 < tests/basic.fth
+./target/debug/march2 < tests/variables.fth
+./target/debug/march2 < tests/types.fth
 ```
 
-Tests verify:
-- Basic arithmetic
-- Word definitions
-- Quotations and conditionals
-- Return stack operations
-- Comparison operators
+**All 38 tests passing!** ✓
 
 ---
 
@@ -224,13 +332,15 @@ make test   (once we convert old tests)
 
 ## Summary
 
-We now have a **clean, working FORTH** with:
-- Proper bootstrap architecture
-- Quotations (code as data)
-- Conditionals with quotations
-- Clean modular code structure
-- Great REPL experience
+We now have a **feature-rich FORTH** with:
+- ✅ Proper bootstrap architecture
+- ✅ Quotations (code as data)
+- ✅ String literals with escapes
+- ✅ Namespaces with qualified names
+- ✅ Variables with immutable state
+- ✅ First-class type system
+- ✅ Testing framework
+- ✅ Clean modular code structure (~900 lines)
+- ✅ Great REPL experience
 
-This is a solid foundation to build the advanced features (state, contexts, error dispatch, types) on top of.
-
-**The bootstrap is complete. Time to build upward!** 🚀
+**Core language features complete. Ready for collections and standard library!** 🚀

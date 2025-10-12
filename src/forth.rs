@@ -1,9 +1,9 @@
 // Core FORTH interpreter
 
 use std::collections::HashMap;
-use crate::value::Value;
+use crate::value::{Value, Type};
 use crate::xt::XT;
-use crate::word::Word;
+use crate::word::{Word, Signature};
 use crate::input::InputBuffer;
 
 pub struct Forth {
@@ -19,6 +19,8 @@ pub struct Forth {
     pub quotation_depth: usize,    // Nesting depth of quotations
     pub current_quotation: Vec<XT>, // Current quotation being compiled
     pub lookup_namespace: Option<usize>, // Temporary namespace stack index for next word lookup
+    pub current_signature: Option<Signature>, // Current type signature for new definitions
+    pub type_stack: Vec<Type>,     // Compile-time type stack for type checking
 }
 
 impl Forth {
@@ -36,13 +38,30 @@ impl Forth {
             quotation_depth: 0,
             current_quotation: Vec::new(),
             lookup_namespace: None,
+            current_signature: None,
+            type_stack: Vec::new(),
         };
 
         // Bootstrap: Add primitive words to dictionary
-        forth.add_word("+", Word::new(XT::Add));
-        forth.add_word("-", Word::new(XT::Sub));
-        forth.add_word("*", Word::new(XT::Mul));
-        forth.add_word("/", Word::new(XT::Div));
+        // Arithmetic ops (i64 i64 -> i64)
+        let binary_i64_sig = Signature::new(vec![Type::I64, Type::I64], vec![Type::I64]);
+        let mut add_word = Word::new(XT::Add);
+        add_word.signature = Some(binary_i64_sig.clone());
+        forth.add_word("+", add_word);
+
+        let mut sub_word = Word::new(XT::Sub);
+        sub_word.signature = Some(binary_i64_sig.clone());
+        forth.add_word("-", sub_word);
+
+        let mut mul_word = Word::new(XT::Mul);
+        mul_word.signature = Some(binary_i64_sig.clone());
+        forth.add_word("*", mul_word);
+
+        let mut div_word = Word::new(XT::Div);
+        div_word.signature = Some(binary_i64_sig);
+        forth.add_word("/", div_word);
+
+        // Stack ops (TODO: add signatures for these)
         forth.add_word("dup", Word::new(XT::Dup));
         forth.add_word("drop", Word::new(XT::Drop));
         forth.add_word("swap", Word::new(XT::Swap));
@@ -104,6 +123,10 @@ impl Forth {
         // Generic type operations
         forth.add_word("?", Word::new(XT::Native(native_type_check)));
         forth.add_word("!", Word::new(XT::Native(native_type_cast)));
+
+        // Type signatures
+        forth.add_word("SIGNATURE.", Word::immediate(XT::Native(native_signature)));
+        forth.add_word("sig", Word::new(XT::Native(native_sig)));
 
         // Testing support
         forth.add_word("TEST.", Word::immediate(XT::Native(native_test)));
@@ -183,6 +206,8 @@ impl Forth {
                 self.current_quotation.push(literal);
             } else if self.compiling {
                 self.current_def.push(literal);
+                // Track type on type stack during compilation
+                self.type_stack.push(Type::String);
             } else {
                 self.data_stack.push(match literal {
                     XT::Literal(v) => v,
@@ -199,6 +224,8 @@ impl Forth {
                 self.current_quotation.push(literal);
             } else if self.compiling {
                 self.current_def.push(literal);
+                // Track type on type stack during compilation
+                self.type_stack.push(Type::I64);
             } else {
                 self.data_stack.push(Value::Number(n));
             }
@@ -219,10 +246,15 @@ impl Forth {
                 self.execute(&word.xt, input)?;
             } else if self.in_quotation {
                 // Inside quotation: add to quotation
-                self.current_quotation.push(word.xt);
+                self.current_quotation.push(word.xt.clone());
             } else if self.compiling {
                 // Compiling word: add to current definition
-                self.current_def.push(word.xt);
+                self.current_def.push(word.xt.clone());
+
+                // Type check if word has a signature
+                if let Some(sig) = &word.signature {
+                    self.check_and_update_types(sig, token)?;
+                }
             } else {
                 // Interpreting: execute immediately
                 self.execute(&word.xt, input)?;
@@ -468,6 +500,47 @@ impl Forth {
             _ => Err("Expected number".to_string()),
         }
     }
+
+    // Check type stack against signature and update it
+    fn check_and_update_types(&mut self, sig: &Signature, word_name: &str) -> Result<(), String> {
+        // Check we have enough types on the stack
+        if self.type_stack.len() < sig.inputs.len() {
+            return Err(format!(
+                "Type error in '{}': expected {} inputs but type stack only has {}",
+                word_name,
+                sig.inputs.len(),
+                self.type_stack.len()
+            ));
+        }
+
+        // Check the types match (from the end of the stack)
+        let stack_len = self.type_stack.len();
+        for (i, expected_type) in sig.inputs.iter().enumerate() {
+            let stack_idx = stack_len - sig.inputs.len() + i;
+            let actual_type = &self.type_stack[stack_idx];
+            if actual_type != expected_type {
+                return Err(format!(
+                    "Type error in '{}': expected {} at position {} but got {}",
+                    word_name,
+                    expected_type.name(),
+                    i,
+                    actual_type.name()
+                ));
+            }
+        }
+
+        // Pop the input types
+        for _ in 0..sig.inputs.len() {
+            self.type_stack.pop();
+        }
+
+        // Push the output types
+        for output_type in &sig.outputs {
+            self.type_stack.push(output_type.clone());
+        }
+
+        Ok(())
+    }
 }
 
 // Native word implementations
@@ -481,6 +554,14 @@ fn native_colon(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String
     forth.compiling = true;
     forth.current_def.clear();
     forth.current_name = Some(name);
+    forth.type_stack.clear();
+
+    // If there's a current signature, initialize type stack with its inputs
+    if let Some(sig) = &forth.current_signature {
+        for input_type in &sig.inputs {
+            forth.type_stack.push(input_type.clone());
+        }
+    }
 
     Ok(())
 }
@@ -494,6 +575,14 @@ fn native_colon_immediate(forth: &mut Forth, input: &mut InputBuffer) -> Result<
     forth.compiling = true;
     forth.current_def.clear();
     forth.current_name = Some(format!("__IMMEDIATE__{}", name)); // Mark as immediate
+    forth.type_stack.clear();
+
+    // If there's a current signature, initialize type stack with its inputs
+    if let Some(sig) = &forth.current_signature {
+        for input_type in &sig.inputs {
+            forth.type_stack.push(input_type.clone());
+        }
+    }
 
     Ok(())
 }
@@ -515,11 +604,36 @@ fn native_semicolon(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), S
 
     // Create the compiled word
     let xt = XT::Compiled(forth.current_def.clone());
-    let word = if is_immediate {
+    let mut word = if is_immediate {
         Word::immediate(xt)
     } else {
         Word::new(xt)
     };
+
+    // Attach current signature if one exists and verify type stack
+    if let Some(sig) = forth.current_signature.clone() {
+        // Verify the type stack matches the signature's outputs
+        if forth.type_stack.len() != sig.outputs.len() {
+            return Err(format!(
+                "Type error in '{}': signature expects {} outputs but type stack has {}",
+                actual_name,
+                sig.outputs.len(),
+                forth.type_stack.len()
+            ));
+        }
+        for (i, expected_type) in sig.outputs.iter().enumerate() {
+            if &forth.type_stack[i] != expected_type {
+                return Err(format!(
+                    "Type error in '{}': output {} should be {} but got {}",
+                    actual_name,
+                    i,
+                    expected_type.name(),
+                    forth.type_stack[i].name()
+                ));
+            }
+        }
+        word.signature = Some(sig);
+    }
 
     // Add word to current namespace (top of stack)
     let current_ns = forth.namespace_stack.len() - 1;
@@ -527,6 +641,7 @@ fn native_semicolon(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), S
 
     forth.compiling = false;
     forth.current_def.clear();
+    forth.type_stack.clear();  // Clear type stack
 
     Ok(())
 }
@@ -572,14 +687,6 @@ fn native_rparen(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), Stri
     }
 
     Ok(())
-}
-
-fn native_signature(_forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
-    // SIGNATURE. ... ;
-    // For now, just a placeholder - we'll implement type signatures later
-    // Just consume tokens until semicolon
-    // TODO: Actually parse and store type signatures
-    Err("SIGNATURE. not yet implemented".to_string())
 }
 
 fn native_context(_forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
@@ -824,6 +931,78 @@ fn native_type_cast(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), S
     };
 
     forth.data_stack.push(result);
+    Ok(())
+}
+
+// SIGNATURE. type1 type2 -> type3 type4 ;
+fn native_signature(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    let mut seen_arrow = false;
+
+    loop {
+        let token = input.next_token()?
+            .ok_or("Expected types or ';' in SIGNATURE.")?;
+
+        if token == ";" {
+            break;
+        }
+
+        if token == "->" {
+            if seen_arrow {
+                return Err("Multiple '->' in SIGNATURE.".to_string());
+            }
+            seen_arrow = true;
+            continue;
+        }
+
+        // Token should be a type name - look it up as a word
+        if let Some(word) = forth.lookup_word(&token) {
+            // Execute to get the type value
+            if let XT::Literal(Value::Type(t)) = word.xt {
+                if seen_arrow {
+                    outputs.push(t);
+                } else {
+                    inputs.push(t);
+                }
+            } else {
+                return Err(format!("'{}' is not a type", token));
+            }
+        } else {
+            return Err(format!("Unknown type: {}", token));
+        }
+    }
+
+    // Store the signature
+    forth.current_signature = Some(Signature::new(inputs, outputs));
+    Ok(())
+}
+
+// sig - prints the signature of the next word
+fn native_sig(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {
+    let word_name = input.next_token()?
+        .ok_or("Expected word name after 'sig'")?;
+
+    if let Some(word) = forth.lookup_word(&word_name) {
+        if let Some(sig) = &word.signature {
+            // Print signature
+            print!("(");
+            for (i, input_type) in sig.inputs.iter().enumerate() {
+                if i > 0 { print!(" "); }
+                print!("{}", input_type.name());
+            }
+            print!(" -> ");
+            for (i, output_type) in sig.outputs.iter().enumerate() {
+                if i > 0 { print!(" "); }
+                print!("{}", output_type.name());
+            }
+            println!(")");
+        } else {
+            println!("<no signature>");
+        }
+    } else {
+        return Err(format!("Unknown word: {}", word_name));
+    }
     Ok(())
 }
 

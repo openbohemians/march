@@ -85,6 +85,26 @@ impl Forth {
         forth.add_word("IMPORT.", Word::immediate(XT::Native(native_import)));
         forth.add_word("ALIAS.", Word::immediate(XT::Native(native_alias)));
 
+        // State/Variables
+        forth.add_word("VARIABLE.", Word::immediate(XT::Native(native_variable)));
+        forth.add_word("->", Word::new(XT::Native(native_store)));
+        forth.add_word("mutable", Word::new(XT::Native(native_mutable)));
+        forth.add_word("immutable", Word::new(XT::Native(native_immutable)));
+
+        // Type operations
+        forth.add_word("type", Word::new(XT::Type));
+
+        // Type constants (push Type values onto stack)
+        forth.add_word("i64", Word::new(XT::Literal(Value::Type(crate::value::Type::I64))));
+        forth.add_word("string", Word::new(XT::Literal(Value::Type(crate::value::Type::String))));
+        forth.add_word("quotation", Word::new(XT::Literal(Value::Type(crate::value::Type::Quotation))));
+        forth.add_word("array", Word::new(XT::Literal(Value::Type(crate::value::Type::Array))));
+        forth.add_word("map", Word::new(XT::Literal(Value::Type(crate::value::Type::Map))));
+
+        // Generic type operations
+        forth.add_word("?", Word::new(XT::Native(native_type_check)));
+        forth.add_word("!", Word::new(XT::Native(native_type_cast)));
+
         // Testing support
         forth.add_word("TEST.", Word::immediate(XT::Native(native_test)));
 
@@ -210,6 +230,19 @@ impl Forth {
             return Ok(());
         }
 
+        // Check if it's a variable in global state
+        if let Some(value) = self.global_state.get(token) {
+            // Push variable value onto stack
+            if self.in_quotation {
+                self.current_quotation.push(XT::Literal(value.clone()));
+            } else if self.compiling {
+                self.current_def.push(XT::Literal(value.clone()));
+            } else {
+                self.data_stack.push(value.clone());
+            }
+            return Ok(());
+        }
+
         Err(format!("Unknown word: {}", token))
     }
 
@@ -300,6 +333,7 @@ impl Forth {
                     Value::Number(n) => println!("{}", n),
                     Value::Quotation(_) => println!("<quotation>"),
                     Value::String(s) => println!("{}", s),
+                    Value::Type(t) => println!("{}", t.name()),
                     Value::Array(_) => println!("<array>"),
                     Value::Map(_) => println!("<map>"),
                     Value::MutableArray(_) => println!("<mutable-array>"),
@@ -402,6 +436,12 @@ impl Forth {
                         self.execute(xt, input)?;
                     }
                 }
+            }
+            XT::Type => {
+                // ( value -- type-string )
+                let value = self.pop()?;
+                let type_name = value.type_name();
+                self.data_stack.push(Value::String(type_name.to_string()));
             }
             XT::Compiled(words) => {
                 for word_xt in words {
@@ -631,6 +671,160 @@ fn native_alias(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String
     } else {
         Err(format!("Target word '{}' not found", target_name))
     }
+}
+
+fn native_variable(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {
+    // VARIABLE. name ... ;
+    // Creates a variable in global state with initial value computed from code
+
+    let var_name = input.next_token()?
+        .ok_or("Expected variable name after 'VARIABLE.'")?;
+
+    // Save current stack state
+    let saved_stack = forth.data_stack.clone();
+
+    // Peek at next token to see if it's an optional '='
+    let first_token = input.next_token()?
+        .ok_or("Expected expression or ';' after variable name")?;
+
+    // Skip optional '=' sign
+    let first_real_token = if first_token == "=" {
+        input.next_token()?
+            .ok_or("Expected expression after '='")?
+    } else {
+        first_token
+    };
+
+    // If first token is semicolon, error - need a value
+    if first_real_token == ";" {
+        return Err("VARIABLE. requires a value expression".to_string());
+    }
+
+    // Execute the first token
+    forth.eval_token_with_input(&first_real_token, input)?;
+
+    // Execute remaining tokens until we hit semicolon
+    loop {
+        let token = input.next_token()?
+            .ok_or("Expected ';' to end VARIABLE.")?;
+
+        if token == ";" {
+            break;
+        }
+
+        // Execute the token to compute the value
+        forth.eval_token_with_input(&token, input)?;
+    }
+
+    // Pop the computed value from stack
+    let initial_value = forth.pop()
+        .map_err(|_| "VARIABLE. requires a value on the stack".to_string())?;
+
+    // Restore stack state (variable definition doesn't affect caller's stack)
+    forth.data_stack = saved_stack;
+
+    // Store in global state (always as immutable)
+    forth.global_state.insert(var_name, initial_value);
+
+    Ok(())
+}
+
+fn native_store(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {
+    // value -> varname
+    // Stores TOS into variable (converting to immutable if needed)
+
+    let var_name = input.next_token()?
+        .ok_or("Expected variable name after '->'")?;
+
+    // Pop value from stack
+    let mut value = forth.pop()?;
+
+    // Convert mutable to immutable if needed
+    value = match value {
+        Value::MutableArray(vec) => Value::Array(vec.into_iter().collect()),
+        Value::MutableMap(map) => Value::Map(map.into_iter().collect()),
+        v => v, // Already immutable or doesn't need conversion
+    };
+
+    // Store in global state
+    forth.global_state.insert(var_name, value);
+
+    Ok(())
+}
+
+fn native_mutable(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
+    // Converts immutable collection to mutable
+    let value = forth.pop()?;
+
+    let mutable_value = match value {
+        Value::Array(vec) => Value::MutableArray(vec.into_iter().collect()),
+        Value::Map(map) => Value::MutableMap(map.into_iter().collect()),
+        v => v, // Already mutable or doesn't need conversion (Number, String, Quotation)
+    };
+
+    forth.data_stack.push(mutable_value);
+    Ok(())
+}
+
+fn native_immutable(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
+    // Converts mutable collection to immutable
+    let value = forth.pop()?;
+
+    let immutable_value = match value {
+        Value::MutableArray(vec) => Value::Array(vec.into_iter().collect()),
+        Value::MutableMap(map) => Value::Map(map.into_iter().collect()),
+        v => v, // Already immutable or doesn't need conversion (Number, String, Quotation)
+    };
+
+    forth.data_stack.push(immutable_value);
+    Ok(())
+}
+
+// Generic type check: ( value type -- bool )
+fn native_type_check(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
+    let expected_type = match forth.pop()? {
+        Value::Type(t) => t,
+        _ => return Err("? requires a type as second argument".to_string()),
+    };
+    let value = forth.pop()?;
+    let result = if value.get_type() == expected_type { 1 } else { 0 };
+    forth.data_stack.push(Value::Number(result));
+    Ok(())
+}
+
+// Generic type cast: ( value type -- converted-value )
+fn native_type_cast(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
+    let target_type = match forth.pop()? {
+        Value::Type(t) => t,
+        _ => return Err("! requires a type as second argument".to_string()),
+    };
+    let value = forth.pop()?;
+
+    // If already the correct type, return as-is
+    if value.get_type() == target_type {
+        forth.data_stack.push(value);
+        return Ok(());
+    }
+
+    // Type conversion logic
+    let result = match (value, target_type) {
+        // Convert to i64
+        (Value::String(s), crate::value::Type::I64) => {
+            let n = s.parse::<i64>()
+                .map_err(|_| format!("Cannot convert string '{}' to i64", s))?;
+            Value::Number(n)
+        }
+        // Convert to string
+        (Value::Number(n), crate::value::Type::String) => Value::String(n.to_string()),
+
+        // Add more conversions as needed
+        (val, target) => {
+            return Err(format!("Cannot convert {} to {}", val.type_name(), target.name()));
+        }
+    };
+
+    forth.data_stack.push(result);
+    Ok(())
 }
 
 fn native_test(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {

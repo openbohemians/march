@@ -39,6 +39,9 @@ pub enum XT {
     If,     // ( cond true-quot false-quot -- ) Execute branch based on condition
     Iff,    // ( cond quot -- ) Execute quotation only if condition is true
 
+    // Type operations
+    Type,   // ( value -- type-string ) Get the type of a value as a string
+
     // User-defined word (list of XTs to execute)
     Compiled(Vec<XT>),
 
@@ -75,6 +78,7 @@ impl std::fmt::Debug for XT {
             XT::Call => write!(f, "Call"),
             XT::If => write!(f, "If"),
             XT::Iff => write!(f, "Iff"),
+            XT::Type => write!(f, "Type"),
             XT::Compiled(words) => write!(f, "Compiled({:?})", words),
             XT::Literal(val) => write!(f, "Literal({:?})", val),
             XT::Native(_) => write!(f, "Native(<fn>)"),

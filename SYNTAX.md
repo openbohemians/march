@@ -1,90 +1,81 @@
 # SYNTAX THOUGHTS
 
-#
-
-Are types names the same a namespaces? Or do they *need* to be separate?
+## Original Syntax
 
 ```
-version: 0 1 0 ;   -- constant
+= string -- ;
 
-< string -- > ==       -- put type (vec of types) on comptime stack, make part of current type signature.
-[ informal? ] ??         -- put condition block on comptime stack, make part of current context.
+? informal? ;
+: hello   "Hi" print ;           -- define a runtime word, via constant thunk.
+: bye-bye "Bye" Print ;
+: thanks  "Thanks print" ;
 
-hello   [ "Hi" print ].   -- runtime word definition
-hye-bye [ "Bye" Print ].
-thanks  [ "Thanks print" ].
-
-[ formal? ] ??
-hello   : "Hello" print ;
-bye-bye : "Good Bye" print ;
-thanks  : "Thank you" print ;
-
-:=: string -- ;
-:?: informal? ;
-: age $ 12 ;
-: version < 1 0 0 > ;
-: hello ( "Hello" print ) ;
-
-
-
-
-
+? formal? ;
+: hello   "Hello" print ;
+: bye-bye "Good Bye" print ;
+: thanks  "Thank you" print ;
 ```
 
-## Bare
+Question: Are types names the same a namespaces? Or do they *need* to be separate?
+
+## Thunks Required?
 
 ```
 # mylib
-< yourlib
-> hello
-? informal?
-=   string ->
-:     hello   [ "Hi" print ]
-:     bye-bye [ "Bye" print ]
-:     thanks  [ "Thanks" print ]
-? formal?
-=   string ->
-:     hello   [ "Hello" print ]
-:     bye-bye [ "Good Bye" print ]
-:     thanks  [ "Thank you" print ]
+< yourlib		  -- import
+> hello       -- export
 
-# mylib!
-$ age 0
-=   ->
-:     now do-now
+? informal? ;
+  = string -> ;
+  : hello   ( "Hi" print ] ;
+  : bye-bye ( "Bye" print ) ;
+  : thanks  ( "Thanks" print ] ;
+
+? formal? ;
+  = string -> ;
+  : hello   ( "Hello" print ) ;
+  : bye-bye ( "Good Bye" print ) ;
+  : thanks  ( "Thank you" print ) ;
+
+# mylib!   -- compile time code?
+
+$ age = 0 ;
+  = -> ;
+  : now do-now
 ```
 
+## COBOL-Like
 
-## COBOL Like
+Then it was decide that since code will end up in a database and way, and the text format is really a serialization format,
+albeit importantly human readable and easy to parse, we came up with a COBOL like syntax:
 
 ```
 PROGRM. mylib
-IMPORT. yourlib
-EXPORT. hello
+VERSION. < 0 2 0 >
+IMPORT. yourlib ;
+EXPORT. hello ;
 
 RUNTIME.
+  CASE. informal? ;
+    TYPE. string -> ;
+      DEFINE. hello   "Hi" print ;
+      DEFINE. bye-bye "Bye" print ;
+      DEFINE. thanks  "Thanks" print ;
 
-  CONTEXT. informal? ;
+  CASE. formal? ;
+    TYPE. string -> ;
+    DEFINE. hello   "Hello" print ;
+    DEFINE. bye-bye "Good Bye" print ;
+    DEFINE. thanks  "Thank you" print ;
 
-  TYPE. string -> ;
-  DEFINE. hello   [ "Hi" print ] ;
-  DEFINE. bye-bye [ "Bye" print ] ;
-  DEFINE. thanks  [ "Thanks" print ] ;
+COMTIME.
+  TYPEDEF. string [char] ;
 
-  CONTEXT. formal? ;
-
-  TYPE. string -> ;
-  DEFINE. hello   [ "Hello" print ] ;
-  DEFINE. bye-bye [ "Good Bye" print ] ;
-  DEEFNE. thanks  [ "Thank you" print ] ;
-  
-COMPTIME.
-
-  TYPE. ;
+  TYPE. string -> string ;
   DEFINE. now ... ;
 ```
 
-Would this approach also allow grouping?
+A more advanced version would allow grouping.
 
 ```
 PROGRAM. mylib
@@ -93,31 +84,23 @@ IMPORT. yourlib ;
 EXPORT. hello ;
 
 RUNTIME.
-
   CONTEXT. informal? ;
-
-  TYPE. string -> ;
-  DEFINE. 
-    hello [ "Hi" print ] ;
-    bye-bye [ "Bye" print ] ;
-    thanks [ "Thanks" print ] ;
-
+    SIGNATURE. string -> ;
+    FUNCTIONS. 
+      hello   ( "Hi" print ) ;
+      bye-bye ( "Bye" print ) ;
+      thanks  ( "Thanks" print ) ;
   CONTEXT. formal? ;
-
-  TYPE. string -> ;
-  DEFINE.
-    hello [ "Hello" print ] ;
-    bye-bye [ "Good Bye" print ] ;
-    thanks [ "Thank you" print ] ;
-  
-COMPTIME.
-
-  TYPE. ;
-  DEFINE. 
-    now ... ;
+    SIGNATURE. string -> ;
+    FUNCTIONS.
+      hello   ( "Hello" print ) ;
+      bye-bye ( "Good Bye" print ) ;
+      thanks  ( "Thank you" print ) ;
+COMTIME.
+    SIGNATURE. ;
+    DEFINE. 
+      now ... ;
 ```
-
-Indention is still optional, I think.
 
 Lower case?
 
@@ -128,7 +111,30 @@ program. mylib
 
   context. informal? ;
     type. string -> ;
-      define. hello [ "Hi" print ] ;
+      DEFINE. hello [ "Hi" print ] ;
+```
+
+## Nascent Refs on Stack
+
+This was a more advanced consideration we almost adopted.
+
+When a word is encountered that is not yet defined, a nascent ref goes on the stack to
+be used by defining words like `:` and `=` or whatever we want.
+
+```
+age : 12 ;
+
+< string -- > !                  -- put type vector on comptime stack, make current type signature.
+
+( informal? ) ?                  -- put *context quotation* on stack, make part of current context.
+hello   : "Hi" print ;           -- define a runtime word, via constant thunk.
+hye-bye : "Bye" Print ;
+thanks  : "Thanks print" ;
+
+( formal? ) ?
+hello   : "Hello" print ;
+bye-bye : "Good Bye" print ;
+thanks  : ( "Thank you" print ) ! ;
 ```
 
 

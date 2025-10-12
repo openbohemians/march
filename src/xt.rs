@@ -15,6 +15,8 @@ pub enum XT {
     Dup,
     Drop,
     Swap,
+    Over,
+    Rot,
     Dot,  // Print TOS
 
     // Comparison operators (return 1 for true, 0 for false)
@@ -58,6 +60,8 @@ impl std::fmt::Debug for XT {
             XT::Dup => write!(f, "Dup"),
             XT::Drop => write!(f, "Drop"),
             XT::Swap => write!(f, "Swap"),
+            XT::Over => write!(f, "Over"),
+            XT::Rot => write!(f, "Rot"),
             XT::Dot => write!(f, "Dot"),
             XT::ToR => write!(f, "ToR"),
             XT::FromR => write!(f, "FromR"),

@@ -1,0 +1,14 @@
+-- Test new marker-based array construction
+
+-- Array comprehension from stack.
+TEST. 10 20 [ + ] [ 30 ] eq? ;
+
+-- Empty array.
+TEST. [ ] ;
+
+-- Array multiple outputs.
+TEST. 10 [ dup dup ] ;
+
+-- Aray comprehencsion from inside.
+TEST. [ 10 20 + ] [ 30 ] eq? ;
+

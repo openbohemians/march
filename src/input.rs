@@ -86,4 +86,53 @@ impl InputBuffer {
     pub fn is_eof(&self) -> bool {
         self.position >= self.buffer.len()
     }
+
+    // Skip to end of current line (for line comments)
+    pub fn skip_to_eol(&mut self) {
+        self.position = self.buffer.len();
+    }
+
+    // Read a string literal from the buffer (after the opening ")
+    // Handles escape sequences like \"
+    pub fn read_string_literal(&mut self) -> Result<String, String> {
+        let mut result = String::new();
+        let mut escaped = false;
+
+        loop {
+            // Check if we need to refill the buffer
+            if self.position >= self.buffer.len() {
+                if !self.refill()? {
+                    return Err("Unterminated string literal (EOF)".to_string());
+                }
+            }
+
+            let ch = self.buffer[self.position..].chars().next()
+                .ok_or("Unexpected end of buffer")?;
+
+            self.position += ch.len_utf8();
+
+            if escaped {
+                // Handle escape sequences
+                match ch {
+                    '"' => result.push('"'),
+                    '\\' => result.push('\\'),
+                    'n' => result.push('\n'),
+                    't' => result.push('\t'),
+                    _ => {
+                        // Unknown escape, just keep the character
+                        result.push('\\');
+                        result.push(ch);
+                    }
+                }
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                // Found closing quote
+                return Ok(result);
+            } else {
+                result.push(ch);
+            }
+        }
+    }
 }

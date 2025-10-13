@@ -143,6 +143,7 @@ impl Forth {
 
         // Testing support
         forth.add_word("TEST.", Word::immediate(XT::Native(native_test)));
+        forth.add_word("test.print-results.", Word::new(XT::Native(native_test_print_results)));
 
         // Comments
         forth.add_word("--", Word::immediate(XT::Native(native_line_comment)));
@@ -177,19 +178,23 @@ impl Forth {
 
     // Look up a word, checking namespace context
     fn lookup_word(&mut self, name: &str) -> Option<Word> {
-        // If name contains dots (and has content before/after), it's a fully qualified name
-        // Split it and navigate to the right namespace
-        if name.contains('.') && name.len() > 1 {
+        // Check if it's a qualified name: namespace.word
+        // Rules:
+        // - Must contain a dot not at start or end: foo.bar (qualified)
+        // - .foo or foo. are just regular words (not qualified)
+        // - foo..bar has multiple dots, falls through as regular word lookup
+        if name.contains('.') && !name.starts_with('.') && !name.ends_with('.') {
             let parts: Vec<&str> = name.rsplitn(2, '.').collect();
             if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
                 let ns_name = parts[1];
                 let word_name = parts[0];
+                // Only treat as qualified if namespace exists
                 if let Some(idx) = self.find_namespace_index(ns_name) {
                     return self.namespaces[idx].get(word_name).cloned();
                 }
-                return None; // Qualified name but namespace not found
+                // Namespace not found - fall through to regular lookup
+                // This allows foo.bar to be a regular word name if namespace "foo" doesn't exist
             }
-            // Fall through if it's just "." or malformed
         }
 
         // Check if there's a temporary lookup namespace override
@@ -1250,6 +1255,32 @@ fn native_test(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String>
         } else {
             println!("✗ FAIL: {}", test_name);
         }
+    }
+
+    Ok(())
+}
+
+fn native_test_print_results(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
+    // test.print-results.
+    // Prints test pass/fail counts from global state
+
+    let pass_count = forth.global_state
+        .get("test.pass-count")
+        .and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
+        .unwrap_or(0);
+
+    let fail_count = forth.global_state
+        .get("test.fail-count")
+        .and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
+        .unwrap_or(0);
+
+    let total = pass_count + fail_count;
+
+    println!("Test Results:");
+    println!("  Total: {}", total);
+    println!("  ✓ Passed: {}", pass_count);
+    if fail_count > 0 {
+        println!("  ✗ Failed: {}", fail_count);
     }
 
     Ok(())

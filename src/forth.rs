@@ -119,6 +119,7 @@ impl Forth {
         // State/Variables
         forth.add_word("VARIABLE.", Word::immediate(XT::Native(native_variable)));
         forth.add_word("->", Word::new(XT::Native(native_store)));
+        forth.add_word("<-", Word::new(XT::Native(native_fetch)));
         forth.add_word("mutable", Word::new(XT::Native(native_mutable)));
         forth.add_word("immutable", Word::new(XT::Native(native_immutable)));
 
@@ -1010,6 +1011,25 @@ fn native_store(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String
 
     // Store in global state
     forth.global_state.insert(var_name, value);
+
+    Ok(())
+}
+
+fn native_fetch(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {
+    // <- varname
+    // Fetches variable from global state, pushing value onto stack
+    // This allows accessing variables even when shadowed by words
+
+    let var_name = input.next_token()?
+        .ok_or("Expected variable name after '<-'")?;
+
+    // Look up in global state
+    let value = forth.global_state.get(&var_name)
+        .cloned()
+        .ok_or_else(|| format!("Variable '{}' not found", var_name))?;
+
+    // Push onto stack
+    forth.data_stack.push(value);
 
     Ok(())
 }

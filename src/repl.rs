@@ -130,6 +130,8 @@ pub fn run_tests() -> i32 {
     }
 
     let mut files_with_errors = Vec::new();
+    let mut total_pass = 0;
+    let mut total_fail = 0;
 
     // Run each test file
     for test_file in &test_files {
@@ -148,6 +150,26 @@ pub fn run_tests() -> i32 {
 
                 // Run the file - TEST. words will print PASS/FAIL as they execute
                 run_simple(&mut forth, &mut input);
+
+                // Collect counts from global state
+                let pass = forth.global_state
+                    .get("test.pass-count")
+                    .and_then(|v| match v {
+                        crate::value::Value::Number(n) => Some(*n),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+
+                let fail = forth.global_state
+                    .get("test.fail-count")
+                    .and_then(|v| match v {
+                        crate::value::Value::Number(n) => Some(*n),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+
+                total_pass += pass;
+                total_fail += fail;
             }
             Err(e) => {
                 eprintln!("✗ Error reading file: {}", e);
@@ -158,16 +180,24 @@ pub fn run_tests() -> i32 {
 
     // Print summary
     println!("\n{}", "=".repeat(50));
+    println!("Test Summary:");
+    println!("  Files: {}", test_files.len());
+    println!("  Total tests: {}", total_pass + total_fail);
+    println!("  ✓ Passed: {}", total_pass);
+    if total_fail > 0 {
+        println!("  ✗ Failed: {}", total_fail);
+    }
     if !files_with_errors.is_empty() {
-        println!("Files with errors: {}", files_with_errors.len());
+        println!("  Files with errors: {}", files_with_errors.len());
         for (name, err) in &files_with_errors {
-            println!("  ✗ {}: {}", name, err);
+            println!("    ✗ {}: {}", name, err);
         }
-        println!("{}", "=".repeat(50));
+    }
+    println!("{}", "=".repeat(50));
+
+    if total_fail > 0 || !files_with_errors.is_empty() {
         1
     } else {
-        println!("All test files completed");
-        println!("{}", "=".repeat(50));
         0
     }
 }

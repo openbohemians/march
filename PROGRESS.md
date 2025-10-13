@@ -118,6 +118,7 @@ Examples:
 - [x] **NAMESPACE. word** - Create new namespaces
 - [x] **Dotted qualified names** - `io.net.http.request` style
 - [x] **Namespace stack** - Efficient O(1) qualified lookups, O(k) unqualified
+- [x] **Index-based stack** - Stack stores indices, not clones (efficient lookup)
 - [x] **IMPORT. word** - Import namespace onto stack for unqualified access
 - [x] **ALIAS. word** - Create word aliases across namespaces
 
@@ -272,6 +273,15 @@ All global state is immutable by default (using `im` crate for persistent data s
 - Values can be converted to mutable for fast operations
 - Storage automatically converts back to immutable
 - Enables structural sharing and efficient copying
+
+### 7. Index-Based Namespace Stack
+
+Namespace stack uses indices instead of cloning HashMaps:
+- `namespaces: Vec<HashMap<String, Word>>` - Storage for all namespaces
+- `namespace_stack: Vec<usize>` - Stack of indices into storage
+- IMPORT. pushes indices, not clones - O(1) operation
+- Only the current (top) namespace can be modified
+- Efficient lookup without expensive copying
 
 ---
 

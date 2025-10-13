@@ -11,6 +11,8 @@ mod word;
 mod forth;
 mod input;
 mod repl;
+mod cid;
+mod serializable;
 
 fn main() {
     repl::run();

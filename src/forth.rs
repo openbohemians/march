@@ -9,8 +9,9 @@ use crate::input::InputBuffer;
 pub struct Forth {
     pub data_stack: Vec<Value>,
     pub return_stack: Vec<Value>,  // Return stack for calls, loops, and temp storage
-    pub namespace_stack: Vec<HashMap<String, Word>>, // Stack of namespace dictionaries
-    pub namespace_names: Vec<String>, // Parallel stack of namespace names (for tracking)
+    pub namespaces: Vec<HashMap<String, Word>>, // All namespaces (indexed)
+    pub namespace_names: Vec<String>, // Names for each namespace (parallel to namespaces)
+    pub namespace_stack: Vec<usize>, // Stack of indices into namespaces
     pub global_state: HashMap<String, Value>, // Immutable global state
     pub compiling: bool,           // Are we in compilation mode?
     pub current_def: Vec<XT>,      // Current word being compiled
@@ -18,7 +19,7 @@ pub struct Forth {
     pub in_quotation: bool,        // Are we compiling a quotation?
     pub quotation_depth: usize,    // Nesting depth of quotations
     pub current_quotation: Vec<XT>, // Current quotation being compiled
-    pub lookup_namespace: Option<usize>, // Temporary namespace stack index for next word lookup
+    pub lookup_namespace: Option<usize>, // Temporary namespace index for next word lookup
     pub current_signature: Option<Signature>, // Current type signature for new definitions
     pub type_stack: Vec<Type>,     // Compile-time type stack for type checking
 }
@@ -28,8 +29,9 @@ impl Forth {
         let mut forth = Forth {
             data_stack: Vec::new(),
             return_stack: Vec::new(),
-            namespace_stack: vec![HashMap::new()], // Start with root namespace
+            namespaces: vec![HashMap::new()], // Root namespace at index 0
             namespace_names: vec![String::new()],  // Root namespace has empty name
+            namespace_stack: vec![0], // Stack starts with root namespace index
             global_state: HashMap::new(),
             compiling: false,
             current_def: Vec::new(),
@@ -142,19 +144,9 @@ impl Forth {
     }
 
     fn add_word(&mut self, name: &str, word: Word) {
-        // Add word to the current namespace (top of stack)
-        let current_ns = self.namespace_stack.len() - 1;
-        self.namespace_stack[current_ns].insert(name.to_string(), word);
-    }
-
-    // Get current namespace index (top of stack)
-    fn current_namespace_index(&self) -> usize {
-        self.namespace_stack.len() - 1
-    }
-
-    // Check if a token is a namespace name that exists in the stack
-    fn is_namespace(&self, token: &str) -> bool {
-        self.namespace_names.iter().any(|name| name == token)
+        // Add word to the current namespace (top of namespace stack)
+        let current_ns_idx = *self.namespace_stack.last().unwrap();
+        self.namespaces[current_ns_idx].insert(name.to_string(), word);
     }
 
     // Find namespace index by name
@@ -172,7 +164,7 @@ impl Forth {
                 let ns_name = parts[1];
                 let word_name = parts[0];
                 if let Some(idx) = self.find_namespace_index(ns_name) {
-                    return self.namespace_stack[idx].get(word_name).cloned();
+                    return self.namespaces[idx].get(word_name).cloned();
                 }
                 return None; // Qualified name but namespace not found
             }
@@ -181,15 +173,15 @@ impl Forth {
 
         // Check if there's a temporary lookup namespace override
         if let Some(ns_idx) = self.lookup_namespace.take() {
-            if let Some(word) = self.namespace_stack[ns_idx].get(name).cloned() {
+            if let Some(word) = self.namespaces[ns_idx].get(name).cloned() {
                 return Some(word);
             }
             // Fall through to regular lookup if not found
         }
 
         // Walk namespace stack backwards (most recent first)
-        for ns in self.namespace_stack.iter().rev() {
-            if let Some(word) = ns.get(name) {
+        for &ns_idx in self.namespace_stack.iter().rev() {
+            if let Some(word) = self.namespaces[ns_idx].get(name) {
                 return Some(word.clone());
             }
         }
@@ -636,8 +628,8 @@ fn native_semicolon(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), S
     }
 
     // Add word to current namespace (top of stack)
-    let current_ns = forth.namespace_stack.len() - 1;
-    forth.namespace_stack[current_ns].insert(actual_name, word);
+    let current_ns_idx = *forth.namespace_stack.last().unwrap();
+    forth.namespaces[current_ns_idx].insert(actual_name, word);
 
     forth.compiling = false;
     forth.current_def.clear();
@@ -713,14 +705,17 @@ fn native_namespace(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), St
     }
 
     // Check if this namespace already exists
-    if let Some(_idx) = forth.find_namespace_index(&namespace) {
-        // Namespace exists - for now just continue (could switch to it in future)
+    if let Some(idx) = forth.find_namespace_index(&namespace) {
+        // Namespace exists - push its index onto the stack
+        forth.namespace_stack.push(idx);
         return Ok(());
     }
 
     // Create new namespace
-    forth.namespace_stack.push(HashMap::new());
+    let new_idx = forth.namespaces.len();
+    forth.namespaces.push(HashMap::new());
     forth.namespace_names.push(namespace);
+    forth.namespace_stack.push(new_idx);
     Ok(())
 }
 
@@ -741,10 +736,8 @@ fn native_import(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), Strin
 
     // Find the namespace
     if let Some(idx) = forth.find_namespace_index(&namespace) {
-        // Clone the namespace and push it onto the stack
-        let imported_ns = forth.namespace_stack[idx].clone();
-        forth.namespace_stack.push(imported_ns);
-        forth.namespace_names.push(format!("imported:{}", namespace));
+        // Push the namespace index onto the stack for lookup
+        forth.namespace_stack.push(idx);
         Ok(())
     } else {
         Err(format!("Namespace '{}' not found", namespace))
@@ -772,8 +765,8 @@ fn native_alias(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String
     // Look up the target word
     if let Some(word) = forth.lookup_word(&target_name) {
         // Add alias to current namespace
-        let current_ns = forth.namespace_stack.len() - 1;
-        forth.namespace_stack[current_ns].insert(alias_name, word);
+        let current_ns_idx = *forth.namespace_stack.last().unwrap();
+        forth.namespaces[current_ns_idx].insert(alias_name, word);
         Ok(())
     } else {
         Err(format!("Target word '{}' not found", target_name))

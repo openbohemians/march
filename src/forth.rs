@@ -1267,16 +1267,14 @@ fn native_test(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String>
         forth.global_state.insert("test.fail-count".to_string(), Value::Number(current + 1));
     }
 
-    // Store result for test mode (for test runner to collect)
+    // Store result in test results list
     forth.test_results.push((test_name.clone(), result));
 
-    // Print result unless in test mode (where we'll print a summary)
-    if !forth.test_mode {
-        if result {
-            println!("✓ PASS: {}", test_name);
-        } else {
-            println!("✗ FAIL: {}", test_name);
-        }
+    // Print result
+    if result {
+        println!("✓ PASS: {}", test_name);
+    } else {
+        println!("✗ FAIL: {}", test_name);
     }
 
     Ok(())

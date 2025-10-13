@@ -129,52 +129,28 @@ pub fn run_tests() -> i32 {
         return 0;
     }
 
-    let mut total_pass = 0;
-    let mut total_fail = 0;
     let mut files_with_errors = Vec::new();
 
     // Run each test file
     for test_file in &test_files {
         let file_name = test_file.file_name().unwrap().to_string_lossy();
-        print!("Running {}... ", file_name);
+        println!("\n=== Running {} ===", file_name);
 
         // Create fresh interpreter for each file
         let mut forth = Forth::new();
-        forth.test_mode = true;
 
-        // Read and execute the file - this will run all TEST. words
+        // Read and execute the file - TEST. words print their own results
         match fs::read_to_string(test_file) {
             Ok(content) => {
                 let cursor = std::io::Cursor::new(content.into_bytes());
                 let reader = BufReader::new(cursor);
                 let mut input = InputBuffer::new_from_reader(Box::new(reader));
 
-                // Just run the file - TEST. words will populate test_results
+                // Run the file - TEST. words will print PASS/FAIL as they execute
                 run_simple(&mut forth, &mut input);
-
-                // Collect results from TEST. executions
-                let pass = forth.test_results.iter().filter(|(_, r)| *r).count();
-                let fail = forth.test_results.len() - pass;
-
-                if fail == 0 && forth.test_results.len() > 0 {
-                    println!("✓ {} tests passed", pass);
-                } else if forth.test_results.len() > 0 {
-                    println!("✗ {} passed, {} failed", pass, fail);
-                    // Show which tests failed
-                    for (name, result) in &forth.test_results {
-                        if !result {
-                            println!("    ✗ FAIL: {}", name);
-                        }
-                    }
-                } else {
-                    println!("(no tests found)");
-                }
-
-                total_pass += pass;
-                total_fail += fail;
             }
             Err(e) => {
-                println!("✗ Error reading file: {}", e);
+                eprintln!("✗ Error reading file: {}", e);
                 files_with_errors.push((file_name.to_string(), e.to_string()));
             }
         }
@@ -182,21 +158,16 @@ pub fn run_tests() -> i32 {
 
     // Print summary
     println!("\n{}", "=".repeat(50));
-    println!("Test Summary:");
-    println!("  Files: {}", test_files.len());
-    println!("  Tests: {}", total_pass + total_fail);
-    println!("  ✓ Passed: {}", total_pass);
-    if total_fail > 0 {
-        println!("  ✗ Failed: {}", total_fail);
-    }
     if !files_with_errors.is_empty() {
-        println!("  Files with errors: {}", files_with_errors.len());
-    }
-    println!("{}", "=".repeat(50));
-
-    if total_fail > 0 || !files_with_errors.is_empty() {
+        println!("Files with errors: {}", files_with_errors.len());
+        for (name, err) in &files_with_errors {
+            println!("  ✗ {}: {}", name, err);
+        }
+        println!("{}", "=".repeat(50));
         1
     } else {
+        println!("All test files completed");
+        println!("{}", "=".repeat(50));
         0
     }
 }

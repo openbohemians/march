@@ -180,17 +180,24 @@ impl Forth {
     fn lookup_word(&mut self, name: &str) -> Option<Word> {
         // Check if it's a qualified name: namespace.word
         // Rules:
-        // - If dot is not at start or end, split on LEFTMOST dot
+        // - Namespace names CANNOT contain dots
+        // - Word names can have dots at START and/or END only
         // - .foo or foo. are regular words (not qualified)
-        // - foo.bar → namespace "foo", word "bar"
-        // - foo...bar → namespace "foo", word "..bar"
-        // - foo.bar.baz → namespace "foo", word "bar.baz"
+        // - foo.bar → namespace "foo", word "bar" ✓
+        // - foo..bar → namespace "foo", word ".bar" ✓
+        // - foo...bar → namespace "foo", word "..bar" ✓
+        // - foo.bar. → namespace "foo", word "bar." ✓
+        // - foo.bar.baz → ERROR (would imply namespace "foo.bar" which has a dot)
         if name.contains('.') && !name.starts_with('.') && !name.ends_with('.') {
-            // Split on the first (leftmost) dot
+            // Split on the first internal dot
             if let Some(dot_pos) = name.find('.') {
                 let ns_name = &name[..dot_pos];
                 let word_name = &name[dot_pos + 1..];
                 if !ns_name.is_empty() && !word_name.is_empty() {
+                    // Check that namespace doesn't contain dots
+                    if ns_name.contains('.') {
+                        return None; // Invalid: namespace contains dots
+                    }
                     // Look up in the specified namespace
                     if let Some(idx) = self.find_namespace_index(ns_name) {
                         return self.namespaces[idx].get(word_name).cloned();
@@ -865,6 +872,11 @@ fn native_namespace(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), St
 
     let namespace = input.next_token()?
         .ok_or("Expected namespace name after 'NAMESPACE.'")?;
+
+    // Validate: namespace names cannot contain dots or start/end with dots
+    if namespace.contains('.') {
+        return Err(format!("Namespace name '{}' cannot contain dots", namespace));
+    }
 
     // Check for terminating semicolon
     let terminator = input.next_token()?

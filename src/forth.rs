@@ -180,20 +180,24 @@ impl Forth {
     fn lookup_word(&mut self, name: &str) -> Option<Word> {
         // Check if it's a qualified name: namespace.word
         // Rules:
-        // - Must contain a dot not at start or end: foo.bar (qualified)
-        // - .foo or foo. are just regular words (not qualified)
-        // - foo..bar has multiple dots, falls through as regular word lookup
+        // - If dot is not at start or end, split on LEFTMOST dot
+        // - .foo or foo. are regular words (not qualified)
+        // - foo.bar → namespace "foo", word "bar"
+        // - foo...bar → namespace "foo", word "..bar"
+        // - foo.bar.baz → namespace "foo", word "bar.baz"
         if name.contains('.') && !name.starts_with('.') && !name.ends_with('.') {
-            let parts: Vec<&str> = name.rsplitn(2, '.').collect();
-            if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-                let ns_name = parts[1];
-                let word_name = parts[0];
-                // Only treat as qualified if namespace exists
-                if let Some(idx) = self.find_namespace_index(ns_name) {
-                    return self.namespaces[idx].get(word_name).cloned();
+            // Split on the first (leftmost) dot
+            if let Some(dot_pos) = name.find('.') {
+                let ns_name = &name[..dot_pos];
+                let word_name = &name[dot_pos + 1..];
+                if !ns_name.is_empty() && !word_name.is_empty() {
+                    // Look up in the specified namespace
+                    if let Some(idx) = self.find_namespace_index(ns_name) {
+                        return self.namespaces[idx].get(word_name).cloned();
+                    }
+                    // Namespace not found - return None (error will be "Unknown word")
+                    return None;
                 }
-                // Namespace not found - fall through to regular lookup
-                // This allows foo.bar to be a regular word name if namespace "foo" doesn't exist
             }
         }
 

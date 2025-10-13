@@ -91,14 +91,16 @@ Brings a namespace into scope for unqualified access by pushing it onto the name
 NAMESPACE. mylib ;
 : greet "Hello" . ;
 
-NAMESPACE. core ;    -- switch to different namespace
+NAMESPACE. core ;    -- switch to different namespace (core now on top)
 mylib.greet          -- qualified access required
 
-IMPORT. mylib ;      -- import mylib
+IMPORT. mylib ;      -- import mylib (inserts below core)
+                     -- stack is now: [root, mylib, core]
 greet                -- now works unqualified!
+: test greet ;       -- new definitions still go to core (top)
 ```
 
-**Implementation:** Pushes the namespace index onto the stack for efficient lookup without copying.
+**Implementation:** Inserts the namespace index below the current namespace on the stack.
 
 **Note:** Imported namespaces shadow earlier namespaces. The most recently imported namespace wins for unqualified lookups.
 
@@ -129,20 +131,24 @@ hello                      -- calls mylib.greet
 ```
 Stack (top → bottom):
 ┌─────────────────┐
-│  imported lib   │  ← IMPORT. added this
+│  current ns     │  ← NAMESPACE. working here (top = where definitions go)
 ├─────────────────┤
-│  current ns     │  ← NAMESPACE. working here
+│  imported lib   │  ← IMPORT. added this (below current)
 ├─────────────────┤
 │  root ("")      │  ← always present
 └─────────────────┘
 
-Unqualified lookup walks: imported lib → current ns → root
+Unqualified lookup walks: current ns → imported lib → root
 Qualified lookup goes directly to the named namespace
 ```
 
+**Key insight:** New word definitions always go to the **top** namespace. IMPORT. adds namespaces *below* the current one for lookup without changing where definitions go.
+
 ## Current Namespace
 
-Words are always defined in the **top namespace** on the stack. Use `NAMESPACE.` to switch which namespace is on top.
+Words are always defined in the **top namespace** on the stack.
+- `NAMESPACE.` pushes a namespace to the top (becomes current)
+- `IMPORT.` inserts below the current namespace (adds to lookup path only)
 
 ## Scoping Rules
 

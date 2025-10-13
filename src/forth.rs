@@ -808,8 +808,10 @@ fn native_import(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), Strin
 
     // Find the namespace
     if let Some(idx) = forth.find_namespace_index(&namespace) {
-        // Push the namespace index onto the stack for lookup
-        forth.namespace_stack.push(idx);
+        // Insert namespace below the current one (second-to-last position)
+        // This adds to lookup path without changing where new definitions go
+        let insert_pos = forth.namespace_stack.len().saturating_sub(1);
+        forth.namespace_stack.insert(insert_pos, idx);
         Ok(())
     } else {
         Err(format!("Namespace '{}' not found", namespace))

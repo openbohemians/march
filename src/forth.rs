@@ -180,32 +180,37 @@ impl Forth {
     fn lookup_word(&mut self, name: &str) -> Option<Word> {
         // Check if it's a qualified name: namespace.word
         // Rules:
-        // - Namespace names CANNOT contain dots
+        // - Namespace names can contain internal dots for hierarchy (foo.bar)
         // - Word names can have dots at START and/or END only
         // - .foo or foo. are regular words (not qualified)
-        // - foo.bar → namespace "foo", word "bar" ✓
-        // - foo..bar → namespace "foo", word ".bar" ✓
-        // - foo...bar → namespace "foo", word "..bar" ✓
-        // - foo.bar. → namespace "foo", word "bar." ✓
-        // - foo.bar.baz → ERROR (would imply namespace "foo.bar" which has a dot)
+        // - Split on FIRST dot to separate namespace from word
+        // Examples:
+        // - foo.bar → namespace "foo", word "bar"
+        // - foo..bar → namespace "foo", word ".bar"
+        // - foo...bar → namespace "foo", word "..bar"
+        // - foo.bar. → namespace "foo", word "bar."
+        // - foo.bar.baz → namespace "foo.bar", word "baz"
         if name.contains('.') && !name.starts_with('.') && !name.ends_with('.') {
-            // Split on the first internal dot
-            if let Some(dot_pos) = name.find('.') {
-                let ns_name = &name[..dot_pos];
-                let word_name = &name[dot_pos + 1..];
-                if !ns_name.is_empty() && !word_name.is_empty() {
-                    // Check that namespace doesn't contain dots
-                    if ns_name.contains('.') {
-                        return None; // Invalid: namespace contains dots
+            // Try to split into namespace.word
+            // Start from rightmost dot and work backwards to handle hierarchical namespaces
+            // foo.bar.baz could be namespace "foo.bar" word "baz" OR namespace "foo" word "bar.baz"
+            // We check for longest matching namespace first
+            let bytes = name.as_bytes();
+            for i in (0..bytes.len()).rev() {
+                if bytes[i] == b'.' {
+                    let ns_name = &name[..i];
+                    let word_name = &name[i + 1..];
+                    if !ns_name.is_empty() && !word_name.is_empty() {
+                        // Check if this namespace exists
+                        if let Some(idx) = self.find_namespace_index(ns_name) {
+                            return self.namespaces[idx].get(word_name).cloned();
+                        }
+                        // Continue trying shorter namespace names
                     }
-                    // Look up in the specified namespace
-                    if let Some(idx) = self.find_namespace_index(ns_name) {
-                        return self.namespaces[idx].get(word_name).cloned();
-                    }
-                    // Namespace not found - return None (error will be "Unknown word")
-                    return None;
                 }
             }
+            // No matching namespace found for any split
+            return None;
         }
 
         // Check if there's a temporary lookup namespace override
@@ -869,13 +874,14 @@ fn native_context(_forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), St
 fn native_namespace(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {
     // NAMESPACE. name ;
     // Pushes a new namespace onto the stack (or switches to existing)
+    // Namespace names can contain internal dots for hierarchy: foo.bar
 
     let namespace = input.next_token()?
         .ok_or("Expected namespace name after 'NAMESPACE.'")?;
 
-    // Validate: namespace names cannot contain dots or start/end with dots
-    if namespace.contains('.') {
-        return Err(format!("Namespace name '{}' cannot contain dots", namespace));
+    // Validate: namespace names cannot START or END with dots
+    if namespace.starts_with('.') || namespace.ends_with('.') {
+        return Err(format!("Namespace name '{}' cannot start or end with a dot", namespace));
     }
 
     // Check for terminating semicolon

@@ -1162,13 +1162,22 @@ fn native_sig(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> 
 }
 
 fn native_test(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {
-    // TEST. name ... ;
-    // Reads test name, executes code until semicolon,
+    // TEST. "description" ... ;
+    // Reads test description (string), executes code until semicolon,
     // and checks if result is truthy (0 = fail, non-zero = pass)
+    // Updates test.pass-count and test.fail-count global variables
 
-    // Read the test name
-    let test_name = input.next_token()?
-        .ok_or("Expected test name after 'TEST.'")?;
+    // Read the test description - expect a string literal
+    let token = input.next_token()?
+        .ok_or("Expected test description string after 'TEST.'")?;
+
+    let test_name = if token.starts_with('"') && token.ends_with('"') && token.len() > 1 {
+        // String literal - strip quotes
+        token[1..token.len()-1].to_string()
+    } else {
+        // For backward compatibility, allow bare tokens too
+        token
+    };
 
     // Save current stack state
     let saved_stack = forth.data_stack.clone();
@@ -1196,7 +1205,22 @@ fn native_test(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String>
     // Restore stack state
     forth.data_stack = saved_stack;
 
-    // Store result for test mode
+    // Update test.pass-count and test.fail-count global variables
+    if result {
+        let current = forth.global_state
+            .get("test.pass-count")
+            .and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
+            .unwrap_or(0);
+        forth.global_state.insert("test.pass-count".to_string(), Value::Number(current + 1));
+    } else {
+        let current = forth.global_state
+            .get("test.fail-count")
+            .and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
+            .unwrap_or(0);
+        forth.global_state.insert("test.fail-count".to_string(), Value::Number(current + 1));
+    }
+
+    // Store result for test mode (for test runner to collect)
     forth.test_results.push((test_name.clone(), result));
 
     // Print result unless in test mode (where we'll print a summary)

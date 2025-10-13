@@ -5,6 +5,8 @@ use crate::value::{Value, Type};
 use crate::xt::XT;
 use crate::word::{Word, Signature};
 use crate::input::InputBuffer;
+use crate::cid::CID;
+use crate::serializable::SerializableValue;
 
 pub struct Forth {
     pub data_stack: Vec<Value>,
@@ -14,7 +16,8 @@ pub struct Forth {
     pub namespace_stack: Vec<usize>, // Stack of indices into namespaces
     pub global_state: HashMap<String, Value>, // Immutable global state
     pub compiling: bool,           // Are we in compilation mode?
-    pub current_def: Vec<XT>,      // Current word being compiled
+    pub current_def: Vec<XT>,      // Current word being compiled (XTs for execution)
+    pub current_def_cids: Vec<CID>, // Current word being compiled (CIDs for storage)
     pub current_name: Option<String>, // Name of word being compiled
     pub in_quotation: bool,        // Are we compiling a quotation?
     pub quotation_depth: usize,    // Nesting depth of quotations
@@ -35,6 +38,7 @@ impl Forth {
             global_state: HashMap::new(),
             compiling: false,
             current_def: Vec::new(),
+            current_def_cids: Vec::new(),
             current_name: None,
             in_quotation: false,
             quotation_depth: 0,
@@ -193,11 +197,15 @@ impl Forth {
         // Try to parse as string literal
         if token.starts_with('"') {
             let string_val = self.parse_string(token, input)?;
-            let literal = XT::Literal(Value::String(string_val));
+            let literal = XT::Literal(Value::String(string_val.clone()));
             if self.in_quotation {
                 self.current_quotation.push(literal);
             } else if self.compiling {
                 self.current_def.push(literal);
+                // Generate CID for the literal
+                let ser_val = SerializableValue::String(string_val);
+                let cid = ser_val.to_cid().map_err(|e| format!("Failed to create CID for string literal: {}", e))?;
+                self.current_def_cids.push(cid);
                 // Track type on type stack during compilation
                 self.type_stack.push(Type::String);
             } else {
@@ -216,6 +224,10 @@ impl Forth {
                 self.current_quotation.push(literal);
             } else if self.compiling {
                 self.current_def.push(literal);
+                // Generate CID for the literal
+                let ser_val = SerializableValue::Number(n);
+                let cid = ser_val.to_cid().map_err(|e| format!("Failed to create CID for number literal: {}", e))?;
+                self.current_def_cids.push(cid);
                 // Track type on type stack during compilation
                 self.type_stack.push(Type::I64);
             } else {
@@ -242,6 +254,13 @@ impl Forth {
             } else if self.compiling {
                 // Compiling word: add to current definition
                 self.current_def.push(word.xt.clone());
+
+                // Add word's CID to compilation
+                if let Some(cid) = &word.cid {
+                    self.current_def_cids.push(*cid);
+                } else {
+                    return Err(format!("Word '{}' has no CID - cannot compile", token));
+                }
 
                 // Type check if word has a signature
                 if let Some(sig) = &word.signature {
@@ -545,6 +564,7 @@ fn native_colon(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String
 
     forth.compiling = true;
     forth.current_def.clear();
+    forth.current_def_cids.clear();
     forth.current_name = Some(name);
     forth.type_stack.clear();
 
@@ -566,6 +586,7 @@ fn native_colon_immediate(forth: &mut Forth, input: &mut InputBuffer) -> Result<
 
     forth.compiling = true;
     forth.current_def.clear();
+    forth.current_def_cids.clear();
     forth.current_name = Some(format!("__IMMEDIATE__{}", name)); // Mark as immediate
     forth.type_stack.clear();
 
@@ -596,10 +617,22 @@ fn native_semicolon(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), S
 
     // Create the compiled word
     let xt = XT::Compiled(forth.current_def.clone());
-    let mut word = if is_immediate {
-        Word::immediate(xt)
+
+    // Compute CID for the word from its CID sequence
+    let word_cid = if !forth.current_def_cids.is_empty() {
+        Some(CID::from_sequence(&forth.current_def_cids))
     } else {
-        Word::new(xt)
+        None
+    };
+
+    let mut word = if is_immediate {
+        let mut w = Word::immediate(xt);
+        w.cid = word_cid;
+        w
+    } else {
+        let mut w = Word::new(xt);
+        w.cid = word_cid;
+        w
     };
 
     // Attach current signature if one exists and verify type stack
@@ -633,6 +666,7 @@ fn native_semicolon(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), S
 
     forth.compiling = false;
     forth.current_def.clear();
+    forth.current_def_cids.clear();
     forth.type_stack.clear();  // Clear type stack
 
     Ok(())

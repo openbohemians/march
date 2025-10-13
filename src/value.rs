@@ -3,6 +3,7 @@
 use crate::xt::XT;
 use im;
 use std::collections::HashMap;
+use std::fmt;
 
 // Concrete types in the system
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -30,6 +31,26 @@ impl Type {
             Type::MutableArray => "core.mutable-array",
             Type::MutableMap => "core.mutable-map",
         }
+    }
+
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "core.i64" => Ok(Type::I64),
+            "core.string" => Ok(Type::String),
+            "core.type" => Ok(Type::Type),
+            "core.quotation" => Ok(Type::Quotation),
+            "core.array" => Ok(Type::Array),
+            "core.map" => Ok(Type::Map),
+            "core.mutable-array" => Ok(Type::MutableArray),
+            "core.mutable-map" => Ok(Type::MutableMap),
+            _ => Err(format!("Unknown type: {}", s)),
+        }
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name())
     }
 }
 

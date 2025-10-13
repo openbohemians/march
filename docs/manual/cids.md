@@ -2,7 +2,8 @@
 
 ## Overview
 
-March2 uses **content-addressed identifiers (CIDs)** to represent all code as immutable, verifiable, shareable data. Every piece of code—primitives, literals, quotations, and user-defined words—gets a unique CID based on its content.
+March2 uses **content-addressed identifiers (CIDs)** to represent all code as immutable, verifiable, shareable data. 
+Every piece of code—primitives, literals, quotations, and user-defined words—gets a unique CID based on its content.
 
 This enables:
 - **Deduplication**: Identical code shares the same CID
@@ -253,7 +254,8 @@ Each CID could have multiple compiled representations for different platforms, a
 
 ## ColorForth Inspiration
 
-This design is inspired by **ColorForth's** block-based storage model, where code is stored in a database-like structure rather than text files. March2 extends this with cryptographic content addressing for:
+This design is inspired by **ColorForth's** block-based storage model, where code is stored in a database-like structure rather than text files.
+March2 extends this with cryptographic content addressing for:
 - Distributed code sharing
 - Cryptographic verification
 - Automatic deduplication

@@ -29,6 +29,8 @@ pub struct Forth {
     pub lookup_namespace: Option<usize>, // Temporary namespace index for next word lookup
     pub current_signature: Option<Signature>, // Current type signature for new definitions
     pub type_stack: Vec<Type>,     // Compile-time type stack for type checking
+    pub test_mode: bool,           // Are we in test mode? (suppresses output)
+    pub test_results: Vec<(String, bool)>, // Test name and pass/fail
 }
 
 impl Forth {
@@ -48,6 +50,8 @@ impl Forth {
             lookup_namespace: None,
             current_signature: None,
             type_stack: Vec::new(),
+            test_mode: false,
+            test_results: Vec::new(),
         };
 
         // Bootstrap: Add primitive words to dictionary
@@ -587,6 +591,90 @@ impl Forth {
 
         Ok(())
     }
+
+    // Database integration methods
+
+    /// Save the current namespace to the database
+    pub fn save_namespace(&self, db: &crate::database::Database, namespace: &str) -> Result<(), String> {
+        // Find the namespace index
+        let ns_idx = self.find_namespace_index(namespace)
+            .ok_or(format!("Namespace '{}' not found", namespace))?;
+
+        // Get all words in the namespace
+        let ns_dict = &self.namespaces[ns_idx];
+
+        // Store each word's CID and the word metadata
+        for (name, word) in ns_dict.iter() {
+            // Only save words that have CIDs
+            if let Some(ref cid) = word.cid {
+                // For compiled words, we need to serialize the CID sequence
+                if let XT::Compiled(ref _xts) = word.xt {
+                    // Serialize the CID sequence for this word
+                    let cid_data = rmp_serde::to_vec(&self.current_def_cids)
+                        .map_err(|e| format!("Failed to serialize CID sequence: {}", e))?;
+
+                    db.store_cid(cid, crate::database::ContentType::Sequence, &cid_data)?;
+                }
+
+                // Store the word metadata
+                db.store_word(namespace, name, word)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Load a namespace from the database
+    pub fn load_namespace(&mut self, db: &crate::database::Database, namespace: &str) -> Result<(), String> {
+        // Check if namespace already exists
+        if self.find_namespace_index(namespace).is_some() {
+            return Err(format!("Namespace '{}' already exists", namespace));
+        }
+
+        // Get all words from the database for this namespace
+        let word_names = db.list_words(namespace)?;
+
+        // Create new namespace
+        let mut ns_dict = HashMap::new();
+
+        // Load each word
+        for name in word_names {
+            if let Some((cid, signature, immediate)) = db.get_word(namespace, &name)? {
+                // For now, we'll create a placeholder word with just metadata
+                // Full CID resolution would require loading and reconstructing the XT sequence
+                // This is a simplified version - full implementation would need CID->XT resolution
+
+                // Create a simple word for now (we'd need to resolve CIDs to XTs fully)
+                let xt = XT::Compiled(vec![]); // Placeholder
+                let mut word = Word::new(xt);
+                word.cid = Some(cid);
+                word.signature = signature;
+                word.immediate = immediate;
+
+                ns_dict.insert(name, word);
+            }
+        }
+
+        // Add namespace to the system
+        self.namespaces.push(ns_dict);
+        self.namespace_names.push(namespace.to_string());
+
+        Ok(())
+    }
+
+    /// Save all CIDs for literals that have been compiled
+    pub fn save_literal_cid(&self, db: &crate::database::Database, serializable: &SerializableValue) -> Result<CID, String> {
+        let cid = serializable.to_cid()?;
+
+        // Serialize the value
+        let data = rmp_serde::to_vec(&serializable)
+            .map_err(|e| format!("Failed to serialize value: {}", e))?;
+
+        // Store in database
+        db.store_cid(&cid, crate::database::ContentType::Literal, &data)?;
+
+        Ok(cid)
+    }
 }
 
 // Native word implementations
@@ -1108,11 +1196,16 @@ fn native_test(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String>
     // Restore stack state
     forth.data_stack = saved_stack;
 
-    // Print result
-    if result {
-        println!("✓ PASS: {}", test_name);
-    } else {
-        println!("✗ FAIL: {}", test_name);
+    // Store result for test mode
+    forth.test_results.push((test_name.clone(), result));
+
+    // Print result unless in test mode (where we'll print a summary)
+    if !forth.test_mode {
+        if result {
+            println!("✓ PASS: {}", test_name);
+        } else {
+            println!("✗ FAIL: {}", test_name);
+        }
     }
 
     Ok(())

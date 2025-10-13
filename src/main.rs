@@ -13,7 +13,30 @@ mod input;
 mod repl;
 mod cid;
 mod serializable;
+mod database;
 
 fn main() {
-    repl::run();
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() > 1 {
+        let command = &args[1];
+        match command.as_str() {
+            "test" => {
+                std::process::exit(repl::run_tests());
+            }
+            "repl" => {
+                repl::run();
+            }
+            _ => {
+                eprintln!("Unknown command: {}", command);
+                eprintln!("Usage: march2 [test|repl]");
+                eprintln!("  test - Run all test files in tests/ directory");
+                eprintln!("  repl - Start interactive REPL (default)");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Default to REPL
+        repl::run();
+    }
 }

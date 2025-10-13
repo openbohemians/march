@@ -21,7 +21,8 @@ pub struct Forth {
     pub current_name: Option<String>, // Name of word being compiled
     pub in_quotation: bool,        // Are we compiling a quotation?
     pub quotation_depth: usize,    // Nesting depth of quotations
-    pub current_quotation: Vec<XT>, // Current quotation being compiled
+    pub current_quotation: Vec<XT>, // Current quotation being compiled (XTs for execution)
+    pub current_quotation_cids: Vec<CID>, // Current quotation being compiled (CIDs for storage)
     pub lookup_namespace: Option<usize>, // Temporary namespace index for next word lookup
     pub current_signature: Option<Signature>, // Current type signature for new definitions
     pub type_stack: Vec<Type>,     // Compile-time type stack for type checking
@@ -43,6 +44,7 @@ impl Forth {
             in_quotation: false,
             quotation_depth: 0,
             current_quotation: Vec::new(),
+            current_quotation_cids: Vec::new(),
             lookup_namespace: None,
             current_signature: None,
             type_stack: Vec::new(),
@@ -200,6 +202,10 @@ impl Forth {
             let literal = XT::Literal(Value::String(string_val.clone()));
             if self.in_quotation {
                 self.current_quotation.push(literal);
+                // Generate CID for the literal in quotation
+                let ser_val = SerializableValue::String(string_val.clone());
+                let cid = ser_val.to_cid().map_err(|e| format!("Failed to create CID for string literal: {}", e))?;
+                self.current_quotation_cids.push(cid);
             } else if self.compiling {
                 self.current_def.push(literal);
                 // Generate CID for the literal
@@ -222,6 +228,10 @@ impl Forth {
             let literal = XT::Literal(Value::Number(n));
             if self.in_quotation {
                 self.current_quotation.push(literal);
+                // Generate CID for the literal in quotation
+                let ser_val = SerializableValue::Number(n);
+                let cid = ser_val.to_cid().map_err(|e| format!("Failed to create CID for number literal: {}", e))?;
+                self.current_quotation_cids.push(cid);
             } else if self.compiling {
                 self.current_def.push(literal);
                 // Generate CID for the literal
@@ -251,6 +261,12 @@ impl Forth {
             } else if self.in_quotation {
                 // Inside quotation: add to quotation
                 self.current_quotation.push(word.xt.clone());
+                // Add word's CID to quotation
+                if let Some(cid) = &word.cid {
+                    self.current_quotation_cids.push(*cid);
+                } else {
+                    return Err(format!("Word '{}' has no CID - cannot compile in quotation", token));
+                }
             } else if self.compiling {
                 // Compiling word: add to current definition
                 self.current_def.push(word.xt.clone());
@@ -682,6 +698,7 @@ fn native_lparen(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), Stri
         forth.in_quotation = true;
         forth.quotation_depth = 1;
         forth.current_quotation.clear();
+        forth.current_quotation_cids.clear();
     }
     Ok(())
 }
@@ -698,18 +715,31 @@ fn native_rparen(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), Stri
         // End of outermost quotation
         forth.in_quotation = false;
 
+        // Compute CID for the quotation from its CID sequence
+        let quot_cid = if !forth.current_quotation_cids.is_empty() {
+            CID::from_sequence(&forth.current_quotation_cids)
+        } else {
+            // Empty quotation - create CID from empty sequence
+            CID::from_sequence(&[])
+        };
+
         // Create the quotation value
         let quot = Value::Quotation(forth.current_quotation.clone());
 
         if forth.compiling {
             // Compiling: add quotation as literal to current definition
             forth.current_def.push(XT::Literal(quot));
+            // Also push the quotation's CID (wrapped as a literal CID)
+            let ser_quot = SerializableValue::Quotation(quot_cid);
+            let quot_literal_cid = ser_quot.to_cid().map_err(|e| format!("Failed to create CID for quotation: {}", e))?;
+            forth.current_def_cids.push(quot_literal_cid);
         } else {
             // Interpreting: push quotation onto data stack
             forth.data_stack.push(quot);
         }
 
         forth.current_quotation.clear();
+        forth.current_quotation_cids.clear();
     }
 
     Ok(())

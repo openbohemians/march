@@ -282,6 +282,57 @@ fn deserialize_signature(s: &str) -> Result<Signature, String> {
     })
 }
 
+// === Native Forth Words for Database Operations ===
+
+use crate::input::InputBuffer;
+use crate::value::Value;
+
+/// march.save word - saves a namespace to database
+/// Syntax: "namespace-name" march.save
+/// Reads namespace name from stack and saves it to march2.db
+pub fn native_ns_save(forth: &mut crate::forth::Forth, _input: &mut InputBuffer) -> Result<(), String> {
+    // Pop namespace name from stack
+    let ns_name = match forth.data_stack.pop() {
+        Some(Value::String(s)) => s,
+        Some(_) => return Err("march.save expects a string (namespace name) on stack".to_string()),
+        None => return Err("march.save: stack underflow (expected namespace name)".to_string()),
+    };
+
+    // Open database (use march2.db by default)
+    let db = Database::new("march2.db")
+        .map_err(|e| format!("Failed to open database: {}", e))?;
+
+    // Save the namespace
+    forth.save_namespace(&db, &ns_name)?;
+
+    println!("Saved namespace '{}' to march2.db", ns_name);
+
+    Ok(())
+}
+
+/// march.load word - loads a namespace from database
+/// Syntax: "namespace-name" march.load
+/// Reads namespace name from stack and loads it from march2.db
+pub fn native_ns_load(forth: &mut crate::forth::Forth, _input: &mut InputBuffer) -> Result<(), String> {
+    // Pop namespace name from stack
+    let ns_name = match forth.data_stack.pop() {
+        Some(Value::String(s)) => s,
+        Some(_) => return Err("march.load expects a string (namespace name) on stack".to_string()),
+        None => return Err("march.load: stack underflow (expected namespace name)".to_string()),
+    };
+
+    // Open database (use march2.db by default)
+    let db = Database::new("march2.db")
+        .map_err(|e| format!("Failed to open database: {}", e))?;
+
+    // Load the namespace
+    forth.load_namespace(&db, &ns_name)?;
+
+    println!("Loaded namespace '{}' from march2.db", ns_name);
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

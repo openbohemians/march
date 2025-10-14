@@ -142,8 +142,25 @@ impl Forth {
         forth.add_word("sig", Word::new(XT::Native(native_sig)));
 
         // Testing support
-        forth.add_word("TEST.", Word::immediate(XT::Native(native_test)));
-        forth.add_word("test.print-results.", Word::new(XT::Native(native_test_print_results)));
+        forth.add_word("TEST.", Word::immediate(XT::Native(crate::testing::native_test)));
+        forth.add_word("test.print-results.", Word::new(XT::Native(crate::testing::native_test_print_results)));
+
+        // March namespace - core March2 functionality
+        {
+            let march_idx = forth.namespaces.len();
+            forth.namespaces.push(HashMap::new());
+            forth.namespace_names.push("march".to_string());
+            forth.namespace_stack.push(march_idx);
+
+            // Database / namespace persistence
+            forth.add_word("save", Word::new(XT::Native(crate::database::native_ns_save)));
+            forth.add_word("load", Word::new(XT::Native(crate::database::native_ns_load)));
+
+            // Introspection
+            forth.add_word("words", Word::new(XT::Native(native_march_words)));
+
+            forth.namespace_stack.pop(); // Return to root namespace
+        }
 
         // Comments
         forth.add_word("--", Word::immediate(XT::Native(native_line_comment)));
@@ -1208,100 +1225,27 @@ fn native_sig(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> 
     Ok(())
 }
 
-fn native_test(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {
-    // TEST. "description" ... ;
-    // Reads test description (string), executes code until semicolon,
-    // and checks if result is truthy (0 = fail, non-zero = pass)
-    // Updates test.pass-count and test.fail-count global variables
+// Test functions moved to testing.rs module
 
-    // Read the test description - expect a string literal
-    let token = input.next_token()?
-        .ok_or("Expected test description string after 'TEST.'")?;
+fn native_march_words(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
+    // march.words
+    // Lists all words in the current namespace
 
-    let test_name = if token.starts_with('"') && token.ends_with('"') && token.len() > 1 {
-        // String literal - strip quotes
-        token[1..token.len()-1].to_string()
-    } else {
-        // For backward compatibility, allow bare tokens too
-        token
-    };
+    let current_ns_idx = *forth.namespace_stack.last()
+        .ok_or("Namespace stack is empty")?;
 
-    // Save current stack state
-    let saved_stack = forth.data_stack.clone();
+    let ns_name = &forth.namespace_names[current_ns_idx];
+    let words = &forth.namespaces[current_ns_idx];
 
-    // Execute tokens until we hit semicolon
-    loop {
-        let token = input.next_token()?
-            .ok_or("Expected ';' to end TEST.")?;
+    println!("Words in namespace '{}':", ns_name);
+    let mut word_list: Vec<&String> = words.keys().collect();
+    word_list.sort();
 
-        if token == ";" {
-            break;
-        }
-
-        // Use the normal evaluation path which handles quotations, immediates, etc.
-        forth.eval_token_with_input(&token, input)?;
+    for word in word_list {
+        print!("  {} ", word);
     }
-
-    // Check the result (0 = false/fail, non-zero = true/pass)
-    let result = if let Some(Value::Number(n)) = forth.data_stack.pop() {
-        n != 0
-    } else {
-        false
-    };
-
-    // Restore stack state
-    forth.data_stack = saved_stack;
-
-    // Update test.pass-count and test.fail-count global variables
-    if result {
-        let current = forth.global_state
-            .get("test.pass-count")
-            .and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
-            .unwrap_or(0);
-        forth.global_state.insert("test.pass-count".to_string(), Value::Number(current + 1));
-    } else {
-        let current = forth.global_state
-            .get("test.fail-count")
-            .and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
-            .unwrap_or(0);
-        forth.global_state.insert("test.fail-count".to_string(), Value::Number(current + 1));
-    }
-
-    // Store result in test results list
-    forth.test_results.push((test_name.clone(), result));
-
-    // Print result
-    if result {
-        println!("✓ PASS: {}", test_name);
-    } else {
-        println!("✗ FAIL: {}", test_name);
-    }
-
-    Ok(())
-}
-
-fn native_test_print_results(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
-    // test.print-results.
-    // Prints test pass/fail counts from global state
-
-    let pass_count = forth.global_state
-        .get("test.pass-count")
-        .and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
-        .unwrap_or(0);
-
-    let fail_count = forth.global_state
-        .get("test.fail-count")
-        .and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
-        .unwrap_or(0);
-
-    let total = pass_count + fail_count;
-
-    println!("Test Results:");
-    println!("  Total: {}", total);
-    println!("  ✓ Passed: {}", pass_count);
-    if fail_count > 0 {
-        println!("  ✗ Failed: {}", fail_count);
-    }
+    println!();
+    println!("Total: {} words", words.len());
 
     Ok(())
 }

@@ -14,6 +14,7 @@ mod repl;
 mod cid;
 mod serializable;
 mod database;
+mod testing;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

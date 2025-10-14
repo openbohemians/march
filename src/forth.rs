@@ -120,6 +120,7 @@ impl Forth {
         forth.add_word("VARIABLE.", Word::immediate(XT::Native(native_variable)));
         forth.add_word("->", Word::new(XT::Native(native_store)));
         forth.add_word("<-", Word::new(XT::Native(native_fetch)));
+        forth.add_word("<:", Word::immediate(XT::Native(native_tick)));
         forth.add_word("mutable", Word::new(XT::Native(native_mutable)));
         forth.add_word("immutable", Word::new(XT::Native(native_immutable)));
 
@@ -158,6 +159,7 @@ impl Forth {
 
             // Introspection
             forth.add_word("words", Word::new(XT::Native(native_march_words)));
+            forth.add_word("cid", Word::new(XT::Native(native_march_cid)));
 
             forth.namespace_stack.pop(); // Return to root namespace
         }
@@ -455,6 +457,7 @@ impl Forth {
                     Value::Quotation(_) => println!("<quotation>"),
                     Value::String(s) => println!("{}", s),
                     Value::Type(t) => println!("{}", t.name()),
+                    Value::Word(_) => println!("<word>"),
                     Value::Array(_) => println!("<array>"),
                     Value::Map(_) => println!("<map>"),
                     Value::MutableArray(_) => println!("<mutable-array>"),
@@ -575,6 +578,10 @@ impl Forth {
             XT::Native(func) => {
                 func(self, input)?;
             }
+            XT::Cid(_cid) => {
+                // CIDs should be resolved at load time, not at execute time
+                return Err("Unresolved CID encountered during execution - this is a bug".to_string());
+            }
         }
         Ok(())
     }
@@ -647,9 +654,9 @@ impl Forth {
             // Only save words that have CIDs
             if let Some(ref cid) = word.cid {
                 // For compiled words, we need to serialize the CID sequence
-                if let XT::Compiled(ref _xts) = word.xt {
+                if let (XT::Compiled(_xts), Some(cids)) = (&word.xt, &word.cids) {
                     // Serialize the CID sequence for this word
-                    let cid_data = rmp_serde::to_vec(&self.current_def_cids)
+                    let cid_data = rmp_serde::to_vec(cids)
                         .map_err(|e| format!("Failed to serialize CID sequence: {}", e))?;
 
                     db.store_cid(cid, crate::database::ContentType::Sequence, &cid_data)?;
@@ -679,12 +686,9 @@ impl Forth {
         // Load each word
         for name in word_names {
             if let Some((cid, signature, immediate)) = db.get_word(namespace, &name)? {
-                // For now, we'll create a placeholder word with just metadata
-                // Full CID resolution would require loading and reconstructing the XT sequence
-                // This is a simplified version - full implementation would need CID->XT resolution
+                // Resolve the CID to an executable XT
+                let xt = self.resolve_cid(db, &cid)?;
 
-                // Create a simple word for now (we'd need to resolve CIDs to XTs fully)
-                let xt = XT::Compiled(vec![]); // Placeholder
                 let mut word = Word::new(xt);
                 word.cid = Some(cid);
                 word.signature = signature;
@@ -713,6 +717,52 @@ impl Forth {
         db.store_cid(&cid, crate::database::ContentType::Literal, &data)?;
 
         Ok(cid)
+    }
+
+    /// Resolve a CID to an executable XT
+    /// - Primitive CIDs: directly converted to XT
+    /// - Literal CIDs: loaded from database and deserialized
+    /// - Sequence CIDs: loaded from database, recursively resolved, and compiled
+    pub fn resolve_cid(&self, db: &crate::database::Database, cid: &CID) -> Result<XT, String> {
+        // Check if it's a primitive - these can be resolved without database lookup
+        if let Some(xt) = XT::from_primitive_cid(cid) {
+            return Ok(xt);
+        }
+
+        // For literals and sequences, we need to query the database
+        let (content_type, data) = db.get_cid(cid)?
+            .ok_or_else(|| format!("CID not found in database: {}", cid))?;
+
+        match content_type {
+            crate::database::ContentType::Literal => {
+                // Deserialize the SerializableValue
+                let serializable: SerializableValue = rmp_serde::from_slice(&data)
+                    .map_err(|e| format!("Failed to deserialize literal: {}", e))?;
+
+                // Convert to Value
+                let value = serializable.to_value()?;
+
+                Ok(XT::Literal(value))
+            }
+            crate::database::ContentType::Sequence => {
+                // Deserialize the Vec<CID>
+                let cids: Vec<CID> = rmp_serde::from_slice(&data)
+                    .map_err(|e| format!("Failed to deserialize sequence: {}", e))?;
+
+                // Recursively resolve each CID to an XT
+                let mut xts = Vec::new();
+                for c in &cids {
+                    let xt = self.resolve_cid(db, c)?;
+                    xts.push(xt);
+                }
+
+                Ok(XT::Compiled(xts))
+            }
+            crate::database::ContentType::Primitive => {
+                // This shouldn't happen - primitives should be handled above
+                Err(format!("Primitive CID stored in database: {}", cid))
+            }
+        }
     }
 }
 
@@ -790,10 +840,20 @@ fn native_semicolon(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), S
     let mut word = if is_immediate {
         let mut w = Word::immediate(xt);
         w.cid = word_cid;
+        w.cids = if !forth.current_def_cids.is_empty() {
+            Some(forth.current_def_cids.clone())
+        } else {
+            None
+        };
         w
     } else {
         let mut w = Word::new(xt);
         w.cid = word_cid;
+        w.cids = if !forth.current_def_cids.is_empty() {
+            Some(forth.current_def_cids.clone())
+        } else {
+            None
+        };
         w
     };
 
@@ -1078,6 +1138,24 @@ fn native_fetch(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String
     Ok(())
 }
 
+fn native_tick(forth: &mut Forth, input: &mut InputBuffer) -> Result<(), String> {
+    // <: wordname
+    // Gets a reference to a word, pushing it onto stack as Value::Word
+    // Similar to FORTH's ' (tick) operator but uses <: syntax
+
+    let word_name = input.next_token()?
+        .ok_or("Expected word name after '<:'")?;
+
+    // Look up the word
+    let word = forth.lookup_word(&word_name)
+        .ok_or_else(|| format!("Word '{}' not found", word_name))?;
+
+    // Push word reference onto stack
+    forth.data_stack.push(Value::Word(Box::new(word)));
+
+    Ok(())
+}
+
 fn native_mutable(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
     // Converts immutable collection to mutable
     let value = forth.pop()?;
@@ -1246,6 +1324,37 @@ fn native_march_words(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(),
     }
     println!();
     println!("Total: {} words", words.len());
+
+    Ok(())
+}
+
+fn native_march_cid(forth: &mut Forth, _input: &mut InputBuffer) -> Result<(), String> {
+    // march.cid
+    // Takes a word reference and displays its CID
+    // Usage: <: word march.cid
+
+    // Pop word reference from stack
+    let word = match forth.data_stack.pop() {
+        Some(Value::Word(w)) => w,
+        Some(_) => return Err("march.cid expects a word reference on stack (use <: word)".to_string()),
+        None => return Err("march.cid: stack underflow (expected word reference)".to_string()),
+    };
+
+    // Display CID information
+    match &word.cid {
+        Some(cid) => {
+            println!("CID: {}", cid);
+            if let Some(cids) = &word.cids {
+                println!("  Sequence of {} CIDs:", cids.len());
+                for (i, c) in cids.iter().enumerate() {
+                    println!("    [{}] {}", i, c);
+                }
+            }
+        }
+        None => {
+            println!("<no CID>");
+        }
+    }
 
     Ok(())
 }

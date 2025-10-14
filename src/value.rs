@@ -1,6 +1,7 @@
 // Value types that can be on the stack
 
 use crate::xt::XT;
+use crate::word::Word;
 use im;
 use std::collections::HashMap;
 use std::fmt;
@@ -12,6 +13,7 @@ pub enum Type {
     String,
     Type,  // The type of types themselves
     Quotation,
+    Word,  // Reference to a word definition
     Array,
     Map,
     MutableArray,
@@ -26,6 +28,7 @@ impl Type {
             Type::String => "core.string",
             Type::Type => "core.type",
             Type::Quotation => "core.quotation",
+            Type::Word => "core.word",
             Type::Array => "core.array",
             Type::Map => "core.map",
             Type::MutableArray => "core.mutable-array",
@@ -60,6 +63,7 @@ pub enum Value {
     Quotation(Vec<XT>),  // Code block that can be executed
     String(String),
     Type(Type),  // Type as a first-class value
+    Word(Box<Word>),     // Reference to a word definition (boxed to avoid size issues)
 
     // Immutable collections (from im crate)
     Array(im::Vector<Value>),
@@ -77,6 +81,7 @@ impl Value {
             Value::String(_) => Type::String,
             Value::Type(_) => Type::Type,
             Value::Quotation(_) => Type::Quotation,
+            Value::Word(_) => Type::Word,
             Value::Array(_) => Type::Array,
             Value::Map(_) => Type::Map,
             Value::MutableArray(_) => Type::MutableArray,

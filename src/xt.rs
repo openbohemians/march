@@ -52,6 +52,9 @@ pub enum XT {
     // Native words that need access to interpreter internals
     // These are called with a reference to the Forth instance
     Native(NativeFn),
+
+    // CID reference - needs to be resolved to actual XT on first execution
+    Cid(CID),
 }
 
 impl XT {
@@ -86,6 +89,7 @@ impl XT {
             XT::Compiled(_) => return None,
             XT::Literal(_) => return None,
             XT::Native(_) => return None,
+            XT::Cid(_) => return None,
         };
         Some(CID::primitive(id))
     }
@@ -153,6 +157,7 @@ impl std::fmt::Debug for XT {
             XT::Compiled(words) => write!(f, "Compiled({:?})", words),
             XT::Literal(val) => write!(f, "Literal({:?})", val),
             XT::Native(_) => write!(f, "Native(<fn>)"),
+            XT::Cid(cid) => write!(f, "Cid({})", cid),
         }
     }
 }

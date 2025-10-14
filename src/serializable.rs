@@ -37,6 +37,7 @@ impl From<Type> for SerializableType {
             Type::String => SerializableType::String,
             Type::Type => SerializableType::Type,
             Type::Quotation => SerializableType::Quotation,
+            Type::Word => panic!("Word references cannot be serialized"),
             Type::Array => SerializableType::Array,
             Type::Map => SerializableType::Map,
             Type::MutableArray => SerializableType::MutableArray,
@@ -77,6 +78,34 @@ impl SerializableValue {
     pub fn to_cid(&self) -> Result<CID, String> {
         let bytes = self.to_bytes()?;
         Ok(CID::from_literal(&bytes))
+    }
+
+    /// Convert SerializableValue back to runtime Value
+    /// Note: Quotations remain as CIDs and need separate resolution
+    pub fn to_value(&self) -> Result<Value, String> {
+        match self {
+            SerializableValue::Number(n) => Ok(Value::Number(*n)),
+            SerializableValue::String(s) => Ok(Value::String(s.clone())),
+            SerializableValue::Type(t) => Ok(Value::Type(t.clone().into())),
+            SerializableValue::Quotation(_cid) => {
+                // Quotations need CID resolution - this is a placeholder
+                Err("Quotation CID resolution not yet implemented".to_string())
+            }
+            SerializableValue::Array(vals) => {
+                let mut arr = Vec::new();
+                for v in vals {
+                    arr.push(v.to_value()?);
+                }
+                Ok(Value::Array(im::Vector::from(arr)))
+            }
+            SerializableValue::Map(entries) => {
+                let mut map = im::HashMap::new();
+                for (k, v) in entries {
+                    map.insert(k.clone(), v.to_value()?);
+                }
+                Ok(Value::Map(map))
+            }
+        }
     }
 }
 

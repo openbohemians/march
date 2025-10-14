@@ -21,6 +21,7 @@ impl Signature {
 pub struct Word {
     pub xt: XT,                         // Execution token (runtime)
     pub cid: Option<CID>,               // Content ID (for storage/sharing)
+    pub cids: Option<Vec<CID>>,         // CID sequence for compiled words (for storage)
     pub immediate: bool,                // Does this word execute even during compilation?
     pub signature: Option<Signature>,  // Optional type signature
 }
@@ -32,6 +33,7 @@ impl Word {
         Word {
             xt,
             cid,
+            cids: None,
             immediate: false,
             signature: None,
         }
@@ -42,6 +44,7 @@ impl Word {
         Word {
             xt,
             cid,
+            cids: None,
             immediate: true,
             signature: None,
         }
@@ -52,6 +55,7 @@ impl Word {
         Word {
             xt,
             cid,
+            cids: None,
             immediate: false,
             signature: Some(signature),
         }
@@ -61,6 +65,7 @@ impl Word {
         Word {
             xt,
             cid: Some(cid),
+            cids: None,
             immediate: false,
             signature: None,
         }

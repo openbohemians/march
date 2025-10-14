@@ -1,3 +1,14 @@
+// ============================================================================
+// NOTE: DATABASE FEATURE IS CURRENTLY DEFERRED
+// ============================================================================
+// We are NOT actively working on database persistence right now.
+// Focus is on getting the core FORTH interpreter solid first, especially:
+// - Static type system with function overloading (multiple words, same name, different signatures)
+// - Clean, working interpreter without persistence complexity
+//
+// This module will be revisited after core features are complete.
+// ============================================================================
+
 // Database layer for persistent CID storage
 // Implements SQLite-backed storage for content-addressed code
 

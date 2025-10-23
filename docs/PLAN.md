@@ -12,7 +12,7 @@
    - Document the calling convention so the loader/compiler know what to emit.
 
 3. **Prototype in isolation**
-   - Build a standalone proof-of-concept VM in C using computed goto, fed by hard-coded cell streams, to validate the control flow and performance.
+   - Build a standalone proof-of-concept VM in C using computed goto, fed by hard-coded cell streams, to validate the control flow and performance (see `experiments/vm_cgoto.c`).
    - Add minimal tests (e.g., arithmetic, nested quotations, EXIT behavior) to nail down semantics before integrating.
 
 4. **Integrate with March runtime**

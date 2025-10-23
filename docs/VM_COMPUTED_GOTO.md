@@ -85,5 +85,6 @@ When March self-hosts, the same structure can be coded in March itself:
 Open questions to track while prototyping:
 
 - Exact representation of XT cells for primitives vs user words (sentinel bit? two separate tag values?).
+- Ensure label alignment guarantees the low tag bits remain zero when using `&&label` (may require `-O2` or explicit alignment directives).
 - Effect of tail-call optimisation on stack traces / dev-mode instrumentation.
 - Whether `entry_t` needs type/effect metadata for dev-mode shadow stack.

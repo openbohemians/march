@@ -1,4 +1,40 @@
-# March Redesign: Direct Threading + FORTH-style Outer Interpreter
+# Plans
+
+## 2025-10-22 Computed Goto
+
+1. **Stabilize current state**
+   - Revert the experimental trampoline edits so the VM is back to the last-known-good direct-threaded assembly version.
+   - Capture open questions from the trampoline attempt (return-stack bookkeeping, loader responsibilities) and park them in docs/IDEAS.md.
+
+2. **Design the computed-goto interpreter**
+   - Draft a C (or C-compatible) implementation of the inner interpreter that mirrors the sketch in `docs/IDEAS.md` (see “Computed GOTO”): tag table + per-word DOCOL helper using computed goto. Work-in-progress notes live in `docs/VM_COMPUTED_GOTO.md`.
+   - Define how user words/quotations map to entry stubs or metadata structs and how primitives expose their labels.
+   - Document the calling convention so the loader/compiler know what to emit.
+
+3. **Prototype in isolation**
+   - Build a standalone proof-of-concept VM in C using computed goto, fed by hard-coded cell streams, to validate the control flow and performance.
+   - Add minimal tests (e.g., arithmetic, nested quotations, EXIT behavior) to nail down semantics before integrating.
+
+4. **Integrate with March runtime**
+   - Decide whether the production VM will remain in assembly or move to C while GCC/Clang is required.
+   - Update the loader so each CID-backed definition builds the data structures expected by the new interpreter (likely cell arrays + entry metadata instead of trampolines).
+   - Ensure primitives and existing assembly glue (op_* routines) still bind correctly.
+
+5. **Testing and migration**
+   - Port the current test suite (test_loader, test_quotations, runner tests) to the new interpreter.
+   - Measure interpreter throughput versus the previous design; note regressions or wins.
+   - Gate the switch behind a build flag until both paths are stable.
+
+6. **Longer-term follow-ups**
+   - Plan how the computed-goto interpreter will be reimplemented once March self-hosts (e.g., JITting equivalent jump tables without relying on GCC extensions).
+   - Evaluate whether future features (effects, dev-mode shadow stack) need additional hooks in the new dispatcher.
+
+
+
+
+
+
+## 2025-10-16 March Redesign: Direct Threading + FORTH-style Outer Interpreter
 
 ** DO NOT ASSUME THE INCLUDED CODE SNIPPETS ARE CORRECT! ***
 

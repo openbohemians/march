@@ -31,10 +31,9 @@ bool runner_execute(runner_t* runner, const char* name) {
     /* Try CID-based linking first */
     dict_entry_t* entry = dict_lookup(runner->loader->dict, name);
     if (entry && entry->cid) {
-        /* CID-based path: link and execute */
-        void* linked_code = loader_link_cid(runner->loader, entry->cid);
+        vm_word_entry_t* linked_code = (vm_word_entry_t*)loader_link_cid(runner->loader, entry->cid);
         if (linked_code) {
-            vm_run((cell_t*)linked_code);
+            vm_run(linked_code->body);
             return true;
         }
     }
@@ -65,7 +64,7 @@ int runner_get_stack(runner_t* runner, int64_t* stack, int max_depth) {
      * Depth = (initial_top - current_sp) / sizeof(uint64_t)
      */
     uint64_t* dsp = vm_get_dsp();
-    uint64_t* stack_top = (uint64_t*)((uint8_t*)data_stack_base + 8*1024 - 8);
+    uint64_t* stack_top = data_stack_base + VM_DATA_STACK_WORDS;
     ptrdiff_t depth = stack_top - dsp;
 
     if (depth < 0) depth = 0;

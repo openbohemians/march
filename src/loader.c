@@ -43,21 +43,23 @@ static void cid_cache_free(cid_cache_t* cache) {
     free(cache);
 }
 
-static void cid_cache_put(cid_cache_t* cache, const unsigned char* cid, void* addr) {
+static void cid_cache_put(cid_cache_t* cache, const unsigned char* cid, void* value, int kind) {
     unsigned int bucket = hash_cid_binary(cid);
     cid_cache_entry_t* entry = malloc(sizeof(cid_cache_entry_t));
     memcpy(entry->cid, cid, CID_SIZE);
-    entry->addr = addr;
+    entry->value = value;
+    entry->kind = kind;
     entry->next = cache->buckets[bucket];
     cache->buckets[bucket] = entry;
 }
 
-static void* cid_cache_get(cid_cache_t* cache, const unsigned char* cid) {
+static void* cid_cache_get(cid_cache_t* cache, const unsigned char* cid, int* kind_out) {
     unsigned int bucket = hash_cid_binary(cid);
     cid_cache_entry_t* entry = cache->buckets[bucket];
     while (entry) {
         if (memcmp(entry->cid, cid, CID_SIZE) == 0) {
-            return entry->addr;
+            if (kind_out) *kind_out = entry->kind;
+            return entry->value;
         }
         entry = entry->next;
     }
@@ -89,12 +91,23 @@ loader_t* loader_create(march_db_t* db, dictionary_t* dict) {
         return NULL;
     }
 
+    loader->vm_entry_capacity = 32;
+    loader->vm_entry_count = 0;
+    loader->vm_entries = calloc(loader->vm_entry_capacity, sizeof(vm_word_entry_t*));
+    if (!loader->vm_entries) {
+        free(loader->allocated_buffers);
+        cid_cache_free(loader->cid_cache);
+        free(loader);
+        return NULL;
+    }
+
     /* Legacy word list */
     loader->word_capacity = 64;
     loader->word_count = 0;
     loader->words = calloc(loader->word_capacity, sizeof(loaded_word_t*));
     if (!loader->words) {
         free(loader->allocated_buffers);
+        free(loader->vm_entries);
         cid_cache_free(loader->cid_cache);
         free(loader);
         return NULL;
@@ -120,6 +133,11 @@ void loader_free(loader_t* loader) {
             loaded_word_free(loader->words[i]);
         }
         free(loader->words);
+
+        for (size_t i = 0; i < loader->vm_entry_count; i++) {
+            vm_free_entry(loader->vm_entries[i]);
+        }
+        free(loader->vm_entries);
 
         /* Free allocated buffers (from linking) */
         for (size_t i = 0; i < loader->buffer_count; i++) {
@@ -218,6 +236,15 @@ static void track_buffer(loader_t* loader, void* buffer) {
     loader->allocated_buffers[loader->buffer_count++] = buffer;
 }
 
+static void track_vm_entry(loader_t* loader, vm_word_entry_t* entry) {
+    if (loader->vm_entry_count >= loader->vm_entry_capacity) {
+        loader->vm_entry_capacity *= 2;
+        loader->vm_entries = realloc(loader->vm_entries,
+                                     loader->vm_entry_capacity * sizeof(vm_word_entry_t*));
+    }
+    loader->vm_entries[loader->vm_entry_count++] = entry;
+}
+
 /* Get primitive runtime address by ID */
 void* loader_get_primitive_addr(loader_t* loader, uint16_t prim_id) {
     /* Simple array lookup using the dispatch table */
@@ -237,8 +264,8 @@ void* loader_get_primitive_addr(loader_t* loader, uint16_t prim_id) {
  * Implements the algorithm from LINKING.md
  */
 void* loader_link_cid(loader_t* loader, const unsigned char* cid) {
-    /* Check cache first */
-    void* cached = cid_cache_get(loader->cid_cache, cid);
+    int cached_kind = -1;
+    void* cached = cid_cache_get(loader->cid_cache, cid, &cached_kind);
     if (cached) {
         return cached;
     }
@@ -270,7 +297,6 @@ void* loader_link_cid(loader_t* loader, const unsigned char* cid) {
 
         case BLOB_WORD:
         case BLOB_QUOTATION:
-            /* Recursively link code blob */
             result = loader_link_code(loader, blob_data, blob_len, kind);
             break;
 
@@ -298,7 +324,7 @@ void* loader_link_cid(loader_t* loader, const unsigned char* cid) {
 
     /* Cache result */
     if (result) {
-        cid_cache_put(loader->cid_cache, cid, result);
+        cid_cache_put(loader->cid_cache, cid, result, kind);
     }
 
     return result;
@@ -307,7 +333,8 @@ void* loader_link_cid(loader_t* loader, const unsigned char* cid) {
 /* Link a code blob (CID sequence) into runtime cells
  * Implements the algorithm from LINKING.md
  */
-void* loader_link_code(loader_t* loader, const uint8_t* blob_data, size_t blob_len, int kind) {
+vm_word_entry_t* loader_link_code(loader_t* loader, const uint8_t* blob_data, size_t blob_len, int kind) {
+    (void)kind;
     /* Allocate runtime cell buffer (estimate size, expand if needed) */
     size_t capacity = 64;
     size_t count = 0;
@@ -351,16 +378,21 @@ void* loader_link_code(loader_t* loader, const uint8_t* blob_data, size_t blob_l
             /* The kind field determines how to use this reference */
             switch (id_or_kind) {
                 case BLOB_WORD:
+                {
+                    vm_word_entry_t* entry = (vm_word_entry_t*)addr;
+                    cells[count++] = encode_xt(entry->entry);
+                    break;
+                }
                 case BLOB_PRIMITIVE:
-                    /* Call it */
-                    cells[count++] = encode_xt(addr);
-                    break;
-
+                    fprintf(stderr, "Error: unexpected primitive CID reference\n");
+                    free(cells);
+                    return NULL;
                 case BLOB_QUOTATION:
-                    /* Push its address */
-                    cells[count++] = encode_lit((int64_t)addr);
+                {
+                    vm_word_entry_t* entry = (vm_word_entry_t*)addr;
+                    cells[count++] = encode_lit((int64_t)entry->entry);
                     break;
-
+                }
                 case BLOB_DATA:
                     /* Push the value */
                     {
@@ -391,5 +423,16 @@ void* loader_link_code(loader_t* loader, const uint8_t* blob_data, size_t blob_l
     /* Track for cleanup */
     track_buffer(loader, cells);
 
-    return (void*)cells;
+    if (kind == BLOB_WORD) {
+        printf("Linked word cells (%zu):\n", count);
+        for (size_t i = 0; i < count; i++) {
+            printf("  cell[%zu] = %llu\n", i, (unsigned long long)cells[i]);
+        }
+    }
+    vm_word_entry_t* entry = vm_make_entry(cells);
+    if (!entry) {
+        return NULL;
+    }
+    track_vm_entry(loader, entry);
+    return entry;
 }

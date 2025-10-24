@@ -8,14 +8,11 @@
 
 #include "types.h"
 #include "loader.h"
+#include "vm_api.h"
 #include <stddef.h>
 #include <stdint.h>
 
-/* VM interface - implemented in kernel/x86-64/vm.asm */
-extern void vm_init(void);
-extern void vm_run(uint64_t* code);
-extern uint64_t* vm_get_dsp(void);
-extern uint64_t data_stack_base[1024];  /* BSS array, not pointer */
+extern uint64_t data_stack_base[VM_DATA_STACK_WORDS];
 
 /* Runner context */
 typedef struct {

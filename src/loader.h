@@ -9,6 +9,7 @@
 #include "types.h"
 #include "database.h"
 #include "dictionary.h"
+#include "vm_api.h"
 #include <stddef.h>
 #include <stdbool.h>
 
@@ -23,7 +24,8 @@ typedef struct {
 /* CID-to-address cache entry (for linking) */
 typedef struct cid_cache_entry {
     unsigned char cid[CID_SIZE];  /* Binary CID (32 bytes) */
-    void* addr;                    /* Runtime address */
+    void* value;
+    int kind;
     struct cid_cache_entry* next;
 } cid_cache_entry_t;
 
@@ -44,6 +46,10 @@ typedef struct {
     void** allocated_buffers;
     size_t buffer_count;
     size_t buffer_capacity;
+
+    vm_word_entry_t** vm_entries;
+    size_t vm_entry_count;
+    size_t vm_entry_capacity;
 
     /* Legacy: loaded words list (deprecated in favor of CID cache) */
     loaded_word_t** words;
@@ -79,7 +85,7 @@ void* loader_link_cid(loader_t* loader, const unsigned char* cid);
 /* Link a code blob (CID sequence) into runtime cells
  * Returns runtime address of linked code
  */
-void* loader_link_code(loader_t* loader, const uint8_t* blob_data, size_t blob_len, int kind);
+vm_word_entry_t* loader_link_code(loader_t* loader, const uint8_t* blob_data, size_t blob_len, int kind);
 
 /* Helper: get primitive runtime address by ID */
 void* loader_get_primitive_addr(loader_t* loader, uint16_t prim_id);

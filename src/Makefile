@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -std=c11 -g -O0
 LDFLAGS = -lsqlite3 -lcrypto
 
 # Source files
-CORE_SRCS = cells.c tokens.c dictionary.c database.c primitives.c compiler.c loader.c runner.c debug.c
+CORE_SRCS = cells.c tokens.c dictionary.c database.c primitives.c compiler.c loader.c runner.c debug.c vm.c
 CORE_OBJS = $(CORE_SRCS:.c=.o)
 
 # Test files

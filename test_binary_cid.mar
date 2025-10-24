@@ -1,0 +1,6 @@
+-- Test binary CID implementation
+-- Full compile → link → run pipeline
+
+: fifteen
+  ( 10 5 + )
+;

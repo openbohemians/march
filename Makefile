@@ -22,7 +22,7 @@ BUILD_DIR = build
 RUNTIME_LIB = $(RUNTIME_DIR)/target/release/libmarch_runtime.a
 
 # Source files
-ASM_SOURCES = $(wildcard $(KERNEL_DIR)/*.asm)
+ASM_SOURCES = $(filter-out $(KERNEL_DIR)/vm.asm, $(wildcard $(KERNEL_DIR)/*.asm))
 ASM_OBJECTS = $(patsubst $(KERNEL_DIR)/%.asm,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
 ASM_PIC_OBJECTS = $(patsubst $(KERNEL_DIR)/%.asm,$(BUILD_DIR)/%-pic.o,$(ASM_SOURCES))
 

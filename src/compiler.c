@@ -178,8 +178,9 @@ static bool compile_word(compiler_t* comp, const char* name) {
         return entry->handler(comp);
     }
 
-    /* Not immediate - materialize any pending quotations first */
-    if (comp->quot_stack_depth > 0) {
+    /* Not immediate - materialize any COMPLETED quotations first */
+    /* Don't materialize if we're currently INSIDE a quotation (building it) */
+    if (comp->quot_stack_depth > 0 && comp->buffer_stack_depth == 0) {
         if (!materialize_quotations(comp)) {
             return false;
         }

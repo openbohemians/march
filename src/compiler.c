@@ -1424,6 +1424,14 @@ static bool compile_rbracket(compiler_t* comp) {
         size_cid = db_store_literal(comp->db, 0, "i64");
         encode_cid_ref(comp->blob, BLOB_DATA, size_cid);
         free(size_cid);
+
+        /* Need SWAP to get correct stack order for STORE */
+        /* Stack is [ptr, ptr, 0], need [ptr, 0, ptr] for STORE (value addr --) */
+        dict_entry_t* swap_prim = dict_lookup(comp->dict, "swap");
+        if (!swap_prim) return false;
+        cell_buffer_append(comp->cells, encode_xt(swap_prim->addr));
+        encode_primitive(comp->blob, swap_prim->prim_id);
+
         cell_buffer_append(comp->cells, encode_xt(store_prim->addr));
         encode_primitive(comp->blob, store_prim->prim_id);
 
@@ -1519,6 +1527,11 @@ static bool compile_rbracket(compiler_t* comp) {
     size_cid = db_store_literal(comp->db, elem_count, "i64");
     encode_cid_ref(comp->blob, BLOB_DATA, size_cid);
     free(size_cid);
+    /* Need SWAP to get correct stack order for STORE (value addr --) */
+    dict_entry_t* swap_prim_count = dict_lookup(comp->dict, "swap");
+    if (!swap_prim_count) return false;
+    cell_buffer_append(comp->cells, encode_xt(swap_prim_count->addr));
+    encode_primitive(comp->blob, swap_prim_count->prim_id);
     cell_buffer_append(comp->cells, encode_xt(store_prim->addr));
     encode_primitive(comp->blob, store_prim->prim_id);
 
@@ -1555,6 +1568,11 @@ static bool compile_rbracket(compiler_t* comp) {
     size_cid = db_store_literal(comp->db, elem_type, "i64");
     encode_cid_ref(comp->blob, BLOB_DATA, size_cid);
     free(size_cid);
+    /* Need SWAP to get correct stack order for STORE (value addr --) */
+    dict_entry_t* swap_prim_type = dict_lookup(comp->dict, "swap");
+    if (!swap_prim_type) return false;
+    cell_buffer_append(comp->cells, encode_xt(swap_prim_type->addr));
+    encode_primitive(comp->blob, swap_prim_type->prim_id);
     cell_buffer_append(comp->cells, encode_xt(store_prim->addr));
     encode_primitive(comp->blob, store_prim->prim_id);
 
@@ -1592,18 +1610,8 @@ static bool compile_rbracket(compiler_t* comp) {
         encode_primitive(comp->blob, add_prim->prim_id);
 
         /* Stack: elem[0] ... elem[i] (ptr+offset) */
-        /* We need: elem[0] ... elem[i-1] elem[i] (ptr+offset) for store */
-        /* But elem[i] is currently at TOS-1, so swap */
-
-        dict_entry_t* swap_prim = dict_lookup(comp->dict, "swap");
-        if (!swap_prim) {
-            fprintf(stderr, "Internal error: SWAP primitive not found\n");
-            return false;
-        }
-        cell_buffer_append(comp->cells, encode_xt(swap_prim->addr));
-        encode_primitive(comp->blob, swap_prim->prim_id);
-
-        /* Stack: elem[0] ... elem[i-1] elem[i] (ptr+offset) */
+        /* STORE expects (value addr --), so elem[i] at TOS-1, (ptr+offset) at TOS */
+        /* This is already correct - NO SWAP needed */
 
         /* Store: ! (consumes value and address) */
         /* Stack: elem[0] ... elem[i-1] */

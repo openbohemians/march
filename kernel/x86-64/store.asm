@@ -10,9 +10,10 @@ op_store:
     ; rsi = data stack pointer
     ; [rsi] = TOS (addr)
     ; [rsi+8] = second (value)
+    ; NOTE: rbx is reserved for VM IP, use r10 for temp storage
 
     mov rax, [rsi]          ; Load address
-    mov rbx, [rsi + 8]      ; Load value
-    mov [rax], rbx          ; Store value at address
+    mov r10, [rsi + 8]      ; Load value into temp register (not rbx!)
+    mov [rax], r10          ; Store value at address
     add rsi, 16             ; Drop both items
     jmp vm_dispatch         ; Return to VM dispatch (FORTH-style)

@@ -12,11 +12,12 @@ op_twotor:
     ; rdi = return stack pointer
     ; [rsi] = TOS (n2)
     ; [rsi+8] = second (n1)
+    ; NOTE: rbx is reserved for VM IP, use r10 for temp storage
 
     mov rax, [rsi + 8]      ; Load n1
-    mov rbx, [rsi]          ; Load n2
+    mov r10, [rsi]          ; Load n2 into temp register (not rbx!)
     add rsi, 16             ; Drop both from data stack
     sub rdi, 16             ; Allocate space on return stack
     mov [rdi + 8], rax      ; Push n1 (will be second on return stack)
-    mov [rdi], rbx          ; Push n2 (will be TOS on return stack)
+    mov [rdi], r10          ; Push n2 (will be TOS on return stack)
     jmp vm_dispatch         ; Return to VM dispatch (FORTH-style)

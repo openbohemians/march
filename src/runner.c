@@ -116,7 +116,13 @@ bool runner_execute(runner_t* runner, const char* name) {
             bootstrap[0] = encode_xt(linked_code);  /* Call the wrapper */
             bootstrap[1] = encode_exit();            /* EXIT */
 
+            fprintf(stderr, "TRACE: About to call vm_run with linked code at %p\n", linked_code);
+            fprintf(stderr, "TRACE: Bootstrap cells: [0]=%016lx [1]=%016lx\n",
+                    (unsigned long)bootstrap[0], (unsigned long)bootstrap[1]);
+            fflush(stderr);
             vm_run(bootstrap);
+            fprintf(stderr, "TRACE: vm_run returned successfully\n");
+            fflush(stderr);
             return true;
         } else {
             fprintf(stderr, "Error: Failed to link word '%s'\n", name);

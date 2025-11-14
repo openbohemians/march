@@ -1,0 +1,8 @@
+: test-no-underscore
+  1 2 [ + ]
+  0 march.array.at
+;
+
+: main
+  test-no-underscore
+;

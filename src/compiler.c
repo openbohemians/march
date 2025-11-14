@@ -31,6 +31,7 @@ static bool compile_swap(compiler_t* comp);
 static bool compile_over(compiler_t* comp);
 static bool compile_rot(compiler_t* comp);
 static bool compile_underscore(compiler_t* comp);
+static bool compile_march_alloc(compiler_t* comp);
 
 /* Create compiler */
 compiler_t* compiler_create(dictionary_t* dict, march_db_t* db) {
@@ -319,6 +320,13 @@ void compiler_register_primitives(compiler_t* comp) {
     parse_type_sig("-> a", &sig);  /* Minimal signature - actual type from pulled value */
     dict_add(comp->dict, "_", NULL, NULL, PRIM_IDENTITY, &sig, false, true,
              (immediate_handler_t)compile_underscore, NULL);
+
+    /* march.alloc: Allocate heap memory with type graph tracking
+     * This is a dual word - has both immediate handler and runtime primitive
+     * The immediate handler emits the runtime code and updates the type graph */
+    parse_type_sig("i64 -> ptr", &sig);
+    dict_add(comp->dict, "march.alloc", NULL, NULL, PRIM_ALLOC, &sig, false, true,
+             (immediate_handler_t)compile_march_alloc, NULL);
 
     debug_dump_dict_stats(comp->dict);
 }
@@ -2643,6 +2651,52 @@ static bool compile_underscore(compiler_t* comp) {
     if (comp->verbose) {
         printf("  _ pull value from index %d (before marker at %d, consumed %d)\n",
                source_index, marker_depth, consumed + 1);
+    }
+
+    return true;
+}
+
+/* march.alloc - Allocate heap memory with type graph tracking
+ * Stack: ( size:i64 -- ptr:ptr )
+ * This is a dual word: immediate handler + runtime primitive
+ * - Emits runtime allocation code
+ * - Updates type graph to track the allocated object
+ */
+static bool compile_march_alloc(compiler_t* comp) {
+    crash_context_set_token("march.alloc");
+    crash_context_set_stacks(comp->type_stack_depth,
+                            comp->quot_stack_depth,
+                            comp->buffer_stack_depth);
+
+    /* Type check: need i64 size on stack */
+    if (comp->type_stack_depth < 1) {
+        fprintf(stderr, "Error: march.alloc requires size (i64) on stack\n");
+        return false;
+    }
+
+    type_id_t size_type = comp->type_stack[comp->type_stack_depth - 1].type;
+    if (size_type != TYPE_I64) {
+        fprintf(stderr, "Error: march.alloc requires i64 size, got type %d\n", size_type);
+        return false;
+    }
+
+    /* Look up the runtime primitive */
+    dict_entry_t* alloc_prim = dict_lookup(comp->dict, "alloc");
+    if (!alloc_prim) {
+        fprintf(stderr, "Internal error: alloc primitive not found\n");
+        return false;
+    }
+
+    /* Emit runtime code: call alloc primitive */
+    cell_buffer_append(comp->cells, encode_xt(alloc_prim->addr));
+    encode_primitive(comp->blob, alloc_prim->prim_id);
+
+    /* Update type stack and type graph */
+    pop_type(comp);  /* Remove size */
+    push_heap_value(comp, TYPE_PTR);  /* Add allocated pointer with tracking */
+
+    if (comp->verbose) {
+        printf("  march.alloc emitted with type graph tracking\n");
     }
 
     return true;

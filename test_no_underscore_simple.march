@@ -1,0 +1,7 @@
+: test-simple
+  1 2 [ + ]
+;
+
+: main
+  test-simple
+;

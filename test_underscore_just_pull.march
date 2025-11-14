@@ -1,0 +1,8 @@
+: test-pull
+  5 [ _ ]
+  0 march.array.at
+;
+
+: main
+  test-pull
+;

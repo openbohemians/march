@@ -97,6 +97,9 @@
 #define PRIM_MAP_SIZE   60   /* march.map.size - get element count */
 #define PRIM_MAP_FREE   61   /* march.map.free - free map memory */
 
+/* Additional stack operations */
+#define PRIM_PICK       62   /* pick - copy nth stack item (0=dup, 1=over) */
+
 /* Cell type */
 typedef uint64_t cell_t;
 

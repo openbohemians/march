@@ -1636,9 +1636,39 @@ static bool compile_rbracket(compiler_t* comp) {
     }
 
     /* Restore array pointer from return stack: r> */
-    /* Stack: ptr */
+    /* Stack: <consumed-values> ptr */
     cell_buffer_append(comp->cells, encode_xt(fromr_prim->addr));
     encode_primitive(comp->blob, fromr_prim->prim_id);
+
+    /* Calculate how many values before marker were consumed by _ */
+    int consumed = comp->array_consumed_count[comp->array_marker_depth];
+
+    /* If we consumed values, drop them now */
+    /* Stack is: val1 val2 ... valN ptr */
+    /* We want: ptr */
+    /* Strategy: >r drop drop ... r> */
+    if (consumed > 0) {
+        dict_entry_t* tor_prim = dict_lookup(comp->dict, ">r");
+        dict_entry_t* drop_prim = dict_lookup(comp->dict, "drop");
+        if (!tor_prim || !drop_prim || !fromr_prim) {
+            fprintf(stderr, "Internal error: >r, drop, or r> primitive not found\n");
+            return false;
+        }
+
+        /* Move ptr to return stack: >r */
+        cell_buffer_append(comp->cells, encode_xt(tor_prim->addr));
+        encode_primitive(comp->blob, tor_prim->prim_id);
+
+        /* Drop consumed values: drop drop ... */
+        for (int i = 0; i < consumed; i++) {
+            cell_buffer_append(comp->cells, encode_xt(drop_prim->addr));
+            encode_primitive(comp->blob, drop_prim->prim_id);
+        }
+
+        /* Restore ptr: r> */
+        cell_buffer_append(comp->cells, encode_xt(fromr_prim->addr));
+        encode_primitive(comp->blob, fromr_prim->prim_id);
+    }
 
     /* Update type stack: remove all elements, push array pointer */
     /* First, collect node_ids from array elements (for parent→child edges) */
@@ -1659,10 +1689,12 @@ static bool compile_rbracket(compiler_t* comp) {
         fflush(stderr);
     }
 
-    fprintf(stderr, "TRACE: compile_rbracket resetting stack depth from %d to %d\n", comp->type_stack_depth, marker_depth);
+    fprintf(stderr, "TRACE: compile_rbracket resetting stack depth from %d to %d (consumed %d)\n",
+            comp->type_stack_depth, marker_depth - consumed, consumed);
     fflush(stderr);
 
-    comp->type_stack_depth = marker_depth;
+    /* Reset type stack, removing array elements AND consumed pre-marker values */
+    comp->type_stack_depth = marker_depth - consumed;
 
     fprintf(stderr, "TRACE: compile_rbracket calling push_heap_value\n");
     fflush(stderr);
@@ -2551,6 +2583,11 @@ static bool compile_underscore(compiler_t* comp) {
     /* Get the value from before the marker */
     type_stack_entry_t entry = comp->type_stack[source_index];
 
+    /* Emit runtime code to copy the value from the calculated depth */
+    /* Calculate how deep we need to pick from current runtime stack */
+    /* NOTE: Calculate BEFORE incrementing type_stack_depth, as runtime hasn't executed copy yet */
+    int runtime_depth = comp->type_stack_depth - source_index - 1;
+
     /* Push copy onto current type stack (like dup, but from specific position) */
     if (comp->type_stack_depth >= MAX_TYPE_STACK) {
         fprintf(stderr, "Type stack overflow\n");
@@ -2562,13 +2599,18 @@ static bool compile_underscore(compiler_t* comp) {
     /* Increment consumption counter for this nesting level */
     comp->array_consumed_count[marker_idx]++;
 
-    /* Emit runtime code to copy the value from the calculated depth */
-    /* Calculate how deep we need to pick from current runtime stack */
-    int runtime_depth = comp->type_stack_depth - source_index - 1;
-
-    /* Use 'pick' primitive if available, otherwise use 'over' for depth 1 */
-    if (runtime_depth == 1) {
-        /* Optimize: use 'over' for depth 1 */
+    /* Emit appropriate stack operation based on depth */
+    if (runtime_depth == 0) {
+        /* Depth 0: copy TOS - use dup */
+        dict_entry_t* dup_prim = dict_lookup(comp->dict, "dup");
+        if (!dup_prim) {
+            fprintf(stderr, "Error: dup primitive not found\n");
+            return false;
+        }
+        cell_buffer_append(comp->cells, encode_xt(dup_prim->addr));
+        encode_primitive(comp->blob, dup_prim->prim_id);
+    } else if (runtime_depth == 1) {
+        /* Depth 1: copy second item - use over */
         dict_entry_t* over_prim = dict_lookup(comp->dict, "over");
         if (!over_prim) {
             fprintf(stderr, "Error: over primitive not found\n");
@@ -2581,7 +2623,6 @@ static bool compile_underscore(compiler_t* comp) {
         dict_entry_t* pick_prim = dict_lookup(comp->dict, "pick");
         if (!pick_prim) {
             fprintf(stderr, "Error: pick primitive not found (needed for _ at depth %d)\n", runtime_depth);
-            fprintf(stderr, "Note: _ currently only supports depth 1 (use 'over'), pick not implemented\n");
             return false;
         }
 

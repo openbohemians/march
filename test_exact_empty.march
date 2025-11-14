@@ -1,0 +1,7 @@
+: test
+  32 alloc dup 0 !
+;
+
+: main
+  test
+;

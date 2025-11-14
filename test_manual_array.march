@@ -1,0 +1,7 @@
+: my-array
+  32 alloc dup 0 swap !
+;
+
+: main
+  my-array
+;

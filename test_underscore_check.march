@@ -1,0 +1,8 @@
+: test-one
+  5 [ _ 1 + ]
+  0 march.array.at
+;
+
+: main
+  test-one
+;

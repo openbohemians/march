@@ -1,0 +1,7 @@
+: my-alloc
+  32 alloc
+;
+
+: main
+  my-alloc
+;

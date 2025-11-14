@@ -15,6 +15,7 @@ extern void op_drop(void);
 extern void op_swap(void);
 extern void op_over(void);
 extern void op_rot(void);
+extern void op_pick(void);
 extern void op_identity(void);
 
 /* Arithmetic */

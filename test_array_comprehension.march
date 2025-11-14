@@ -1,0 +1,7 @@
+: test-comp
+  [ 1 2 + ]
+;
+
+: main
+  test-comp
+;

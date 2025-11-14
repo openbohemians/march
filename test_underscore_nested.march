@@ -1,0 +1,8 @@
+: test-nested
+  5 [ 3 [ _ ] 0 march.array.at ]
+  0 march.array.at
+;
+
+: main
+  test-nested
+;

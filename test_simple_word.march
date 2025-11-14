@@ -1,0 +1,7 @@
+: my-word
+  42
+;
+
+: main
+  my-word
+;

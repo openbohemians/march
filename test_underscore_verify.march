@@ -1,0 +1,10 @@
+: test-add
+  2 3 [ _ _ + ]
+  dup march.array.length
+  swap
+  dup 0 march.array.at
+;
+
+: main
+  test-add
+;

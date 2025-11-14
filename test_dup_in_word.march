@@ -1,0 +1,7 @@
+: test-dup
+  42 dup
+;
+
+: main
+  test-dup
+;

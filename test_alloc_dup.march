@@ -1,0 +1,7 @@
+: test-alloc
+  32 alloc dup
+;
+
+: main
+  test-alloc
+;

@@ -1,0 +1,8 @@
+: test-store
+  32 alloc
+  42 over !
+;
+
+: main
+  test-store
+;

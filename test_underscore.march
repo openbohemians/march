@@ -1,0 +1,7 @@
+: test-underscore
+  3 [ _ ]
+;
+
+: main
+  test-underscore
+;

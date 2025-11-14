@@ -1,0 +1,7 @@
+: test-expr
+  5 [ _ 1 + ]
+;
+
+: main
+  test-expr
+;

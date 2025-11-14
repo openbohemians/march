@@ -112,6 +112,7 @@ typedef struct compiler {
     /* Array literal compilation support */
     int array_marker_stack[MAX_ARRAY_DEPTH];  /* Stack depth at each [ */
     int array_marker_depth;                    /* Number of nested [ ] */
+    int array_consumed_count[MAX_ARRAY_DEPTH]; /* Pre-marker values consumed by _ at each level */
 
     /* Word definition cache (compile-time only) */
     /* Words are named quotations - stored as tokens, compiled at call site */

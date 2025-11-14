@@ -1,0 +1,7 @@
+: test-multi
+  2 3 [ _ _ + ]
+;
+
+: main
+  test-multi
+;

@@ -30,6 +30,7 @@ static bool compile_dup(compiler_t* comp);
 static bool compile_swap(compiler_t* comp);
 static bool compile_over(compiler_t* comp);
 static bool compile_rot(compiler_t* comp);
+static bool compile_underscore(compiler_t* comp);
 
 /* Create compiler */
 compiler_t* compiler_create(dictionary_t* dict, march_db_t* db) {
@@ -311,6 +312,13 @@ void compiler_register_primitives(compiler_t* comp) {
     parse_type_sig("a b c -> b c a", &sig);
     dict_add(comp->dict, "rot", NULL, NULL, PRIM_ROT, &sig, false, true,
              (immediate_handler_t)compile_rot, NULL);
+
+    /* _: Pull value from before [ marker into array comprehension
+     * Type signature is dynamic - copies type from source value
+     * Must be used inside array literals */
+    parse_type_sig("-> a", &sig);  /* Minimal signature - actual type from pulled value */
+    dict_add(comp->dict, "_", NULL, NULL, PRIM_IDENTITY, &sig, false, true,
+             (immediate_handler_t)compile_underscore, NULL);
 
     debug_dump_dict_stats(comp->dict);
 }
@@ -1359,6 +1367,10 @@ static bool compile_lbracket(compiler_t* comp) {
 
     /* Record current stack depth as the marker boundary */
     comp->array_marker_stack[comp->array_marker_depth] = comp->type_stack_depth;
+
+    /* Initialize consumption counter for _ (underscore) tracking */
+    comp->array_consumed_count[comp->array_marker_depth] = 0;
+
     comp->array_marker_depth++;
 
     if (comp->verbose) {
@@ -2506,6 +2518,90 @@ static bool compile_rot(compiler_t* comp) {
 
     if (comp->verbose) {
         printf("  XT rot\n");
+    }
+
+    return true;
+}
+
+/* _ (underscore) - Pull value from before [ marker into array construction
+ * Explicit array comprehension: 2 3 [ _ _ + ] → [5]
+ * Sequential consumption: first _ pulls -1, second _ pulls -2, etc.
+ */
+static bool compile_underscore(compiler_t* comp) {
+    /* Check if we're inside an array literal */
+    if (comp->array_marker_depth == 0) {
+        fprintf(stderr, "Error: _ (underscore) can only be used inside array literals []\n");
+        return false;
+    }
+
+    /* Get the current array marker depth and consumption count */
+    int marker_idx = comp->array_marker_depth - 1;
+    int marker_depth = comp->array_marker_stack[marker_idx];
+    int consumed = comp->array_consumed_count[marker_idx];
+
+    /* Calculate source index: work backwards from marker */
+    int source_index = marker_depth - consumed - 1;
+
+    /* Validate that we have a value to pull */
+    if (source_index < 0) {
+        fprintf(stderr, "Error: _ (underscore) - no more values before [ marker (tried to access index %d)\n", source_index);
+        return false;
+    }
+
+    /* Get the value from before the marker */
+    type_stack_entry_t entry = comp->type_stack[source_index];
+
+    /* Push copy onto current type stack (like dup, but from specific position) */
+    if (comp->type_stack_depth >= MAX_TYPE_STACK) {
+        fprintf(stderr, "Type stack overflow\n");
+        return false;
+    }
+    comp->type_stack[comp->type_stack_depth] = entry;  /* Copy entire entry including slot_id, node_id */
+    comp->type_stack_depth++;
+
+    /* Increment consumption counter for this nesting level */
+    comp->array_consumed_count[marker_idx]++;
+
+    /* Emit runtime code to copy the value from the calculated depth */
+    /* Calculate how deep we need to pick from current runtime stack */
+    int runtime_depth = comp->type_stack_depth - source_index - 1;
+
+    /* Use 'pick' primitive if available, otherwise use 'over' for depth 1 */
+    if (runtime_depth == 1) {
+        /* Optimize: use 'over' for depth 1 */
+        dict_entry_t* over_prim = dict_lookup(comp->dict, "over");
+        if (!over_prim) {
+            fprintf(stderr, "Error: over primitive not found\n");
+            return false;
+        }
+        cell_buffer_append(comp->cells, encode_xt(over_prim->addr));
+        encode_primitive(comp->blob, over_prim->prim_id);
+    } else {
+        /* General case: use pick primitive */
+        dict_entry_t* pick_prim = dict_lookup(comp->dict, "pick");
+        if (!pick_prim) {
+            fprintf(stderr, "Error: pick primitive not found (needed for _ at depth %d)\n", runtime_depth);
+            fprintf(stderr, "Note: _ currently only supports depth 1 (use 'over'), pick not implemented\n");
+            return false;
+        }
+
+        /* Emit: <depth> pick */
+        cell_buffer_append(comp->cells, encode_lit(runtime_depth));
+        unsigned char* depth_cid = db_store_literal(comp->db, runtime_depth, "i64");
+        if (!depth_cid) {
+            fprintf(stderr, "Error: Failed to store pick depth literal\n");
+            return false;
+        }
+        encode_cid_ref(comp->blob, BLOB_DATA, depth_cid);
+        free(depth_cid);
+
+        cell_buffer_append(comp->cells, encode_xt(pick_prim->addr));
+        encode_primitive(comp->blob, pick_prim->prim_id);
+    }
+
+    if (comp->verbose) {
+        printf("  _ pull value from index %d (before marker at %d, consumed %d)\n",
+               source_index, marker_depth, consumed + 1);
     }
 
     return true;

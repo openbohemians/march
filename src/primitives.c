@@ -96,7 +96,8 @@ void register_primitives(dictionary_t* dict) {
     REG_PRIM("swap", PRIM_SWAP, op_swap, "a b -> b a");
     REG_PRIM("over", PRIM_OVER, op_over, "a b -> a b a");
     REG_PRIM("rot", PRIM_ROT, op_rot, "a b c -> b c a");
-    REG_PRIM("_", PRIM_IDENTITY, op_identity, "a -> a");
+    /* Note: _ is registered as immediate word in compiler.c, not as primitive */
+    /* REG_PRIM("_", PRIM_IDENTITY, op_identity, "a -> a"); */
 
     /* Arithmetic */
     REG_PRIM("+", PRIM_ADD, op_add, "i64 i64 -> i64");

@@ -24,3 +24,35 @@ path = "demo_multimodal.rs"
 [[bin]]
 name = "demo_error_handling"
 path = "demo_error_handling.rs"
+
+[[bin]]
+name = "test_extensible_operators"
+path = "test_extensible_operators.rs"
+
+[[bin]]
+name = "test_operator_override"
+path = "test_operator_override.rs"
+
+[[bin]]
+name = "test_thunks"
+path = "test_thunks.rs"
+
+[[bin]]
+name = "test_context_signatures"
+path = "test_context_signatures.rs"
+
+[[bin]]
+name = "test_arrays"
+path = "test_arrays.rs"
+
+[[bin]]
+name = "test_context_signatures_new"
+path = "test_context_signatures_new.rs"
+
+[[bin]]
+name = "test_context_simple"
+path = "test_context_simple.rs"
+
+[[bin]]
+name = "test_type_dispatch"
+path = "test_type_dispatch.rs"

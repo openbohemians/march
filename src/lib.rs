@@ -7,6 +7,19 @@ pub mod database;
 pub mod state;
 pub mod hash;
 
+// Thunk system for lazy evaluation and context signatures
+#[derive(Debug, Clone, PartialEq)]
+pub enum ThunkType {
+    General,           // General lazy evaluation - can return anything
+    ContextSignature,  // Context signatures - must return [types...] boolean
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThunkDefinition {
+    pub body_source: String,
+    pub thunk_type: ThunkType,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum AbstractType {
     Int,
@@ -28,6 +41,8 @@ pub enum ConcreteType {
     // Type system types
     TypeOf(AbstractType),                           // Type-of-type
     ConstrainedType(AbstractType, Vec<Constraint>), // Constrained type
+    // Thunk type
+    Thunk,                                          // Lazy evaluation thunk
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +56,8 @@ pub enum Value {
     // Type-of-types for constraint building
     TypeOf(AbstractType),                           // Type-of-type (Int', String', etc)
     ConstrainedType(AbstractType, Vec<Constraint>), // Constrained type
+    // Thunk for lazy evaluation
+    Thunk(ThunkDefinition),                         // Lazy evaluation thunk
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -206,7 +223,7 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new() -> Result<Self, RuntimeError> {
-        Ok(Interpreter {
+        let mut interp = Interpreter {
             value_stack: Vec::new(),
             type_stack: Vec::new(),
             // memory: Memory::new(),  // Future: Heap-based memory management
@@ -218,11 +235,13 @@ impl Interpreter {
             execution_mode: ExecutionMode::Runtime,
             type_analysis_stack: Vec::new(),
             errors: ErrorRegistry::new(),
-        })
+        };
+        interp.initialize_standard_operators()?;
+        Ok(interp)
     }
 
     pub fn with_database(db_path: &str) -> Result<Self, RuntimeError> {
-        Ok(Interpreter {
+        let mut interp = Interpreter {
             value_stack: Vec::new(),
             type_stack: Vec::new(),
             // memory: Memory::new(),  // Future: Heap-based memory management
@@ -234,7 +253,31 @@ impl Interpreter {
             execution_mode: ExecutionMode::Runtime,
             type_analysis_stack: Vec::new(),
             errors: ErrorRegistry::new(),
-        })
+        };
+        interp.initialize_standard_operators()?;
+        Ok(interp)
+    }
+
+    /// Initialize standard operators as extensible March words
+    fn initialize_standard_operators(&mut self) -> Result<(), RuntimeError> {
+        use crate::hash::primitives::*;
+
+        // For now, define operators without contexts (default behavior)
+        // Future: These will become context-aware for type dispatch
+
+        // Create primitive hashes (these are already registered in runtime)
+        let add_hash = crate::hash::WordHash::primitive(ADD);
+        let sub_hash = crate::hash::WordHash::primitive(SUB);
+        let mul_hash = crate::hash::WordHash::primitive(MUL);
+        let div_hash = crate::hash::WordHash::primitive(DIV);
+
+        // Alias operators to primitive hashes (making them extensible)
+        self.db.alias_word("+", None, &add_hash)?;
+        self.db.alias_word("-", None, &sub_hash)?;
+        self.db.alias_word("*", None, &mul_hash)?;
+        self.db.alias_word("/", None, &div_hash)?;
+
+        Ok(())
     }
 
     /// Set the execution mode for multi-modal execution
@@ -286,6 +329,64 @@ impl Interpreter {
     pub fn drop(&mut self) -> Result<(), RuntimeError> {
         let _ = self.pop()?;
         Ok(())
+    }
+
+    /// Force a thunk - execute its body and return the result
+    pub fn force_thunk(&mut self, thunk: &ThunkDefinition) -> Result<Value, RuntimeError> {
+        // Save current stack state to isolate thunk execution
+        let saved_stack_size = self.value_stack.len();
+
+        // Execute thunk body in current environment
+        self.execute_body(&thunk.body_source)?;
+
+        // For general thunks, return the top of stack (if any)
+        match thunk.thunk_type {
+            ThunkType::General => {
+                if self.value_stack.len() > saved_stack_size {
+                    let (result, _) = self.pop()?;
+                    Ok(result)
+                } else {
+                    // Thunk didn't produce a value
+                    Ok(Value::I64(0)) // Default/unit value
+                }
+            }
+            ThunkType::ContextSignature => {
+                // Context signature thunks must return [types...] boolean
+                // For now, return a simple success indicator
+                // TODO: Implement proper type signature extraction
+                Ok(Value::I64(1)) // Success for now
+            }
+        }
+    }
+
+    /// Check if a value is a thunk and force it if needed
+    pub fn force_if_thunk(&mut self, value: Value) -> Result<Value, RuntimeError> {
+        match value {
+            Value::Thunk(thunk_def) => self.force_thunk(&thunk_def),
+            other => Ok(other),
+        }
+    }
+
+    /// Force the thunk on top of the stack
+    pub fn force_top_thunk(&mut self) -> Result<(), RuntimeError> {
+        let (value, _) = self.pop()?;
+
+        match value {
+            Value::Thunk(thunk_def) => {
+                let result = self.force_thunk(&thunk_def)?;
+                let result_type = self.infer_concrete_type_from_value(&result);
+                self.push(result, result_type);
+                println!("Forced thunk, result on stack");
+                Ok(())
+            }
+            _ => {
+                // Not a thunk, just put it back
+                let value_type = self.infer_concrete_type_from_value(&value);
+                self.push(value, value_type);
+                println!("Value is not a thunk");
+                Ok(())
+            }
+        }
     }
 
     pub fn add(&mut self) -> Result<(), RuntimeError> {
@@ -404,6 +505,16 @@ impl Interpreter {
             return self.parse_error_declaration(input);
         }
 
+        // Handle thunk creation with { }
+        if input.trim().starts_with('{') && input.trim().ends_with('}') {
+            return self.parse_thunk_creation(input);
+        }
+
+        // Handle array creation with [ ]
+        if input.trim().starts_with('[') && input.trim().ends_with(']') {
+            return self.parse_array_creation(input);
+        }
+
         // Handle state access operations
         if input.ends_with('@') {
             return self.state_get(&input[..input.len()-1]);
@@ -414,10 +525,6 @@ impl Interpreter {
 
         // Handle single word execution
         match input {
-            "+" => self.add(),
-            "-" => self.sub(),
-            "*" => self.mul(),
-            "/" => self.div(),
             "dup" => self.dup(),
             "swap" => self.swap(),
             "drop" => self.drop(),
@@ -428,6 +535,15 @@ impl Interpreter {
             "=" => self.equals(),
             ">" => self.greater_than_or_constraint(),
             "<" => self.less_than_or_constraint(),
+            // Boolean literals
+            "true" => {
+                self.push(Value::I64(-1), ConcreteType::I64);
+                Ok(())
+            },
+            "false" => {
+                self.push(Value::I64(0), ConcreteType::I64);
+                Ok(())
+            },
             // Type-of-type words
             "Int" => self.push_int_type(),
             "String" => self.push_string_type(),
@@ -437,20 +553,29 @@ impl Interpreter {
             "then" => Ok(()),  // No-op for now
             // Error handling
             "raise" => self.raise_error(),
+            // Thunk operations
+            "force" => self.force_top_thunk(),
             _ => {
-                // Try hash-based lookup first
-                if let Some(word_hash) = self.db.find_word_hash(input, self.current_context.as_deref())? {
-                    // Track current word for error re-dispatch
-                    self.current_executing_word = Some(input.to_string());
+                // Try revolutionary type-based dispatch first!
+                if let Some(context) = self.find_matching_context(input)? {
+                    if let Some(word_hash) = self.db.find_word_hash(input, Some(&context))? {
+                        // Track current word for error re-dispatch
+                        self.current_executing_word = Some(input.to_string());
 
-                    // Use runtime execution for legacy compatibility
-                    let result = self.execute_word_hash_runtime(&word_hash);
+                        println!("🚀 Type dispatch: {} with context: {:?}", input, context);
 
-                    // Clear tracking after execution
-                    self.current_executing_word = None;
+                        // Use runtime execution
+                        let result = self.execute_word_hash_runtime(&word_hash);
 
-                    result
-                } else if let Ok(n) = input.parse::<i64>() {
+                        // Clear tracking after execution
+                        self.current_executing_word = None;
+
+                        return result;
+                    }
+                }
+
+                // Fall back to legacy lookups
+                if let Ok(n) = input.parse::<i64>() {
                     // Try to parse as number
                     self.push(Value::I64(n), ConcreteType::I64);
                     Ok(())
@@ -580,6 +705,32 @@ impl Interpreter {
 
         while i < words.len() {
             let word = words[i];
+
+            // Check for array literal start
+            if word == "[" {
+                // Find matching ]
+                let mut j = i + 1;
+                let mut bracket_count = 1;
+                while j < words.len() && bracket_count > 0 {
+                    if words[j] == "[" {
+                        bracket_count += 1;
+                    } else if words[j] == "]" {
+                        bracket_count -= 1;
+                    }
+                    j += 1;
+                }
+
+                if bracket_count == 0 {
+                    // Found complete array literal
+                    let array_tokens = &words[i..j];
+                    let array_literal = array_tokens.join(" ");
+                    self.parse_array_creation(&array_literal)?;
+                    i = j; // Skip to after the ]
+                    continue;
+                } else {
+                    return Err(RuntimeError::ParseError); // Unmatched [
+                }
+            }
 
             // Look ahead for state operations
             if i + 1 < words.len() {
@@ -806,6 +957,7 @@ impl Interpreter {
             Value::ConstrainedType(abstract_type, constraints) => {
                 ConcreteType::ConstrainedType(abstract_type.clone(), constraints.clone())
             }
+            Value::Thunk(_) => ConcreteType::Thunk,
         }
     }
 
@@ -846,7 +998,27 @@ impl Interpreter {
 
     /// Runtime execution mode
     fn execute_runtime(&mut self, word_hash: &hash::WordHash) -> Result<(), RuntimeError> {
-        // Fall back to legacy execution for now
+        // Check if it's a primitive - handle directly for common math operations
+        if word_hash.is_primitive() {
+            if let Some(prim_id) = word_hash.primitive_id() {
+                use crate::hash::primitives::*;
+                match prim_id {
+                    ADD => return self.add(),
+                    SUB => return self.sub(),
+                    MUL => return self.mul(),
+                    DIV => return self.div(),
+                    DUP => return self.dup(),
+                    DROP => return self.drop(),
+                    SWAP => return self.swap(),
+                    EQ => return self.equals(),
+                    GT => return self.greater_than(),
+                    AND => return self.logical_and(),
+                    _ => {} // Fall through for other primitives
+                }
+            }
+        }
+
+        // Fall back to database lookup for user words
         if let Some(definition) = self.db.get_word(word_hash)? {
             self.execute_body(&definition.body_source)
         } else {
@@ -1031,21 +1203,328 @@ impl Interpreter {
     fn parse_context_declaration(&mut self, input: &str) -> Result<(), RuntimeError> {
         let input = input.trim();
 
-        // Parse "? condition-word" or "? default"
+        // Handle context setting with thunks
+        if input == "?" {
+            return self.set_context_from_thunk();
+        }
+
+        // Parse "? default"
         if input == "? default" {
             self.current_context = None;
             println!("Set context to default");
-        } else if let Some(condition) = input.strip_prefix("? ") {
+            return Ok(());
+        }
+
+        // Legacy support for simple context names
+        if let Some(condition) = input.strip_prefix("? ") {
             let condition = condition.trim();
             if condition.is_empty() {
-                println!("Invalid context declaration. Use: ? condition-word");
+                println!("Invalid context declaration. Use: ? (with thunk on stack) or ? default");
                 return Err(RuntimeError::ParseError);
             }
             self.current_context = Some(condition.to_string());
             println!("Set context to: {}", condition);
-        } else {
-            println!("Invalid context syntax. Use: ? condition-word or ? default");
+            return Ok(());
+        }
+
+        println!("Invalid context syntax. Use: ? (with thunk on stack) or ? default");
+        Err(RuntimeError::ParseError)
+    }
+
+    /// Get current stack types as a signature string for type dispatch
+    fn get_current_stack_signature(&self, depth: usize) -> String {
+        let mut types = Vec::new();
+        let available = std::cmp::min(depth, self.type_stack.len());
+
+        // Get types from top of stack
+        for i in 0..available {
+            let stack_index = self.type_stack.len() - 1 - i;
+            let concrete_type = &self.type_stack[stack_index];
+            let type_name = match concrete_type {
+                ConcreteType::I64 => "I64",
+                ConcreteType::String => "String",
+                ConcreteType::BigRational => "Rational",
+                ConcreteType::Array { .. } => "Array",
+                ConcreteType::Thunk => "Thunk",
+                _ => "Unknown", // Handle other types
+            };
+            types.push(type_name);
+        }
+
+        types.join(" ")
+    }
+
+    /// Find the best matching context signature for current stack types
+    fn find_matching_context(&mut self, word_name: &str) -> Result<Option<String>, RuntimeError> {
+        // Get current stack types (we'll start with 3 elements for typical binary operations)
+        let current_types = self.get_current_stack_signature(3);
+
+        println!("🔍 Looking for {} with stack types: [{}]", word_name, current_types);
+
+        // For now, try exact match against known context signatures
+        // This is a simplified implementation - in the future we could query the database
+        // for all contexts and do sophisticated matching
+
+        // Try current context first (if it matches our stack)
+        if let Some(context) = &self.current_context {
+            println!("   Trying current context: {}", context);
+            if current_types.starts_with(context) || context.contains(&current_types) {
+                if let Some(_) = self.db.find_word_hash(word_name, Some(context))? {
+                    println!("   ✅ Found match in current context: {}", context);
+                    return Ok(Some(context.clone()));
+                }
+            }
+        }
+
+        // Try to find a context that matches our stack types exactly
+        // For now, we'll try common patterns
+        let possible_contexts = vec![
+            format!("{} {}", current_types, current_types.split_whitespace().last().unwrap_or("I64")), // Binary op pattern
+            current_types.clone(), // Exact match
+            "I64 I64 I64".to_string(), // Common I64 binary pattern
+            "String String String".to_string(), // Common String binary pattern
+        ];
+
+        for candidate_context in possible_contexts {
+            println!("   Trying candidate context: {}", candidate_context);
+            if let Some(_) = self.db.find_word_hash(word_name, Some(&candidate_context))? {
+                println!("   ✅ Found match with context: {}", candidate_context);
+                return Ok(Some(candidate_context));
+            }
+        }
+
+        // Try default context
+        println!("   Trying default context");
+        if let Some(_) = self.db.find_word_hash(word_name, None)? {
+            println!("   ✅ Found in default context");
+            return Ok(None);
+        }
+
+        println!("   ❌ No matching context found");
+        Ok(None)
+    }
+
+    /// Set context signature from thunk on stack
+    /// Expects thunk that returns: [ types... ] boolean
+    fn set_context_from_thunk(&mut self) -> Result<(), RuntimeError> {
+        // Check if there's a thunk on the stack
+        if self.value_stack.is_empty() {
+            println!("Error: ? requires a thunk on the stack");
             return Err(RuntimeError::ParseError);
+        }
+
+        // Get the top value (should be a thunk)
+        let (top_value, _) = self.pop()?;
+        match top_value {
+            Value::Thunk(thunk) => {
+                // Execute thunk body directly (don't use force_thunk which pops the result)
+                println!("Forcing context signature thunk...");
+                self.execute_body(&thunk.body_source)?;
+
+                // Expect boolean on top, array below
+                if self.value_stack.len() < 2 {
+                    println!("Error: Context thunk must return [types...] boolean");
+                    return Err(RuntimeError::ParseError);
+                }
+
+                let (boolean_val, _) = self.pop()?;
+                let (array_val, _) = self.pop()?;
+
+                // Validate we got the right types
+                let condition = match boolean_val {
+                    Value::I64(n) => n != 0, // FORTH-style: -1 is true, 0 is false
+                    _ => {
+                        println!("Error: Expected boolean from context thunk");
+                        return Err(RuntimeError::ParseError);
+                    }
+                };
+
+                let type_signature = match array_val {
+                    Value::Array(types) => {
+                        // Convert array elements to type signature string
+                        let mut sig_parts = Vec::new();
+                        let mut found_separator = false;
+
+                        for element in types {
+                            match element {
+                                Value::String(s) if s == "--" => {
+                                    found_separator = true;
+                                    sig_parts.push("--".to_string());
+                                }
+                                Value::TypeOf(abstract_type) => {
+                                    let type_name = match abstract_type {
+                                        crate::AbstractType::Int => "I64",
+                                        crate::AbstractType::String => "String",
+                                        crate::AbstractType::Rational => "Rational",
+                                        crate::AbstractType::Array(_) => "Array",
+                                        crate::AbstractType::Ptr(_) => "Ptr",
+                                    };
+                                    sig_parts.push(type_name.to_string());
+                                }
+                                Value::String(s) => {
+                                    sig_parts.push(s);
+                                }
+                                _ => {
+                                    println!("Warning: Unexpected element in type signature array");
+                                }
+                            }
+                        }
+                        sig_parts.join(" ")
+                    }
+                    _ => {
+                        println!("Error: Expected array from context thunk");
+                        return Err(RuntimeError::ParseError);
+                    }
+                };
+
+                if condition {
+                    self.current_context = Some(type_signature.clone());
+                    println!("✅ Set context signature: [ {} ]", type_signature);
+                } else {
+                    println!("❌ Context condition failed: [ {} ]", type_signature);
+                }
+
+                Ok(())
+            }
+            _ => {
+                println!("Error: ? requires a thunk on the stack, got {:?}", top_value);
+                Err(RuntimeError::ParseError)
+            }
+        }
+    }
+
+    /// Parse thunk creation: { body }
+    fn parse_thunk_creation(&mut self, input: &str) -> Result<(), RuntimeError> {
+        let input = input.trim();
+
+        // Extract body between { and }
+        if input.len() < 2 {
+            println!("Invalid thunk syntax. Use: {{ body }}");
+            return Err(RuntimeError::ParseError);
+        }
+
+        let body = &input[1..input.len()-1].trim();
+
+        // Create thunk definition
+        let thunk = ThunkDefinition {
+            body_source: body.to_string(),
+            thunk_type: ThunkType::General,
+        };
+
+        // Push thunk onto stack
+        self.push(Value::Thunk(thunk), ConcreteType::Thunk);
+        println!("Created thunk: {{{}}}", body);
+
+        Ok(())
+    }
+
+    /// Parse array creation: [ item item item ]
+    fn parse_array_creation(&mut self, input: &str) -> Result<(), RuntimeError> {
+        let input = input.trim();
+
+        // Extract content between [ and ]
+        if input.len() < 2 {
+            println!("Invalid array syntax. Use: [ item item ... ]");
+            return Err(RuntimeError::ParseError);
+        }
+
+        let content = &input[1..input.len()-1].trim();
+
+        // Handle empty array
+        if content.is_empty() {
+            let empty_array = Value::Array(Vec::new());
+            self.push(empty_array, ConcreteType::Array {
+                element_type: Box::new(ConcreteType::I64), // Default element type
+                size: 0
+            });
+            println!("Created empty array: []");
+            return Ok(());
+        }
+
+        // Parse array elements
+        let mut array_elements = Vec::new();
+        let tokens: Vec<&str> = content.split_whitespace().collect();
+        let token_count = tokens.len();
+
+        for token in tokens {
+            // Try to parse as number first
+            if let Ok(n) = token.parse::<i64>() {
+                array_elements.push(Value::I64(n));
+            } else {
+                // Try to parse as other types or references
+                match token {
+                    "I64" => array_elements.push(Value::TypeOf(crate::AbstractType::Int)),
+                    "String" => array_elements.push(Value::TypeOf(crate::AbstractType::String)),
+                    "Rational" => array_elements.push(Value::TypeOf(crate::AbstractType::Rational)),
+                    _ => {
+                        // Treat as string literal for now
+                        array_elements.push(Value::String(token.to_string()));
+                    }
+                }
+            }
+        }
+
+        // Create array value
+        let array = Value::Array(array_elements);
+        let array_type = ConcreteType::Array {
+            element_type: Box::new(ConcreteType::I64), // TODO: Better type inference
+            size: token_count
+        };
+
+        self.push(array, array_type);
+        println!("Created array: [{}]", content);
+
+        Ok(())
+    }
+
+    /// Parse context signature declaration: ? [ I64 I64 -- I64 ] condition ;
+    fn parse_context_signature_declaration(&mut self, input: &str) -> Result<(), RuntimeError> {
+        let input = input.trim();
+
+        // Extract signature between [ and ]
+        let start = input.find('[').ok_or(RuntimeError::ParseError)?;
+        let end = input.find(']').ok_or(RuntimeError::ParseError)?;
+
+        if start >= end {
+            println!("Invalid signature syntax. Use: ? [ input-types -- output-types ]");
+            return Err(RuntimeError::ParseError);
+        }
+
+        let signature_str = &input[start+1..end].trim();
+        let after_bracket = &input[end+1..].trim();
+
+        // Parse optional condition after ] (but not the semicolon)
+        let condition = if after_bracket.is_empty() || *after_bracket == ";" {
+            None
+        } else {
+            // Remove trailing semicolon if present
+            let cond = after_bracket.strip_suffix(';').unwrap_or(after_bracket);
+            if cond.trim().is_empty() {
+                None
+            } else {
+                Some(cond.trim().to_string())
+            }
+        };
+
+        // Create context signature thunk
+        let thunk_body = if let Some(cond) = &condition {
+            format!("{} [ {} ]", cond, signature_str)
+        } else {
+            format!("[ {} ]", signature_str)
+        };
+
+        let context_thunk = ThunkDefinition {
+            body_source: thunk_body,
+            thunk_type: ThunkType::ContextSignature,
+        };
+
+        // Store as current context (for now, we'll use the signature as context name)
+        let context_name = format!("sig:{}", signature_str);
+        self.current_context = Some(context_name.clone());
+
+        println!("Created context signature: [ {} ]", signature_str);
+        if let Some(cond) = condition {
+            println!("  with condition: {}", cond);
         }
 
         Ok(())

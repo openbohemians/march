@@ -1,189 +1,233 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::Path;
 
 use anyhow::{Result, bail};
 use rusqlite::Connection;
 
-use crate::cli::commands::util::{lookup_named_cid, parse_effect_mask_flags, require_store_path};
+use crate::cli::commands::util::{lookup_named_cid, require_store_path};
 use march5::effect::{self, EffectCanon};
 use march5::global_store::{GlobalStoreSnapshot, store_snapshot};
 use march5::prim::{self, PrimCanon};
+use march5::surface::{
+    CatalogEntry, Definition, GuardSpec, OverloadEntry, OverloadSetSpec, PrimSpec, StackOp,
+    StateSpec, WordSpec, parse_catalog_from_sexpr_str,
+};
 use march5::types::EffectMask;
-use march5::yaml::{self, CatalogItem, WordOp};
+use march5::yaml;
 use march5::{TypeTag, Value, cid, get_name, open_store, put_name};
 
 pub(crate) fn cmd_catalog(store: Option<&Path>, file: &Path, dry_run: bool) -> Result<()> {
-    let catalog = yaml::parse_catalog_from_file(file)?;
+    let catalog: Vec<CatalogEntry> = if is_sexpr_path(file) {
+        let contents = fs::read_to_string(file)?;
+        parse_catalog_from_sexpr_str(&contents)?
+    } else {
+        yaml::parse_catalog_from_file(file)?
+    };
     if dry_run {
-        for (namespace, entries) in &catalog {
-            for (symbol, item) in entries {
-                println!(
-                    "[dry-run] {namespace}/{symbol}: {}",
-                    describe_catalog_item(item)
-                );
-            }
+        for entry in &catalog {
+            println!(
+                "[dry-run] {}: {}",
+                join_namespace_symbol(&entry.namespace, &entry.symbol),
+                describe_definition(&entry.definition)
+            );
         }
         return Ok(());
     }
 
     let store_path = require_store_path(store)?;
     let conn = open_store(store_path)?;
-    for (namespace, entries) in catalog {
-        let mut guard_items = Vec::new();
-        let mut word_items = Vec::new();
-        let mut overload_items: Vec<(String, String, Vec<yaml::OverloadSpec>)> = Vec::new();
-        let mut snapshot_items = Vec::new();
-        for (symbol, item) in entries {
-            let full_name = format!("{namespace}/{symbol}");
-            match item {
-                CatalogItem::Effect { doc } => {
-                    let spec = EffectCanon {
-                        name: &full_name,
-                        doc: doc.as_deref(),
-                    };
-                    let outcome = effect::store_effect(&conn, &spec)?;
-                    put_name(&conn, "effect", &full_name, &outcome.cid)?;
-                    println!(
-                        "stored effect `{full_name}` with cid {}",
-                        cid::to_hex(&outcome.cid)
-                    );
-                }
-                CatalogItem::Prim {
+    let mut guard_specs: Vec<(String, GuardSpec)> = Vec::new();
+    let mut word_specs: Vec<(String, WordSpec)> = Vec::new();
+    let mut overload_sets: Vec<(String, OverloadSetSpec)> = Vec::new();
+    let mut state_specs: Vec<StateSpec> = Vec::new();
+
+    for entry in catalog {
+        let namespace = entry.namespace;
+        let symbol = entry.symbol;
+        let full_name = join_namespace_symbol(&namespace, &symbol);
+        let short_symbol = if symbol.is_empty() {
+            namespace.clone()
+        } else {
+            symbol.clone()
+        };
+        match entry.definition {
+            Definition::Effect(spec) => {
+                let effect_spec = EffectCanon {
+                    name: &spec.name,
+                    doc: spec.doc.as_deref(),
+                };
+                let outcome = effect::store_effect(&conn, &effect_spec)?;
+                put_name(&conn, "effect", &spec.name, &outcome.cid)?;
+                println!(
+                    "stored effect `{}` with cid {}",
+                    spec.name,
+                    cid::to_hex(&outcome.cid)
+                );
+            }
+            Definition::Prim(spec) => {
+                let PrimSpec {
+                    name,
                     params,
                     results,
                     effects,
-                    emask,
-                } => {
-                    let effect_mask = parse_effect_mask_flags(&emask)?;
-                    let spec = PrimCanon {
-                        params: &params,
-                        results: &results,
-                        effects: effects.as_slice(),
-                        effect_mask,
-                    };
-                    let outcome = prim::store_prim(&conn, &spec)?;
-                    put_name(&conn, "prim", &full_name, &outcome.cid)?;
-                    if get_name(&conn, "prim", &symbol)?.is_none() {
-                        put_name(&conn, "prim", &symbol, &outcome.cid)?;
-                    }
-                    println!(
-                        "stored prim `{full_name}` with cid {}",
-                        cid::to_hex(&outcome.cid)
-                    );
-                }
-                CatalogItem::Guard {
-                    params,
-                    results,
-                    stack,
-                } => {
-                    guard_items.push((symbol, full_name, params, results, stack));
-                }
-                CatalogItem::Word {
-                    params,
-                    results,
-                    stack,
-                    guards,
-                } => {
-                    word_items.push((symbol, full_name, params, results, stack, guards));
-                }
-                CatalogItem::Overloads { entries } => {
-                    overload_items.push((symbol, full_name, entries));
-                }
-                CatalogItem::Snapshot { values } => {
-                    snapshot_items.push((symbol, full_name, values));
-                }
-            }
-        }
-
-        for (symbol, full_name, params, results, stack) in guard_items {
-            apply_guard_catalog(&conn, &full_name, &params, &results, &stack)?;
-            if get_name(&conn, "guard", &symbol)?.is_none() {
-                let cid = lookup_named_cid(&conn, "guard", &full_name)?;
-                put_name(&conn, "guard", &symbol, &cid)?;
-            }
-        }
-
-        for (_symbol, full_name, entries) in overload_items {
-            let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-            for entry in &entries {
-                let sig = format_signature(&entry.params, &entry.results);
-                let counter = counts.entry(sig.clone()).or_insert(0);
-                *counter += 1;
-                let derived = if *counter == 1 {
-                    format!("{full_name}#{}", sig)
-                } else {
-                    format!("{full_name}#{}${}", sig, *counter)
+                    effect_mask,
+                } = spec;
+                let prim_spec = PrimCanon {
+                    params: &params,
+                    results: &results,
+                    effects: effects.as_slice(),
+                    effect_mask,
                 };
-                apply_word_catalog(
-                    &conn,
-                    &derived,
-                    &entry.params,
-                    &entry.results,
-                    &entry.stack,
-                    &entry.guards,
-                )?;
+                let outcome = prim::store_prim(&conn, &prim_spec)?;
+                put_name(&conn, "prim", &name, &outcome.cid)?;
+                if get_name(&conn, "prim", &short_symbol)?.is_none() {
+                    put_name(&conn, "prim", &short_symbol, &outcome.cid)?;
+                }
+                println!(
+                    "stored prim `{name}` with cid {}",
+                    cid::to_hex(&outcome.cid)
+                );
             }
-            println!(
-                "registered overload set `{full_name}` ({} entries)",
-                entries.len()
-            );
-        }
-
-        for (symbol, full_name, params, results, stack, guards) in word_items {
-            apply_word_catalog(&conn, &full_name, &params, &results, &stack, &guards)?;
-            if get_name(&conn, "word", &symbol)?.is_none() {
-                let cid = lookup_named_cid(&conn, "word", &full_name)?;
-                put_name(&conn, "word", &symbol, &cid)?;
+            Definition::Guard(spec) => {
+                guard_specs.push((short_symbol, spec));
+            }
+            Definition::Word(spec) => {
+                word_specs.push((short_symbol, spec));
+            }
+            Definition::OverloadSet(spec) => {
+                overload_sets.push((short_symbol, spec));
+            }
+            Definition::State(spec) => {
+                state_specs.push(spec);
+            }
+            Definition::Namespace(spec) => {
+                println!(
+                    "skipping namespace `{}` (not yet supported by catalog import)",
+                    spec.name
+                );
+            }
+            Definition::Interface(_)
+            | Definition::Agent(_)
+            | Definition::Rule(_) => {
+                bail!(
+                    "catalog entry `{full_name}` uses a definition type not yet supported by the CLI"
+                );
             }
         }
+    }
 
-        for (_symbol, full_name, values) in snapshot_items {
-            let snapshot = GlobalStoreSnapshot::from_entries(values);
-            let outcome = store_snapshot(&conn, &snapshot)?;
-            put_name(&conn, "gstate", &full_name, &outcome.cid)?;
-            println!(
-                "stored snapshot `{full_name}` with cid {}",
-                cid::to_hex(&outcome.cid)
-            );
+    for (symbol, spec) in guard_specs {
+        let guard_cid = apply_guard_spec(&conn, &spec)?;
+        if get_name(&conn, "guard", &symbol)?.is_none() {
+            put_name(&conn, "guard", &symbol, &guard_cid)?;
         }
+    }
+
+    for (symbol, spec) in word_specs {
+        let word_cid = apply_word_spec(&conn, &spec)?;
+        if get_name(&conn, "word", &symbol)?.is_none() {
+            put_name(&conn, "word", &symbol, &word_cid)?;
+        }
+    }
+
+    for (_symbol, spec) in overload_sets {
+        let OverloadSetSpec { name, entries } = spec;
+        let entry_count = entries.len();
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        for entry in entries {
+            let OverloadEntry {
+                params,
+                results,
+                guards,
+                ops,
+            } = entry;
+            let sig = format_signature(&params, &results);
+            let counter = counts.entry(sig.clone()).or_insert(0);
+            *counter += 1;
+            let derived = if *counter == 1 {
+                format!("{name}#{}", sig)
+            } else {
+                format!("{name}#{}${}", sig, *counter)
+            };
+            let word_spec = WordSpec {
+                name: derived.clone(),
+                params,
+                results,
+                ops,
+                guards,
+            };
+            apply_word_spec(&conn, &word_spec)?;
+        }
+        println!("registered overload set `{name}` ({entry_count} entries)");
+    }
+
+    for spec in state_specs {
+        let StateSpec { name, entries } = spec;
+        let snapshot = GlobalStoreSnapshot::from_entries(entries);
+        let outcome = store_snapshot(&conn, &snapshot)?;
+        put_name(&conn, "gstate", &name, &outcome.cid)?;
+        println!(
+            "stored state `{}` with cid {}",
+            name,
+            cid::to_hex(&outcome.cid)
+        );
     }
 
     Ok(())
 }
 
-fn describe_catalog_item(item: &CatalogItem) -> &'static str {
-    match item {
-        CatalogItem::Effect { .. } => "effect",
-        CatalogItem::Prim { .. } => "prim",
-        CatalogItem::Guard { .. } => "guard",
-        CatalogItem::Word { .. } => "word",
-        CatalogItem::Overloads { .. } => "overloads",
-        CatalogItem::Snapshot { .. } => "snapshot",
+fn is_sexpr_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            let lower = ext.to_ascii_lowercase();
+            matches!(lower.as_str(), "sexpr" | "sxp" | "scm" | "lisp")
+        })
+        .unwrap_or(false)
+}
+
+fn join_namespace_symbol(namespace: &str, symbol: &str) -> String {
+    if namespace.is_empty() {
+        symbol.to_string()
+    } else if symbol.is_empty() {
+        namespace.to_string()
+    } else {
+        format!("{namespace}/{symbol}")
     }
 }
 
-fn apply_word_catalog(
-    conn: &Connection,
-    full_name: &str,
-    params: &[TypeTag],
-    results: &[TypeTag],
-    stack: &[WordOp],
-    guards: &[String],
-) -> Result<()> {
+fn describe_definition(definition: &Definition) -> &'static str {
+    match definition {
+        Definition::Effect(_) => "effect",
+        Definition::Prim(_) => "prim",
+        Definition::Guard(_) => "guard",
+        Definition::Word(_) => "word",
+        Definition::OverloadSet(_) => "overloads",
+        Definition::State(_) => "state",
+        Definition::Namespace(_) => "namespace",
+        Definition::Interface(_) => "interface",
+        Definition::Agent(_) => "agent",
+        Definition::Rule(_) => "rule",
+    }
+}
+
+fn apply_word_spec(conn: &Connection, spec: &WordSpec) -> Result<[u8; 32]> {
     let mut builder = march5::GraphBuilder::new(conn);
-    builder.begin_word(params)?;
-    for guard_name in guards {
+    builder.begin_word(&spec.params)?;
+    for guard_name in &spec.guards {
         let cid = lookup_named_cid(conn, "guard", guard_name)?;
         builder.attach_guard(cid);
     }
-    apply_stack_ops(&mut builder, conn, full_name, stack)?;
-    let word_cid = builder.finish_word(params, results, Some(full_name))?;
-    put_name(conn, "word", full_name, &word_cid)?;
+    apply_stack_ops(&mut builder, conn, &spec.name, &spec.ops)?;
+    let word_cid = builder.finish_word(&spec.params, &spec.results, Some(&spec.name))?;
+    put_name(conn, "word", &spec.name, &word_cid)?;
     println!(
-        "stored word `{full_name}` with cid {}",
+        "stored word `{}` with cid {}",
+        spec.name,
         cid::to_hex(&word_cid)
     );
-    Ok(())
+    Ok(word_cid)
 }
 
 fn format_signature(params: &[TypeTag], results: &[TypeTag]) -> String {
@@ -200,38 +244,33 @@ fn format_signature(params: &[TypeTag], results: &[TypeTag]) -> String {
     format!("{left}->{right}")
 }
 
-fn apply_guard_catalog(
-    conn: &Connection,
-    full_name: &str,
-    params: &[TypeTag],
-    results: &[TypeTag],
-    stack: &[WordOp],
-) -> Result<()> {
+fn apply_guard_spec(conn: &Connection, spec: &GuardSpec) -> Result<[u8; 32]> {
     let mut builder = march5::GraphBuilder::new(conn);
-    builder.begin_guard(params)?;
-    apply_stack_ops(&mut builder, conn, full_name, stack)?;
-    let guard_cid = builder.finish_guard(params, results, Some(full_name))?;
-    put_name(conn, "guard", full_name, &guard_cid)?;
+    builder.begin_guard(&spec.params)?;
+    apply_stack_ops(&mut builder, conn, &spec.name, &spec.ops)?;
+    let guard_cid = builder.finish_guard(&spec.params, &spec.results, Some(&spec.name))?;
+    put_name(conn, "guard", &spec.name, &guard_cid)?;
     println!(
-        "stored guard `{full_name}` with cid {}",
+        "stored guard `{}` with cid {}",
+        spec.name,
         cid::to_hex(&guard_cid)
     );
-    Ok(())
+    Ok(guard_cid)
 }
 
 fn apply_stack_ops(
     builder: &mut march5::GraphBuilder<'_>,
     conn: &Connection,
     full_name: &str,
-    ops: &[WordOp],
+    ops: &[StackOp],
 ) -> Result<()> {
     for op in ops {
         match op {
-            WordOp::Prim(name) => {
+            StackOp::Prim(name) => {
                 let cid = lookup_named_cid(conn, "prim", name)?;
                 builder.apply_prim(cid)?;
             }
-            WordOp::Word(name) => match lookup_named_cid(conn, "word", name) {
+            StackOp::Word(name) => match lookup_named_cid(conn, "word", name) {
                 Ok(cid) => {
                     builder.apply_word(cid)?;
                 }
@@ -239,16 +278,16 @@ fn apply_stack_ops(
                     apply_overloaded_symbol(builder, conn, name)?;
                 }
             },
-            WordOp::Dup => builder.dup()?,
-            WordOp::Swap => builder.swap()?,
-            WordOp::Over => builder.over()?,
-            WordOp::Lit(value) => match value {
+            StackOp::Dup => builder.dup()?,
+            StackOp::Swap => builder.swap()?,
+            StackOp::Over => builder.over()?,
+            StackOp::Lit(value) => match value {
                 Value::I64(n) => {
                     builder.push_lit_i64(*n)?;
                 }
                 other => bail!("unsupported literal in `{full_name}`: {:?}", other),
             },
-            WordOp::Quote(cid_bytes) => {
+            StackOp::Quote(cid_bytes) => {
                 builder.quote(*cid_bytes)?;
             }
         }

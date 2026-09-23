@@ -14,6 +14,8 @@ pub mod interp;
 pub mod namespace;
 pub mod node;
 pub mod prim;
+pub mod sexpr;
+pub mod surface;
 pub mod types;
 pub mod word;
 pub mod yaml;
@@ -37,5 +39,12 @@ pub use interp::{Value, run_word, run_word_i64};
 pub use namespace::{NamespaceCanon, NamespaceExport, NamespaceStoreOutcome};
 pub use node::{NodeCanon, NodeInput, NodeKind, NodePayload, NodeStoreOutcome};
 pub use prim::{PrimCanon, PrimInfo, PrimStoreOutcome};
+pub use sexpr::{SExpr, parse as parse_sexpr, parse_sequence as parse_sexpr_sequence};
+pub use surface::{
+    AgentSpec, CatalogEntry, Definition, EffectSpec, GuardSpec as SurfaceGuardSpec, InterfaceSpec,
+    InterfaceSymbolSpec, NamespaceExportSpec, NamespaceSpec, OverloadEntry, OverloadSetSpec,
+    PrimSpec as SurfacePrimSpec, RuleSpec as SurfaceRuleSpec, StackOp as SurfaceStackOp, StateSpec,
+    WordSpec as SurfaceWordSpec, parse_catalog_from_sexpr_str, parse_definitions_from_sexpr,
+};
 pub use types::TypeTag;
 pub use word::{WordCanon, WordStoreOutcome};

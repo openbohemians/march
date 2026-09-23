@@ -5,7 +5,11 @@ use std::path::Path;
 use anyhow::{Result, anyhow, bail};
 
 use crate::interp::Value;
-use crate::types::TypeTag;
+use crate::surface::{
+    CatalogEntry, Definition, EffectSpec, GuardSpec, OverloadEntry, OverloadSetSpec, PrimSpec,
+    StackOp, StateSpec, WordSpec,
+};
+use crate::types::{EffectMask, TypeTag, effect_mask};
 
 #[derive(Clone, Debug)]
 pub enum Node {
@@ -341,92 +345,51 @@ fn as_scalar(node: &Node) -> Result<String> {
     }
 }
 
-/// Representation of a catalog entry loaded from YAML.
-#[derive(Debug)]
-pub enum CatalogItem {
-    Effect {
-        doc: Option<String>,
-    },
-    Prim {
-        params: Vec<TypeTag>,
-        results: Vec<TypeTag>,
-        effects: Vec<[u8; 32]>,
-        emask: Vec<String>,
-    },
-    Word {
-        params: Vec<TypeTag>,
-        results: Vec<TypeTag>,
-        stack: Vec<WordOp>,
-        guards: Vec<String>,
-    },
-    Guard {
-        params: Vec<TypeTag>,
-        results: Vec<TypeTag>,
-        stack: Vec<WordOp>,
-    },
-    Snapshot {
-        values: BTreeMap<String, Value>,
-    },
-    Overloads {
-        entries: Vec<OverloadSpec>,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub enum WordOp {
-    Prim(String),
-    Word(String),
-    Dup,
-    Swap,
-    Over,
-    Lit(Value),
-    Quote([u8; 32]),
-}
-
-pub type Catalog = BTreeMap<String, BTreeMap<String, CatalogItem>>;
-
-pub fn parse_catalog_from_str(input: &str) -> Result<Catalog> {
+pub fn parse_catalog_from_str(input: &str) -> Result<Vec<CatalogEntry>> {
     let lines = preprocess(input);
     if lines.is_empty() {
-        return Ok(BTreeMap::new());
+        return Ok(Vec::new());
     }
     let mut idx = 0;
     let root = parse_node(&lines, &mut idx, 0)?;
     match root {
         Node::Mapping(namespaces) => {
-            let mut catalog = BTreeMap::new();
-            for (ns, entries) in namespaces {
+            let mut entries_out = Vec::new();
+            for (namespace, entries) in namespaces {
                 let mapping = match entries {
                     Node::Mapping(items) => items,
-                    other => bail!("namespace `{ns}` must be mapping, found {:?}", other),
+                    other => bail!("namespace `{namespace}` must be mapping, found {:?}", other),
                 };
-                let mut ns_entries = BTreeMap::new();
                 for (symbol, node) in mapping {
-                    let item = decode_catalog_entry(&symbol, node)?;
-                    ns_entries.insert(symbol, item);
+                    let definition = decode_catalog_entry(&namespace, &symbol, node)?;
+                    entries_out.push(CatalogEntry {
+                        namespace: namespace.clone(),
+                        symbol,
+                        definition,
+                    });
                 }
-                catalog.insert(ns, ns_entries);
             }
-            Ok(catalog)
+            Ok(entries_out)
         }
         other => bail!("catalog root must be mapping, found {:?}", other),
     }
 }
 
-pub fn parse_catalog_from_file(path: &Path) -> Result<Catalog> {
+pub fn parse_catalog_from_file(path: &Path) -> Result<Vec<CatalogEntry>> {
     let contents = fs::read_to_string(path)?;
     parse_catalog_from_str(&contents)
 }
 
-fn decode_catalog_entry(symbol: &str, node: Node) -> Result<CatalogItem> {
+fn decode_catalog_entry(namespace: &str, symbol: &str, node: Node) -> Result<Definition> {
+    let full_name = format!("{namespace}/{symbol}");
     match node {
         Node::Tagged { tag, value } => match tag.as_str() {
-            "effect" => decode_effect_entry(*value),
-            "prim" => decode_prim_entry(*value),
-            "word" => decode_word_entry(symbol, *value),
-            "guard" => decode_guard_entry(symbol, *value),
-            "overloads" => decode_overloads_entry(*value),
-            "snapshot" => decode_snapshot_entry(*value),
+            "effect" => decode_effect_entry(&full_name, *value),
+            "prim" => decode_prim_entry(&full_name, *value),
+            "word" => decode_word_entry(&full_name, symbol, *value),
+            "guard" => decode_guard_entry(&full_name, symbol, *value),
+            "overloads" => decode_overloads_entry(&full_name, *value),
+            "snapshot" | "state" => decode_snapshot_entry(&full_name, *value),
             other => bail!("unsupported catalog tag `{other}`"),
         },
         other => bail!(
@@ -436,21 +399,13 @@ fn decode_catalog_entry(symbol: &str, node: Node) -> Result<CatalogItem> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct OverloadSpec {
-    pub params: Vec<TypeTag>,
-    pub results: Vec<TypeTag>,
-    pub guards: Vec<String>,
-    pub stack: Vec<WordOp>,
-}
-
-fn decode_overloads_entry(node: Node) -> Result<CatalogItem> {
+fn decode_overloads_entry(full_name: &str, node: Node) -> Result<Definition> {
     // Require a sequence of overload entries; labels are not supported to avoid ambiguity.
     let list = match node {
         Node::Sequence(items) => items,
         other => bail!("overloads entry must be sequence, found {:?}", other),
     };
-    let mut entries: Vec<OverloadSpec> = Vec::with_capacity(list.len());
+    let mut entries: Vec<OverloadEntry> = Vec::with_capacity(list.len());
     for item in list {
         let map = match item {
             Node::Mapping(map) => map,
@@ -467,31 +422,40 @@ fn decode_overloads_entry(node: Node) -> Result<CatalogItem> {
             .get("stack")
             .ok_or_else(|| anyhow!("overload entry missing `stack` field"))?;
         let stack = decode_word_ops(stack_node)?;
-        entries.push(OverloadSpec {
+        entries.push(OverloadEntry {
             params,
             results,
             guards,
-            stack,
+            ops: stack,
         });
     }
-    Ok(CatalogItem::Overloads { entries })
+    Ok(Definition::OverloadSet(OverloadSetSpec {
+        name: full_name.to_string(),
+        entries,
+    }))
 }
 
-fn decode_effect_entry(node: Node) -> Result<CatalogItem> {
+fn decode_effect_entry(full_name: &str, node: Node) -> Result<Definition> {
     match node {
         Node::Mapping(map) => {
             let doc = match map.get("doc") {
                 Some(node) => Some(as_scalar(node)?),
                 None => None,
             };
-            Ok(CatalogItem::Effect { doc })
+            Ok(Definition::Effect(EffectSpec {
+                name: full_name.to_string(),
+                doc,
+            }))
         }
-        Node::Scalar(text) if text.is_empty() => Ok(CatalogItem::Effect { doc: None }),
+        Node::Scalar(text) if text.is_empty() => Ok(Definition::Effect(EffectSpec {
+            name: full_name.to_string(),
+            doc: None,
+        })),
         other => bail!("effect entry must be mapping or empty, found {:?}", other),
     }
 }
 
-fn decode_prim_entry(node: Node) -> Result<CatalogItem> {
+fn decode_prim_entry(full_name: &str, node: Node) -> Result<Definition> {
     let map = match node {
         Node::Mapping(map) => map,
         other => bail!("prim entry must be mapping, found {:?}", other),
@@ -499,23 +463,17 @@ fn decode_prim_entry(node: Node) -> Result<CatalogItem> {
     let params = parse_type_list(map.get("params"))?;
     let results = parse_type_list(map.get("results"))?;
     let effects = parse_hex_list(map.get("effects"))?;
-    let emask = match map.get("emask") {
-        Some(Node::Sequence(items)) => items
-            .iter()
-            .map(|n| as_scalar(n))
-            .collect::<Result<Vec<_>>>()?,
-        Some(other) => bail!("emask must be sequence, found {:?}", other),
-        None => Vec::new(),
-    };
-    Ok(CatalogItem::Prim {
+    let effect_mask = parse_effect_mask_node(map.get("emask"))?;
+    Ok(Definition::Prim(PrimSpec {
+        name: full_name.to_string(),
         params,
         results,
         effects,
-        emask,
-    })
+        effect_mask,
+    }))
 }
 
-fn decode_word_entry(symbol: &str, node: Node) -> Result<CatalogItem> {
+fn decode_word_entry(full_name: &str, symbol: &str, node: Node) -> Result<Definition> {
     let map = match node {
         Node::Mapping(map) => map,
         other => bail!("word entry `{symbol}` must be mapping, found {:?}", other),
@@ -527,15 +485,16 @@ fn decode_word_entry(symbol: &str, node: Node) -> Result<CatalogItem> {
         .ok_or_else(|| anyhow!("word `{symbol}` missing `stack` field"))?;
     let ops = decode_word_ops(stack_node)?;
     let guards = parse_string_list(map.get("guards"))?;
-    Ok(CatalogItem::Word {
+    Ok(Definition::Word(WordSpec {
+        name: full_name.to_string(),
         params,
         results,
-        stack: ops,
+        ops,
         guards,
-    })
+    }))
 }
 
-fn decode_guard_entry(symbol: &str, node: Node) -> Result<CatalogItem> {
+fn decode_guard_entry(full_name: &str, symbol: &str, node: Node) -> Result<Definition> {
     let map = match node {
         Node::Mapping(map) => map,
         other => bail!("guard entry `{symbol}` must be mapping, found {:?}", other),
@@ -549,14 +508,15 @@ fn decode_guard_entry(symbol: &str, node: Node) -> Result<CatalogItem> {
         .get("stack")
         .ok_or_else(|| anyhow!("guard `{symbol}` missing `stack` field"))?;
     let ops = decode_word_ops(stack_node)?;
-    Ok(CatalogItem::Guard {
+    Ok(Definition::Guard(GuardSpec {
+        name: full_name.to_string(),
         params,
         results,
-        stack: ops,
-    })
+        ops,
+    }))
 }
 
-fn decode_snapshot_entry(node: Node) -> Result<CatalogItem> {
+fn decode_snapshot_entry(full_name: &str, node: Node) -> Result<Definition> {
     let map = match node {
         Node::Mapping(map) => map,
         other => bail!("snapshot entry must be mapping, found {:?}", other),
@@ -566,7 +526,10 @@ fn decode_snapshot_entry(node: Node) -> Result<CatalogItem> {
         let value = decode_value(node)?;
         values.insert(key, value);
     }
-    Ok(CatalogItem::Snapshot { values })
+    Ok(Definition::State(StateSpec {
+        name: full_name.to_string(),
+        entries: values,
+    }))
 }
 
 fn parse_type_list(node: Option<&Node>) -> Result<Vec<TypeTag>> {
@@ -615,7 +578,35 @@ fn parse_string_list(node: Option<&Node>) -> Result<Vec<String>> {
     }
 }
 
-fn decode_word_ops(node: &Node) -> Result<Vec<WordOp>> {
+fn parse_effect_mask_node(node: Option<&Node>) -> Result<EffectMask> {
+    let mut mask = effect_mask::NONE;
+    match node {
+        None => Ok(mask),
+        Some(Node::Sequence(items)) => {
+            for item in items {
+                let flag = as_scalar(item)?.trim().to_ascii_lowercase();
+                if flag.is_empty() {
+                    continue;
+                }
+                match flag.as_str() {
+                    "io" => mask |= effect_mask::IO,
+                    "state" => mask |= effect_mask::STATE_READ | effect_mask::STATE_WRITE,
+                    "state.read" | "state_read" | "state-read" => mask |= effect_mask::STATE_READ,
+                    "state.write" | "state_write" | "state-write" => {
+                        mask |= effect_mask::STATE_WRITE
+                    }
+                    "test" => mask |= effect_mask::TEST,
+                    "metric" => mask |= effect_mask::METRIC,
+                    other => bail!("unknown effect mask flag `{other}`"),
+                }
+            }
+            Ok(mask)
+        }
+        Some(other) => bail!("emask must be sequence, found {:?}", other),
+    }
+}
+
+fn decode_word_ops(node: &Node) -> Result<Vec<StackOp>> {
     match node {
         Node::Sequence(items) => {
             let mut ops = Vec::with_capacity(items.len());
@@ -628,14 +619,14 @@ fn decode_word_ops(node: &Node) -> Result<Vec<WordOp>> {
     }
 }
 
-fn decode_word_op(node: &Node) -> Result<WordOp> {
+fn decode_word_op(node: &Node) -> Result<StackOp> {
     match node {
         Node::Tagged { tag, value } => match tag.as_str() {
-            "prim" => Ok(WordOp::Prim(as_scalar(value)?)),
-            "word" => Ok(WordOp::Word(as_scalar(value)?)),
-            "dup" => Ok(WordOp::Dup),
-            "swap" => Ok(WordOp::Swap),
-            "over" => Ok(WordOp::Over),
+            "prim" => Ok(StackOp::Prim(as_scalar(value)?)),
+            "word" => Ok(StackOp::Word(as_scalar(value)?)),
+            "dup" => Ok(StackOp::Dup),
+            "swap" => Ok(StackOp::Swap),
+            "over" => Ok(StackOp::Over),
             "quote" => {
                 let scalar = as_scalar(value)?;
                 let bytes = decode_hex(&scalar)?;
@@ -644,7 +635,7 @@ fn decode_word_op(node: &Node) -> Result<WordOp> {
                 }
                 let mut cid = [0u8; 32];
                 cid.copy_from_slice(&bytes);
-                Ok(WordOp::Quote(cid))
+                Ok(StackOp::Quote(cid))
             }
             "lit" => {
                 let value_node = match &**value {
@@ -652,13 +643,13 @@ fn decode_word_op(node: &Node) -> Result<WordOp> {
                     other => other.clone(),
                 };
                 let lit = decode_value(value_node)?;
-                Ok(WordOp::Lit(lit))
+                Ok(StackOp::Lit(lit))
             }
             other => bail!("unsupported word stack tag `{other}`"),
         },
         other => {
             let scalar = as_scalar(other)?;
-            Ok(WordOp::Prim(scalar))
+            Ok(StackOp::Prim(scalar))
         }
     }
 }
@@ -710,7 +701,7 @@ demo:
       results: [text]
       stack:
         - !word text/concat
-  counter: !snapshot
+  counter: !state
     demo.counter: !i64 0
   square: !word
     params: [i64]
@@ -719,17 +710,44 @@ demo:
       - !dup
       - !prim core/add_i64
 "#;
-        let catalog = parse_catalog_from_str(doc)?;
-        assert_eq!(catalog.len(), 2);
-        let demo_entries = catalog.get("demo").expect("demo namespace parsed");
+        let entries = parse_catalog_from_str(doc)?;
+        assert_eq!(entries.len(), 6);
+        let guard_entry = entries
+            .iter()
+            .find(|e| e.namespace == "demo" && e.symbol == "always_true")
+            .expect("guard entry parsed");
         assert!(matches!(
-            demo_entries.get("always_true"),
-            Some(CatalogItem::Guard { .. })
+            guard_entry.definition,
+            Definition::Guard(GuardSpec { .. })
         ));
+        let overload_entry = entries
+            .iter()
+            .find(|e| e.namespace == "demo" && e.symbol == "add")
+            .expect("overload entry parsed");
         assert!(matches!(
-            demo_entries.get("add"),
-            Some(CatalogItem::Overloads { .. })
+            overload_entry.definition,
+            Definition::OverloadSet(OverloadSetSpec { .. })
         ));
+        let state_entry = entries
+            .iter()
+            .find(|e| e.namespace == "demo" && e.symbol == "counter")
+            .expect("state entry parsed");
+        assert!(matches!(
+            state_entry.definition,
+            Definition::State(StateSpec { .. })
+        ));
+        let word_entry = entries
+            .iter()
+            .find(|e| e.namespace == "demo" && e.symbol == "square")
+            .expect("word entry parsed");
+        match &word_entry.definition {
+            Definition::Word(spec) => {
+                assert_eq!(spec.params, vec![TypeTag::I64]);
+                assert_eq!(spec.results, vec![TypeTag::I64]);
+                assert_eq!(spec.ops.len(), 2);
+            }
+            other => panic!("expected word definition, found {:?}", other),
+        }
         Ok(())
     }
 }

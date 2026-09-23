@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use rusqlite::Connection;
 
 use crate::cbor::{push_array, push_map, push_text};
+use crate::sexpr::{self, SExpr};
 use crate::{cid, db};
 
 #[derive(Clone, Debug)]
@@ -375,7 +376,7 @@ impl Reducer {
             return Ok(true);
         }
         // Minimal S-expr DSL: (seq (connect (A port) (B port))* (delete A B)?)
-        let forms = parse_sexpr_sequence(body)?;
+        let forms = sexpr::parse_sequence(body)?;
         // Collect connect and disconnect operations
         let mut connects: Vec<(PortRef, PortRef)> = Vec::new();
         let mut to_disconnect: Vec<PortRef> = Vec::new();
@@ -518,86 +519,6 @@ impl Reducer {
             }
         }
         Ok(true)
-    }
-}
-
-// --- Minimal S-expression parser ---
-
-#[derive(Clone, Debug)]
-enum SExpr {
-    Sym(String),
-    List(Vec<SExpr>),
-}
-
-fn parse_sexpr_sequence(input: &str) -> Result<Vec<SExpr>> {
-    let mut tokens = tokenize(input);
-    let mut forms = Vec::new();
-    while !tokens.is_empty() {
-        forms.push(parse_one(&mut tokens)?);
-    }
-    // Unwrap (seq ...) if present
-    if forms.len() == 1 {
-        if let SExpr::List(items) = &forms[0] {
-            if let Some(SExpr::Sym(head)) = items.get(0) {
-                if head == "seq" {
-                    let mut seq = Vec::new();
-                    for it in items.iter().skip(1) {
-                        seq.push(it.clone());
-                    }
-                    return Ok(seq);
-                }
-            }
-        }
-    }
-    Ok(forms)
-}
-
-fn tokenize(input: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    for ch in input.chars() {
-        match ch {
-            '(' | ')' => {
-                if !cur.trim().is_empty() {
-                    out.push(cur.trim().to_string());
-                }
-                cur.clear();
-                out.push(ch.to_string());
-            }
-            c if c.is_whitespace() => {
-                if !cur.trim().is_empty() {
-                    out.push(cur.trim().to_string());
-                    cur.clear();
-                }
-            }
-            _ => cur.push(ch),
-        }
-    }
-    if !cur.trim().is_empty() {
-        out.push(cur.trim().to_string());
-    }
-    out
-}
-
-fn parse_one(tokens: &mut Vec<String>) -> Result<SExpr> {
-    if tokens.is_empty() {
-        bail!("unexpected EOF in s-expr");
-    }
-    let tok = tokens.remove(0);
-    if tok == "(" {
-        let mut items = Vec::new();
-        while !tokens.is_empty() && tokens[0] != ")" {
-            items.push(parse_one(tokens)?);
-        }
-        if tokens.is_empty() {
-            bail!("unbalanced parentheses");
-        }
-        tokens.remove(0); // consume ')'
-        Ok(SExpr::List(items))
-    } else if tok == ")" {
-        bail!("unexpected ')' in s-expr");
-    } else {
-        Ok(SExpr::Sym(tok))
     }
 }
 

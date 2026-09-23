@@ -36,10 +36,11 @@ The port-level experiment is now real enough to justify another gate:
 
 It has not yet justified becoming the only backend.  Current fans duplicate
 values, not arbitrary unevaluated computations; the guarded call only handles
-families whose first parameter drives selection; data, closures, higher-order
-application, and canonical residual identity are absent.  Keep the CAS reducer
-as the semantic oracle and treat the INet as an experimental lowering until
-those cases work without global rewrites or exponential growth.
+families whose first parameter drives selection and whose auxiliary arguments
+are passive atoms; data, closures, higher-order application, and canonical
+residual identity are absent.  Keep the CAS reducer as the semantic oracle and
+treat the INet as an experimental lowering until those cases work without
+global rewrites or exponential growth.
 
 ## Narrow, do not discard: teleological topology analysis
 

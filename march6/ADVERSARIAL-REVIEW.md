@@ -59,6 +59,11 @@ passing test suite cannot quietly redefine the research question.
   duplicating or discarding the linear effect boundary.
 - The narrow guarded-call lowering rejects definitions where demanding
   parameter zero would change source laziness.
+- Reusable quotations and families reject embedded literal trace/world values;
+  capabilities must arrive through explicit parameters rather than being
+  captured and potentially duplicated by repeated application.
+- The guarded-call lowerer rejects computed auxiliary arguments whose detached
+  nets could otherwise raise an error before the selected clause erased them.
 
 ## Claims narrowed
 
@@ -125,3 +130,7 @@ passing test suite cannot quietly redefine the research question.
     work inside each copy needs fresh/dynamic fan identities.  The current
     value-level fan rules cannot express this test and must fail honestly rather
     than silently capture or duplicate the wrong subnet.
+11. Replace the 64-frame host-recursion guard with an iterative worklist.  The
+    current resource error prevents process aborts, but a terminating source
+    recursion deeper than the host limit cannot yet complete even with an
+    ample work budget.

@@ -102,9 +102,11 @@ outputs.  Repeated strict arithmetic DAG nodes are computed once and distributed
 through explicit fan trees with linear-size lowering.  A narrow guarded `Call`
 agent now selects first-parameter-driven immutable templates, instantiates only
 the chosen body, supports recursion, and preserves results under two schedules.
-Lowering rejects calls whose first argument should remain undemanded.  General
-guard decision chains, fan/operator commutation, arbitrary subnet choice, data
-constructors, and higher-order calls remain open; see `RESULTS.md`.
+Lowering rejects calls whose first argument should remain undemanded and
+computed auxiliary arguments that could reduce before selection.  General
+guard decision chains, delayed arguments, fan/operator commutation, arbitrary
+subnet choice, data constructors, and higher-order calls remain open; see
+`RESULTS.md`.
 
 ## Failure and pivot criteria
 

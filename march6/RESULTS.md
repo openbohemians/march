@@ -12,10 +12,11 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass.  There are currently 76 unit, integration, generated, and
-differential tests.  One of those tests performs 10,440 generated staging
-comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses found by external review
-and whether they are fixed, narrowed, or still open.
+All checks pass.  There are currently 87 unit, integration, generated, and
+differential test cases: 86 pass and one deliberately ignored case records the
+need for an iterative evaluator.  One passing test performs 10,440 generated
+staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses found by
+external review and whether they are fixed, narrowed, or still open.
 
 ## Staged content-addressed reduction
 
@@ -91,6 +92,9 @@ Two boundaries were made explicit after adversarial review:
 
 - quotations and families are closed code values; ambient named holes are
   rejected rather than silently losing facts between epochs;
+- reusable code cannot embed a literal trace/world capability; effects must
+  cross the boundary as explicit parameters so they cannot be minted or
+  duplicated by repeated application;
 - guards are syntactically pure, and effect/world tokens may be neither fanned
   nor erased by the interaction-net backend.
 
@@ -265,12 +269,14 @@ schedules and leaves no live agents.
 
 This lowering intentionally rejects a family whose first parameter is not
 semantically demanded before clause selection; otherwise the `Call` agent would
-change the source language's laziness.  General multi-argument guard demand
-needs local decision-chain agents.  Fans still distribute strict values, not
-arbitrary unevaluated computations.  This is evidence that local active-pair
-selection and destruction/reuse fit the staged model, not evidence that general
-higher-order March calls, data, or effects already have a satisfactory net
-encoding.
+change the source language's laziness.  It also rejects computed auxiliary
+arguments: their detached subnets could otherwise fail before a selected clause
+erased them.  General multi-argument guard demand and delayed argument agents
+are needed to lift those restrictions.  Fans still distribute strict values,
+not arbitrary unevaluated computations.  This is evidence that local
+active-pair selection and destruction/reuse fit the staged model, not evidence
+that general higher-order March calls, data, or effects already have a
+satisfactory net encoding.
 
 ## Corrections to the inherited design
 

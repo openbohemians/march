@@ -119,7 +119,10 @@ impl fmt::Display for ReduceError {
                 write!(f, "integer overflow in {operation}")
             }
             Self::LinearValueDuplicated(cid) => {
-                write!(f, "linear effect value {cid} has more than one consumer")
+                write!(
+                    f,
+                    "linear effect value {cid} is duplicated or captured by reusable code"
+                )
             }
             Self::BudgetExhausted { limit } => {
                 write!(f, "reduction exceeded its explicit {limit}-step budget")
@@ -1093,6 +1096,13 @@ impl<'a> Reducer<'a> {
                 .cloned()
                 .ok_or(ReduceError::MissingNode(cid))?;
             match node {
+                // A trace is a linear capability, not an inert constant that
+                // reusable code may capture.  It must cross the code boundary
+                // as an explicit parameter so every invocation has one
+                // visible use topology.
+                Node::Const(Atom::Trace(_)) => {
+                    return Err(ReduceError::LinearValueDuplicated(cid));
+                }
                 Node::Const(_) => {}
                 Node::Hole(name) => return Err(ReduceError::OpenCodeValue(name)),
                 Node::Param(index) => {
@@ -1335,8 +1345,8 @@ impl<'a> Reducer<'a> {
 
 fn reducer_cid() -> Cid {
     Cid::digest(
-        b"march6/reducer/v3",
-        b"lazy-quote-and-arguments;ordered-guarded-families;lexical-recur;pure-explicit-effects",
+        b"march6/reducer/v4",
+        b"lazy-quote-and-arguments;ordered-guarded-families;lexical-recur;pure-explicit-effects;no-captured-capabilities",
     )
 }
 

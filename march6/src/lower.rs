@@ -131,6 +131,7 @@ pub fn to_inet(store: &Store, root: Cid, output_label: &str) -> Result<InetNet, 
                     ));
                 }
                 validate_first_argument_guards(store, family)?;
+                validate_passive_call_arguments(store, &arguments)?;
                 let call = net.add(AgentKind::Call { family, parameters });
                 for (index, argument) in arguments.into_iter().enumerate() {
                     let source = take_outlet(&mut outlets, argument)?;
@@ -214,6 +215,12 @@ fn install_template_graph(
             .get(cid)
             .cloned()
             .ok_or(LowerError::MissingNode(cid))?;
+        match &node {
+            Node::Dispatch { arguments, .. } | Node::Recur(arguments) => {
+                validate_passive_call_arguments(store, arguments)?;
+            }
+            _ => {}
+        }
         pending.extend(node.children());
         net.install_template(cid, node);
     }
@@ -273,6 +280,28 @@ fn is_pattern_atom(store: &Store, cid: Cid) -> bool {
         store.get(cid),
         Some(Node::Const(Atom::Int(_) | Atom::Bool(_)))
     )
+}
+
+/// Only the principal argument of the first guarded-call encoding carries
+/// demand.  A computed subnet attached to an auxiliary port could otherwise
+/// reduce before selection and report an error even when the selected clause
+/// erases it.  Until explicit thunk/decision agents exist, accept only passive
+/// atoms on those ports and reject a lowering that would change CAS laziness.
+fn validate_passive_call_arguments(store: &Store, arguments: &[Cid]) -> Result<(), LowerError> {
+    for argument in arguments.iter().skip(1) {
+        match store
+            .get(*argument)
+            .ok_or(LowerError::MissingNode(*argument))?
+        {
+            Node::Const(Atom::Int(_) | Atom::Bool(_)) | Node::Hole(_) | Node::Param(_) => {}
+            _ => {
+                return Err(LowerError::UnsupportedNode(
+                    "guarded INet cannot defer a computed non-principal argument",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn take_outlet(outlets: &mut BTreeMap<Cid, Vec<Port>>, cid: Cid) -> Result<Port, LowerError> {

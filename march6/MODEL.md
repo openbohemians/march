@@ -255,9 +255,11 @@ The interaction-net backend can lower the subset whose first parameter drives
 selection.  The family templates live in an immutable table rather than as
 live agents; a `Call` demands the first argument, installs only the chosen
 body, and uses fans and erasers for its actual parameter uses.  A lowering that
-would make an otherwise undemanded first argument strict is rejected.  This is
-evidence for demand-directed local selection, not yet a general encoding of
-multi-argument guards, closures, or fan/operator commutation.
+would make an otherwise undemanded first argument strict is rejected, as is a
+computed auxiliary argument whose detached subnet could reduce before clause
+selection.  This is evidence for demand-directed local selection, not yet a
+general encoding of multi-argument guards, delayed arguments, closures, or
+fan/operator commutation.
 
 The next gate is therefore sharper: compile general guard demand into a local
 decision chain, then test higher-order duplicated computations with nested,

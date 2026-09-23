@@ -1,0 +1,11 @@
+# Local working copies retained while their histories live under archive/*
+# refs in this repository.  March 6 is intentionally not ignored: it is the
+# current implementation and will be tracked on the canonical branch.
+/march1/
+/march2/
+/march3/
+/march4/
+/march5/
+
+# Used after the current Rust prototype is promoted to the repository root.
+/target/

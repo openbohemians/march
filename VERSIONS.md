@@ -54,6 +54,7 @@ Original remote: `git@github.com:trans/march4.git`.
 | `archive/march4/main` | `8a7738b36ada04fac4c889804094347b311708a5` | Local main head |
 | `archive/march4/vm-computed-goto` | `c7a2ba331fe408df7ab95c590be0522629108da2` | Computed-goto VM experiment |
 | `archive/march4/remotes/origin/main` | `4ea4b5e8561451837841ce83ec52948b2334277a` | Last recovered origin/main |
+| `archive/march4/preserved/docs-2026-09-23` | `c40f2ee1a69b7bf5e6a93c4a36f582e89f2103b0` | Recovered session summary and VM/formal design documents |
 
 ## March 5
 
@@ -73,6 +74,11 @@ tracked on the canonical repository branch.  The directory name is temporary:
 if the research gates succeed, its contents will be promoted to the repository
 root and it will simply be March.  A future architectural break can preserve
 this lineage under `archive/march6/*` without requiring a separate repository.
+
+The dated March 4/March 5 implementation audit is retained at
+`doc/AUDIT-2026-09-23.md`.  It records the evidence available before March 6
+was selected as the active research line; its recommendation is historical
+context rather than the current architecture decision.
 
 ## Verification and access
 

@@ -36,3 +36,6 @@ does and does not establish.  [DECISION.md](DECISION.md) gives the resulting
 go/conditional-go decision and the next falsification gate.  [MODEL.md](MODEL.md)
 states the emerging FORTH-inspired, self-extending language model and separates
 essential net topology from optional teleological topology analysis.
+[BOOTSTRAP.md](BOOTSTRAP.md) turns the self-extension claim into the B0 gate:
+a syntax-free nucleus must load a seed image whose March-defined `:` and `;`
+can extend that same image reproducibly.

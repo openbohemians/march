@@ -1,4 +1,5 @@
 pub mod cid;
+pub mod collect;
 pub mod flow;
 pub mod image;
 pub mod inet;
@@ -11,6 +12,7 @@ pub mod seed;
 pub mod template;
 
 pub use cid::Cid;
+pub use collect::{CollectionError, CollectionStats};
 pub use image::{Image, ImageError};
 pub use net::{Atom, Bindings, Clause, Node, Store};
 pub use reduce::{

@@ -152,6 +152,14 @@ passing test suite cannot quietly redefine the research question.
   observes only at constant binding and successful EOF. Regression tests cover
   demanded/discarded failures, unused arguments, pauses, image reload, and
   shared demand. Code/handler values remain dormant at observation boundaries.
+- Independent B0d review found no discrepancy in repeated fragment extraction,
+  inlining, composed words, image replay, or pure-call sharing (six tests).
+  `SYNTAX.md` now warns that binding a computed constant is not callable-word
+  extraction: the latter needs parentheses in the name-first seed.
+- Explicit-root in-memory collection now removes unreachable CAS history and
+  validation metadata. Missing references fail before sweep, and all dormant
+  code/pending computations reachable from roots survive without evaluation.
+  The CLI collects between 64-token batches and retains a cumulative work cap.
 
 ## Still open and high priority
 
@@ -165,8 +173,10 @@ Seed review measured roughly 100 retained Store nodes per token in a repeated
 call/drop workload. Persistent CAS storage currently also holds every transient
 reduction state. A checkpoint/reload baseline reduces retained history with
 explicit roots and unchanged final identity, but it incurs image-codec work
-and is not automatic in the CLI. Distinguishing transient reduction cells from
-persistent values, or adding explicit-root reclamation, remains unresolved.
+and is retained as a control. The CLI now uses direct explicit-root collection
+without codec work. Automatic root registration, collection inside long
+reductions, and distinguishing transient reduction cells from persistent
+values remain unresolved; batch collection is not a peak-byte guarantee.
 Runtime variable-arity calls also construct temporary reflected applications;
 a syntax-neutral list-application operation is a possible later optimization,
 not required for the current seed's correctness.

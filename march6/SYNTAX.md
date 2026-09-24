@@ -23,6 +23,11 @@ observes the bound value; successful EOF observes the remaining stack. Quoted
 code stays dormant. Token-quota pauses and image snapshots do not force pending
 work. See `SEED.md` for this B0d demand contract and its current limits.
 
+When extracting a fragment into a callable word, keep the parentheses:
+`name : ( fragment ) ;`. Writing `name : fragment ;` instead computes a
+constant at `;`, which can expose a failure even if the name is never used.
+The alternative FORTH spelling `: name fragment ;` constructs callable code.
+
 Bare data names push their values; callable names invoke their code. Quotation
 construction uses a symbolic stack, with shuffles becoming graph wiring. The
 first equivalence target is that `square` has exactly the CID of the hand-built

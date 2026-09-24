@@ -55,6 +55,12 @@ impl SpecializationCache {
         self.entries.is_empty()
     }
 
+    /// Residual node roots to retain when collecting the associated store.
+    /// Cache keys are artifact identities, not node roots.
+    pub fn roots(&self) -> impl Iterator<Item = Cid> + '_ {
+        self.entries.values().copied()
+    }
+
     pub fn specialize(
         &mut self,
         store: &mut Store,

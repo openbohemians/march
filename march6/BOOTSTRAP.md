@@ -241,8 +241,10 @@ EOF. Inline/factored value and overflow regressions cover the original
 counterexample; richer stack interfaces and source effects still require
 factoring evidence as they are added. See `SEED.md` and `MODEL.md`.
 The in-memory Store currently retains transient reduction history; explicit
-checkpoint/reload measurements in `SEED.md` provide a baseline while persistent
-dictionaries and transient-vs-persistent storage remain research questions.
+checkpoint/reload measurements in `SEED.md` provide a baseline. Explicit-root
+in-memory collection now reclaims unreachable history between CLI batches;
+persistent dictionaries and transient-vs-persistent storage remain research
+questions. See `COLLECTION.md`.
 
 ### Nucleus capabilities (Rust)
 

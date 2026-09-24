@@ -133,6 +133,9 @@ records, code descriptions, and handler composition.
   failures, such as integer overflow or work exhaustion, remain `ReduceError`s.
 - Eleven B0d demand tests cover observation boundaries, dormant code, sharing,
   and 216 inline/factored value-or-error comparisons across both surfaces.
+- Six independent factoring tests exercise repeated fragment extraction inside
+  definitions, composed calls, inverse inlining, image replay, constant-binding
+  boundaries, and sharing of identical pure calls.
 - Tests run on a 256 KiB native thread stack.
 
 Pausing uses a token quota over the **same complete source plus cursor**.
@@ -173,15 +176,14 @@ The scaling gate remains open. Repeated calls with a fixed dictionary use
 current regression (the discarded arithmetic is not demanded). The corresponding
 retained images are 42,636 / 42,860 / 43,308 bytes, including source text.
 These are workload measurements, not resource
-guarantees: the CAS retains intermediate nodes in memory, dictionaries are
-flat, text is cloned, and charging is not a total host-resource quota.
+guarantees: uncollected reduction retains intermediate nodes in memory,
+dictionaries are flat, text is cloned, and charging is not a total host-resource quota.
 
 Independent review measured roughly 100 retained CAS nodes per source token
-on repeated square/call/drop workloads. The current store conflates persistent
-content with transient reduction states: discarding stack cells does not
-remove their nodes from this in-memory store. This is an architectural
-limitation of the reference implementation, not evidence of efficient runtime
-reclamation.
+on repeated square/call/drop workloads without collection. Persistent content
+and transient reduction states still share one store: discarding stack cells
+does not itself remove their nodes. Explicit-root collection now reclaims
+unreachable history between reductions; it is not immediate last-use freeing.
 
 An explicit-root checkpoint baseline runs the 64-call fixture in 16-token
 epochs, serializing and reloading only runner and state between epochs. It
@@ -189,7 +191,9 @@ produces the identical final state/image while reducing the store-node high
 water mark from 19,400 to 1,936, with 348 nodes retained after the last reload.
 Charged reduction steps rise from 56,326 to 62,074; serialization, parsing,
 hashing, and peak bytes during reload are additional unmeasured costs.
-This is a test/control strategy, not an automatic collector in the CLI or a
-decision to use arenas. Applications must enumerate **all** live roots before
-replacing a store. An incremental collector or distinct transient reduction
-storage remains a separate design decision.
+The checkpoint/reload path remains a test/control strategy. The CLI now uses
+in-memory `Store::collect` after each 64-token batch, without image codec work.
+The corresponding 16-token collection fixture peaks at 1,936 nodes and ends
+with 348, preserving the final image. Applications must enumerate **all** live
+roots; no arena or transient-storage architecture is implied. See
+`COLLECTION.md` for root obligations, metrics, and remaining limitations.

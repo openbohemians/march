@@ -55,3 +55,5 @@ the seed compiler lives in image graphs, both surfaces compile the same square,
 and source-defined parsing aliases work without changing the nucleus. B0d
 aligns inline and factored expression demand, with explicit observation at
 constant binding and successful EOF; pauses and images preserve pending work.
+[COLLECTION.md](COLLECTION.md) describes explicit-root reclamation for the CAS
+store; the CLI collects intermediate history between token batches.

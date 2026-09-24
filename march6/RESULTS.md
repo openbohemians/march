@@ -12,7 +12,7 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass. There are currently 199 unit, integration, generated, and
+All checks pass. There are currently 218 unit, integration, generated, and
 differential test cases, with none ignored.  One passing test performs 10,440
 generated staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses
 found by external review and whether they are fixed, narrowed, or still open.
@@ -99,8 +99,9 @@ and evaluates `7 square` to `49`. A FORTH-style seed produces the same code
 under the same reducer. Source-defined parsing aliases work in the same file.
 Nineteen seed tests exercise constants, compiled composition, explicit input
 wiring, static links across rebinding, context isolation, staged source, and
-every-token-boundary reload. Two CLI tests cover both surfaces and failure
-exit statuses. The seed tests also pass on a 256 KiB thread stack.
+every-token-boundary reload. Four CLI tests cover both surfaces, failure
+exit statuses, and collection/EOF boundaries. The seed tests also pass on a
+256 KiB thread stack.
 See `SEED.md` for runnable examples and measured fixed-dictionary costs.
 
 Seven independent seed tests additionally compare 60 generated programs under
@@ -115,6 +116,11 @@ quota/image boundaries, plus 216 generated inline/factored value-or-error
 comparisons across both surfaces. A post-reload sharing witness observes a 64-addition
 graph once versus sixteen times in 923 versus 1,508 charged steps. Sharing is
 per reduction run; reducer memo tables are not persisted in images.
+Six independent B0d tests also exercise repeated cut/name/replace within
+definition bodies and across composed calls, inverse inlining, replay at
+token boundaries, and identical-call demand sharing. No discrepancy was found
+in the tested integer/single-result subset. Constant construction is explicitly
+not the same transformation as extracting a callable quotation.
 The seed also rejects numeral definition names and excessive inferred arity
 without extending the nucleus.
 
@@ -129,8 +135,17 @@ The explicit-root checkpoint baseline now compares a 64-call run against
 16-token image/reload epochs: 19,400 uncollected nodes versus 1,936 peak nodes
 within an epoch and 348 retained nodes after final reload, with the same final
 image. Reduction steps increase from 56,326 to 62,074, excluding image codec
-cost. This establishes a reclamation control, not a production collector or
-bounded peak byte usage; the CLI still uses a single uncollected run.
+cost. This remains a checkpoint control, not a bound on peak byte usage.
+
+An in-memory explicit-root collector now marks structural reachability and
+sweeps obsolete nodes and validation metadata at safe points. Its 16-token
+version of the same fixture peaks at 1,936 nodes and ends with 348, preserving
+exact final image bytes without serialization/reload inside the loop. The CLI
+uses 64-token batches with a shared total reduction budget. Thirteen new tests
+cover collector invariants, host roots, deep graphs, staging and demand, image
+equivalence, CLI EOF boundaries, and driver fuel. This does not bound a single
+epoch's allocations or account for collection in reducer fuel; transient and
+persistent storage still share one map. See `COLLECTION.md`.
 
 Reflection tests round-trip 300 generated closed code values, mutate 400
 descriptions without a panic, sweep budgets, and compare original versus

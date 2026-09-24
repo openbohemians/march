@@ -321,6 +321,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(test)]
+mod seed_driver_tests {
+    use super::*;
+    use march_research::ReduceError;
+
+    fn setup(source: &str) -> (Store, Seed, Cid) {
+        let mut store = Store::new();
+        let seed = Seed::build(&mut store, Syntax::NameFirst);
+        let source = store.intern(Node::Const(Atom::Text(source.into())));
+        let state = seed.state(&mut store, source);
+        (store, seed, state)
+    }
+
+    #[test]
+    fn batched_driver_matches_direct_images_and_does_not_stop_at_last_token() {
+        for source in [
+            "",
+            "1 2 +",
+            "9223372036854775807 1 + drop 0",
+            "( 9223372036854775807 1 + )",
+        ] {
+            for batch in [1, 3, 64] {
+                let (mut store, seed, initial) = setup(source);
+                let direct = seed::resume(&mut store, seed.runner, initial, u32::MAX, 20_000_000)
+                    .unwrap()
+                    .root;
+                let expected = Image::from_store(&store, &[seed.runner, direct]).unwrap();
+                let (state, stats) =
+                    run_seed(&mut store, seed.runner, initial, batch, 20_000_000).unwrap();
+                assert_eq!(
+                    Image::from_store(&store, &[seed.runner, state]).unwrap(),
+                    expected
+                );
+                assert!(stats.collections > 0);
+            }
+        }
+    }
+
+    #[test]
+    fn batched_driver_rejects_zero_quota_and_preserves_the_total_work_limit() {
+        let (mut store, seed, initial) = setup(&"1 drop ".repeat(100));
+        assert!(run_seed(&mut store, seed.runner, initial, 0, 1000).is_err());
+        // Each individual token fits; the entire program doesn't. Resetting
+        // fuel every batch would incorrectly allow this run to succeed.
+        seed::resume(&mut store, seed.runner, initial, 1, 1000).unwrap();
+        let error = match run_seed(&mut store, seed.runner, initial, 1, 1000) {
+            Err(error) => error,
+            Ok(_) => panic!("driver reset fuel between epochs"),
+        };
+        assert!(matches!(
+            error.downcast_ref::<ReduceError>(),
+            Some(ReduceError::BudgetExhausted { .. })
+        ));
+    }
+}
+
 fn seed_field(store: &Store, record: Cid, field: &str) -> Result<Cid, Box<dyn std::error::Error>> {
     let Some(Node::Record(fields)) = store.get(record) else {
         return Err("seed returned an unresolved or malformed state".into());
@@ -332,18 +388,56 @@ fn seed_field(store: &Store, record: Cid, field: &str) -> Result<Cid, Box<dyn st
         .ok_or_else(|| format!("seed state lacks field {field}").into())
 }
 
+#[derive(Default)]
+struct SeedRunStats {
+    steps: usize,
+    collections: usize,
+    reclaimed: usize,
+    peak_nodes: usize,
+}
+
+// This adapter owns this store's live roots. It inspects reader status, never
+// source tokens. A positive-quota resume of this seed advances the cursor or
+// finishes EOF/error handling. A successful fixed point therefore certifies
+// EOF observation, unlike merely reaching the last token's byte position.
+fn run_seed(
+    store: &mut Store,
+    runner: Cid,
+    mut state: Cid,
+    token_batch: u32,
+    work: usize,
+) -> Result<(Cid, SeedRunStats), Box<dyn std::error::Error>> {
+    if token_batch == 0 {
+        return Err("seed token batch must be positive".into());
+    }
+    let mut stats = SeedRunStats::default();
+    loop {
+        let result = seed::resume(store, runner, state, token_batch, work - stats.steps)?;
+        stats.steps += result.stats.steps;
+        stats.peak_nodes = stats.peak_nodes.max(store.len());
+        let complete = result.root == state;
+        state = result.root;
+        let collection = store.collect(&[runner, state])?;
+        stats.collections += 1;
+        stats.reclaimed += collection.reclaimed;
+        let error = seed_field(store, state, "error")?;
+        if store.get(error) != Some(&Node::Const(Atom::Unit)) {
+            let token = seed_field(store, state, "token")?;
+            return Err(format!("{} near {}", store.format(error), store.format(token)).into());
+        }
+        if complete {
+            return Ok((state, stats));
+        }
+    }
+}
+
 fn evaluate_source(source: &str, syntax: Syntax) -> Result<(), Box<dyn std::error::Error>> {
     let mut store = Store::new();
     let seed = Seed::build(&mut store, syntax);
     let source = store.intern(Node::Const(Atom::Text(source.into())));
     let state = seed.state(&mut store, source);
-    let result = seed::resume(&mut store, seed.runner, state, u32::MAX, 20_000_000)?;
-    let error = seed_field(&store, result.root, "error")?;
-    if store.get(error) != Some(&Node::Const(Atom::Unit)) {
-        let token = seed_field(&store, result.root, "token")?;
-        return Err(format!("{} near {}", store.format(error), store.format(token)).into());
-    }
-    let mut stack = seed_field(&store, result.root, "stack")?;
+    let (state, stats) = run_seed(&mut store, seed.runner, state, 64, 20_000_000)?;
+    let mut stack = seed_field(&store, state, "stack")?;
     let mut rendered = Vec::new();
     while let Some(Node::Pair(cell, tail)) = store.get(stack) {
         let value = seed_field(&store, *cell, "value")?;
@@ -360,8 +454,15 @@ fn evaluate_source(source: &str, syntax: Syntax) -> Result<(), Box<dyn std::erro
     println!("stack (top first): [{}]", rendered.join(", "));
     println!(
         "image: {}",
-        Image::from_store(&store, &[seed.runner, result.root])?.cid()
+        Image::from_store(&store, &[seed.runner, state])?.cid()
     );
-    println!("reduction steps: {}", result.stats.steps);
+    println!("reduction steps: {}", stats.steps);
+    println!(
+        "collection: epochs={} reclaimed-nodes={} peak-store-nodes={} retained-nodes={}",
+        stats.collections,
+        stats.reclaimed,
+        stats.peak_nodes,
+        store.len()
+    );
     Ok(())
 }

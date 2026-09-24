@@ -235,9 +235,11 @@ gate or an implemented feature.
 It requires source-level record/code-description operations, general stack
 effects, recursion, and guarded state transformers. It should exercise the
 context-oriented model by expressing the compiler's own modes in March.
-Before broadening that surface, the strict-evaluation/lazy-quotation factoring
-counterexample in `MODEL.md` needs a demand-policy resolution and inline versus
-factored value/error comparisons.
+B0d aligns evaluation and quotation demand for the existing scalar subset:
+both build pending graphs, with observation at constant binding and successful
+EOF. Inline/factored value and overflow regressions cover the original
+counterexample; richer stack interfaces and source effects still require
+factoring evidence as they are added. See `SEED.md` and `MODEL.md`.
 The in-memory Store currently retains transient reduction history; explicit
 checkpoint/reload measurements in `SEED.md` provide a baseline while persistent
 dictionaries and transient-vs-persistent storage remain research questions.

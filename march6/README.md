@@ -52,4 +52,6 @@ operation interns only validated closed quotations and families.
 graph-defined reader resume tests. [SYNTAX.md](SYNTAX.md) fixes provisional
 name-first spellings. [SEED.md](SEED.md) describes the executable B0c subset:
 the seed compiler lives in image graphs, both surfaces compile the same square,
-and source-defined parsing aliases work without changing the nucleus.
+and source-defined parsing aliases work without changing the nucleus. B0d
+aligns inline and factored expression demand, with explicit observation at
+constant binding and successful EOF; pauses and images preserve pending work.

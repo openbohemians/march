@@ -1,4 +1,4 @@
-# B0c: an executable seed compiler
+# B0c/B0d: an executable, demand-driven seed compiler
 
 The working surface now runs. From `march6/`:
 
@@ -19,7 +19,7 @@ source text. Formatting is outside the generated quotation's identity.
 and a guarded reader loop. This is the initial seed's construction recipe.
 It never iterates over source tokens or interprets them in Rust. The host
 starts ordinary reduction and presents the returned state. No nucleus node,
-reducer rule, reflection schema, or image format changed for B0c.
+reducer rule, reflection schema, or image format changed for B0c or B0d.
 
 The reader, symbolic compiler, input-wire allocation, dictionary updates,
 and punctuation behavior all execute as those graphs. They are reachable
@@ -30,9 +30,10 @@ an invocation of a held runner, with explicit state and quota arguments.
 The dictionary contains tagged cells. Integers push data; quotations are
 called; handler families transform the explicit reader state. The initial
 handlers include `:`, `;`, `(`, `)`, `quote`, `dup`, `drop`, `swap`, `+`, and
-`*`. Arithmetic/shuffle handlers select construction or evaluation behavior
-from context. The `binder` field identifies name-first binding delimiters for
-lookahead; the handler families themselves decide which modes enable them.
+`*`. Arithmetic/shuffle handlers build expression graphs in both contexts;
+only compilation may infer missing input wires. The `binder` field identifies
+name-first binding delimiters for lookahead; the handler families themselves
+decide which modes enable them.
 
 ## State and compilation
 
@@ -40,24 +41,24 @@ The immutable state carries source text, byte cursor, dictionary, a top-first
 stack, mode, pending definition name, saved outer stacks, inferred input count,
 current token, and error. There is no ambient compiler state or lexical capture.
 
-In evaluation mode the stack contains tagged integer or held-code values.
-In quotation mode it contains ordinary reflection descriptions. Shuffles
-rearrange wires; arithmetic constructs description records. When a word needs
+Both modes use tagged expression cells holding ordinary reflection descriptions.
+Evaluation can also hold observed integers and dormant code/handler values.
+Shuffles rearrange wires; arithmetic constructs description records. When a word needs
 more inputs than the symbolic stack contains, a graph helper introduces
 explicit parameter wires beneath it. Parameter zero is the first input pulled
 from the caller's top of stack, followed by successively deeper inputs.
 Closing a quotation uses `Intern` to validate and seal the resulting code.
 
 For this slice quotations have one integer result and inferred input arity.
-Calling an existing word during compilation emits an application description
-holding its code, preserving static linkage. At evaluation time a graph helper
-constructs a closed application using reflection and invokes it. Dynamic
+Calling an existing word in either mode emits an application description
+holding its code, preserving static linkage. At observation time a graph helper
+constructs a closed expression using reflection and invokes it. Dynamic
 argument-list construction therefore uses the existing nucleus; no special
 host call dispatcher was added.
 
-A definition evaluates its expression on a fresh stack. `;` requires one
-value, binds it, and restores the outer stack. Parentheses start a separate
-symbolic stack; they do not capture prior runtime stack cells. A quotation can
+A definition builds its expression on a fresh stack. `;` requires one
+value, observes it, binds it, and restores the outer stack. Parentheses start a
+separate symbolic stack; they do not capture prior runtime stack cells. A quotation can
 run inside another definition's construction expression:
 
 ```text
@@ -68,15 +69,34 @@ answer
 
 This binds the integer `49`, not delayed code.
 
-There is an important semantic seam in this seed: its evaluation stack is
-strict, while quotation construction builds a demand-driven graph and erases
-discarded symbolic work. Thus `( 9223372036854775807 1 + drop 0 )` produces a
-quotation that returns `0`, while evaluating the body directly at top level
-overflows before reaching `drop`. A regression preserves this distinction.
-The current seed therefore violates the intended factoring invariant described
-in `MODEL.md` for failure behavior. Aligning those demand
-boundaries is a language-design question for the next slice, not evidence
-that the two contexts currently have identical operational behavior.
+## Demand boundaries (B0d)
+
+Arithmetic and word calls now build pending expressions in both evaluation
+and quotation contexts. `9223372036854775807 1 + drop 0` returns `0` both inline
+and extracted into a word. Dropping a pending call or an unused argument does
+not execute it. Demanding the overflowing result still reports `IntegerOverflow`.
+
+There are two observation boundaries in this seed:
+
+- `;` observes the single definition value. An integer constant is computed
+  now; a code/handler value remains dormant. The saved outer stack is untouched.
+- Successful EOF observes all remaining stack cells, top first. Code and
+  handler cells remain dormant here too.
+
+A token-quota pause, image snapshot/reload, or failed/incomplete reader does
+not observe pending expressions. Structural errors (underflow, unknown words,
+unsupported cell kinds, malformed definitions) remain immediate. Quotation
+construction still validates closed code even if the quotation will be dropped.
+This is demand alignment for well-formed integer, single-result fragments with
+the same explicit stack interface, not a claim about arbitrary malformed source
+or moving code across an observation boundary.
+
+Shared pending cells keep the same graph identity. The reference reducer memo
+shares their demand within a reduction run; it is not persisted between epochs.
+After reloading a pending 64-addition graph, observing one versus sixteen
+copies takes 923 versus 1,508 charged steps in the regression. This is a sharing
+witness, not a general complexity bound. No new source effects or surface
+guards are introduced by this change.
 
 ## Source-level parsing aliases
 
@@ -111,14 +131,17 @@ records, code descriptions, and handler composition.
   residual image. Seed/final identity is unaffected by unreachable store history.
 - Reader syntax/type/underflow failures are explicit error states. Nucleus
   failures, such as integer overflow or work exhaustion, remain `ReduceError`s.
+- Eleven B0d demand tests cover observation boundaries, dormant code, sharing,
+  and 216 inline/factored value-or-error comparisons across both surfaces.
 - Tests run on a 256 KiB native thread stack.
 
 Pausing uses a token quota over the **same complete source plus cursor**.
 Lookahead can inspect the next token without consuming it. This does not yet
 support appending chunks, pausing inside a token, or treating temporary input
 exhaustion as a request for more bytes. A quota that stops at the last token
-has not necessarily performed EOF validation; resume with additional quota to
-check completion. Failed reader states remain stopped on subsequent resume.
+has not performed EOF validation or final observation; resume with additional
+quota to check completion and observe results. Failed reader states remain
+stopped on subsequent resume.
 
 ## Deliberate limits
 
@@ -146,9 +169,10 @@ check completion. Failed reader states remain stopped on subsequent resume.
 - This is the CAS reference reducer. It does not expand the INet backend.
 
 The scaling gate remains open. Repeated calls with a fixed dictionary use
-16,277 / 30,197 / 58,012 charged steps for 16 / 32 / 64 calls in the current
-regression. The corresponding retained images are 41,643 / 41,867 / 42,315
-bytes, including source text. These are workload measurements, not resource
+15,887 / 29,375 / 56,326 charged steps for 16 / 32 / 64 call/drop pairs in the
+current regression (the discarded arithmetic is not demanded). The corresponding
+retained images are 42,636 / 42,860 / 43,308 bytes, including source text.
+These are workload measurements, not resource
 guarantees: the CAS retains intermediate nodes in memory, dictionaries are
 flat, text is cloned, and charging is not a total host-resource quota.
 
@@ -162,8 +186,8 @@ reclamation.
 An explicit-root checkpoint baseline runs the 64-call fixture in 16-token
 epochs, serializing and reloading only runner and state between epochs. It
 produces the identical final state/image while reducing the store-node high
-water mark from 19,766 to 1,962, with 337 nodes retained after the last reload.
-Charged reduction steps rise from 58,012 to 63,797; serialization, parsing,
+water mark from 19,400 to 1,936, with 348 nodes retained after the last reload.
+Charged reduction steps rise from 56,326 to 62,074; serialization, parsing,
 hashing, and peak bytes during reload are additional unmeasured costs.
 This is a test/control strategy, not an automatic collector in the CLI or a
 decision to use arenas. Applications must enumerate **all** live roots before

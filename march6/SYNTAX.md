@@ -18,6 +18,11 @@ quotation. Parentheses construct deferred code: they do not enforce a fixed
 compile/runtime boundary. A quotation can be invoked whenever its inputs are
 available, including during construction.
 
+Both top-level arithmetic and word calls build pending expressions. `;`
+observes the bound value; successful EOF observes the remaining stack. Quoted
+code stays dormant. Token-quota pauses and image snapshots do not force pending
+work. See `SEED.md` for this B0d demand contract and its current limits.
+
 Bare data names push their values; callable names invoke their code. Quotation
 construction uses a symbolic stack, with shuffles becoming graph wiring. The
 first equivalence target is that `square` has exactly the CID of the hand-built

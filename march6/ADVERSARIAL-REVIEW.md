@@ -147,15 +147,19 @@ passing test suite cannot quietly redefine the research question.
   reflection arity error. The input allocator now stops at 65,535 and
   propagates an explicit reader error. Near-limit state fixtures exercise
   primitives and compiled calls without requiring huge source inputs.
+- B0c's strict evaluation stack disagreed with lazy quotation construction on
+  discarded overflow. B0d now builds pending expressions in both contexts and
+  observes only at constant binding and successful EOF. Regression tests cover
+  demanded/discarded failures, unused arguments, pauses, image reload, and
+  shared demand. Code/handler values remain dormant at observation boundaries.
 
 ## Still open and high priority
 
-The seed's evaluation stack is strict; its symbolic quotation stack erases
-discarded computations. A discarded overflowing addition can therefore fail
-when interpreted but disappear when compiled inside a quotation. This seam is
-now explicit and tested. General source-fragment extraction preserving failure
-behavior needs a demand-policy decision; generated total integer comparisons
-do not prove that stronger property.
+General source-fragment extraction remains broader than the tested integer,
+single-result subset. Structural syntax/type/underflow errors remain immediate;
+richer stack effects, source effects, and surface guards require fresh
+value/error factoring tests when introduced. The original discarded-overflow
+counterexample is fixed without changing the nucleus.
 
 Seed review measured roughly 100 retained Store nodes per token in a repeated
 call/drop workload. Persistent CAS storage currently also holds every transient

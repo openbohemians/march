@@ -1,4 +1,4 @@
-//! B0c: a hand-assembled image, not a host parser/interpreter.
+//! B0c/B0d: a hand-assembled image, not a host parser/interpreter.
 //!
 //! Every operation below constructs a graph. Source tokens are consumed only
 //! by the resulting guarded families running through the ordinary reducer.
@@ -25,7 +25,9 @@ impl Seed {
         let execute = build_execute(&g, ensure, take);
         let open = build_open(&g);
         let close = build_close(&g);
-        let finish = build_finish(&g);
+        let observe = build_observe(&g);
+        let observe_stack = build_observe_stack(&g, observe);
+        let finish = build_finish(&g, observe);
         let colon = build_colon(&g, syntax);
         let semicolon = if syntax == Syntax::NameFirst {
             finish
@@ -59,7 +61,7 @@ impl Seed {
         }
         let dictionary = g.record(&words);
         let step = build_step(&g, execute, syntax);
-        let runner = build_runner(&g, step);
+        let runner = build_runner(&g, step, observe_stack);
         Self { runner, dictionary }
     }
 
@@ -83,6 +85,8 @@ impl Seed {
 }
 
 /// Resume using image roots alone. Does not build a seed or inspect source.
+/// A token-quota pause preserves pending expressions. Successful EOF observes
+/// the remaining stack; binding a definition observes its value at `;`.
 pub fn resume(
     store: &mut Store,
     runner: Cid,
@@ -233,6 +237,20 @@ impl Graph<'_> {
     fn integer(&self, value: Cid) -> Cid {
         self.cell("int", value, self.int(0), false)
     }
+    fn numeric(&self, cell: Cid) -> Cid {
+        self.choose(
+            self.is(self.get(cell, "kind"), "expr"),
+            self.yes(),
+            self.is(self.get(cell, "kind"), "int"),
+        )
+    }
+    fn description(&self, cell: Cid) -> Cid {
+        self.choose(
+            self.is(self.get(cell, "kind"), "expr"),
+            self.get(cell, "value"),
+            self.desc("int", &[("value", self.get(cell, "value"))]),
+        )
+    }
     fn push(&self, state: Cid, value: Cid) -> Cid {
         self.put(state, "stack", self.pair(value, self.get(state, "stack")))
     }
@@ -302,17 +320,12 @@ fn build_ensure(g: &Graph<'_>) -> Cid {
 fn build_take(g: &Graph<'_>) -> Cid {
     let stack = g.param(0);
     let needed = g.param(1);
-    let compile = g.param(2);
     let head = g.first(stack);
-    let tail = g.recur(&[g.second(stack), g.add(needed, g.int(-1)), compile]);
-    let description = g.choose(
-        compile,
-        g.get(head, "value"),
-        g.desc("int", &[("value", g.get(head, "value"))]),
-    );
-    let valid = g.choose(compile, g.yes(), g.is(g.get(head, "kind"), "int"));
+    let tail = g.recur(&[g.second(stack), g.add(needed, g.int(-1))]);
+    let description = g.description(head);
+    let valid = g.numeric(head);
     g.family(
-        3,
+        2,
         &[
             (
                 g.eq(needed, g.int(0)),
@@ -343,10 +356,7 @@ fn build_execute(g: &Graph<'_>, ensure: Cid, take: Cid) -> Cid {
             compile,
         ],
     );
-    let taken = g.call(
-        take,
-        &[g.get(prepared, "stack"), g.get(entry, "inputs"), compile],
-    );
+    let taken = g.call(take, &[g.get(prepared, "stack"), g.get(entry, "inputs")]);
     let application = g.desc(
         "apply",
         &[
@@ -357,11 +367,7 @@ fn build_execute(g: &Graph<'_>, ensure: Cid, take: Cid) -> Cid {
             ("arguments", g.get(taken, "arguments")),
         ],
     );
-    let value = g.node(Node::Apply {
-        function: g.closed(g.int(0), application),
-        arguments: vec![],
-    });
-    let cell = g.choose(compile, g.expression(application), g.integer(value));
+    let cell = g.expression(application);
     let applied = g.update(
         s,
         &[
@@ -379,11 +385,7 @@ fn build_execute(g: &Graph<'_>, ensure: Cid, take: Cid) -> Cid {
         applied,
         g.put(s, "error", g.get(prepared, "error")),
     );
-    let constant = g.choose(
-        compile,
-        g.expression(g.desc("int", &[("value", g.get(entry, "value"))])),
-        entry,
-    );
+    let constant = g.expression(g.desc("int", &[("value", g.get(entry, "value"))]));
     g.family(
         2,
         &[
@@ -425,24 +427,15 @@ fn build_primitive(g: &Graph<'_>, ensure: Cid, operation: &str) -> Cid {
         "drop" => (rest, g.yes()),
         "swap" => (g.pair(b, g.pair(a, tail)), g.yes()),
         "+" | "*" => {
-            let av = g.get(a, "value");
-            let bv = g.get(b, "value");
+            let av = g.description(a);
+            let bv = g.description(b);
             let description = g.desc(
                 if operation == "+" { "add" } else { "multiply" },
                 &[("left", bv), ("right", av)],
             );
-            let result = g.node(if operation == "+" {
-                Node::Add(bv, av)
-            } else {
-                Node::Mul(bv, av)
-            });
-            let cell = g.choose(compile, g.expression(description), g.integer(result));
-            let integers = g.choose(
-                g.is(g.get(a, "kind"), "int"),
-                g.is(g.get(b, "kind"), "int"),
-                g.no(),
-            );
-            (g.pair(cell, tail), g.choose(compile, g.yes(), integers))
+            let cell = g.expression(description);
+            let integers = g.choose(g.numeric(a), g.numeric(b), g.no());
+            (g.pair(cell, tail), integers)
         }
         _ => unreachable!("assembler primitive list"),
     };
@@ -527,13 +520,47 @@ fn build_close(g: &Graph<'_>) -> Cid {
     )
 }
 
-fn build_finish(g: &Graph<'_>) -> Cid {
+/// Only explicit observation executes an expression description. Code and
+/// parser handlers remain dormant values, even at an observation boundary.
+fn build_observe(g: &Graph<'_>) -> Cid {
+    let cell = g.param(0);
+    let value = g.node(Node::Apply {
+        function: g.closed(g.int(0), g.get(cell, "value")),
+        arguments: vec![],
+    });
+    g.family(
+        1,
+        &[
+            (g.is(g.get(cell, "kind"), "expr"), g.integer(value)),
+            (g.yes(), cell),
+        ],
+    )
+}
+
+fn build_observe_stack(g: &Graph<'_>, observe: Cid) -> Cid {
+    let stack = g.param(0);
+    g.family(
+        1,
+        &[
+            (g.eq(stack, g.unit()), g.unit()),
+            (
+                g.yes(),
+                g.pair(
+                    g.call(observe, &[g.first(stack)]),
+                    g.recur(&[g.second(stack)]),
+                ),
+            ),
+        ],
+    )
+}
+
+fn build_finish(g: &Graph<'_>, observe: Cid) -> Cid {
     let s = g.param(0);
     let stack = g.get(s, "stack");
     let dictionary = g.node(Node::PutKey {
         record: g.get(s, "dictionary"),
         key: g.get(s, "name"),
-        value: g.first(stack),
+        value: g.call(observe, &[g.first(stack)]),
     });
     let finished = g.update(
         s,
@@ -695,7 +722,7 @@ fn build_step(g: &Graph<'_>, execute: Cid, syntax: Syntax) -> Cid {
     )
 }
 
-fn build_runner(g: &Graph<'_>, step: Cid) -> Cid {
+fn build_runner(g: &Graph<'_>, step: Cid, observe_stack: Cid) -> Cid {
     let s = g.param(0);
     let quota = g.param(1);
     let next = g.next(s);
@@ -709,16 +736,15 @@ fn build_runner(g: &Graph<'_>, step: Cid) -> Cid {
     let progressed = g.call(step, &[advanced]);
     let again = g.recur(&[progressed, g.add(quota, g.int(-1))]);
     let eof = g.put(s, "position", g.get(next, "position"));
+    let observed = g.put(eof, "stack", g.call(observe_stack, &[g.get(s, "stack")]));
+    // Failed/incomplete readers and quota pauses must not observe pending work.
+    let incomplete = g.error(eof, "unfinished reader mode");
     let eof = g.choose(
         g.eq(g.get(s, "name"), g.unit()),
-        eof,
+        observed,
         g.error(eof, "unfinished definition"),
     );
-    let eof = g.choose(
-        g.mode(s, "eval"),
-        eof,
-        g.error(eof, "unfinished reader mode"),
-    );
+    let eof = g.choose(g.mode(s, "eval"), eof, incomplete);
     g.family(
         2,
         &[

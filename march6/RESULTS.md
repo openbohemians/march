@@ -12,7 +12,7 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass. There are currently 188 unit, integration, generated, and
+All checks pass. There are currently 199 unit, integration, generated, and
 differential test cases, with none ignored.  One passing test performs 10,440
 generated staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses
 found by external review and whether they are fixed, narrowed, or still open.
@@ -107,9 +107,14 @@ Seven independent seed tests additionally compare 60 generated programs under
 both surfaces with a test-side symbolic compiler and concrete stack evaluator,
 resume generated programs across token boundaries, exercise 300 random token
 sequences under both surfaces, test no implicit capture and scalar results,
-sweep work budgets, and report retained nodes per token. Error cases account
-for demand-driven erasure: the strict top-level stack and symbolic quotation
-stack do not yet preserve the same failure behavior for discarded computations.
+sweep work budgets, and report retained nodes per token. B0d now aligns
+top-level and quotation demand: both build pending expression graphs. Eleven
+additional demand tests cover discarded/demanded overflow, unused arguments,
+constant-binding isolation, dormant code, whole-stack EOF observation, and
+quota/image boundaries, plus 216 generated inline/factored value-or-error
+comparisons across both surfaces. A post-reload sharing witness observes a 64-addition
+graph once versus sixteen times in 923 versus 1,508 charged steps. Sharing is
+per reduction run; reducer memo tables are not persisted in images.
 The seed also rejects numeral definition names and excessive inferred arity
 without extending the nucleus.
 
@@ -121,9 +126,9 @@ scaling remain unproved. No INet or memory-planner capability changed here.
 Independent seed review identified persistent retention of transient compiler
 states (roughly 100 store nodes per source token in its repeated-call probes).
 The explicit-root checkpoint baseline now compares a 64-call run against
-16-token image/reload epochs: 19,766 uncollected nodes versus 1,962 peak nodes
-within an epoch and 337 retained nodes after final reload, with the same final
-image. Reduction steps increase from 58,012 to 63,797, excluding image codec
+16-token image/reload epochs: 19,400 uncollected nodes versus 1,936 peak nodes
+within an epoch and 348 retained nodes after final reload, with the same final
+image. Reduction steps increase from 56,326 to 62,074, excluding image codec
 cost. This establishes a reclamation control, not a production collector or
 bounded peak byte usage; the CLI still uses a single uncollected run.
 

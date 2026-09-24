@@ -435,17 +435,15 @@ fn input_arity_limit_is_reported_before_reflection() {
 }
 
 #[test]
-fn dead_symbolic_work_is_erased_but_the_evaluation_stack_is_strict() {
+fn dead_work_is_erased_in_both_inline_and_factored_code() {
     let (s, state) = evaluate(
         "dead : ( 9223372036854775807 1 + drop 0 ) ; dead",
         Syntax::NameFirst,
     );
     assert_eq!(s.get(value(&s, state)), Some(&Node::Const(Atom::Int(0))));
-    let (mut s, seed, state) = setup("9223372036854775807 1 + drop 0", Syntax::NameFirst);
-    assert_eq!(
-        resume(&mut s, seed.runner, state, 100, WORK),
-        Err(ReduceError::IntegerOverflow("add"))
-    );
+    let expected = value(&s, state);
+    let (s, state) = evaluate("9223372036854775807 1 + drop 0", Syntax::NameFirst);
+    assert_eq!(value(&s, state), expected);
 }
 
 #[test]

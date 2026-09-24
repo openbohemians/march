@@ -228,15 +228,19 @@ comparing only successful integer results is insufficient. Resource-budget
 exhaustion must be considered separately, with sufficient resources for both
 runs.
 
-The B0c seed currently violates this invariant at the interpretation boundary:
-`9223372036854775807 1 + drop 0` overflows at top level, but placing the same
-body in a quotation erases the unused addition and returns `0`. The evaluation
-stack is strict, whereas the symbolic stack builds a demand-driven graph.
-This is a characterized prototype limitation, not the intended final rule.
-A next semantic gate should compare inline versus factored programs for both
-values and error classes. Making evaluation build the same graph and demand
-it at explicit observation points is a candidate resolution consistent with
-the lazy model; it is not implemented by B0c.
+B0d resolves the B0c interpretation-boundary counterexample:
+`9223372036854775807 1 + drop 0` now returns `0` both inline and in a quotation.
+Both contexts build expression descriptions; evaluation observes them only
+when binding a constant or successfully completing source input. Pauses and
+image reloads do not observe them. Tests compare demanded and discarded errors,
+unused arguments, and sharing, not just total integer results. See `SEED.md`
+for the exact boundaries.
+
+This establishes the tested integer/single-result subset, not general fragment
+extraction with arbitrary stack effects. Structural errors remain immediate;
+moving a computation across a constant-binding or EOF observation is not an
+equivalent interface. Source effects, surface guards, and richer stack effects
+still need their own factoring evidence when exposed by the language.
 
 ### Self-hosting stages
 

@@ -1,5 +1,5 @@
 use march_research::reduce::ReduceError;
-use march_research::{Atom, Bindings, Clause, Image, Node, Reducer, Store};
+use march_research::{Atom, Bindings, Cid, Clause, Image, Node, Reducer, Store};
 
 fn int(store: &mut Store, value: i64) -> march_research::Cid {
     store.intern(Node::Const(Atom::Int(value)))
@@ -387,7 +387,162 @@ fn quotation_parameters_cannot_duplicate_effect_tokens() {
 }
 
 #[test]
-fn deep_recursion_fails_as_a_resource_error_before_host_stack_overflow() {
+fn recursive_arguments_cannot_duplicate_an_effect_token() {
+    let mut store = Store::new();
+    let truth = bool_(&mut store, true);
+    let parameter = store.intern(Node::Param(0));
+    let recur = store.intern(Node::Recur(vec![parameter, parameter]));
+    let family = store.intern(Node::Family {
+        parameters: 2,
+        clauses: vec![Clause {
+            guard: truth,
+            body: recur,
+        }],
+    });
+    let world = store.intern(Node::Const(Atom::Trace(Vec::new())));
+    let zero = int(&mut store, 0);
+    let call = store.intern(Node::Dispatch {
+        family,
+        arguments: vec![world, zero],
+    });
+
+    assert_eq!(
+        Reducer::new(&mut store, &Bindings::new()).run(call),
+        Err(ReduceError::LinearValueDuplicated(world)),
+    );
+}
+
+#[test]
+fn a_bound_effect_hole_cannot_be_duplicated_by_a_selected_body() {
+    let mut store = Store::new();
+    let truth = bool_(&mut store, true);
+    let parameter = store.intern(Node::Param(0));
+    let body = store.intern(Node::Pair(parameter, parameter));
+    let family = store.intern(Node::Family {
+        parameters: 1,
+        clauses: vec![Clause { guard: truth, body }],
+    });
+    let hole = store.intern(Node::Hole("world".into()));
+    let call = store.intern(Node::Dispatch {
+        family,
+        arguments: vec![hole],
+    });
+    let world = store.intern(Node::Const(Atom::Trace(Vec::new())));
+    let mut bindings = Bindings::new();
+    bindings.insert("world", world);
+
+    assert_eq!(
+        Reducer::new(&mut store, &bindings).run(call),
+        Err(ReduceError::LinearValueDuplicated(hole)),
+    );
+}
+
+fn fork_world_through_a_shared_container(store: &mut Store, world: Cid) -> Cid {
+    let one = int(store, 1);
+    let message_a = store.intern(Node::Const(Atom::Text("a".into())));
+    let message_b = store.intern(Node::Const(Atom::Text("b".into())));
+    let carried = store.intern(Node::Pair(world, one));
+    let shared = store.intern(Node::Pair(carried, carried));
+    let left_container = store.intern(Node::First(shared));
+    let right_container = store.intern(Node::Second(shared));
+    let left_world = store.intern(Node::First(left_container));
+    let right_world = store.intern(Node::First(right_container));
+    let emit_a = store.intern(Node::Emit {
+        token: left_world,
+        message: message_a,
+    });
+    let emit_b = store.intern(Node::Emit {
+        token: right_world,
+        message: message_b,
+    });
+    store.intern(Node::Pair(emit_a, emit_b))
+}
+
+#[test]
+fn a_world_inside_a_shared_root_container_cannot_be_forked() {
+    let mut store = Store::new();
+    let world = store.intern(Node::Const(Atom::Trace(Vec::new())));
+    let root = fork_world_through_a_shared_container(&mut store, world);
+
+    assert!(matches!(
+        Reducer::new(&mut store, &Bindings::new()).run(root),
+        Err(ReduceError::LinearValueDuplicated(_)),
+    ));
+}
+
+#[test]
+fn a_family_cannot_fork_a_world_through_a_shared_container() {
+    let mut store = Store::new();
+    let truth = bool_(&mut store, true);
+    let parameter = store.intern(Node::Param(0));
+    let body = fork_world_through_a_shared_container(&mut store, parameter);
+    let family = store.intern(Node::Family {
+        parameters: 1,
+        clauses: vec![Clause { guard: truth, body }],
+    });
+    let world = store.intern(Node::Const(Atom::Trace(Vec::new())));
+    let call = store.intern(Node::Dispatch {
+        family,
+        arguments: vec![world],
+    });
+
+    assert_eq!(
+        Reducer::new(&mut store, &Bindings::new()).run(call),
+        Err(ReduceError::LinearValueDuplicated(world)),
+    );
+}
+
+#[test]
+fn an_unbound_world_fork_is_rejected_in_the_residual_epoch() {
+    let mut store = Store::new();
+    let truth = bool_(&mut store, true);
+    let parameter = store.intern(Node::Param(0));
+    let body = fork_world_through_a_shared_container(&mut store, parameter);
+    let family = store.intern(Node::Family {
+        parameters: 1,
+        clauses: vec![Clause { guard: truth, body }],
+    });
+    let hole = store.intern(Node::Hole("world".into()));
+    let call = store.intern(Node::Dispatch {
+        family,
+        arguments: vec![hole],
+    });
+
+    assert_eq!(
+        Reducer::new(&mut store, &Bindings::new()).run(call),
+        Err(ReduceError::LinearValueDuplicated(hole)),
+    );
+}
+
+#[test]
+fn distinct_bindings_cannot_alias_one_effect_token() {
+    let mut store = Store::new();
+    let a = store.intern(Node::Hole("a".into()));
+    let b = store.intern(Node::Hole("b".into()));
+    let message_a = store.intern(Node::Const(Atom::Text("a".into())));
+    let message_b = store.intern(Node::Const(Atom::Text("b".into())));
+    let emit_a = store.intern(Node::Emit {
+        token: a,
+        message: message_a,
+    });
+    let emit_b = store.intern(Node::Emit {
+        token: b,
+        message: message_b,
+    });
+    let root = store.intern(Node::Pair(emit_a, emit_b));
+    let world = store.intern(Node::Const(Atom::Trace(Vec::new())));
+    let mut bindings = Bindings::new();
+    bindings.insert("a", world);
+    bindings.insert("b", world);
+
+    assert_eq!(
+        Reducer::new(&mut store, &bindings).run(root),
+        Err(ReduceError::LinearValueDuplicated(world)),
+    );
+}
+
+#[test]
+fn deep_recursion_completes_without_using_the_host_stack() {
     let mut store = Store::new();
     let workload = workload(&mut store);
     let truth = bool_(&mut store, true);
@@ -395,8 +550,53 @@ fn deep_recursion_fails_as_a_resource_error_before_host_stack_overflow() {
     let mut bindings = Bindings::new();
     bindings.insert("flag", truth);
     bindings.insert("n", thousand);
-    assert!(matches!(
-        Reducer::with_budget(&mut store, &bindings, usize::MAX).run(workload.root),
-        Err(ReduceError::DepthExhausted { .. })
-    ));
+    let reduced = Reducer::with_budget(&mut store, &bindings, usize::MAX)
+        .run(workload.root)
+        .unwrap();
+    assert_eq!(
+        store.get(reduced.root),
+        Some(&Node::Const(Atom::Int(1_001_042)))
+    );
+    assert!(reduced.stats.peak_frames > 64);
+}
+
+#[test]
+fn a_guard_forced_argument_is_shared_with_the_selected_residual_body() {
+    let mut store = Store::new();
+    let zero = int(&mut store, 0);
+    let one = int(&mut store, 1);
+    let negative_one = int(&mut store, -1);
+    let p0 = store.intern(Node::Param(0));
+    let p1 = store.intern(Node::Param(1));
+    let is_zero = store.intern(Node::Eq(p0, zero));
+    let body = store.intern(Node::If {
+        condition: p1,
+        when_true: p0,
+        when_false: zero,
+    });
+    let family = store.intern(Node::Family {
+        parameters: 2,
+        clauses: vec![Clause {
+            guard: is_zero,
+            body,
+        }],
+    });
+    let computed_zero = store.intern(Node::Add(one, negative_one));
+    let unknown = store.intern(Node::Hole("later".into()));
+    let call = store.intern(Node::Dispatch {
+        family,
+        arguments: vec![computed_zero, unknown],
+    });
+
+    let residual = Reducer::new(&mut store, &Bindings::new())
+        .run(call)
+        .unwrap();
+    assert_eq!(
+        store.get(residual.root),
+        Some(&Node::If {
+            condition: unknown,
+            when_true: zero,
+            when_false: zero,
+        })
+    );
 }

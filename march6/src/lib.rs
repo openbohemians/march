@@ -12,6 +12,5 @@ pub use cid::Cid;
 pub use image::{Image, ImageError};
 pub use net::{Atom, Bindings, Clause, Node, Store};
 pub use reduce::{
-    DEFAULT_HOST_DEPTH_LIMIT, DEFAULT_REDUCTION_BUDGET, Reducer, Reduction, Specialization,
-    SpecializationCache,
+    DEFAULT_REDUCTION_BUDGET, Reducer, Reduction, Specialization, SpecializationCache,
 };

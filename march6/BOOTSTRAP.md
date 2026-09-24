@@ -113,7 +113,7 @@ lazy quotations, closed code values, and canonical images.  The proposal:
 - **Names are outside object identity.**  A separate index maps names to CIDs
   (March 5).
 - **Tail-recursion-only is not needed.**  March 2 adopted it to avoid native
-  stack growth.  The planned work-list reducer removes that reason.
+  stack growth.  The implemented work-list reducer removes that reason.
 - **Context is explicit.**  Code values are closed; context crosses into code
   only as a parameter (March 6).
 
@@ -150,10 +150,11 @@ other word.  It needs only:
    descriptions as plain records plus one intern primitive, not
    quasi-quotation, but the choice is yours.  Interning must run the existing
    closed-code and guard-purity checks.
-4. A work-list reducer, or at least a configurable depth limit well above
-   the input length.  The outer interpreter recurses once per token, so
-   **B0 depends on the iterative reducer**.  Today's depth limit of 64 would
-   stop a 64-token source file.
+4. The implemented work-list reducer.  The outer interpreter recurses once per
+   token, so **B0 depends on stack-safe iteration**.  The R0 regressions now
+   cover 10,000 guarded calls, linear lazy-carried-state workloads, and
+   depth-20,000 structural traversals; an explicit work budget, rather than a
+   native-stack limit, bounds execution.
 
 ### Seed image (March)
 

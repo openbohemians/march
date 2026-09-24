@@ -9,6 +9,9 @@ pub struct ReductionStats {
     pub visited: usize,
     pub rewritten: usize,
     pub memo_hits: usize,
+    /// Maximum number of pending continuation/work frames in any iterative
+    /// reducer traversal during this run.
+    pub peak_frames: usize,
     /// Number of guarded bodies actually instantiated.  Unselected and
     /// unresolved clauses do not contribute.
     pub clauses_instantiated: usize,
@@ -94,7 +97,6 @@ pub enum ReduceError {
     IntegerOverflow(&'static str),
     LinearValueDuplicated(Cid),
     BudgetExhausted { limit: usize },
-    DepthExhausted { limit: usize },
     EmptyFamily,
     FamilyArity { expected: u16, actual: usize },
     NoMatchingClause,
@@ -127,12 +129,6 @@ impl fmt::Display for ReduceError {
             Self::BudgetExhausted { limit } => {
                 write!(f, "reduction exceeded its explicit {limit}-step budget")
             }
-            Self::DepthExhausted { limit } => {
-                write!(
-                    f,
-                    "reduction exceeded its explicit {limit}-frame host depth limit"
-                )
-            }
             Self::EmptyFamily => f.write_str("guarded definition family has no clauses"),
             Self::FamilyArity { expected, actual } => {
                 write!(
@@ -160,12 +156,14 @@ pub struct Reducer<'a> {
     store: &'a mut Store,
     bindings: &'a Bindings,
     memo: BTreeMap<Cid, Cid>,
+    ground_memo: BTreeMap<(Cid, bool), bool>,
+    strict_guard_parameters: BTreeMap<Cid, BTreeSet<u16>>,
+    linearity_summaries: BTreeMap<Cid, LinearitySummary>,
+    carries_linear: BTreeMap<Cid, Option<Cid>>,
     visiting: BTreeSet<Cid>,
     stats: ReductionStats,
     remaining_steps: usize,
     step_limit: usize,
-    depth: usize,
-    depth_limit: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -174,11 +172,100 @@ enum CodeScope {
     Quote { parameters: u16 },
 }
 
+#[derive(Clone, Copy, Debug)]
+enum BinaryFrameOp {
+    Add,
+    Mul,
+    Eq,
+    Pair,
+}
+
+#[derive(Clone, Debug, Default)]
+struct LinearitySummary {
+    parameter_uses: BTreeMap<u16, usize>,
+    token_parameters: BTreeSet<u16>,
+}
+
+#[derive(Debug)]
+enum EvalFrame {
+    Enter(Cid),
+    Return {
+        source: Cid,
+    },
+    Binary {
+        source: Cid,
+        operation: BinaryFrameOp,
+    },
+    If {
+        source: Cid,
+        when_true: Cid,
+        when_false: Cid,
+    },
+    First {
+        source: Cid,
+    },
+    Second {
+        source: Cid,
+    },
+    Record {
+        source: Cid,
+        names: Vec<String>,
+    },
+    Get {
+        source: Cid,
+        field: String,
+    },
+    Put {
+        source: Cid,
+        field: String,
+    },
+    Apply {
+        source: Cid,
+        arguments: Vec<Cid>,
+    },
+    Emit {
+        source: Cid,
+    },
+    DispatchFamily {
+        source: Cid,
+        arguments: Vec<Cid>,
+    },
+    DispatchNext {
+        source: Cid,
+        family: Cid,
+        arguments: Vec<Cid>,
+        clauses: Vec<Clause>,
+        index: usize,
+        demanded: BTreeSet<u16>,
+    },
+    DispatchGuard {
+        source: Cid,
+        family: Cid,
+        arguments: Vec<Cid>,
+        clauses: Vec<Clause>,
+        index: usize,
+        demanded: BTreeSet<u16>,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RewriteMode<'a> {
+    Substitute { arguments: &'a [Cid] },
+    FamilyBody { arguments: &'a [Cid], family: Cid },
+    Bindings,
+}
+
+#[derive(Debug)]
+enum RewriteFrame {
+    Enter(Cid),
+    Exit {
+        source: Cid,
+        node: Node,
+        children: usize,
+    },
+}
+
 pub const DEFAULT_REDUCTION_BUDGET: usize = 512;
-// This protects the current recursive Rust control implementation.  It is an
-// execution-resource limit, not March semantics; the planned work-list reducer
-// will remove the native-stack dependency.
-pub const DEFAULT_HOST_DEPTH_LIMIT: usize = 64;
 
 impl<'a> Reducer<'a> {
     pub fn new(store: &'a mut Store, bindings: &'a Bindings) -> Self {
@@ -190,18 +277,24 @@ impl<'a> Reducer<'a> {
             store,
             bindings,
             memo: BTreeMap::new(),
+            ground_memo: BTreeMap::new(),
+            strict_guard_parameters: BTreeMap::new(),
+            linearity_summaries: BTreeMap::new(),
+            carries_linear: BTreeMap::new(),
             visiting: BTreeSet::new(),
             stats: ReductionStats::default(),
             remaining_steps: step_limit,
             step_limit,
-            depth: 0,
-            depth_limit: DEFAULT_HOST_DEPTH_LIMIT,
         }
     }
 
     pub fn run(mut self, root: Cid) -> Result<Reduction, ReduceError> {
-        self.validate_linearity(root)?;
+        let mut linear_roots = Vec::with_capacity(self.bindings.0.len() + 1);
+        linear_roots.push(root);
+        linear_roots.extend(self.bindings.0.values().copied());
+        self.validate_linearity_roots(&linear_roots)?;
         let root = self.reduce(root)?;
+        self.validate_linearity_roots(&[root])?;
         Ok(Reduction {
             root,
             stats: self.stats,
@@ -249,138 +342,237 @@ impl<'a> Reducer<'a> {
         Ok(())
     }
 
-    fn enter_depth(&mut self) -> Result<(), ReduceError> {
-        if self.depth == self.depth_limit {
-            return Err(ReduceError::DepthExhausted {
-                limit: self.depth_limit,
-            });
-        }
-        self.depth += 1;
-        Ok(())
-    }
+    fn reduce(&mut self, root: Cid) -> Result<Cid, ReduceError> {
+        let mut frames = vec![EvalFrame::Enter(root)];
+        let mut values = Vec::new();
 
-    fn reduce(&mut self, cid: Cid) -> Result<Cid, ReduceError> {
-        self.enter_depth()?;
-        let result = self.reduce_inner(cid);
-        self.depth -= 1;
-        result
-    }
+        loop {
+            self.stats.peak_frames = self.stats.peak_frames.max(frames.len());
+            let Some(frame) = frames.pop() else {
+                break;
+            };
+            match frame {
+                EvalFrame::Enter(cid) => {
+                    if let Some(result) = self.memo.get(&cid).copied() {
+                        self.stats.memo_hits += 1;
+                        values.push(result);
+                        continue;
+                    }
 
-    fn reduce_inner(&mut self, cid: Cid) -> Result<Cid, ReduceError> {
-        if let Some(result) = self.memo.get(&cid) {
-            self.stats.memo_hits += 1;
-            return Ok(*result);
-        }
-        self.charge()?;
-        if !self.visiting.insert(cid) {
-            return Err(ReduceError::Cycle(cid));
-        }
-        self.stats.visited += 1;
-        let node = self
-            .store
-            .get(cid)
-            .cloned()
-            .ok_or(ReduceError::MissingNode(cid))?;
+                    self.charge()?;
+                    if !self.visiting.insert(cid) {
+                        return Err(ReduceError::Cycle(cid));
+                    }
+                    self.stats.visited += 1;
+                    let node = self
+                        .store
+                        .get(cid)
+                        .cloned()
+                        .ok_or(ReduceError::MissingNode(cid))?;
 
-        let result =
-            match node {
-                Node::Const(_) | Node::Param(_) => cid,
-                Node::Hole(name) => match self.bindings.get(&name) {
-                    Some(value) => self.reduce(value)?,
-                    None => cid,
-                },
-                Node::Add(a, b) => {
-                    let a = self.reduce(a)?;
-                    let b = self.reduce(b)?;
-                    match (self.store.get(a).cloned(), self.store.get(b).cloned()) {
-                        (Some(Node::Const(Atom::Int(a))), Some(Node::Const(Atom::Int(b)))) => {
-                            let value = a
-                                .checked_add(b)
-                                .ok_or(ReduceError::IntegerOverflow("add"))?;
-                            self.store.intern(Node::Const(Atom::Int(value)))
+                    match node {
+                        Node::Const(_) | Node::Param(_) => {
+                            self.finish_evaluation(cid, cid, &mut values);
                         }
-                        (left, right)
-                            if (left.as_ref().is_some_and(|node| {
-                                !matches!(node, Node::Const(Atom::Int(_)))
-                            }) && self.is_ground(a)?)
-                                || (right.as_ref().is_some_and(|node| {
+                        Node::Hole(name) => match self.bindings.get(&name) {
+                            Some(value) => {
+                                frames.push(EvalFrame::Return { source: cid });
+                                frames.push(EvalFrame::Enter(value));
+                            }
+                            None => self.finish_evaluation(cid, cid, &mut values),
+                        },
+                        Node::Add(left, right) => {
+                            Self::schedule_binary(&mut frames, cid, BinaryFrameOp::Add, left, right)
+                        }
+                        Node::Mul(left, right) => {
+                            Self::schedule_binary(&mut frames, cid, BinaryFrameOp::Mul, left, right)
+                        }
+                        Node::Eq(left, right) => {
+                            Self::schedule_binary(&mut frames, cid, BinaryFrameOp::Eq, left, right)
+                        }
+                        Node::If {
+                            condition,
+                            when_true,
+                            when_false,
+                        } => {
+                            frames.push(EvalFrame::If {
+                                source: cid,
+                                when_true,
+                                when_false,
+                            });
+                            frames.push(EvalFrame::Enter(condition));
+                        }
+                        Node::Pair(left, right) => Self::schedule_binary(
+                            &mut frames,
+                            cid,
+                            BinaryFrameOp::Pair,
+                            left,
+                            right,
+                        ),
+                        Node::First(pair) => {
+                            frames.push(EvalFrame::First { source: cid });
+                            frames.push(EvalFrame::Enter(pair));
+                        }
+                        Node::Second(pair) => {
+                            frames.push(EvalFrame::Second { source: cid });
+                            frames.push(EvalFrame::Enter(pair));
+                        }
+                        Node::Record(fields) => {
+                            let (names, children): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
+                            frames.push(EvalFrame::Record { source: cid, names });
+                            for child in children.into_iter().rev() {
+                                frames.push(EvalFrame::Enter(child));
+                            }
+                        }
+                        Node::Get { record, field } => {
+                            frames.push(EvalFrame::Get { source: cid, field });
+                            frames.push(EvalFrame::Enter(record));
+                        }
+                        Node::Put {
+                            record,
+                            field,
+                            value,
+                        } => {
+                            frames.push(EvalFrame::Put { source: cid, field });
+                            frames.push(EvalFrame::Enter(value));
+                            frames.push(EvalFrame::Enter(record));
+                        }
+                        Node::Quote { .. } => {
+                            self.validate_code_value(cid)?;
+                            self.finish_evaluation(cid, cid, &mut values);
+                        }
+                        Node::Apply {
+                            function,
+                            arguments,
+                        } => {
+                            frames.push(EvalFrame::Apply {
+                                source: cid,
+                                arguments,
+                            });
+                            frames.push(EvalFrame::Enter(function));
+                        }
+                        Node::Emit { token, message } => {
+                            frames.push(EvalFrame::Emit { source: cid });
+                            frames.push(EvalFrame::Enter(message));
+                            frames.push(EvalFrame::Enter(token));
+                        }
+                        Node::Family { .. } => {
+                            self.validate_code_value(cid)?;
+                            self.finish_evaluation(cid, cid, &mut values);
+                        }
+                        Node::Dispatch { family, arguments } => {
+                            frames.push(EvalFrame::DispatchFamily {
+                                source: cid,
+                                arguments,
+                            });
+                            frames.push(EvalFrame::Enter(family));
+                        }
+                        Node::Recur(_) => return Err(ReduceError::UnboundRecursion),
+                    }
+                }
+                EvalFrame::Return { source } => {
+                    let result = Self::pop_value(&mut values);
+                    self.finish_evaluation(source, result, &mut values);
+                }
+                EvalFrame::Binary { source, operation } => {
+                    let right = Self::pop_value(&mut values);
+                    let left = Self::pop_value(&mut values);
+                    let result = match operation {
+                        BinaryFrameOp::Add => match (
+                            self.store.get(left).cloned(),
+                            self.store.get(right).cloned(),
+                        ) {
+                            (
+                                Some(Node::Const(Atom::Int(left))),
+                                Some(Node::Const(Atom::Int(right))),
+                            ) => {
+                                let value = left
+                                    .checked_add(right)
+                                    .ok_or(ReduceError::IntegerOverflow("add"))?;
+                                self.store.intern(Node::Const(Atom::Int(value)))
+                            }
+                            (left_node, right_node)
+                                if (left_node.as_ref().is_some_and(|node| {
                                     !matches!(node, Node::Const(Atom::Int(_)))
-                                }) && self.is_ground(b)?) =>
-                        {
-                            return Err(ReduceError::Type("add expects two integers"));
-                        }
-                        _ => self.store.intern(Node::Add(a, b)),
-                    }
-                }
-                Node::Mul(a, b) => {
-                    let a = self.reduce(a)?;
-                    let b = self.reduce(b)?;
-                    match (self.store.get(a).cloned(), self.store.get(b).cloned()) {
-                        (Some(Node::Const(Atom::Int(a))), Some(Node::Const(Atom::Int(b)))) => {
-                            let value = a
-                                .checked_mul(b)
-                                .ok_or(ReduceError::IntegerOverflow("multiply"))?;
-                            self.store.intern(Node::Const(Atom::Int(value)))
-                        }
-                        (left, right)
-                            if (left.as_ref().is_some_and(|node| {
-                                !matches!(node, Node::Const(Atom::Int(_)))
-                            }) && self.is_ground(a)?)
-                                || (right.as_ref().is_some_and(|node| {
+                                }) && self.is_ground(left)?)
+                                    || (right_node.as_ref().is_some_and(|node| {
+                                        !matches!(node, Node::Const(Atom::Int(_)))
+                                    }) && self.is_ground(right)?) =>
+                            {
+                                return Err(ReduceError::Type("add expects two integers"));
+                            }
+                            _ => self.store.intern(Node::Add(left, right)),
+                        },
+                        BinaryFrameOp::Mul => match (
+                            self.store.get(left).cloned(),
+                            self.store.get(right).cloned(),
+                        ) {
+                            (
+                                Some(Node::Const(Atom::Int(left))),
+                                Some(Node::Const(Atom::Int(right))),
+                            ) => {
+                                let value = left
+                                    .checked_mul(right)
+                                    .ok_or(ReduceError::IntegerOverflow("multiply"))?;
+                                self.store.intern(Node::Const(Atom::Int(value)))
+                            }
+                            (left_node, right_node)
+                                if (left_node.as_ref().is_some_and(|node| {
                                     !matches!(node, Node::Const(Atom::Int(_)))
-                                }) && self.is_ground(b)?) =>
-                        {
-                            return Err(ReduceError::Type("multiply expects two integers"));
+                                }) && self.is_ground(left)?)
+                                    || (right_node.as_ref().is_some_and(|node| {
+                                        !matches!(node, Node::Const(Atom::Int(_)))
+                                    }) && self.is_ground(right)?) =>
+                            {
+                                return Err(ReduceError::Type("multiply expects two integers"));
+                            }
+                            _ => self.store.intern(Node::Mul(left, right)),
+                        },
+                        BinaryFrameOp::Eq => {
+                            if self.is_ground(left)? && self.is_ground(right)? {
+                                self.store.intern(Node::Const(Atom::Bool(left == right)))
+                            } else {
+                                self.store.intern(Node::Eq(left, right))
+                            }
                         }
-                        _ => self.store.intern(Node::Mul(a, b)),
-                    }
+                        BinaryFrameOp::Pair => self.store.intern(Node::Pair(left, right)),
+                    };
+                    self.finish_evaluation(source, result, &mut values);
                 }
-                Node::Eq(a, b) => {
-                    let a = self.reduce(a)?;
-                    let b = self.reduce(b)?;
-                    if self.is_ground(a)? && self.is_ground(b)? {
-                        self.store.intern(Node::Const(Atom::Bool(a == b)))
-                    } else {
-                        self.store.intern(Node::Eq(a, b))
-                    }
-                }
-                Node::If {
-                    condition,
+                EvalFrame::If {
+                    source,
                     when_true,
                     when_false,
                 } => {
-                    let condition = self.reduce(condition)?;
-                    match self.store.get(condition) {
-                        Some(Node::Const(Atom::Bool(true))) => self.reduce(when_true)?,
-                        Some(Node::Const(Atom::Bool(false))) => self.reduce(when_false)?,
+                    let condition = Self::pop_value(&mut values);
+                    match self.store.get(condition).cloned() {
+                        Some(Node::Const(Atom::Bool(true))) => {
+                            frames.push(EvalFrame::Return { source });
+                            frames.push(EvalFrame::Enter(when_true));
+                        }
+                        Some(Node::Const(Atom::Bool(false))) => {
+                            frames.push(EvalFrame::Return { source });
+                            frames.push(EvalFrame::Enter(when_false));
+                        }
                         Some(Node::Const(_)) => {
                             return Err(ReduceError::Type("if condition is not a boolean"));
                         }
-                        // Branches are lazy.  Reducing them before the condition
-                        // is known can surface an error or divergence that direct
-                        // execution would never observe.  Static bindings still
-                        // have to be embedded so the residual is closed over the
-                        // compile context.
                         _ => {
                             let mut memo = BTreeMap::new();
                             let when_true = self.instantiate_bindings(when_true, &mut memo)?;
                             let when_false = self.instantiate_bindings(when_false, &mut memo)?;
-                            self.store.intern(Node::If {
+                            let result = self.store.intern(Node::If {
                                 condition,
                                 when_true,
                                 when_false,
-                            })
+                            });
+                            self.finish_evaluation(source, result, &mut values);
                         }
                     }
                 }
-                Node::Pair(a, b) => {
-                    let a = self.reduce(a)?;
-                    let b = self.reduce(b)?;
-                    self.store.intern(Node::Pair(a, b))
-                }
-                Node::First(pair) => {
-                    let pair = self.reduce(pair)?;
-                    match self.store.get(pair).cloned() {
+                EvalFrame::First { source } => {
+                    let pair = Self::pop_value(&mut values);
+                    let result = match self.store.get(pair).cloned() {
                         Some(Node::Pair(first, _)) => first,
                         Some(Node::Const(_)) => {
                             return Err(ReduceError::Type("first operand is not a pair"));
@@ -389,11 +581,12 @@ impl<'a> Reducer<'a> {
                             return Err(ReduceError::Type("first operand is not a pair"));
                         }
                         _ => self.store.intern(Node::First(pair)),
-                    }
+                    };
+                    self.finish_evaluation(source, result, &mut values);
                 }
-                Node::Second(pair) => {
-                    let pair = self.reduce(pair)?;
-                    match self.store.get(pair).cloned() {
+                EvalFrame::Second { source } => {
+                    let pair = Self::pop_value(&mut values);
+                    let result = match self.store.get(pair).cloned() {
                         Some(Node::Pair(_, second)) => second,
                         Some(Node::Const(_)) => {
                             return Err(ReduceError::Type("second operand is not a pair"));
@@ -402,18 +595,23 @@ impl<'a> Reducer<'a> {
                             return Err(ReduceError::Type("second operand is not a pair"));
                         }
                         _ => self.store.intern(Node::Second(pair)),
-                    }
+                    };
+                    self.finish_evaluation(source, result, &mut values);
                 }
-                Node::Record(fields) => {
-                    let fields = fields
-                        .into_iter()
-                        .map(|(name, value)| Ok((name, self.reduce(value)?)))
-                        .collect::<Result<Vec<_>, ReduceError>>()?;
-                    self.store.intern(Node::Record(fields))
+                EvalFrame::Record { source, names } => {
+                    let first = values
+                        .len()
+                        .checked_sub(names.len())
+                        .expect("record evaluation values");
+                    let children = values.split_off(first);
+                    let result = self
+                        .store
+                        .intern(Node::Record(names.into_iter().zip(children).collect()));
+                    self.finish_evaluation(source, result, &mut values);
                 }
-                Node::Get { record, field } => {
-                    let record = self.reduce(record)?;
-                    match self.store.get(record).cloned() {
+                EvalFrame::Get { source, field } => {
+                    let record = Self::pop_value(&mut values);
+                    let result = match self.store.get(record).cloned() {
                         Some(Node::Record(fields)) => fields
                             .into_iter()
                             .find(|(name, _)| name == &field)
@@ -426,16 +624,13 @@ impl<'a> Reducer<'a> {
                             return Err(ReduceError::Type("get operand is not a record"));
                         }
                         _ => self.store.intern(Node::Get { record, field }),
-                    }
+                    };
+                    self.finish_evaluation(source, result, &mut values);
                 }
-                Node::Put {
-                    record,
-                    field,
-                    value,
-                } => {
-                    let record = self.reduce(record)?;
-                    let value = self.reduce(value)?;
-                    match self.store.get(record).cloned() {
+                EvalFrame::Put { source, field } => {
+                    let value = Self::pop_value(&mut values);
+                    let record = Self::pop_value(&mut values);
+                    let result = match self.store.get(record).cloned() {
                         Some(Node::Record(mut fields)) => {
                             match fields.iter_mut().find(|(name, _)| name == &field) {
                                 Some((_, old)) => *old = value,
@@ -454,22 +649,11 @@ impl<'a> Reducer<'a> {
                             field,
                             value,
                         }),
-                    }
+                    };
+                    self.finish_evaluation(source, result, &mut values);
                 }
-                // A quotation is code-as-data and therefore already in weak
-                // normal form.  Its body is demanded only by application.
-                Node::Quote { .. } => {
-                    self.validate_code_value(cid)?;
-                    cid
-                }
-                Node::Apply {
-                    function,
-                    arguments,
-                } => {
-                    let function = self.reduce(function)?;
-                    // Arguments are passed as graph references.  Capture facts
-                    // from this epoch without evaluating an argument that the
-                    // quotation may never use.
+                EvalFrame::Apply { source, arguments } => {
+                    let function = Self::pop_value(&mut values);
                     let mut binding_memo = BTreeMap::new();
                     let arguments = arguments
                         .into_iter()
@@ -483,23 +667,27 @@ impl<'a> Reducer<'a> {
                                     actual: arguments.len(),
                                 });
                             }
+                            self.validate_instantiation_linearity(body, &arguments)?;
                             let body = self.substitute(body, &arguments, &mut BTreeMap::new())?;
-                            self.validate_linearity(body)?;
-                            self.reduce(body)?
+                            frames.push(EvalFrame::Return { source });
+                            frames.push(EvalFrame::Enter(body));
                         }
                         _ if self.is_ground(function)? => {
                             return Err(ReduceError::Type("apply operand is not a quotation"));
                         }
-                        _ => self.store.intern(Node::Apply {
-                            function,
-                            arguments,
-                        }),
+                        _ => {
+                            let result = self.store.intern(Node::Apply {
+                                function,
+                                arguments,
+                            });
+                            self.finish_evaluation(source, result, &mut values);
+                        }
                     }
                 }
-                Node::Emit { token, message } => {
-                    let token = self.reduce(token)?;
-                    let message = self.reduce(message)?;
-                    match (
+                EvalFrame::Emit { source } => {
+                    let message = Self::pop_value(&mut values);
+                    let token = Self::pop_value(&mut values);
+                    let result = match (
                         self.store.get(token).cloned(),
                         self.store.get(message).cloned(),
                     ) {
@@ -516,83 +704,429 @@ impl<'a> Reducer<'a> {
                             ));
                         }
                         _ => self.store.intern(Node::Emit { token, message }),
+                    };
+                    self.finish_evaluation(source, result, &mut values);
+                }
+                EvalFrame::DispatchFamily { source, arguments } => {
+                    let family = Self::pop_value(&mut values);
+                    let node = self
+                        .store
+                        .get(family)
+                        .cloned()
+                        .ok_or(ReduceError::MissingNode(family))?;
+                    match node {
+                        Node::Family {
+                            parameters,
+                            clauses,
+                        } => {
+                            if clauses.is_empty() {
+                                return Err(ReduceError::EmptyFamily);
+                            }
+                            if usize::from(parameters) != arguments.len() {
+                                return Err(ReduceError::FamilyArity {
+                                    expected: parameters,
+                                    actual: arguments.len(),
+                                });
+                            }
+                            frames.push(EvalFrame::DispatchNext {
+                                source,
+                                family,
+                                arguments,
+                                clauses,
+                                index: 0,
+                                demanded: BTreeSet::new(),
+                            });
+                        }
+                        _ if self.is_ground(family)? => {
+                            return Err(ReduceError::Type(
+                                "dispatch target is not a guarded definition family",
+                            ));
+                        }
+                        _ => {
+                            let result = self.residual_dispatch(family, &arguments)?;
+                            self.finish_evaluation(source, result, &mut values);
+                        }
                     }
                 }
-                Node::Family { .. } => {
-                    self.validate_code_value(cid)?;
-                    cid
-                }
-                Node::Dispatch {
+                EvalFrame::DispatchNext {
+                    source,
                     family,
-                    mut arguments,
-                } => self.reduce_dispatch(family, &mut arguments)?,
-                Node::Recur(_) => return Err(ReduceError::UnboundRecursion),
-            };
-
-        self.visiting.remove(&cid);
-        if result != cid {
-            self.stats.rewritten += 1;
+                    arguments,
+                    clauses,
+                    index,
+                    mut demanded,
+                } => {
+                    let Some(clause) = clauses.get(index).cloned() else {
+                        return Err(ReduceError::NoMatchingClause);
+                    };
+                    demanded.extend(self.strict_guard_parameters(clause.guard)?);
+                    let guard = self.substitute(clause.guard, &arguments, &mut BTreeMap::new())?;
+                    frames.push(EvalFrame::DispatchGuard {
+                        source,
+                        family,
+                        arguments,
+                        clauses,
+                        index,
+                        demanded,
+                    });
+                    frames.push(EvalFrame::Enter(guard));
+                }
+                EvalFrame::DispatchGuard {
+                    source,
+                    family,
+                    arguments,
+                    clauses,
+                    index,
+                    demanded,
+                } => {
+                    let guard = Self::pop_value(&mut values);
+                    match self.store.get(guard).cloned() {
+                        Some(Node::Const(Atom::Bool(false))) => {
+                            frames.push(EvalFrame::DispatchNext {
+                                source,
+                                family,
+                                arguments,
+                                clauses,
+                                index: index + 1,
+                                demanded,
+                            });
+                        }
+                        Some(Node::Const(Atom::Bool(true))) => {
+                            self.stats.clauses_instantiated += 1;
+                            let body = clauses.get(index).expect("guarded clause index").body;
+                            // Share only reductions demanded in strict positions of the
+                            // guards actually evaluated.  This is independent of unrelated
+                            // memo-table history, while undemanded arguments remain lazy.
+                            let arguments = arguments
+                                .into_iter()
+                                .enumerate()
+                                .map(|(index, argument)| {
+                                    let index = u16::try_from(index)
+                                        .expect("family arity was represented by u16");
+                                    if demanded.contains(&index) {
+                                        self.memo.get(&argument).copied().unwrap_or(argument)
+                                    } else {
+                                        argument
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            self.validate_instantiation_linearity(body, &arguments)?;
+                            let selected = self.substitute_family_body(
+                                body,
+                                &arguments,
+                                family,
+                                &mut BTreeMap::new(),
+                            )?;
+                            frames.push(EvalFrame::Return { source });
+                            frames.push(EvalFrame::Enter(selected));
+                        }
+                        Some(Node::Const(_)) => {
+                            return Err(ReduceError::Type(
+                                "guarded-family guard did not produce a boolean",
+                            ));
+                        }
+                        _ if self.is_ground(guard)? => {
+                            return Err(ReduceError::Type(
+                                "guarded-family guard did not produce a boolean",
+                            ));
+                        }
+                        _ => {
+                            let result = self.residual_dispatch(family, &arguments)?;
+                            self.finish_evaluation(source, result, &mut values);
+                        }
+                    }
+                }
+            }
         }
-        self.memo.insert(cid, result);
-        Ok(result)
+
+        assert_eq!(values.len(), 1, "iterative reducer value-stack imbalance");
+        Ok(values.pop().expect("root reduction result"))
     }
 
-    fn reduce_dispatch(&mut self, family: Cid, arguments: &mut [Cid]) -> Result<Cid, ReduceError> {
-        let family = self.reduce(family)?;
-        let Some(node) = self.store.get(family).cloned() else {
-            return Err(ReduceError::MissingNode(family));
-        };
-        let Node::Family {
-            parameters,
-            clauses,
-        } = node
-        else {
-            if self.is_ground(family)? {
-                return Err(ReduceError::Type(
-                    "dispatch target is not a guarded definition family",
-                ));
-            }
-            return self.residual_dispatch(family, arguments);
-        };
-        if clauses.is_empty() {
-            return Err(ReduceError::EmptyFamily);
+    fn schedule_binary(
+        frames: &mut Vec<EvalFrame>,
+        source: Cid,
+        operation: BinaryFrameOp,
+        left: Cid,
+        right: Cid,
+    ) {
+        frames.push(EvalFrame::Binary { source, operation });
+        frames.push(EvalFrame::Enter(right));
+        frames.push(EvalFrame::Enter(left));
+    }
+
+    fn pop_value(values: &mut Vec<Cid>) -> Cid {
+        values.pop().expect("evaluation frame value")
+    }
+
+    fn finish_evaluation(&mut self, source: Cid, result: Cid, values: &mut Vec<Cid>) {
+        let removed = self.visiting.remove(&source);
+        debug_assert!(removed, "finished node was not marked active");
+        if result != source {
+            self.stats.rewritten += 1;
         }
-        if usize::from(parameters) != arguments.len() {
-            return Err(ReduceError::FamilyArity {
-                expected: parameters,
-                actual: arguments.len(),
-            });
+        self.memo.insert(source, result);
+        values.push(result);
+    }
+
+    /// Parameters in these positions are demanded on every successful path
+    /// through this guard.  Branch bodies stay non-strict even when a
+    /// particular evaluation happens to select one of them; this keeps body
+    /// normalization independent of unrelated memo-table history.
+    fn strict_guard_parameters(&mut self, root: Cid) -> Result<BTreeSet<u16>, ReduceError> {
+        if let Some(parameters) = self.strict_guard_parameters.get(&root) {
+            return Ok(parameters.clone());
         }
 
-        for Clause { guard, body } in clauses {
-            // Guard expressions are closed templates over the family
-            // parameters.  Instantiating a guard never touches its body or
-            // any later clause.
-            let guard = self.substitute(guard, arguments, &mut BTreeMap::new())?;
-            let guard = self.reduce(guard)?;
-            match self.store.get(guard).cloned() {
-                Some(Node::Const(Atom::Bool(false))) => continue,
-                Some(Node::Const(Atom::Bool(true))) => {
-                    self.stats.clauses_instantiated += 1;
-                    let selected =
-                        self.substitute_family_body(body, arguments, family, &mut BTreeMap::new())?;
-                    self.validate_linearity(selected)?;
-                    return self.reduce(selected);
+        let mut parameters = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let mut pending = vec![root];
+        while let Some(cid) = pending.pop() {
+            if !seen.insert(cid) {
+                continue;
+            }
+            self.charge()?;
+            let node = self
+                .store
+                .get(cid)
+                .cloned()
+                .ok_or(ReduceError::MissingNode(cid))?;
+            match node {
+                Node::Param(index) => {
+                    parameters.insert(index);
                 }
-                Some(Node::Const(_)) => {
-                    return Err(ReduceError::Type(
-                        "guarded-family guard did not produce a boolean",
-                    ));
+                Node::If { condition, .. } => pending.push(condition),
+                Node::Const(_) | Node::Hole(_) => {}
+                // Guard validation rejects these cases before dispatch.  Keep
+                // them as boundaries here so this analysis cannot accidentally
+                // make dormant code strict if validation is reordered later.
+                Node::Quote { .. } | Node::Family { .. } => {}
+                other => {
+                    let children = other.children();
+                    pending.extend(children.into_iter().rev());
                 }
-                _ if self.is_ground(guard)? => {
-                    return Err(ReduceError::Type(
-                        "guarded-family guard did not produce a boolean",
-                    ));
-                }
-                _ => return self.residual_dispatch(family, arguments),
             }
         }
-        Err(ReduceError::NoMatchingClause)
+        self.strict_guard_parameters
+            .insert(root, parameters.clone());
+        Ok(parameters)
+    }
+
+    /// Check only the new aliasing introduced by substituting arguments into a
+    /// previously validated code template.  The template summary and the
+    /// "contains a linear value" property are immutable CID facts cached for
+    /// this run, so a loop carrying a growing lazy accumulator does not rescan
+    /// its entire history at every call.
+    fn validate_instantiation_linearity(
+        &mut self,
+        template: Cid,
+        arguments: &[Cid],
+    ) -> Result<(), ReduceError> {
+        let summary = self.linearity_summary(template)?;
+        let mut argument_uses = BTreeMap::<Cid, (usize, bool)>::new();
+        for (index, uses) in summary.parameter_uses {
+            let argument = arguments.get(usize::from(index)).copied().ok_or(
+                ReduceError::ParameterOutOfRange {
+                    index,
+                    arguments: arguments.len(),
+                },
+            )?;
+            let entry = argument_uses.entry(argument).or_default();
+            entry.0 = entry.0.saturating_add(uses);
+            entry.1 |= summary.token_parameters.contains(&index);
+        }
+
+        for (argument, (uses, used_as_token)) in argument_uses {
+            if uses <= 1 {
+                continue;
+            }
+            if used_as_token {
+                return Err(ReduceError::LinearValueDuplicated(argument));
+            }
+            if self.first_linear_descendant(argument)?.is_some() {
+                return Err(ReduceError::LinearValueDuplicated(argument));
+            }
+        }
+        Ok(())
+    }
+
+    fn linearity_summary(&mut self, root: Cid) -> Result<LinearitySummary, ReduceError> {
+        if let Some(summary) = self.linearity_summaries.get(&root) {
+            return Ok(summary.clone());
+        }
+
+        let mut reachable = BTreeSet::new();
+        let mut incoming = BTreeMap::<Cid, usize>::new();
+        let mut nodes = BTreeMap::<Cid, Node>::new();
+        let mut pending = vec![root];
+        while let Some(cid) = pending.pop() {
+            if !reachable.insert(cid) {
+                continue;
+            }
+            self.charge()?;
+            let node = self
+                .store
+                .get(cid)
+                .cloned()
+                .ok_or(ReduceError::MissingNode(cid))?;
+            let children = match &node {
+                Node::Quote { .. } | Node::Family { .. } => Vec::new(),
+                _ => node.children(),
+            };
+            for child in children.into_iter().rev() {
+                *incoming.entry(child).or_default() += 1;
+                pending.push(child);
+            }
+            nodes.insert(cid, node);
+        }
+
+        let mut linear = nodes
+            .iter()
+            .filter_map(|(cid, node)| match node {
+                Node::Const(Atom::Trace(_)) | Node::Emit { .. } => Some(*cid),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        let mut summary = LinearitySummary::default();
+        for node in nodes.values() {
+            if let Node::Emit { token, .. } = node {
+                linear.insert(*token);
+                if let Some(Node::Param(index)) = self.store.get(*token) {
+                    summary.token_parameters.insert(*index);
+                }
+            }
+        }
+        if let Some(cid) = linear.into_iter().find(|cid| {
+            incoming.get(cid).copied().unwrap_or(0) > 1
+                && !matches!(nodes.get(cid), Some(Node::Param(_)))
+        }) {
+            return Err(ReduceError::LinearValueDuplicated(cid));
+        }
+
+        // Direct incoming-edge counts miss duplication through a shared
+        // container: `x = Pair($0, 1); Pair(x, x)` has one edge into `$0`
+        // but two paths from the body root to it.  Propagate path
+        // multiplicities through the template DAG so instantiation can reject
+        // copying an argument that carries a linear capability.
+        let mut indegree = nodes
+            .keys()
+            .map(|cid| (*cid, incoming.get(cid).copied().unwrap_or(0)))
+            .collect::<BTreeMap<_, _>>();
+        let mut ready = indegree
+            .iter()
+            .filter_map(|(cid, degree)| (*degree == 0).then_some(*cid))
+            .collect::<BTreeSet<_>>();
+        let mut paths = BTreeMap::from([(root, 1_usize)]);
+        let mut processed = 0;
+        while let Some(cid) = ready.pop_first() {
+            processed += 1;
+            let path_count = paths.get(&cid).copied().unwrap_or(0);
+            let node = nodes.get(&cid).expect("reachable summary node");
+            let children = match node {
+                Node::Quote { .. } | Node::Family { .. } => Vec::new(),
+                _ => node.children(),
+            };
+            for child in children {
+                let child_paths = paths.entry(child).or_default();
+                *child_paths = child_paths.saturating_add(path_count);
+                let degree = indegree.get_mut(&child).expect("reachable child indegree");
+                *degree = degree.checked_sub(1).expect("positive child indegree");
+                if *degree == 0 {
+                    ready.insert(child);
+                }
+            }
+        }
+        if processed != nodes.len() {
+            let cid = indegree
+                .into_iter()
+                .find_map(|(cid, degree)| (degree != 0).then_some(cid))
+                .expect("unprocessed summary node");
+            return Err(ReduceError::Cycle(cid));
+        }
+
+        for (cid, node) in &nodes {
+            if let Node::Param(index) = node {
+                summary
+                    .parameter_uses
+                    .insert(*index, paths.get(cid).copied().unwrap_or(0));
+            }
+        }
+        self.linearity_summaries.insert(root, summary.clone());
+        Ok(summary)
+    }
+
+    fn first_linear_descendant(&mut self, root: Cid) -> Result<Option<Cid>, ReduceError> {
+        enum LinearFrame {
+            Enter(Cid),
+            Exit { cid: Cid, children: usize },
+        }
+
+        if let Some(linear) = self.carries_linear.get(&root) {
+            return Ok(*linear);
+        }
+        let mut frames = vec![LinearFrame::Enter(root)];
+        let mut values = Vec::new();
+        let mut visiting = BTreeSet::new();
+        while let Some(frame) = frames.pop() {
+            self.stats.peak_frames = self.stats.peak_frames.max(frames.len() + 1);
+            match frame {
+                LinearFrame::Enter(cid) => {
+                    if let Some(linear) = self.carries_linear.get(&cid).copied() {
+                        values.push(linear);
+                        continue;
+                    }
+                    if !visiting.insert(cid) {
+                        return Err(ReduceError::Cycle(cid));
+                    }
+                    self.charge()?;
+                    let node = self
+                        .store
+                        .get(cid)
+                        .cloned()
+                        .ok_or(ReduceError::MissingNode(cid))?;
+                    let immediate = match node {
+                        Node::Const(Atom::Trace(_)) | Node::Emit { .. } => Some(Some(cid)),
+                        Node::Quote { .. } | Node::Family { .. } => Some(None),
+                        Node::Hole(name) => match self.bindings.get(&name) {
+                            Some(value) => {
+                                frames.push(LinearFrame::Exit { cid, children: 1 });
+                                frames.push(LinearFrame::Enter(value));
+                                None
+                            }
+                            None => Some(None),
+                        },
+                        node => {
+                            let children = node.children();
+                            frames.push(LinearFrame::Exit {
+                                cid,
+                                children: children.len(),
+                            });
+                            for child in children.into_iter().rev() {
+                                frames.push(LinearFrame::Enter(child));
+                            }
+                            None
+                        }
+                    };
+                    if let Some(linear) = immediate {
+                        visiting.remove(&cid);
+                        self.carries_linear.insert(cid, linear);
+                        values.push(linear);
+                    }
+                }
+                LinearFrame::Exit { cid, children } => {
+                    let first = values
+                        .len()
+                        .checked_sub(children)
+                        .expect("linear-carry frame values");
+                    let linear = values.drain(first..).find_map(|value| value);
+                    visiting.remove(&cid);
+                    self.carries_linear.insert(cid, linear);
+                    values.push(linear);
+                }
+            }
+        }
+        assert_eq!(values.len(), 1, "linear-carry value-stack imbalance");
+        Ok(values.pop().expect("linear-carry result"))
     }
 
     fn residual_dispatch(&mut self, family: Cid, arguments: &[Cid]) -> Result<Cid, ReduceError> {
@@ -611,172 +1145,7 @@ impl<'a> Reducer<'a> {
         family: Cid,
         memo: &mut BTreeMap<Cid, Cid>,
     ) -> Result<Cid, ReduceError> {
-        self.enter_depth()?;
-        let result = self.substitute_family_body_inner(cid, arguments, family, memo);
-        self.depth -= 1;
-        result
-    }
-
-    fn substitute_family_body_inner(
-        &mut self,
-        cid: Cid,
-        arguments: &[Cid],
-        family: Cid,
-        memo: &mut BTreeMap<Cid, Cid>,
-    ) -> Result<Cid, ReduceError> {
-        if let Some(result) = memo.get(&cid) {
-            return Ok(*result);
-        }
-        self.charge()?;
-        let node = self
-            .store
-            .get(cid)
-            .cloned()
-            .ok_or(ReduceError::MissingNode(cid))?;
-        let result = match node {
-            Node::Param(index) => arguments.get(usize::from(index)).copied().ok_or(
-                ReduceError::ParameterOutOfRange {
-                    index,
-                    arguments: arguments.len(),
-                },
-            )?,
-            Node::Recur(recursive_arguments) => {
-                if recursive_arguments.len() != arguments.len() {
-                    return Err(ReduceError::FamilyArity {
-                        expected: arguments.len().try_into().unwrap_or(u16::MAX),
-                        actual: recursive_arguments.len(),
-                    });
-                }
-                let recursive_arguments = recursive_arguments
-                    .into_iter()
-                    .map(|argument| self.substitute_family_body(argument, arguments, family, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.store.intern(Node::Dispatch {
-                    family,
-                    arguments: recursive_arguments,
-                })
-            }
-            // Nested binders and atoms are boundaries.
-            Node::Quote { .. } | Node::Family { .. } | Node::Const(_) | Node::Hole(_) => cid,
-            Node::Add(a, b) => {
-                let (a, b) = self.substitute_family_binary(a, b, arguments, family, memo)?;
-                self.store.intern(Node::Add(a, b))
-            }
-            Node::Mul(a, b) => {
-                let (a, b) = self.substitute_family_binary(a, b, arguments, family, memo)?;
-                self.store.intern(Node::Mul(a, b))
-            }
-            Node::Eq(a, b) => {
-                let (a, b) = self.substitute_family_binary(a, b, arguments, family, memo)?;
-                self.store.intern(Node::Eq(a, b))
-            }
-            Node::If {
-                condition,
-                when_true,
-                when_false,
-            } => {
-                let condition = self.substitute_family_body(condition, arguments, family, memo)?;
-                let when_true = self.substitute_family_body(when_true, arguments, family, memo)?;
-                let when_false =
-                    self.substitute_family_body(when_false, arguments, family, memo)?;
-                self.store.intern(Node::If {
-                    condition,
-                    when_true,
-                    when_false,
-                })
-            }
-            Node::Pair(a, b) => {
-                let (a, b) = self.substitute_family_binary(a, b, arguments, family, memo)?;
-                self.store.intern(Node::Pair(a, b))
-            }
-            Node::First(pair) => {
-                let pair = self.substitute_family_body(pair, arguments, family, memo)?;
-                self.store.intern(Node::First(pair))
-            }
-            Node::Second(pair) => {
-                let pair = self.substitute_family_body(pair, arguments, family, memo)?;
-                self.store.intern(Node::Second(pair))
-            }
-            Node::Record(fields) => {
-                let fields = fields
-                    .into_iter()
-                    .map(|(name, value)| {
-                        Ok((
-                            name,
-                            self.substitute_family_body(value, arguments, family, memo)?,
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, ReduceError>>()?;
-                self.store.intern(Node::Record(fields))
-            }
-            Node::Get { record, field } => {
-                let record = self.substitute_family_body(record, arguments, family, memo)?;
-                self.store.intern(Node::Get { record, field })
-            }
-            Node::Put {
-                record,
-                field,
-                value,
-            } => {
-                let record = self.substitute_family_body(record, arguments, family, memo)?;
-                let value = self.substitute_family_body(value, arguments, family, memo)?;
-                self.store.intern(Node::Put {
-                    record,
-                    field,
-                    value,
-                })
-            }
-            Node::Apply {
-                function,
-                arguments: nested,
-            } => {
-                let function = self.substitute_family_body(function, arguments, family, memo)?;
-                let nested = nested
-                    .into_iter()
-                    .map(|value| self.substitute_family_body(value, arguments, family, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.store.intern(Node::Apply {
-                    function,
-                    arguments: nested,
-                })
-            }
-            Node::Emit { token, message } => {
-                let token = self.substitute_family_body(token, arguments, family, memo)?;
-                let message = self.substitute_family_body(message, arguments, family, memo)?;
-                self.store.intern(Node::Emit { token, message })
-            }
-            Node::Dispatch {
-                family: nested_family,
-                arguments: nested,
-            } => {
-                let nested_family =
-                    self.substitute_family_body(nested_family, arguments, family, memo)?;
-                let nested = nested
-                    .into_iter()
-                    .map(|value| self.substitute_family_body(value, arguments, family, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.store.intern(Node::Dispatch {
-                    family: nested_family,
-                    arguments: nested,
-                })
-            }
-        };
-        memo.insert(cid, result);
-        Ok(result)
-    }
-
-    fn substitute_family_binary(
-        &mut self,
-        a: Cid,
-        b: Cid,
-        arguments: &[Cid],
-        family: Cid,
-        memo: &mut BTreeMap<Cid, Cid>,
-    ) -> Result<(Cid, Cid), ReduceError> {
-        Ok((
-            self.substitute_family_body(a, arguments, family, memo)?,
-            self.substitute_family_body(b, arguments, family, memo)?,
-        ))
+        self.rewrite_graph(cid, RewriteMode::FamilyBody { arguments, family }, memo)
     }
 
     fn substitute(
@@ -785,154 +1154,7 @@ impl<'a> Reducer<'a> {
         arguments: &[Cid],
         memo: &mut BTreeMap<Cid, Cid>,
     ) -> Result<Cid, ReduceError> {
-        self.enter_depth()?;
-        let result = self.substitute_inner(cid, arguments, memo);
-        self.depth -= 1;
-        result
-    }
-
-    fn substitute_inner(
-        &mut self,
-        cid: Cid,
-        arguments: &[Cid],
-        memo: &mut BTreeMap<Cid, Cid>,
-    ) -> Result<Cid, ReduceError> {
-        if let Some(result) = memo.get(&cid) {
-            return Ok(*result);
-        }
-        self.charge()?;
-        let node = self
-            .store
-            .get(cid)
-            .cloned()
-            .ok_or(ReduceError::MissingNode(cid))?;
-        let result = match node {
-            Node::Param(index) => arguments.get(usize::from(index)).copied().ok_or(
-                ReduceError::ParameterOutOfRange {
-                    index,
-                    arguments: arguments.len(),
-                },
-            )?,
-            // E0 quotations do not capture through a nested quotation.
-            Node::Quote { .. } | Node::Family { .. } | Node::Const(_) | Node::Hole(_) => cid,
-            Node::Add(a, b) => {
-                let (a, b) = self.substitute_binary(a, b, arguments, memo)?;
-                self.store.intern(Node::Add(a, b))
-            }
-            Node::Mul(a, b) => {
-                let (a, b) = self.substitute_binary(a, b, arguments, memo)?;
-                self.store.intern(Node::Mul(a, b))
-            }
-            Node::Eq(a, b) => {
-                let (a, b) = self.substitute_binary(a, b, arguments, memo)?;
-                self.store.intern(Node::Eq(a, b))
-            }
-            Node::If {
-                condition,
-                when_true,
-                when_false,
-            } => {
-                let condition = self.substitute(condition, arguments, memo)?;
-                let when_true = self.substitute(when_true, arguments, memo)?;
-                let when_false = self.substitute(when_false, arguments, memo)?;
-                self.store.intern(Node::If {
-                    condition,
-                    when_true,
-                    when_false,
-                })
-            }
-            Node::Pair(a, b) => {
-                let (a, b) = self.substitute_binary(a, b, arguments, memo)?;
-                self.store.intern(Node::Pair(a, b))
-            }
-            Node::First(pair) => {
-                let pair = self.substitute(pair, arguments, memo)?;
-                self.store.intern(Node::First(pair))
-            }
-            Node::Second(pair) => {
-                let pair = self.substitute(pair, arguments, memo)?;
-                self.store.intern(Node::Second(pair))
-            }
-            Node::Record(fields) => {
-                let fields = fields
-                    .into_iter()
-                    .map(|(name, value)| Ok((name, self.substitute(value, arguments, memo)?)))
-                    .collect::<Result<Vec<_>, ReduceError>>()?;
-                self.store.intern(Node::Record(fields))
-            }
-            Node::Get { record, field } => {
-                let record = self.substitute(record, arguments, memo)?;
-                self.store.intern(Node::Get { record, field })
-            }
-            Node::Put {
-                record,
-                field,
-                value,
-            } => {
-                let record = self.substitute(record, arguments, memo)?;
-                let value = self.substitute(value, arguments, memo)?;
-                self.store.intern(Node::Put {
-                    record,
-                    field,
-                    value,
-                })
-            }
-            Node::Apply {
-                function,
-                arguments: nested,
-            } => {
-                let function = self.substitute(function, arguments, memo)?;
-                let nested = nested
-                    .into_iter()
-                    .map(|value| self.substitute(value, arguments, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.store.intern(Node::Apply {
-                    function,
-                    arguments: nested,
-                })
-            }
-            Node::Emit { token, message } => {
-                let token = self.substitute(token, arguments, memo)?;
-                let message = self.substitute(message, arguments, memo)?;
-                self.store.intern(Node::Emit { token, message })
-            }
-            Node::Dispatch {
-                family,
-                arguments: nested,
-            } => {
-                let family = self.substitute(family, arguments, memo)?;
-                let nested = nested
-                    .into_iter()
-                    .map(|value| self.substitute(value, arguments, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.store.intern(Node::Dispatch {
-                    family,
-                    arguments: nested,
-                })
-            }
-            Node::Recur(nested) => {
-                let nested = nested
-                    .into_iter()
-                    .map(|value| self.substitute(value, arguments, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.store.intern(Node::Recur(nested))
-            }
-        };
-        memo.insert(cid, result);
-        Ok(result)
-    }
-
-    fn substitute_binary(
-        &mut self,
-        a: Cid,
-        b: Cid,
-        arguments: &[Cid],
-        memo: &mut BTreeMap<Cid, Cid>,
-    ) -> Result<(Cid, Cid), ReduceError> {
-        Ok((
-            self.substitute(a, arguments, memo)?,
-            self.substitute(b, arguments, memo)?,
-        ))
+        self.rewrite_graph(cid, RewriteMode::Substitute { arguments }, memo)
     }
 
     /// Replace known named holes without otherwise evaluating the graph.  This
@@ -943,134 +1165,197 @@ impl<'a> Reducer<'a> {
         cid: Cid,
         memo: &mut BTreeMap<Cid, Cid>,
     ) -> Result<Cid, ReduceError> {
-        self.enter_depth()?;
-        let result = self.instantiate_bindings_inner(cid, memo);
-        self.depth -= 1;
-        result
+        self.rewrite_graph(cid, RewriteMode::Bindings, memo)
     }
 
-    fn instantiate_bindings_inner(
+    /// Iterative post-order graph rewrite shared by quotation substitution,
+    /// selected-family instantiation, and epoch-binding capture.  Each policy
+    /// keeps the exact boundary and child order of the former recursive
+    /// implementation.
+    fn rewrite_graph(
         &mut self,
-        cid: Cid,
+        root: Cid,
+        mode: RewriteMode<'_>,
         memo: &mut BTreeMap<Cid, Cid>,
     ) -> Result<Cid, ReduceError> {
-        if let Some(result) = memo.get(&cid) {
-            return Ok(*result);
+        let mut frames = vec![RewriteFrame::Enter(root)];
+        let mut values = Vec::new();
+
+        loop {
+            self.stats.peak_frames = self.stats.peak_frames.max(frames.len());
+            let Some(frame) = frames.pop() else {
+                break;
+            };
+            match frame {
+                RewriteFrame::Enter(cid) => {
+                    if let Some(result) = memo.get(&cid).copied() {
+                        values.push(result);
+                        continue;
+                    }
+
+                    self.charge()?;
+                    let node = self
+                        .store
+                        .get(cid)
+                        .cloned()
+                        .ok_or(ReduceError::MissingNode(cid))?;
+
+                    let leaf = match (&mode, &node) {
+                        (
+                            RewriteMode::Substitute { arguments }
+                            | RewriteMode::FamilyBody { arguments, .. },
+                            Node::Param(index),
+                        ) => Some(arguments.get(usize::from(*index)).copied().ok_or(
+                            ReduceError::ParameterOutOfRange {
+                                index: *index,
+                                arguments: arguments.len(),
+                            },
+                        )?),
+                        (RewriteMode::Bindings, Node::Param(_)) => Some(cid),
+                        (RewriteMode::Bindings, Node::Hole(name)) => {
+                            Some(self.bindings.get(name).unwrap_or(cid))
+                        }
+                        (
+                            RewriteMode::Substitute { .. } | RewriteMode::FamilyBody { .. },
+                            Node::Hole(_),
+                        ) => Some(cid),
+                        (_, Node::Const(_) | Node::Quote { .. } | Node::Family { .. }) => Some(cid),
+                        _ => None,
+                    };
+
+                    if let Some(result) = leaf {
+                        memo.insert(cid, result);
+                        values.push(result);
+                        continue;
+                    }
+
+                    if let (
+                        RewriteMode::FamilyBody { arguments, .. },
+                        Node::Recur(recursive_arguments),
+                    ) = (&mode, &node)
+                        && recursive_arguments.len() != arguments.len()
+                    {
+                        return Err(ReduceError::FamilyArity {
+                            expected: arguments.len().try_into().unwrap_or(u16::MAX),
+                            actual: recursive_arguments.len(),
+                        });
+                    }
+
+                    let children = node.children();
+                    frames.push(RewriteFrame::Exit {
+                        source: cid,
+                        node,
+                        children: children.len(),
+                    });
+                    for child in children.into_iter().rev() {
+                        frames.push(RewriteFrame::Enter(child));
+                    }
+                }
+                RewriteFrame::Exit {
+                    source,
+                    node,
+                    children,
+                } => {
+                    let first = values
+                        .len()
+                        .checked_sub(children)
+                        .expect("rewrite frame values");
+                    let rewritten_children = values.split_off(first);
+                    let result =
+                        self.rebuild_rewritten_node(source, node, rewritten_children, mode)?;
+                    memo.insert(source, result);
+                    values.push(result);
+                }
+            }
         }
-        self.charge()?;
-        let node = self
-            .store
-            .get(cid)
-            .cloned()
-            .ok_or(ReduceError::MissingNode(cid))?;
-        let result = match node {
-            Node::Const(_) | Node::Param(_) | Node::Quote { .. } | Node::Family { .. } => cid,
-            Node::Hole(name) => self.bindings.get(&name).unwrap_or(cid),
-            Node::Add(a, b) => {
-                let a = self.instantiate_bindings(a, memo)?;
-                let b = self.instantiate_bindings(b, memo)?;
-                self.store.intern(Node::Add(a, b))
-            }
-            Node::Mul(a, b) => {
-                let a = self.instantiate_bindings(a, memo)?;
-                let b = self.instantiate_bindings(b, memo)?;
-                self.store.intern(Node::Mul(a, b))
-            }
-            Node::Eq(a, b) => {
-                let a = self.instantiate_bindings(a, memo)?;
-                let b = self.instantiate_bindings(b, memo)?;
-                self.store.intern(Node::Eq(a, b))
-            }
-            Node::If {
-                condition,
-                when_true,
-                when_false,
-            } => {
-                let condition = self.instantiate_bindings(condition, memo)?;
-                let when_true = self.instantiate_bindings(when_true, memo)?;
-                let when_false = self.instantiate_bindings(when_false, memo)?;
-                self.store.intern(Node::If {
-                    condition,
-                    when_true,
-                    when_false,
-                })
-            }
-            Node::Pair(a, b) => {
-                let a = self.instantiate_bindings(a, memo)?;
-                let b = self.instantiate_bindings(b, memo)?;
-                self.store.intern(Node::Pair(a, b))
-            }
-            Node::First(pair) => {
-                let pair = self.instantiate_bindings(pair, memo)?;
-                self.store.intern(Node::First(pair))
-            }
-            Node::Second(pair) => {
-                let pair = self.instantiate_bindings(pair, memo)?;
-                self.store.intern(Node::Second(pair))
-            }
-            Node::Record(fields) => {
-                let fields = fields
-                    .into_iter()
-                    .map(|(name, value)| Ok((name, self.instantiate_bindings(value, memo)?)))
-                    .collect::<Result<Vec<_>, ReduceError>>()?;
-                self.store.intern(Node::Record(fields))
-            }
-            Node::Get { record, field } => {
-                let record = self.instantiate_bindings(record, memo)?;
-                self.store.intern(Node::Get { record, field })
-            }
-            Node::Put {
-                record,
-                field,
-                value,
-            } => {
-                let record = self.instantiate_bindings(record, memo)?;
-                let value = self.instantiate_bindings(value, memo)?;
-                self.store.intern(Node::Put {
-                    record,
-                    field,
-                    value,
-                })
-            }
-            Node::Apply {
-                function,
-                arguments,
-            } => {
-                let function = self.instantiate_bindings(function, memo)?;
-                let arguments = arguments
-                    .into_iter()
-                    .map(|argument| self.instantiate_bindings(argument, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.store.intern(Node::Apply {
-                    function,
-                    arguments,
-                })
-            }
-            Node::Emit { token, message } => {
-                let token = self.instantiate_bindings(token, memo)?;
-                let message = self.instantiate_bindings(message, memo)?;
-                self.store.intern(Node::Emit { token, message })
-            }
-            Node::Dispatch { family, arguments } => {
-                let family = self.instantiate_bindings(family, memo)?;
-                let arguments = arguments
-                    .into_iter()
-                    .map(|argument| self.instantiate_bindings(argument, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.store.intern(Node::Dispatch { family, arguments })
-            }
-            Node::Recur(arguments) => {
-                let arguments = arguments
-                    .into_iter()
-                    .map(|argument| self.instantiate_bindings(argument, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.store.intern(Node::Recur(arguments))
-            }
-        };
-        memo.insert(cid, result);
-        Ok(result)
+
+        assert_eq!(values.len(), 1, "graph-rewrite value-stack imbalance");
+        Ok(values.pop().expect("graph-rewrite result"))
     }
 
+    fn rebuild_rewritten_node(
+        &mut self,
+        source: Cid,
+        node: Node,
+        rewritten_children: Vec<Cid>,
+        mode: RewriteMode<'_>,
+    ) -> Result<Cid, ReduceError> {
+        let mut children = rewritten_children.into_iter();
+        let rebuilt = match node {
+            Node::Add(_, _) => Node::Add(
+                children.next().expect("add left child"),
+                children.next().expect("add right child"),
+            ),
+            Node::Mul(_, _) => Node::Mul(
+                children.next().expect("multiply left child"),
+                children.next().expect("multiply right child"),
+            ),
+            Node::Eq(_, _) => Node::Eq(
+                children.next().expect("equality left child"),
+                children.next().expect("equality right child"),
+            ),
+            Node::If { .. } => Node::If {
+                condition: children.next().expect("if condition"),
+                when_true: children.next().expect("if true branch"),
+                when_false: children.next().expect("if false branch"),
+            },
+            Node::Pair(_, _) => Node::Pair(
+                children.next().expect("pair left child"),
+                children.next().expect("pair right child"),
+            ),
+            Node::First(_) => Node::First(children.next().expect("first child")),
+            Node::Second(_) => Node::Second(children.next().expect("second child")),
+            Node::Record(fields) => Node::Record(
+                fields
+                    .into_iter()
+                    .map(|(name, _)| (name, children.next().expect("record field child")))
+                    .collect(),
+            ),
+            Node::Get { field, .. } => Node::Get {
+                record: children.next().expect("get record child"),
+                field,
+            },
+            Node::Put { field, .. } => Node::Put {
+                record: children.next().expect("put record child"),
+                field,
+                value: children.next().expect("put value child"),
+            },
+            Node::Apply { .. } => {
+                let function = children.next().expect("apply function child");
+                Node::Apply {
+                    function,
+                    arguments: children.by_ref().collect(),
+                }
+            }
+            Node::Emit { .. } => Node::Emit {
+                token: children.next().expect("emit token child"),
+                message: children.next().expect("emit message child"),
+            },
+            Node::Dispatch { .. } => {
+                let family = children.next().expect("dispatch family child");
+                Node::Dispatch {
+                    family,
+                    arguments: children.by_ref().collect(),
+                }
+            }
+            Node::Recur(_) => match mode {
+                RewriteMode::FamilyBody { family, .. } => Node::Dispatch {
+                    family,
+                    arguments: children.by_ref().collect(),
+                },
+                RewriteMode::Substitute { .. } | RewriteMode::Bindings => {
+                    Node::Recur(children.by_ref().collect())
+                }
+            },
+            Node::Const(_)
+            | Node::Hole(_)
+            | Node::Param(_)
+            | Node::Quote { .. }
+            | Node::Family { .. } => return Ok(source),
+        };
+        debug_assert!(children.next().is_none());
+        Ok(self.store.intern(rebuilt))
+    }
     /// Code values are closed over named holes.  Context therefore crosses a
     /// code boundary only as an explicit argument, making residual families
     /// independent of which epoch first encountered them.
@@ -1239,52 +1524,97 @@ impl<'a> Reducer<'a> {
     }
 
     fn is_ground(&mut self, root: Cid) -> Result<bool, ReduceError> {
-        fn visit(
-            reducer: &mut Reducer<'_>,
-            cid: Cid,
-            bound_parameters: bool,
-            memo: &mut BTreeMap<(Cid, bool), bool>,
-            visiting: &mut BTreeSet<Cid>,
-        ) -> Result<bool, ReduceError> {
-            if let Some(ground) = memo.get(&(cid, bound_parameters)) {
-                return Ok(*ground);
-            }
-            if !visiting.insert(cid) {
-                return Err(ReduceError::Cycle(cid));
-            }
-            reducer.charge()?;
-            let node = reducer
-                .store
-                .get(cid)
-                .cloned()
-                .ok_or(ReduceError::MissingNode(cid))?;
-            let ground = match node {
-                Node::Const(_) => true,
-                Node::Hole(_) => false,
-                Node::Param(_) => bound_parameters,
-                Node::Quote { .. } | Node::Family { .. } => {
-                    reducer.validate_code_value(cid)?;
-                    true
-                }
-                _ => {
-                    let mut ground = true;
-                    for child in node.children() {
-                        ground &= visit(reducer, child, bound_parameters, memo, visiting)?;
-                    }
-                    ground
-                }
-            };
-            visiting.remove(&cid);
-            memo.insert((cid, bound_parameters), ground);
-            Ok(ground)
+        enum GroundFrame {
+            Enter {
+                cid: Cid,
+                bound_parameters: bool,
+            },
+            Exit {
+                cid: Cid,
+                bound_parameters: bool,
+                children: usize,
+            },
         }
-        visit(
-            self,
-            root,
-            false,
-            &mut BTreeMap::new(),
-            &mut BTreeSet::new(),
-        )
+
+        let mut frames = vec![GroundFrame::Enter {
+            cid: root,
+            bound_parameters: false,
+        }];
+        let mut values = Vec::new();
+        let mut visiting = BTreeSet::new();
+
+        loop {
+            self.stats.peak_frames = self.stats.peak_frames.max(frames.len());
+            let Some(frame) = frames.pop() else {
+                break;
+            };
+            match frame {
+                GroundFrame::Enter {
+                    cid,
+                    bound_parameters,
+                } => {
+                    if let Some(ground) = self.ground_memo.get(&(cid, bound_parameters)).copied() {
+                        values.push(ground);
+                        continue;
+                    }
+                    if !visiting.insert(cid) {
+                        return Err(ReduceError::Cycle(cid));
+                    }
+                    self.charge()?;
+                    let node = self
+                        .store
+                        .get(cid)
+                        .cloned()
+                        .ok_or(ReduceError::MissingNode(cid))?;
+                    let ground = match node {
+                        Node::Const(_) => Some(true),
+                        Node::Hole(_) => Some(false),
+                        Node::Param(_) => Some(bound_parameters),
+                        Node::Quote { .. } | Node::Family { .. } => {
+                            self.validate_code_value(cid)?;
+                            Some(true)
+                        }
+                        node => {
+                            let children = node.children();
+                            frames.push(GroundFrame::Exit {
+                                cid,
+                                bound_parameters,
+                                children: children.len(),
+                            });
+                            for child in children.into_iter().rev() {
+                                frames.push(GroundFrame::Enter {
+                                    cid: child,
+                                    bound_parameters,
+                                });
+                            }
+                            None
+                        }
+                    };
+                    if let Some(ground) = ground {
+                        visiting.remove(&cid);
+                        self.ground_memo.insert((cid, bound_parameters), ground);
+                        values.push(ground);
+                    }
+                }
+                GroundFrame::Exit {
+                    cid,
+                    bound_parameters,
+                    children,
+                } => {
+                    let first = values
+                        .len()
+                        .checked_sub(children)
+                        .expect("groundness frame values");
+                    let ground = values.drain(first..).all(|value| value);
+                    visiting.remove(&cid);
+                    self.ground_memo.insert((cid, bound_parameters), ground);
+                    values.push(ground);
+                }
+            }
+        }
+
+        assert_eq!(values.len(), 1, "groundness value-stack imbalance");
+        Ok(values.pop().expect("groundness result"))
     }
 
     /// Conservative E0 linearity check for the explicit effect carrier.  It
@@ -1292,11 +1622,22 @@ impl<'a> Reducer<'a> {
     /// feeding an emit token as linear, then rejects shared consumers.  A
     /// typed successor should make linearity part of the typing judgment and
     /// treat mutually exclusive branches more precisely.
+    #[cfg(test)]
     fn validate_linearity(&mut self, root: Cid) -> Result<(), ReduceError> {
+        self.validate_linearity_roots(&[root])
+    }
+
+    /// Treat the program and every supplied context value as children of one
+    /// virtual invocation root.  This exposes aliases across distinct binding
+    /// names as well as sharing inside an individual bound value.
+    fn validate_linearity_roots(&mut self, roots: &[Cid]) -> Result<(), ReduceError> {
         let mut reachable = BTreeSet::new();
         let mut incoming = BTreeMap::<Cid, usize>::new();
         let mut nodes = BTreeMap::<Cid, Node>::new();
-        let mut pending = vec![root];
+        let mut pending = roots.to_vec();
+        for root in roots {
+            *incoming.entry(*root).or_default() += 1;
+        }
         while let Some(cid) = pending.pop() {
             if !reachable.insert(cid) {
                 continue;
@@ -1321,15 +1662,16 @@ impl<'a> Reducer<'a> {
             nodes.insert(cid, node);
         }
 
-        let mut linear = nodes
-            .iter()
-            .filter_map(|(cid, node)| match node {
-                Node::Const(Atom::Trace(_)) | Node::Emit { .. } => Some(*cid),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
+        let mut linear = BTreeSet::new();
+        for cid in nodes.keys().copied().collect::<Vec<_>>() {
+            if self.first_linear_descendant(cid)?.is_some() {
+                linear.insert(cid);
+            }
+        }
         for node in nodes.values() {
             if let Node::Emit { token, .. } = node {
+                // An unresolved token position is linear by contract even
+                // when the value currently beneath it carries no known Trace.
                 linear.insert(*token);
             }
         }
@@ -1345,8 +1687,8 @@ impl<'a> Reducer<'a> {
 
 fn reducer_cid() -> Cid {
     Cid::digest(
-        b"march6/reducer/v4",
-        b"lazy-quote-and-arguments;ordered-guarded-families;lexical-recur;pure-explicit-effects;no-captured-capabilities",
+        b"march6/reducer/v5",
+        b"lazy-quote-and-arguments;ordered-guarded-families;lexical-recur;pure-explicit-effects;no-captured-capabilities;strict-guard-demand-sharing;incremental-linear-capability-summary",
     )
 }
 
@@ -1515,6 +1857,54 @@ mod tests {
             .run(application)
             .unwrap();
         assert_eq!(store.get(result.root), Some(&Node::Const(Atom::Int(81))));
+    }
+
+    #[test]
+    fn incremental_linearity_matches_full_walk_on_core_instantiations() {
+        fn duplicated(result: Result<(), ReduceError>) -> bool {
+            matches!(result, Err(ReduceError::LinearValueDuplicated(_)))
+        }
+
+        let mut store = Store::new();
+        let p0 = store.intern(Node::Param(0));
+        let p1 = store.intern(Node::Param(1));
+        let pair_same = store.intern(Node::Pair(p0, p0));
+        let pair_distinct = store.intern(Node::Pair(p0, p1));
+        let one = int(&mut store, 1);
+        let world = store.intern(Node::Const(Atom::Trace(Vec::new())));
+        let a = store.intern(Node::Const(Atom::Text("a".into())));
+        let b = store.intern(Node::Const(Atom::Text("b".into())));
+        let emit_a = store.intern(Node::Emit {
+            token: p0,
+            message: a,
+        });
+        let emit_b = store.intern(Node::Emit {
+            token: p0,
+            message: b,
+        });
+        let duplicate_emits = store.intern(Node::Pair(emit_a, emit_b));
+        let cases = [
+            (pair_same, vec![one]),
+            (pair_same, vec![world]),
+            (pair_distinct, vec![world, world]),
+            (p0, vec![world]),
+            (duplicate_emits, vec![world]),
+        ];
+
+        let bindings = Bindings::new();
+        let mut reducer = Reducer::with_budget(&mut store, &bindings, usize::MAX);
+        for (template, arguments) in cases {
+            let incremental =
+                duplicated(reducer.validate_instantiation_linearity(template, &arguments));
+            let selected = reducer
+                .substitute(template, &arguments, &mut BTreeMap::new())
+                .unwrap();
+            let full = duplicated(reducer.validate_linearity(selected));
+            assert_eq!(
+                incremental, full,
+                "incremental and full linearity checks disagree for {template:?}",
+            );
+        }
     }
 
     #[test]

@@ -12,11 +12,10 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass.  There are currently 87 unit, integration, generated, and
-differential test cases: 86 pass and one deliberately ignored case records the
-need for an iterative evaluator.  One passing test performs 10,440 generated
-staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses found by
-external review and whether they are fixed, narrowed, or still open.
+All checks pass.  There are currently 104 unit, integration, generated, and
+differential test cases, with none ignored.  One passing test performs 10,440
+generated staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses
+found by external review and whether they are fixed, narrowed, or still open.
 
 ## Staged content-addressed reduction
 
@@ -37,19 +36,21 @@ The sample specializes a static choice into this residual graph:
 
 Supplying `input = 41` later produces the content-addressed value `42`.
 Specialization identity includes source artifact, complete supplied context,
-and reducer/rule-set identity.  Primitive operation tags are part of node
-identity, closing the March 5 add/sub CID collision.
+and reducer/rule-set identity.  The current v5 identity records the
+history-independent guard-demand sharing and linear-capability summary rules.
+Primitive operation tags are part of node identity, closing the March 5
+add/sub CID collision.
 
-Reduction has a configurable work budget (512 charged visits by default) and
-a host-recursion depth limit (64 by default) to bound the recursive prototype.
-Reduction, substitution, binding
-instantiation, linearity validation, and memoized groundness checks all charge
-the same counter.  Exhaustion is an execution-resource outcome, not a language
-result and not part of semantic reducer identity.  Resetting a budget between
-compile and runtime can therefore change whether a resource limit is reached;
-the staging equality below concerns values and semantic errors when both runs
-have sufficient resources.  A production evaluator needs an iterative engine
-and a total request budget carried across phases.
+Reduction uses explicit continuation/work lists rather than the native call
+stack.  Reduction, substitution, binding instantiation, linearity validation,
+and memoized groundness checks all charge one configurable work budget (512
+visits by default), and the reducer reports its peak pending-frame count.
+Exhaustion is an execution-resource outcome, not a language result and not part
+of semantic reducer identity.  Resetting a budget between compile and runtime
+can therefore change whether a resource limit is reached; the staging equality
+below concerns values and semantic errors when both runs have sufficient
+resources.  A production service still needs a total request budget carried
+across phases.
 
 An in-memory specialization cache now exercises that identity.  Repeating the
 same source/context/reducer request is a hit with no reducer steps; changing
@@ -71,7 +72,17 @@ Explicit immutable records model state transitions.  Explicit trace tokens
 model effect ordering; compilation leaves an effect blocked until its runtime
 token arrives and never performs hidden host I/O.  A conservative DAG-use
 check rejects a token with multiple consumers.  This is not yet a typed linear
-effect system, nor does it execute or benchmark real host effects.
+effect system, nor does it execute or benchmark real host effects.  Because
+the E0 trace stand-in is purely content-addressed, two independently intended
+tokens with identical traces currently have the same CID; real host
+capabilities will need explicit lineage/identity or an edge-based type rule.
+The conservative check propagates linearity through shared containers and
+validates the program plus all supplied binding values as one invocation
+graph, rejecting aliases across distinct context names.  It also validates the
+residual before returning, so an unbound token fork is rejected in the epoch
+that constructs it rather than waiting for a later binding.  One consequence
+of content-only token identity is that an otherwise unused binding equal to a
+literal token in the program is conservatively treated as an alias.
 
 ## Guarded definitions and reduction epochs
 
@@ -80,15 +91,16 @@ parameters, and lexical `Recur` calls.  A guard is an ordinary pure March
 expression over the family parameters.  Literal `true` is the otherwise case;
 clause order participates in the family CID and is observable precedence.
 
-An unknown guard leaves one compact dispatch.  Its bodies are neither traversed
+An unknown guard leaves one compact dispatch.  Its bodies are neither reduced
 nor instantiated, so changing an unselected body from 10 nodes to 10,000 nodes
-does not change the work needed to suspend the call.  An erroneous later guard
-is not observed after an earlier match.  Selected recursive calls are memoized
-by CID within a reduction, and a shared recursive subcall is evaluated once.
-The same residual can receive facts in either epoch order, and a suspended
-dispatch survives canonical image serialization before continuing.
+does not change the charged reduction work needed to suspend the call.  Closed
+code validation does scan a newly encountered family once.  An erroneous later
+guard is not observed after an earlier match.  Selected recursive calls are
+memoized by CID within a reduction, and a shared recursive subcall is evaluated
+once.  The same residual can receive facts in either epoch order, and a
+suspended dispatch survives canonical image serialization before continuing.
 
-Two boundaries were made explicit after adversarial review:
+Three boundaries were made explicit after adversarial review:
 
 - quotations and families are closed code values; ambient named holes are
   rejected rather than silently losing facts between epochs;
@@ -98,10 +110,20 @@ Two boundaries were made explicit after adversarial review:
 - guards are syntactically pure, and effect/world tokens may be neither fanned
   nor erased by the interaction-net backend.
 
-The host reference evaluator also reports a depth-resource error before deep
-source recursion can overflow the native stack.  That limit is execution
-policy, not a semantic result.  A production evaluator still needs an
-iterative worklist.
+The host reference evaluator now completes 10,000 nested guarded calls without
+using the native call stack.  Guard evaluation shares only argument reductions
+it actually demanded with the selected body; undemanded arguments remain lazy.
+Only statically strict parameters of the guards actually evaluated are shared,
+so, given the same bindings and reducer identity, unrelated earlier memo hits
+cannot change a residual CID.  Selection and application validate new aliases
+against cached code-template summaries rather than re-walking carried argument
+graphs, and groundness facts are cached per run.  Step-ratio regressions are
+linear for a lazy accumulator, a structural list walk, and a world-threading
+effect loop.  The 10,000-call sum performs fewer than 300,000 charged visits
+instead of repeatedly rebuilding and walking a growing symbolic argument.
+Separate depth-20,000 regressions exercise ordinary evaluation, quotation
+substitution, binding capture beneath an unresolved branch, and groundness
+checking.  The explicit work budget remains the resource stop condition.
 
 ## Canonical images
 

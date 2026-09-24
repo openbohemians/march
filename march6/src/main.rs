@@ -69,13 +69,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         store.format(result.root)
     );
     println!(
-        "reductions   compile steps={} visited={} rewrites={}; runtime steps={} visited={} rewrites={}",
+        "reductions   compile steps={} visited={} rewrites={} peak-frames={}; runtime steps={} visited={} rewrites={} peak-frames={}",
         compiled.stats.steps,
         compiled.stats.visited,
         compiled.stats.rewritten,
+        compiled.stats.peak_frames,
         result.stats.steps,
         result.stats.visited,
-        result.stats.rewritten
+        result.stats.rewritten,
+        result.stats.peak_frames,
     );
     let image = Image::from_store(&store, &[program])?;
     let (_, loaded) = Image::parse(image.as_bytes())?;

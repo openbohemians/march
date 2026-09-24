@@ -60,9 +60,10 @@ remain correct when no useful prediction is available.
 - Symbolic straight-line reference graph with borrowed, unique, and shared
   input contracts.
 
-Implemented and covered by the reference reducer, reachable-image round-trip,
-conservative effect-token linearity, 10,440 generated staged/direct checks, and
-targeted differential tests.
+Implemented and covered by the stack-safe work-list reference reducer,
+reachable-image round-trip, conservative effect-token linearity, 10,440
+generated staged/direct checks, deep structural regressions, and targeted
+differential tests.
 
 ### E1: resource-plan boundary
 

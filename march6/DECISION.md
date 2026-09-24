@@ -15,7 +15,8 @@ This should be the normative language layer.  A fresh implementation should be
 organized around the CAS term/value graph and canonical image, not around the
 March 4 database schema or the March 5 scaffolding.
 
-The execution work budget is deliberately outside language meaning.  Successful
+The stack-safe reducer uses explicit continuation/work lists.  Its execution
+work budget is deliberately outside language meaning.  Successful
 specializations may be cached by source, context, and semantic reducer identity;
 resource-limit failures are not cached or compared as program results.
 

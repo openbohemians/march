@@ -22,6 +22,9 @@ families, compact residual dispatch, and recursion.  A deliberately narrow
 interaction-net `Call` lowering exercises that model without allocating
 rejected clauses.  It is still too small to settle the interaction-net
 question, but it no longer uses “INet” as a name for an ordinary DAG.
+The reference reducer itself is an explicit, budgeted work-list machine: deep
+source recursion and structural graph traversals do not consume the Rust call
+stack.
 
 Run everything offline:
 

@@ -1,7 +1,6 @@
 //! Adversarial regression tests from the @march-claude review of the guarded
-//! slice.  Each test states the behaviour March *should* have.  Tests that
-//! document a known, accepted gap are `#[ignore]`d with the reason, so the
-//! suite stays green while the gap stays visible.
+//! slice.  Each test states the behaviour March *should* have.  Formerly
+//! accepted gaps remain here as ordinary regressions once corrected.
 
 use march_research::inet::{AgentKind, Net, NetError, Schedule, Value};
 use march_research::lower;
@@ -249,7 +248,7 @@ fn c_guard_that_emits_is_impure() {
 // (D) Deep recursion is an execution-resource outcome, never a process abort.
 
 #[test]
-fn d_deep_recursion_reports_a_resource_error_instead_of_aborting() {
+fn d_deep_recursion_no_longer_uses_the_host_stack() {
     let mut store = Store::new();
     let sum = sum_family(&mut store);
     let n = int(&mut store, 1_000);
@@ -257,16 +256,17 @@ fn d_deep_recursion_reports_a_resource_error_instead_of_aborting() {
         family: sum,
         arguments: vec![n],
     });
-    // Before the fix this aborted the whole test binary with a native stack
-    // overflow.  Reaching the assertion at all is most of the test.
-    assert!(matches!(
-        Reducer::with_budget(&mut store, &Bindings::new(), usize::MAX).run(call),
-        Err(ReduceError::DepthExhausted { .. }),
-    ));
+    let reduction = Reducer::with_budget(&mut store, &Bindings::new(), usize::MAX)
+        .run(call)
+        .unwrap();
+    assert_eq!(
+        store.get(reduction.root),
+        Some(&Node::Const(Atom::Int(500_500)))
+    );
+    assert!(reduction.stats.peak_frames > 64);
 }
 
 #[test]
-#[ignore = "open: needs the work-list reducer; the host depth limit (64) is a stand-in, not the intended semantics"]
 fn d_deep_recursion_completes_with_an_ample_budget() {
     let mut store = Store::new();
     let sum = sum_family(&mut store);
@@ -275,11 +275,18 @@ fn d_deep_recursion_completes_with_an_ample_budget() {
         family: sum,
         arguments: vec![n],
     });
-    let result = Reducer::with_budget(&mut store, &Bindings::new(), usize::MAX)
+    let reduction = Reducer::with_budget(&mut store, &Bindings::new(), usize::MAX)
         .run(call)
-        .unwrap()
-        .root;
-    assert_eq!(store.get(result), Some(&Node::Const(Atom::Int(50_005_000))));
+        .unwrap();
+    assert_eq!(
+        store.get(reduction.root),
+        Some(&Node::Const(Atom::Int(50_005_000)))
+    );
+    assert!(
+        reduction.stats.steps < 300_000,
+        "guard-demand sharing must keep recursive work linear: {:?}",
+        reduction.stats,
+    );
 }
 
 // Lazy arguments: CAS and INet must agree when the selected clause ignores an

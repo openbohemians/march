@@ -21,6 +21,11 @@ passing test suite cannot quietly redefine the research question.
 - Images now contain only reachable nodes; noncanonical records and Boolean
   encodings are rejected.
 - Effect-token fan-out is rejected by a conservative linear-use validation.
+- Linear-use validation propagates capabilities through shared containers and
+  treats all supplied binding values as roots of one invocation graph, closing
+  indirect-container and cross-binding token forks.
+- Residuals receive the same validation before leaving an epoch, so a token
+  fork hidden behind an unbound hole is rejected when it is constructed.
 - The CAS DAG now has explicit lowerings into the memory IR and unary INet
   subset.  Repeated pair children expose a preserve-sharing versus
   rematerialize policy instead of assuming CID identity implies uniqueness.
@@ -53,8 +58,15 @@ passing test suite cannot quietly redefine the research question.
 - Guards are syntactically pure, so selection cannot consume an effect token
   also needed by the body.  Selected quotation bodies are checked for illegal
   effect-token duplication.
-- Deep guarded recursion now returns an explicit host-depth resource error
-  before the prototype can overflow the native stack.
+- Reduction, substitution, binding capture, and groundness checking now use
+  explicit work lists.  Deep guarded recursion completes without native-stack
+  growth, and demanded guard arguments are shared with the selected body so
+  the 10,000-call regression performs linear rather than quadratic work.
+- Guard-demand sharing is restricted to strict positions in guards already
+  evaluated, making residual CIDs independent of unrelated memo hits.
+  Selection-time linearity uses cached template/argument summaries, and
+  groundness uses a per-run cache; lazy accumulators, structural list walks,
+  and world-threading loops have linear charged-step ratios.
 - Interaction-net `Fan(World)` and `Erase(World)` are rejected rather than
   duplicating or discarding the linear effect boundary.
 - The narrow guarded-call lowering rejects definitions where demanding
@@ -130,7 +142,5 @@ passing test suite cannot quietly redefine the research question.
     work inside each copy needs fresh/dynamic fan identities.  The current
     value-level fan rules cannot express this test and must fail honestly rather
     than silently capture or duplicate the wrong subnet.
-11. Replace the 64-frame host-recursion guard with an iterative worklist.  The
-    current resource error prevents process aborts, but a terminating source
-    recursion deeper than the host limit cannot yet complete even with an
-    ample work budget.
+11. Replace the content-only E0 `Trace` stand-in with a typed capability model
+    that can distinguish independently created resources with equal history.

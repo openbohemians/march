@@ -163,6 +163,14 @@ passing test suite cannot quietly redefine the research question.
 
 ## Still open and high priority
 
+C0 fixtures make two subtleties executable: strict Pair/Record projections
+force even unused erroneous fields, and a type error observed around an
+unknown may be superseded by an earlier child overflow after binding. The
+initial scalar A-inspired request/memo control matches the reference across
+generated tests, but direct CID lookup is not actual multi-port net wiring.
+Its retained memo cache is counted as live, not reported as reclaimed. B and
+the real port-rule, scheduling, higher-order, and reclamation gates remain open.
+
 General source-fragment extraction remains broader than the tested integer,
 single-result subset. Structural syntax/type/underflow errors remain immediate;
 richer stack effects, source effects, and surface guards require fresh

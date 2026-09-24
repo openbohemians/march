@@ -1,8 +1,10 @@
 pub mod cid;
 pub mod collect;
+pub mod demand;
 pub mod flow;
 pub mod image;
 pub mod inet;
+pub mod inet_demand_a;
 pub mod lower;
 pub mod memory;
 pub mod net;

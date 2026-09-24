@@ -57,3 +57,6 @@ aligns inline and factored expression demand, with explicit observation at
 constant binding and successful EOF; pauses and images preserve pending work.
 [COLLECTION.md](COLLECTION.md) describes explicit-root reclamation for the CAS
 store; the CLI collects intermediate history between token batches.
+[NEXT-PHASE.md](NEXT-PHASE.md) tracks the next reference-core and interaction-net
+milestones, task ownership, and review gates. [DEMAND-CONTRACT.md](DEMAND-CONTRACT.md)
+records the first executable demand fixtures and isolated protocol-probe scope.

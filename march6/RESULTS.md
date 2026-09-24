@@ -12,10 +12,43 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass. There are currently 218 unit, integration, generated, and
+All checks pass. There are currently 249 unit, integration, generated, and
 differential test cases, with none ignored.  One passing test performs 10,440
 generated staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses
 found by external review and whether they are fixed, narrowed, or still open.
+
+## Demand-contract and protocol-control checkpoint
+
+C0 adds eleven executable reference fixtures for arbitrary-parameter guard
+demand, independent static progress around unknowns, error sequencing, strict
+aggregate projection, closed suspensions inside strict containers, and explicit
+higher-order code arguments. A reflected Church `two two` returns closed code
+that, applied to increment and then zero across an image boundary, yields 4;
+its dependencies are explicit, not an implicit lexical environment.
+Independent output-template witnesses preserve unused-input laziness and
+share an instantiated recursive computation across distinct outputs, without
+changing Pair/Record semantics. They are not yet general seed word interfaces.
+These preserve existing semantics rather than
+silently making all constructors lazy. An observed error around unknown inputs
+can change after binding; the probes therefore cache errors only per epoch.
+
+The first A-inspired scalar protocol control lives in `inet_demand_a.rs`, with
+a shared probe vocabulary in `demand.rs`. It has iterative request/reply
+continuations, shared memo values, retained partial state between epochs,
+atomic binding-conflict rejection, and recoverable budget exhaustion. Four
+unit tests and fourteen independent differential tests pass, including 720
+arbitrary DAG/context and 240 typed staged comparisons. Two lowering-boundary
+tests reject missing references and unsupported dormant nodes. A depth-30
+repeated-doubling DAG evaluates its 31 distinct nodes once each, rather than
+expanding the shared work into a tree.
+
+This is NOT the port-level INet backend or an implementation of A's proposed
+multi-principal request ports. Direct CID lookup models requests, and retained
+memo storage is counted as live until the machine is dropped. No confluence,
+parallelism, complete last-consumer reclamation, higher-order net encoding,
+or canonical residual-image result follows from these tests. The independent
+B probe is assigned to Claude but has not yet landed; there is no A/B winner.
+See `DEMAND-CONTRACT.md` and `NEXT-PHASE.md` for the remaining gates.
 
 ## Staged content-addressed reduction
 

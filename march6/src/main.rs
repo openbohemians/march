@@ -1,16 +1,33 @@
 use march_research::inet::{Schedule, Value as InetValue};
 use march_research::lower;
 use march_research::memory::{self, InputIdentities, Instr, Ownership};
+use march_research::seed::{self, Seed, Syntax};
 use march_research::template::Template;
 use march_research::{
-    Atom, Bindings, Clause, DEFAULT_REDUCTION_BUDGET, Image, Node, Reducer, SpecializationCache,
-    Store,
+    Atom, Bindings, Cid, Clause, DEFAULT_REDUCTION_BUDGET, Image, Node, Reducer,
+    SpecializationCache, Store,
 };
 use std::collections::BTreeMap;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if std::env::args().nth(1).as_deref() != Some("demo") {
-        eprintln!("usage: march-research demo");
+    let mut arguments = std::env::args().skip(1);
+    let command = arguments.next();
+    if matches!(command.as_deref(), Some("eval" | "eval-forth")) {
+        let source = arguments
+            .next()
+            .ok_or("eval requires one quoted source argument")?;
+        if arguments.next().is_some() {
+            return Err("eval requires one quoted source argument".into());
+        }
+        let syntax = if command.as_deref() == Some("eval-forth") {
+            Syntax::Forth
+        } else {
+            Syntax::NameFirst
+        };
+        return evaluate_source(&source, syntax);
+    }
+    if command.as_deref() != Some("demo") {
+        eprintln!("usage: march-research demo | eval 'source' | eval-forth 'source'");
         std::process::exit(2);
     }
 
@@ -301,5 +318,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         guarded_inet.live_agents()
     );
 
+    Ok(())
+}
+
+fn seed_field(store: &Store, record: Cid, field: &str) -> Result<Cid, Box<dyn std::error::Error>> {
+    let Some(Node::Record(fields)) = store.get(record) else {
+        return Err("seed returned an unresolved or malformed state".into());
+    };
+    fields
+        .iter()
+        .find(|(name, _)| name == field)
+        .map(|(_, value)| *value)
+        .ok_or_else(|| format!("seed state lacks field {field}").into())
+}
+
+fn evaluate_source(source: &str, syntax: Syntax) -> Result<(), Box<dyn std::error::Error>> {
+    let mut store = Store::new();
+    let seed = Seed::build(&mut store, syntax);
+    let source = store.intern(Node::Const(Atom::Text(source.into())));
+    let state = seed.state(&mut store, source);
+    let result = seed::resume(&mut store, seed.runner, state, u32::MAX, 20_000_000)?;
+    let error = seed_field(&store, result.root, "error")?;
+    if store.get(error) != Some(&Node::Const(Atom::Unit)) {
+        let token = seed_field(&store, result.root, "token")?;
+        return Err(format!("{} near {}", store.format(error), store.format(token)).into());
+    }
+    let mut stack = seed_field(&store, result.root, "stack")?;
+    let mut rendered = Vec::new();
+    while let Some(Node::Pair(cell, tail)) = store.get(stack) {
+        let value = seed_field(&store, *cell, "value")?;
+        rendered.push(match store.get(value) {
+            Some(Node::Quote { params, .. }) => format!("quote/{params}:{}", value.short()),
+            Some(Node::Family { .. }) => format!("handler:{}", value.short()),
+            _ => store.format(value),
+        });
+        stack = *tail;
+    }
+    if store.get(stack) != Some(&Node::Const(Atom::Unit)) {
+        return Err("seed returned a malformed stack".into());
+    }
+    println!("stack (top first): [{}]", rendered.join(", "));
+    println!(
+        "image: {}",
+        Image::from_store(&store, &[seed.runner, result.root])?.cid()
+    );
+    println!("reduction steps: {}", result.stats.steps);
     Ok(())
 }

@@ -1,7 +1,8 @@
 # Bootstrap: FORTH's self-extension on an immutable substrate
 
-Status: B0a reflection and B0b reader foundation implemented; the complete B0
-gate remains open. Drafted by @march-claude from the archived March 1–5
+Status: B0a reflection, B0b reader foundation, and the B0c executable seed
+subset implemented; the complete B0 gate remains open. Drafted by @march-claude
+from the archived March 1–5
 lineages (see `../VERSIONS.md`), updated with the provisional surface choices.
 
 ## The principle
@@ -65,7 +66,7 @@ The bootstrap thread was lost every time the substrate matured:
 | March 2 `bootstrap-forth` | mutable FORTH interpreter | achieved: `:` `;` are immediate words |
 | March 4 | C compiler + x86 VM, CIDs in SQLite | lost: `:` `;` `[` `]` are tokenizer special cases |
 | March 5 | CID objects, mini-inets | absent: programs built through CLI and YAML |
-| March 6 | staged CAS reducer, INet backend | absent so far: no surface or seed image |
+| March 6 | staged CAS reducer, INet backend | executable B0c seed; parsing aliases demonstrated, full bootstrap still open |
 
 This is structural, not accidental.  FORTH bootstrapping relies on mutation:
 the dictionary, `STATE`, `HERE`, and the input buffer, all changed by
@@ -196,6 +197,51 @@ This is not the seed compiler: the frequency reader assigns no language
 meaning to tokens. Complete syntax, self-extension, streamed input, and broad
 linear scaling remain to be demonstrated.
 
+### Progress: B0c executable seed
+
+The hand-assembled seed now reads `square : ( dup * ) ; 7 square`, constructs
+the exact hand-built square quotation CID, and returns `49`. An alternate
+FORTH seed reads `: square dup * ; 7 square` to the same code CID and result.
+All token interpretation, symbolic-stack construction, dictionary updates,
+and syntax handlers execute as image graphs through the unchanged nucleus.
+The `eval` and `eval-forth` commands expose this experiment; see `SEED.md`.
+
+Source can alias parsing handlers and use them immediately, including aliases
+for the binding and ending words. This is a narrow B0.3 witness, not yet
+source-defined arbitrary parsing behavior or a self-hosted seed assembler.
+Constants, scalar-result quotation calls/composition, input-wire inference,
+rebinding with static linkage, and `quote` retrieval are implemented.
+
+| Gate | Evidence so far |
+| --- | --- |
+| B0.1 | Exact square CID and `49`; computed constant `42` |
+| B0.2 | Two seed surfaces, unchanged nucleus |
+| B0.3 | Source-defined parsing aliases; broader handler composition open |
+| B0.4 | Tested image identity across reload and unrelated store history |
+| B0.5 | Every tested token boundary with complete source retained; streamed chunks open |
+
+Nested quotations, richer value/stack effects, surface guards and recursive
+definitions, arbitrary grammar extensions, and broad scaling remain open.
+
+### Next proposed gate: source bootstrap fixed point
+
+Independent review proposes writing the seed's state-transforming handlers
+in March source, compiling that source with the stage-zero seed, and comparing
+the resulting runner CID with the assembled runner CID. Exact equality would
+make the Rust assembler a verified bootstrap recipe rather than the only
+maintainable form of the compiler. This is a proposed B1 target, not a passed
+gate or an implemented feature.
+
+It requires source-level record/code-description operations, general stack
+effects, recursion, and guarded state transformers. It should exercise the
+context-oriented model by expressing the compiler's own modes in March.
+Before broadening that surface, the strict-evaluation/lazy-quotation factoring
+counterexample in `MODEL.md` needs a demand-policy resolution and inline versus
+factored value/error comparisons.
+The in-memory Store currently retains transient reduction history; explicit
+checkpoint/reload measurements in `SEED.md` provide a baseline while persistent
+dictionaries and transient-vs-persistent storage remain research questions.
+
 ### Nucleus capabilities (Rust)
 
 The nucleus must stay free of syntax: no knowledge of `:` `;` `[` `]` or any
@@ -219,7 +265,8 @@ other word.  It needs only:
 
 ### Seed image (March)
 
-Written as hand-built graphs at first, since no parser exists yet to read it:
+Initially written as hand-built graphs. The executable subset is in `seed.rs`;
+expressing this assembler in source remains a later self-hosting step:
 
 - **The outer interpreter**: a guarded family `step(state)` with clauses:
   - at end of input: return the state;

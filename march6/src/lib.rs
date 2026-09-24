@@ -7,6 +7,7 @@ pub mod memory;
 pub mod net;
 pub mod reduce;
 pub mod reflect;
+pub mod seed;
 pub mod template;
 
 pub use cid::Cid;

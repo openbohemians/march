@@ -68,6 +68,7 @@ Stack safety and deterministic identity do not establish linear runtime or
 memory growth. The B0 scaling gate remains open; persistent text/dictionary
 representations may be needed.
 
-Next is the seed's symbolic stack, definition/quotation words, number/name
-dispatch, and source-level self-extension. The Rust nucleus must continue to
-know none of their spellings.
+The B0c seed now supplies a symbolic stack, definition/quotation words,
+number/name dispatch, and parsing aliases. See `SEED.md` for the executable
+subset and the remaining self-extension/scaling questions. The Rust nucleus
+continues to know none of their spellings.

@@ -133,11 +133,39 @@ passing test suite cannot quietly redefine the research question.
 - Guarded INet calls keep rejected templates out of the live agent count, but
   the immutable template table is still host metadata.  It is not yet a
   self-hosted net representation of definitions.
-- Reflection proves only that March values can construct validated code.  It
-  does not yet prove that a March-defined outer interpreter owns token meaning,
-  dictionary policy, immediacy, or alternate surface spellings.
+- Reflection alone proves only that March values can construct validated code.
+  B0c now supplies a graph-defined outer interpreter and two seed surfaces,
+  but source-level parsing extension is currently limited to handler aliases.
+  Arbitrary source-defined grammar logic and self-hosting the seed assembler
+  still require a richer surface.
+- Independent B0b review found no source defect and supplied 15 adversarial
+  tests. Exact strings and line comments require additional syntax-neutral
+  text access: the source is retained, but slicing/delimiter search is absent.
+  The user chose integer-literal precedence and prohibited numeral bindings;
+  both seeds now enforce it. Unicode keys currently use exact UTF-8 bytes.
+- Seed review found that inferring 65,536 inputs escaped as a low-level
+  reflection arity error. The input allocator now stops at 65,535 and
+  propagates an explicit reader error. Near-limit state fixtures exercise
+  primitives and compiled calls without requiring huge source inputs.
 
 ## Still open and high priority
+
+The seed's evaluation stack is strict; its symbolic quotation stack erases
+discarded computations. A discarded overflowing addition can therefore fail
+when interpreted but disappear when compiled inside a quotation. This seam is
+now explicit and tested. General source-fragment extraction preserving failure
+behavior needs a demand-policy decision; generated total integer comparisons
+do not prove that stronger property.
+
+Seed review measured roughly 100 retained Store nodes per token in a repeated
+call/drop workload. Persistent CAS storage currently also holds every transient
+reduction state. A checkpoint/reload baseline reduces retained history with
+explicit roots and unchanged final identity, but it incurs image-codec work
+and is not automatic in the CLI. Distinguishing transient reduction cells from
+persistent values, or adding explicit-root reclamation, remains unresolved.
+Runtime variable-arity calls also construct temporary reflected applications;
+a syntax-neutral list-application operation is a possible later optimization,
+not required for the current seed's correctness.
 
 1. Representative workloads plus external input graphs with nested alias
    shapes.  The new dynamic reference-count oracle covers nested local sharing,
@@ -168,7 +196,9 @@ passing test suite cannot quietly redefine the research question.
     than silently capture or duplicate the wrong subnet.
 11. Replace the content-only E0 `Trace` stand-in with a typed capability model
     that can distinguish independently created resources with equal history.
-12. Complete bootstrap gate B0 above reflection: syntax-neutral text stepping,
-    token-derived dynamic dictionary keys, a hand-built outer interpreter and
-    seed image, alternate `: ... ;` / `to ... end` spellings, self-extension,
-    and deterministic split/reload image construction.
+12. Complete bootstrap gate B0 beyond the executable B0c seed: arbitrary
+    source-defined parsing handlers, richer stack/value operations, source
+    streaming across image epochs, and scaling beyond flat dictionaries.
+    Text stepping, dynamic dictionary keys, a graph-defined seed interpreter,
+    alternate name-first/FORTH surfaces, parsing aliases, and token-quota
+    split/reload are now tested.

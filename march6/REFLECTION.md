@@ -116,6 +116,7 @@ B0b now provides syntax-neutral text stepping and dynamic record-key operations
 (see `READER.md`), so a graph can look up a token-derived dictionary key. Decisions
 such as whether a token is a number, whether a word is immediate, what ends a
 comment or string, and what compiler mode means belong in the seed image, not
-in Rust. The hand-built seed must next implement the working `name : ... ;`
-surface, prove an alternate spelling, and exercise deterministic split/reload
-bootstrap epochs. See `SYNTAX.md` for the provisional choices.
+in Rust. The hand-built B0c seed now implements a subset of `name : ... ;`,
+an alternate FORTH spelling, and deterministic token-quota save/reload.
+See `SEED.md` for evidence and remaining limitations; arbitrary source-defined
+parsing handlers and streamed input are still unproved.

@@ -1,7 +1,8 @@
 # March research prototype
 
 This directory is a deliberately small experimental successor to March 4 and
-March 5.  It is not yet a language implementation.  Its purpose is to test the
+March 5. It now includes a small executable seed language, not a complete March
+implementation. Its purpose is to test the
 claims that would make a new March architecture worthwhile.
 
 The prototype keeps three ideas together:
@@ -31,6 +32,8 @@ Run everything offline:
 ```sh
 cargo test --offline
 cargo run --offline -- demo
+cargo run --offline -- eval 'square : ( dup * ) ; 7 square'
+cargo run --offline -- eval-forth ': square dup * ; 7 square'
 ```
 
 See [RESEARCH.md](RESEARCH.md) for the hypotheses, invariants, measurements,
@@ -47,4 +50,6 @@ March records describe code, and a strict, budgeted, syntax-neutral reducer
 operation interns only validated closed quotations and families.
 [READER.md](READER.md) records the B0b token/dictionary foundation and
 graph-defined reader resume tests. [SYNTAX.md](SYNTAX.md) fixes provisional
-name-first spellings for the forthcoming seed; they are not yet a compiler.
+name-first spellings. [SEED.md](SEED.md) describes the executable B0c subset:
+the seed compiler lives in image graphs, both surfaces compile the same square,
+and source-defined parsing aliases work without changing the nucleus.

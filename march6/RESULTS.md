@@ -12,7 +12,7 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass.  There are currently 145 unit, integration, generated, and
+All checks pass. There are currently 188 unit, integration, generated, and
 differential test cases, with none ignored.  One passing test performs 10,440
 generated staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses
 found by external review and whether they are fixed, narrowed, or still open.
@@ -69,7 +69,8 @@ with respect to newly reflected nodes.  Unknown descriptions residualize for a
 later epoch.  There is no textual-CID authority path and no operation for
 constructing a trace capability.  This establishes the B0a construction
 boundary, not the complete B0 bootstrap. B0b now adds token stepping, optional
-decimal conversion, and dynamic dictionary keys; the seed compiler remains.
+decimal conversion, and dynamic dictionary keys. B0c adds a small executable
+seed compiler using those operations without changing the nucleus.
 
 B0b's graph-defined token-frequency reader completes 10,000 tokens, including
 on a 256 KiB native test-thread stack. Save/reload at every boundary of an
@@ -80,9 +81,51 @@ A dictionary-held quotation survives reload and computes `49` from parsed
 round-trips, UTF-8 cursor boundaries, all input-subset staging combinations,
 reflection/substitution, guard purity, capability safety, and byte budgets.
 See `READER.md` for exact contracts and limits, and `SYNTAX.md` for provisional
-surface choices. These witnesses do not yet compile the chosen surface syntax
-or establish the B0 self-extension and scaling gates. Flat dictionaries and
+surface choices. The B0b witnesses alone do not compile the chosen surface
+syntax. Flat dictionaries and
 existing whole-text clones can still cause superlinear host work.
+
+An independent B0b review found no source bug and added 15 tests: generated
+tokenizer/reference comparisons, integer boundary/decorated-value checks,
+canonical dynamic updates, strict operand types, pure name/number guards,
+reflection schemas, budget sweeps, and dynamically derived capability forks.
+It also identified a deferred text-access gap: exact strings and line comments
+need slicing/search beyond the current whitespace step. Per the user's
+decision, integer literals take precedence and cannot be definition names;
+exact UTF-8 keys are an explicit provisional seed policy.
+
+B0c now compiles `square : ( dup * ) ;` to the exact hand-built quotation CID
+and evaluates `7 square` to `49`. A FORTH-style seed produces the same code
+under the same reducer. Source-defined parsing aliases work in the same file.
+Nineteen seed tests exercise constants, compiled composition, explicit input
+wiring, static links across rebinding, context isolation, staged source, and
+every-token-boundary reload. Two CLI tests cover both surfaces and failure
+exit statuses. The seed tests also pass on a 256 KiB thread stack.
+See `SEED.md` for runnable examples and measured fixed-dictionary costs.
+
+Seven independent seed tests additionally compare 60 generated programs under
+both surfaces with a test-side symbolic compiler and concrete stack evaluator,
+resume generated programs across token boundaries, exercise 300 random token
+sequences under both surfaces, test no implicit capture and scalar results,
+sweep work budgets, and report retained nodes per token. Error cases account
+for demand-driven erasure: the strict top-level stack and symbolic quotation
+stack do not yet preserve the same failure behavior for discarded computations.
+The seed also rejects numeral definition names and excessive inferred arity
+without extending the nucleus.
+
+This establishes the narrow B0c witnesses, not the complete bootstrap gate:
+self-extension is currently alias-level; arbitrary source-defined parsing
+handlers, source-chunk streaming, full source self-hosting, and general linear
+scaling remain unproved. No INet or memory-planner capability changed here.
+
+Independent seed review identified persistent retention of transient compiler
+states (roughly 100 store nodes per source token in its repeated-call probes).
+The explicit-root checkpoint baseline now compares a 64-call run against
+16-token image/reload epochs: 19,766 uncollected nodes versus 1,962 peak nodes
+within an epoch and 337 retained nodes after final reload, with the same final
+image. Reduction steps increase from 58,012 to 63,797, excluding image codec
+cost. This establishes a reclamation control, not a production collector or
+bounded peak byte usage; the CLI still uses a single uncollected run.
 
 Reflection tests round-trip 300 generated closed code values, mutate 400
 descriptions without a panic, sweep budgets, and compare original versus

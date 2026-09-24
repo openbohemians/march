@@ -219,6 +219,27 @@ image and host resources as well.
 
 ## Bootstrap target
 
+### Factoring invariant for the surface
+
+Extracting a well-formed fragment into a closed word, with the same explicit
+stack interface, should preserve its value and observable failure behavior.
+This is the factoring invariant behind the desired FORTH-style composability;
+comparing only successful integer results is insufficient. Resource-budget
+exhaustion must be considered separately, with sufficient resources for both
+runs.
+
+The B0c seed currently violates this invariant at the interpretation boundary:
+`9223372036854775807 1 + drop 0` overflows at top level, but placing the same
+body in a quotation erases the unused addition and returns `0`. The evaluation
+stack is strict, whereas the symbolic stack builds a demand-driven graph.
+This is a characterized prototype limitation, not the intended final rule.
+A next semantic gate should compare inline versus factored programs for both
+values and error classes. Making evaluation build the same graph and demand
+it at explicit observation points is a candidate resolution consistent with
+the lazy model; it is not implemented by B0c.
+
+### Self-hosting stages
+
 The self-hosting path should be observable in stages:
 
 1. A small trusted host nucleus implements canonical graph storage, CID

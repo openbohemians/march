@@ -1,8 +1,10 @@
 # Working surface syntax
 
-Status: provisional seed-language choices, not yet implemented syntax. The
+Status: provisional seed-language choices; the B0c subset is executable. The
 Rust nucleus does not recognize these spellings. Changing them should require
 changing an image, not changing the reducer.
+
+See `SEED.md` for commands, tests, exact supported forms, and limitations.
 
 ```text
 answer : 6 7 * ;
@@ -37,6 +39,20 @@ delimiters need separating whitespace: `square : ( dup * ) ;`. It does not
 split `square:` or assign any meaning to punctuation. More elaborate reading
 belongs above this foundation.
 
-The bootstrap gate should also accept a conventional FORTH seed using
+Integer literals take precedence over dictionary names and cannot be bound as
+definition names, per the user's decision. This includes equivalent spellings
+such as `007`, `+7`, and `-0`. The current literal grammar is exactly the
+checked signed-64-bit decimal grammar of `ParseInt`; digit strings outside that
+range are not supported integer literals. Broader numeric syntax is deferred.
+Keys use exact UTF-8 bytes, without Unicode normalization: canonically
+equivalent spellings remain distinct. Unicode policy remains provisional.
+
+Line comments and whitespace-exact strings need additional text access beyond
+`NextToken`. The original text remains in state, but the seed cannot currently
+slice it or search for a newline/delimiter. A future syntax-neutral slicing and
+search/scanning operation can supply that capability; no delimiter spelling
+needs to become a nucleus rule. Strings/comments remain deferred here.
+
+The bootstrap experiment also accepts a conventional FORTH seed using
 `: square dup * ;`, producing the same code CID with the same nucleus. The
 representation is replaceable; the code identity is the comparison point.

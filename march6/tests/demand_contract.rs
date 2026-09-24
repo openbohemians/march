@@ -17,6 +17,49 @@ fn overflow(s: &mut Store) -> Cid {
 }
 
 #[test]
+fn eager_argument_boundary_changes_unused_failure_but_if_remains_selective() {
+    let mut s = Store::new();
+    let bad = overflow(&mut s);
+    let seven = int(&mut s, 7);
+    let yes = s.intern(Node::Const(Atom::Bool(true)));
+    let direct = s.intern(Node::If {
+        condition: yes,
+        when_true: seven,
+        when_false: bad,
+    });
+    assert_eq!(run(&mut s, direct), Ok(seven));
+    let c = s.intern(Node::Param(0));
+    let a = s.intern(Node::Param(1));
+    let b = s.intern(Node::Param(2));
+    let body = s.intern(Node::If {
+        condition: c,
+        when_true: a,
+        when_false: b,
+    });
+    let choose = s.intern(Node::Quote { params: 3, body });
+    let call = s.intern(Node::Apply {
+        function: choose,
+        arguments: vec![yes, seven, bad],
+    });
+    assert_eq!(run(&mut s, call), Ok(seven));
+
+    // A small CBV-boundary control, NOT a new evaluator: reducing ordinary
+    // arguments before calling the same held code exposes the unused fault.
+    let eager = (|| {
+        let args = [yes, seven, bad]
+            .into_iter()
+            .map(|arg| run(&mut s, arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let call = s.intern(Node::Apply {
+            function: choose,
+            arguments: args,
+        });
+        run(&mut s, call)
+    })();
+    assert_eq!(eager, Err(ReduceError::IntegerOverflow("add")));
+}
+
+#[test]
 fn arbitrary_guard_parameter_can_leave_an_earlier_computed_argument_unused() {
     let mut s = Store::new();
     let bad = overflow(&mut s);

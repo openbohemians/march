@@ -124,6 +124,22 @@ pub struct ProbeRun {
     pub stats: ProbeStats,
 }
 
+/// Diagnostic accounting for the B/C append-only agent arrays, not total heap
+/// usage. Deleted agents leave vacant slots; neither probe reuses them yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StorageStats {
+    pub template_nodes: usize,
+    pub use_count_entries: usize,
+    /// Sum of array lengths, including vacant slots.
+    pub issued_slots: usize,
+    pub vacant_slots: usize,
+    /// Sum of array capacities; slots of different agent types have different sizes.
+    pub capacity_slots: usize,
+    /// Backing-array capacity bytes only: excludes maps, templates, nested
+    /// allocations, allocator overhead, and temporary runtime worklists.
+    pub capacity_bytes: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProbeError {
     Unsupported(&'static str),

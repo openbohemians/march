@@ -12,14 +12,14 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass. There are currently 249 unit, integration, generated, and
+All checks pass. There are currently 278 unit, integration, generated, and
 differential test cases, with none ignored.  One passing test performs 10,440
 generated staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses
 found by external review and whether they are fixed, narrowed, or still open.
 
 ## Demand-contract and protocol-control checkpoint
 
-C0 adds eleven executable reference fixtures for arbitrary-parameter guard
+C0 adds twelve executable reference fixtures for arbitrary-parameter guard
 demand, independent static progress around unknowns, error sequencing, strict
 aggregate projection, closed suspensions inside strict containers, and explicit
 higher-order code arguments. A reflected Church `two two` returns closed code
@@ -36,7 +36,7 @@ The first A-inspired scalar protocol control lives in `inet_demand_a.rs`, with
 a shared probe vocabulary in `demand.rs`. It has iterative request/reply
 continuations, shared memo values, retained partial state between epochs,
 atomic binding-conflict rejection, and recoverable budget exhaustion. Four
-unit tests and fourteen independent differential tests pass, including 720
+unit tests and sixteen shared protocol tests pass, including 720
 arbitrary DAG/context and 240 typed staged comparisons. Two lowering-boundary
 tests reject missing references and unsupported dormant nodes. A depth-30
 repeated-doubling DAG evaluates its 31 distinct nodes once each, rather than
@@ -46,9 +46,18 @@ This is NOT the port-level INet backend or an implementation of A's proposed
 multi-principal request ports. Direct CID lookup models requests, and retained
 memo storage is counted as live until the machine is dropped. No confluence,
 parallelism, complete last-consumer reclamation, higher-order net encoding,
-or canonical residual-image result follows from these tests. The independent
-B probe is assigned to Claude but has not yet landed; there is no A/B winner.
-See `DEMAND-CONTRACT.md` and `NEXT-PHASE.md` for the remaining gates.
+or canonical residual-image result follows from these tests.
+
+B and both C reply topologies are now integrated and independently verified
+against the same harness, with quiescent audits after every B/C run. Their 25
+unit tests pass. Additional review fixtures exercise generated budget cuts,
+retained backing storage, and dormant branch cleanup. B/C finish the depth-30
+workload with two logical agents but retain vacant array slots: B has 91 issued
+slots, C 121. This is not total-memory reclamation. Discarding a 2,000-node
+branch releases over 4,000 uses inside fewer than 100 transitions: the fuel
+limit does not bound host work. No design has been selected. See
+`DEMAND-COMPARISON.md` for verified measurements, costs, and the eager-evaluation
+comparison; `DEMAND-CONTRACT.md` and `NEXT-PHASE.md` track the remaining gates.
 
 ## Staged content-addressed reduction
 

@@ -169,7 +169,13 @@ unknown may be superseded by an earlier child overflow after binding. The
 initial scalar A-inspired request/memo control matches the reference across
 generated tests, but direct CID lookup is not actual multi-port net wiring.
 Its retained memo cache is counted as live, not reported as reclaimed. B and
-the real port-rule, scheduling, higher-order, and reclamation gates remain open.
+both C topologies now pass the shared contracts with per-run quiescent audits.
+Review found that their logical deletion retains backing-array capacity, and
+large dormant-branch release walks run outside transition fuel. New storage
+diagnostics and regression fixtures expose these limits rather than treating
+them as fixed. C's distribution token also contains a host worklist counted as
+one logical agent. The real port-rule, scheduling, higher-order, and production
+reclamation gates remain open; see `DEMAND-COMPARISON.md`.
 
 General source-fragment extraction remains broader than the tested integer,
 single-result subset. Structural syntax/type/underflow errors remain immediate;

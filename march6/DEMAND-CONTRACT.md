@@ -105,11 +105,12 @@ port correctness, full token conservation, or efficient parallel execution.
 The first probes isolate semantic and accounting mistakes before investing in
 the full port/rule implementation. They do not replace the N0/N1 gates.
 
-Both candidate routes must eventually face the same differential fixtures.
-The A probe models direct requests to shared memo state. Claude has accepted
-the B assignment to model requests routed through a fan tree. Neither is selected as
-the winning design. Results are reported only for implementations actually
-available and tested, not for a queued assignment or a hand-worked trace.
+All four configurations now face the same sixteen shared fixtures. A models
+direct requests to shared memo state; B routes through fans; C separates
+control merges from data fans with reply-on-data and reply-on-control options.
+B/C audits run after every harness observation, including budget/conflict
+errors. No winning design is selected. `DEMAND-COMPARISON.md` records the
+independently reproduced measurements and eager-boundary reference witness.
 
 Common checks include demanded versus discarded failure, dynamic first use,
 repeated/nested sharing, unknown/static-island reduction, epoch-local error
@@ -125,3 +126,8 @@ Execution/memo storage and routing costs must be counted; persistent templates
 are reported separately. Any probe that retains memo cells until machine drop
 must say so, even when it releases use-site edges or continuations. Releasing
 those edges is not a demonstration of complete last-consumer reclamation.
+B/C release dead logical agents, but their backing arrays retain vacant slots.
+Their `storage()` diagnostics distinguish those slots from live agents.
+Transition budgets do not include whole release cascades or cancellation path
+walks. The large discarded-branch fixture characterizes that limitation;
+neither total-memory nor bounded-latency claims follow from these probes.

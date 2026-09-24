@@ -8,12 +8,13 @@ See `DEMAND-CONTRACT.md` for executable reference fixtures and the precise
 scope of isolated scalar protocol probes. The real port-level backend stays
 unchanged until a candidate passes its tests and has explicit interaction rules.
 
-First implementation checkpoint: C0 has eleven new reference fixtures, including
+Current implementation checkpoint: C0 has twelve new reference fixtures, including
 explicit reflected Church `two two` across collection/image reload and two
 independently demanded output-template witnesses. The shared scalar probe API,
-A-inspired sequential memo control, and fourteen differential tests are in
-place. This is reference/semantic evidence, not completion of N0 or N1. Claude's
-B port-and-wire probe is assigned but not yet integrated. R1 still needs a
+A-inspired sequential memo control, B fan-routed probe, and both C control-port
+reply topologies run sixteen shared tests. This is reference/semantic evidence,
+not completion of N0 or N1. See `DEMAND-COMPARISON.md` for integration findings,
+including retained storage and unbudgeted cleanup. R1 still needs a
 representation decision before production word-interface changes.
 
 ## Objective

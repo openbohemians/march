@@ -60,3 +60,5 @@ store; the CLI collects intermediate history between token batches.
 [NEXT-PHASE.md](NEXT-PHASE.md) tracks the next reference-core and interaction-net
 milestones, task ownership, and review gates. [DEMAND-CONTRACT.md](DEMAND-CONTRACT.md)
 records the first executable demand fixtures and isolated protocol-probe scope.
+[DEMAND-COMPARISON.md](DEMAND-COMPARISON.md) compares the integrated A/B/C probes,
+their remaining costs, and eager evaluation.

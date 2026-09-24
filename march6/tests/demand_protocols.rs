@@ -13,23 +13,43 @@ type Facts = BTreeMap<String, Scalar>;
 
 enum Machine {
     A(march_research::inet_demand_a::Machine),
+    B(march_research::inet_demand_b::Machine),
+    C(march_research::inet_demand_c::Machine),
 }
 
 impl Machine {
     fn run(&mut self, facts: &Facts, budget: usize) -> Result<ProbeRun, ProbeError> {
         match self {
             Self::A(machine) => machine.run(facts, budget),
+            Self::B(machine) => {
+                let result = machine.run(facts, budget);
+                machine.audit().expect("B quiescent invariants after run");
+                result
+            }
+            Self::C(machine) => {
+                let result = machine.run(facts, budget);
+                machine.audit().expect("C quiescent invariants after run");
+                result
+            }
         }
     }
 }
 
-fn machines(store: &Store, root: Cid) -> [Machine; 1] {
-    // Add the independent B machine here when its implementation lands. Every
-    // contract below then exercises it against the same CAS control; no B
-    // result or coverage is claimed until then.
-    [Machine::A(march_research::inet_demand_a::Machine::new(
-        Program::from_store(store, root).unwrap(),
-    ))]
+fn machines(store: &Store, root: Cid) -> [Machine; 4] {
+    use march_research::inet_demand_c::Topology;
+    let program = Program::from_store(store, root).unwrap();
+    [
+        Machine::A(march_research::inet_demand_a::Machine::new(program.clone())),
+        Machine::B(march_research::inet_demand_b::Machine::new(program.clone())),
+        Machine::C(march_research::inet_demand_c::Machine::with_topology(
+            program.clone(),
+            Topology::ReplyOnData,
+        )),
+        Machine::C(march_research::inet_demand_c::Machine::with_topology(
+            program,
+            Topology::ReplyOnControl,
+        )),
+    ]
 }
 
 fn int(store: &mut Store, n: i64) -> Cid {
@@ -477,6 +497,82 @@ fn random(seed: &mut u64) -> usize {
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
     (*seed >> 32) as usize
+}
+
+#[test]
+fn generated_budget_cuts_allow_retry_then_new_facts() {
+    let mut seed = 0x43555453_u64;
+    for case in 0..24 {
+        let mut store = Store::new();
+        let mut pool = vec![
+            int(&mut store, 1),
+            int(&mut store, i64::MAX),
+            boolean(&mut store, true),
+            hole(&mut store, "x"),
+            hole(&mut store, "flag"),
+        ];
+        for _ in 0..10 {
+            let a = pool[random(&mut seed) % pool.len()];
+            let b = pool[random(&mut seed) % pool.len()];
+            let c = pool[random(&mut seed) % pool.len()];
+            pool.push(store.intern(match random(&mut seed) % 3 {
+                0 => Node::Add(a, b),
+                1 => Node::Mul(a, b),
+                _ => Node::If {
+                    condition: a,
+                    when_true: b,
+                    when_false: c,
+                },
+            }));
+        }
+        let root = *pool.last().unwrap();
+        let initial = Facts::new();
+        let later = facts(&[("x", Scalar::Int(2)), ("flag", Scalar::Bool(true))]);
+        let initial_expected = control(&mut store, root, &initial);
+        let later_expected = control(&mut store, root, &later);
+        for cut in 0..80 {
+            for (variant, mut machine) in machines(&store, root).into_iter().enumerate() {
+                match machine.run(&initial, cut) {
+                    Ok(run) => assert_eq!(run.outcome, initial_expected),
+                    Err(ProbeError::BudgetExhausted { .. }) => {}
+                    other => panic!("case {case} variant {variant} cut {cut}: {other:?}"),
+                }
+                assert_eq!(
+                    machine.run(&initial, BUDGET).unwrap().outcome,
+                    initial_expected
+                );
+                assert_eq!(machine.run(&later, BUDGET).unwrap().outcome, later_expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn dormant_branch_cleanup_is_not_bounded_by_transition_fuel() {
+    let mut store = Store::new();
+    let one = int(&mut store, 1);
+    let seven = int(&mut store, 7);
+    let yes = boolean(&mut store, true);
+    let mut discarded = one;
+    for _ in 0..2_000 {
+        discarded = store.intern(Node::Add(discarded, one));
+    }
+    let root = store.intern(Node::If {
+        condition: yes,
+        when_true: seven,
+        when_false: discarded,
+    });
+    for (variant, mut machine) in machines(&store, root).into_iter().enumerate() {
+        let run = machine.run(&Facts::new(), 100).unwrap();
+        assert_eq!(run.outcome, Outcome::Value(Scalar::Int(7)));
+        assert_eq!(run.stats.node_evaluations.get(&discarded), None);
+        assert!(run.stats.transitions <= 100);
+        if variant != 0 {
+            // Characterize a limitation, not a bounded-work success: B/C
+            // walk the unused template's edges inside a release cascade.
+            assert!(run.stats.erasures >= 4_000);
+        }
+    }
 }
 
 #[test]

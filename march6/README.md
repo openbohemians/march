@@ -62,3 +62,5 @@ milestones, task ownership, and review gates. [DEMAND-CONTRACT.md](DEMAND-CONTRA
 records the first executable demand fixtures and isolated protocol-probe scope.
 [DEMAND-COMPARISON.md](DEMAND-COMPARISON.md) compares the integrated A/B/C probes,
 their remaining costs, and eager evaluation.
+[N0-PROBE.md](N0-PROBE.md) records the experimental closed-code/application
+probe, including the canonical-sharing and cycle-detection gaps found in review.

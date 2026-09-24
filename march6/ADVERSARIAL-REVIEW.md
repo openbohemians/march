@@ -163,6 +163,15 @@ passing test suite cannot quietly redefine the research question.
 
 ## Still open and high priority
 
+N0a integration found an acceptance gap beyond explicit-argument sharing:
+instance/template keys do not coalesce identical substituted work like the CAS
+reference, across calls or within a body. Self-application also misses canonical
+cycle detection and instead exhausts fuel. Independent characterization tests
+record these differences; N0 is not passed. The initial code-conditioned `If`
+mismatch is fixed in the probe with structural residual-groundness propagation,
+not a change to reference semantics. Retained instance records/argument vectors
+are exposed separately from live agents. See `N0-PROBE.md`.
+
 C0 fixtures make two subtleties executable: strict Pair/Record projections
 force even unused erroneous fields, and a type error observed around an
 unknown may be superseded by an earlier child overflow after binding. The

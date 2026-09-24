@@ -17,6 +17,13 @@ not completion of N0 or N1. See `DEMAND-COMPARISON.md` for integration findings,
 including retained storage and unbudgeted cleanup. R1 still needs a
 representation decision before production word-interface changes.
 
+N0a is now integrated as an experimental module with closed Quote/Apply and
+dynamic parameter-proxy sites. It is not a gate pass: independent review found
+that per-instance keys lose sharing introduced by canonical substitution and
+miss the reference's active-CID cycle detection. Next N0 task is canonical
+instantiated-work identity, before the reflected Church/N0b extension. Preserve
+all current shared-evaluation requirements; see `N0-PROBE.md` for counterexamples.
+
 ## Objective
 
 Strengthen the reference at word, data, and demand boundaries while testing

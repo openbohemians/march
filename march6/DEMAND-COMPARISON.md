@@ -18,9 +18,15 @@ than only in Claude's scratch copy. Their sharing measurements reproduce here:
 
 | Workload | A transitions | B transitions | C/data transitions | C/control transitions |
 | --- | ---: | ---: | ---: | ---: |
-| Nested sharing, depth 30 | 122 | 213 | 397 | 425 |
-| Wide sharing, 32 uses | 130 | 256 | 300 | 389 |
-| Dynamic first consumer, false branch | 18 | 29 | 62 | 47 |
+| Nested sharing, depth 30 | 122 | 213 | 336 | 304 |
+| Wide sharing, 32 uses | 130 | 256 | 266 | 292 |
+| Dynamic first consumer, false branch | 18 | 29 | 53 | 37 |
+
+C now carries the caller's site in the token, making merges stateless and
+returns direct. Previously it retraced merge marks on return; those older C
+counts were 397/425, 300/389 and 62/47 respectively. Direct site lookup is
+counted as a transition but not as merge routing; it is not proof of local
+port rewrites or zero-cost communication.
 
 These are NOT timings or equal-cost instruction counts. A uses direct map
 lookup, B combines some routing/copy work, and C charges distribution steps
@@ -34,10 +40,10 @@ fully represented by these totals. There is no eager-backend benchmark here.
 | A-inspired control | Small sequential memo baseline; direct requests | Retains memo cells; host continuation stack; does not implement A's proposed incoming request ports |
 | B | One fan network routes demand and shares replies; releases dead cells | Fans carry caller marks and parked replies; request cost depends on tree depth; fan collapse may discard a cached reply; host continuation stack |
 | C/data | Demand and data have separate wiring; callers can use parked values without routing another request | Maintains both trees; distributes copies even to consumers later erased; completion waits for distribution before returning |
-| C/control | Same separation; carries a result back only when requested | Repeated consumers traverse control merges; current code still allocates the data-tree structure even though this topology does not broadcast |
+| C/control | Same separation; carries a result directly back only when requested | Repeated consumers traverse control merges on calls; current code still allocates the data-tree structure even though this topology does not broadcast |
 
 C removes the host **evaluation frame stack**, not continuation state or all
-host worklists. Waiting cells and active merges encode the continuation.
+host worklists. Waiting cells and their return-site references encode the continuation.
 Distribution carries a growable pending-work vector in the token; cleanup has
 another work vector. They are not extra logical agents in `peak_live`.
 
@@ -60,8 +66,10 @@ The common limitations matter more than the small scalar measurements:
 3. **Sharing currently relies on static consumer counts.** Those counts cover
    even dormant consumers, preventing premature deletion and recomputation.
    Fresh applications and explicit captured pending inputs introduce dynamic
-   consumers; this scalar solution does not yet cover that. This is an N0
-   representation/lifetime question, not a requirement to add implicit closures.
+   consumers; this scalar solution does not yet cover that. The separate N0a
+   probe now creates dynamic argument-proxy sites, but its per-instance keys
+   miss canonical sharing after substitution (including within one body).
+   This is not a requirement to add implicit closures. See `N0-PROBE.md`.
 4. **C's clarity does not prove arbitrary scheduling safe.** It uses one token,
    finishes distribution before returning, drains erasures atomically, and
    does no ahead-of-token evaluation. Removing those restrictions needs rules
@@ -72,10 +80,12 @@ The common limitations matter more than the small scalar measurements:
    can keep a computed value alive. Error precedence can change after binding,
    so errors are not permanent ground memo values. These are real obligations
    of the semantics, not just the placement of ports.
-6. **The scope is narrow.** No protocol `Apply`, `Quote`, `Intern`, general
+6. **The A/B/C scalar scope is narrow.** No protocol `Apply`, `Quote`, `Intern`, general
    guards, effects, dynamic captured inputs, or persisted paused-machine codec.
    In-memory cloning and retry are not image save/reload. The main reference
-   supports more than these probes do.
+   supports more than these probes do. The separate N0a experiment adds closed
+   `Quote`/`Apply` but has known canonical-sharing and cycle-observation gaps;
+   it is not an N0 pass.
 
 ## What eager evaluation would change
 
@@ -127,6 +137,6 @@ Such optimizations must preserve error order, termination behavior and sharing;
 "pure" or "used somewhere" alone does not justify evaluating earlier.
 
 C is a promising way to make those boundaries explicit, not a demonstrated
-performance winner. Next gates are dynamic sharing for N0, reusable storage
+performance winner. Next gates are canonical instantiated-work identity for N0, reusable storage
 and honest work budgets, then comparisons against an eager control on matched
 workloads. Keep both C reply topologies and B until that evidence exists.

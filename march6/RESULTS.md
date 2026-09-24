@@ -12,7 +12,7 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass. There are currently 278 unit, integration, generated, and
+All checks pass. There are currently 298 unit, integration, generated, and
 differential test cases, with none ignored.  One passing test performs 10,440
 generated staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses
 found by external review and whether they are fixed, narrowed, or still open.
@@ -58,6 +58,30 @@ branch releases over 4,000 uses inside fewer than 100 transitions: the fuel
 limit does not bound host work. No design has been selected. See
 `DEMAND-COMPARISON.md` for verified measurements, costs, and the eager-evaluation
 comparison; `DEMAND-CONTRACT.md` and `NEXT-PHASE.md` track the remaining gates.
+
+## Revised C and experimental N0a integration
+
+C's merges are now stateless: the token retains the calling site and replies
+return directly. The sixteen shared scalar tests still pass with per-run audits;
+the storage diagnostics lost in the scratch-file handoff are restored. Revised
+measurements are in `DEMAND-COMPARISON.md`; direct host return-site lookup is not
+itself evidence of local port rewriting.
+
+The separate `inet_n0.rs` probe adds closed code, exact-arity application and
+dynamic argument-proxy sites. Thirteen unit tests and seven independent review
+tests pass, including higher-order apply-twice, dormant arguments, epoch/budget
+recovery and code-valued conditions. Integration preserves reference semantics
+by carrying structural groundness for stuck conditionals internally; no reducer
+identity or image format changed. Template census uses an ordered visited set,
+and storage diagnostics expose retained instance records and argument vectors.
+
+**N0 has not passed.** Two review fixtures deliberately characterize remaining
+acceptance gaps: separate instance/template keys recompute work that CAS
+substitution coalesces, and higher-order self-application exhausts fuel instead
+of reporting the reference's canonical-CID cycle error. Those passing tests
+record known shortcomings, not conformance successes. Canonical instantiated
+work identity must be resolved before reflection/N0b or a full N0 claim. See
+`N0-PROBE.md` for scope and exact counterexamples.
 
 ## Staged content-addressed reduction
 

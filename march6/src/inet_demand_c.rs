@@ -18,28 +18,29 @@
 //! critical pairs that a free scheduler would have to resolve are listed in
 //! `INET-DEMAND.md`, section 10.
 //!
-//! Agents and where state lives:
+//! The token carries its own return address: the use site to resume.  A
+//! reply therefore goes straight back to its caller, and nothing on the way
+//! in has to remember who called.  Agents and where state lives:
 //! - `Cell`, one per reached program node: its cached result, whether it is
 //!   evaluating, its operand use sites, and its *control state* (`Idle`, or
-//!   `Waiting` for one operand with a phase).  The chain of waiting cells is
-//!   the continuation; there is no host-side frame stack.
+//!   `Waiting` for one operand with a phase and the site to return to).  The
+//!   chain of waiting cells is the continuation; there is no host-side stack.
 //! - `Site`, one per materialized use site: which cell it uses, its consumer,
 //!   its position in both of the used cell's trees, and (reply-on-data only)
 //!   a parked copy of the value with its epoch.
 //! - `Fan`, the data-side k-to-1 tree: stateless.  A value entering a fan is
 //!   copied to both children.
-//! - `Merge`, the control-side k-to-1 tree: remembers which side's call is
-//!   active so the return finds its caller.  With one token it never has to
-//!   arbitrate; two simultaneous callers are reported as an invariant error.
+//! - `Merge`, the control-side k-to-1 tree: stateless.  A call entering a
+//!   merge from either side continues upward.
 //!
 //! Two reply topologies are kept visible.  With `Topology::ReplyOnData`, the
 //! default, a completing cell broadcasts its value down the fan tree, every
-//! site parks a copy, and the token returns carrying nothing; a consumer whose
-//! site already holds a valid copy never enters the control tree at all.  With
-//! `Topology::ReplyOnControl` the value rides back with the token and sites
-//! hold no copies, so every consumer calls.  A site attached after its cell
-//! already has a valid value, or a broadcast cut short by the budget, is served
-//! by a late copy carried on the return.
+//! site parks a copy, and the token returns to its caller's site empty; a
+//! consumer whose site already holds a valid copy never enters the control
+//! tree at all.  With `Topology::ReplyOnControl` the value rides back with the
+//! token and sites hold no copies, so every consumer calls.  A site attached
+//! after its cell already has a valid value, or a broadcast cut short by the
+//! budget, is served by a late copy carried on the return.
 //!
 //! Sharing is exact and ground values are never recomputed, with the same
 //! static use counts as variant B: a cached value survives while a dormant
@@ -49,19 +50,19 @@
 //! Accounting: `live` = cells + fans + merges + sites + the in-flight token;
 //! immutable `Program` templates are excluded.  `erasures` counts released use
 //! sites, materialized or dormant.  `routing_steps` counts control-merge hops
-//! (both directions) plus data-fan hops during distribution; `detail()`
-//! separates them and adds copies, teardown steps, and agent counts.
-//! `memo_hits` counts site-level (parked copy) and cell-level hits.
+//! (calls only; replies are direct) plus data-fan hops during distribution;
+//! `detail()` separates them and adds copies, teardown steps, and agent
+//! counts.  `memo_hits` counts site-level (parked copy) and cell-level hits.
 //! `evaluations` and `node_evaluations` count evaluations *started*; a node cut
 //! off by the budget is counted again when a later run evaluates it.  Budget
-//! exhaustion clears the control path (waiting cells and active merges) from
-//! the root; nothing is persisted, and the next run observes afresh.
+//! exhaustion clears the chain of waiting cells from the root; nothing is
+//! persisted, and the next run observes afresh.
 //!
-//! Logical agent deletion is not backing-storage reclamation: arrays retain
-//! vacant slots and do not reuse them. `storage()` reports this cost. The
-//! distribution token contains a host worklist counted as one logical token;
-//! erasure also uses a host worklist. Release cascades and cancellation are
-//! outside the transition budget, so it does not bound total host work.
+//! Logical deletion leaves vacant backing-array slots; `storage()` reports
+//! retained lengths and capacities. The distribution token and release cascade
+//! use host worklists. Cleanup and cancellation run outside transition fuel.
+//! Return-site IDs are explicit stored references, dereferenced directly by
+//! the host; counted direct returns do not establish local port-rewrite rules.
 
 use crate::cid::Cid;
 use crate::demand::{Expr, Fault, Outcome, ProbeError, ProbeRun, ProbeStats, Program, Scalar};
@@ -146,8 +147,6 @@ struct Fan {
 struct Merge {
     up: Up,
     children: [Option<TreeRef>; 2],
-    /// The side whose call is in progress through this merge.
-    active: Option<Side>,
 }
 
 #[derive(Clone, Debug)]
@@ -173,9 +172,12 @@ enum Phase {
 enum Control {
     #[default]
     Idle,
+    /// Demanding operand `slot`; `return_to` is the site this cell's own
+    /// caller is waiting at.
     Waiting {
         slot: usize,
         phase: Phase,
+        return_to: usize,
     },
 }
 
@@ -190,28 +192,29 @@ struct Cell {
     control: Control,
 }
 
-/// The single demand token: where it is and what it carries.
+/// The single demand token: where it is and what it carries.  A call always
+/// carries `from`, the site to return to.
 #[derive(Debug)]
 enum Token {
     /// At a use site, about to call the used cell (or read a parked copy).
     Call(usize),
     /// A call moving up the control tree from this node.
-    Climb(TreeRef),
+    Climb { at: TreeRef, from: usize },
     /// A call that reached its cell.
-    AtCell(Cid),
-    /// Distributing a completed value down the data tree (S2).
+    AtCell { cid: Cid, from: usize },
+    /// Distributing a completed value down the data tree (S2), then
+    /// returning to `return_to`.
     Distribute {
-        cid: Cid,
         pending: Vec<TreeRef>,
         outcome: Outcome,
+        return_to: usize,
     },
-    /// A return moving down the control tree; `Some` carries a value.
-    Return {
-        at: TreeRef,
+    /// Back at the calling site; `Some` carries a value (reply-on-control or
+    /// a late copy), `None` means read the site's parked copy.
+    Resume {
+        site: usize,
         outcome: Option<Outcome>,
     },
-    /// Back at the calling site with the value.
-    Resume { site: usize, outcome: Outcome },
 }
 
 enum Step {
@@ -313,8 +316,8 @@ impl Machine {
 
     /// Run one observation epoch; `budget` limits transitions in this call.
     /// Conflicting bindings are rejected before any machine state changes.
-    /// Budget exhaustion clears the control path; a later run observes afresh,
-    /// keeping cached values but no mid-transition token.
+    /// Budget exhaustion clears the waiting chain; a later run observes
+    /// afresh, keeping cached values but no mid-transition token.
     pub fn run(
         &mut self,
         bindings: &BTreeMap<String, Scalar>,
@@ -355,9 +358,10 @@ impl Machine {
         Err(ProbeError::BudgetExhausted { limit: budget })
     }
 
-    /// Check quiescent invariants: no evaluation, waiting cell, or active
-    /// merge; every tree link consistent with its parent; every cell still
-    /// held by a static use; `live` equal to a recount.
+    /// Check quiescent invariants: no evaluating or waiting cell; every tree
+    /// link consistent with its parent; every cell still held by a static
+    /// use; `live` equal to a recount.  Diagnostic only; the running machine
+    /// never scans globally.
     pub fn audit(&self) -> Result<(), ProbeError> {
         for (cid, cell) in &self.cells {
             if cell.evaluating {
@@ -402,9 +406,6 @@ impl Machine {
         }
         for (id, merge) in self.merges.iter().enumerate() {
             let Some(merge) = merge else { continue };
-            if merge.active.is_some() {
-                return Err(ProbeError::Invariant("quiescent merge has an active call"));
-            }
             for (index, child) in merge.children.iter().enumerate() {
                 let Some(child) = child else { continue };
                 let side = if index == 0 { Side::Left } else { Side::Right };
@@ -471,9 +472,9 @@ impl Machine {
         Ok(site)
     }
 
-    /// Host-side recovery after an aborted run: walk the control path from
-    /// the root, clearing waiting states, evaluation flags, and active merge
-    /// marks.  Only that path is visited.
+    /// Host-side recovery after an aborted run: follow the chain of waiting
+    /// cells from the root, clearing each one.  Merges hold no state, so
+    /// nothing else needs clearing.  Only that chain is visited.
     fn cancel(&mut self) {
         let mut cid = self.program.root;
         loop {
@@ -487,25 +488,10 @@ impl Machine {
             let Some(site) = cell.slots.get(slot).copied().flatten() else {
                 break;
             };
-            let Some(mut up) = self.sites[site].as_ref().map(|site| site.control_up) else {
+            let Some(next) = self.sites[site].as_ref().map(|site| site.child) else {
                 break;
             };
-            loop {
-                match up {
-                    Up::Merge(merge, _) => match self.merges[merge].as_mut() {
-                        Some(merge) => {
-                            merge.active = None;
-                            up = merge.up;
-                        }
-                        None => return,
-                    },
-                    Up::Cell(next) => {
-                        cid = next;
-                        break;
-                    }
-                    Up::Fan(..) => return,
-                }
-            }
+            cid = next;
         }
         self.account(0);
     }
@@ -513,25 +499,23 @@ impl Machine {
     fn step(&mut self, token: Token) -> Result<Step, ProbeError> {
         match token {
             Token::Call(site) => self.call(site),
-            Token::Climb(at) => match self.up_of(Tree::Control, at)? {
-                Up::Cell(cid) => Ok(Step::Next(Token::AtCell(cid))),
-                Up::Merge(merge, side) => {
+            Token::Climb { at, from } => match self.up_of(Tree::Control, at)? {
+                Up::Cell(cid) => Ok(Step::Next(Token::AtCell { cid, from })),
+                Up::Merge(merge, _) => {
                     self.stats.routing_steps += 1;
                     self.detail.control_hops += 1;
-                    let agent = self.merge_mut(merge)?;
-                    if agent.active.is_some() {
-                        return Err(ProbeError::Invariant("two calls met at one merge"));
-                    }
-                    agent.active = Some(side);
-                    Ok(Step::Next(Token::Climb(TreeRef::Merge(merge))))
+                    Ok(Step::Next(Token::Climb {
+                        at: TreeRef::Merge(merge),
+                        from,
+                    }))
                 }
                 Up::Fan(..) => Err(ProbeError::Invariant("call entered a data fan")),
             },
-            Token::AtCell(cid) => self.at_cell(cid),
+            Token::AtCell { cid, from } => self.at_cell(cid, from),
             Token::Distribute {
-                cid,
                 mut pending,
                 outcome,
+                return_to,
             } => {
                 let epoch = self.epoch;
                 match pending.pop() {
@@ -549,42 +533,30 @@ impl Machine {
                         return Err(ProbeError::Invariant("value entered a control merge"));
                     }
                     None => {
-                        let at = self
-                            .cells
-                            .get(&cid)
-                            .and_then(|cell| cell.control_uses)
-                            .ok_or(ProbeError::Invariant("completed cell has no caller"))?;
-                        return Ok(Step::Next(Token::Return { at, outcome: None }));
+                        return Ok(Step::Next(Token::Resume {
+                            site: return_to,
+                            outcome: None,
+                        }));
                     }
                 }
                 Ok(Step::Next(Token::Distribute {
-                    cid,
                     pending,
                     outcome,
+                    return_to,
                 }))
             }
-            Token::Return { at, outcome } => match at {
-                TreeRef::Merge(merge) => {
-                    self.stats.routing_steps += 1;
-                    self.detail.control_hops += 1;
-                    let agent = self.merge_mut(merge)?;
-                    let side = agent.active.take().ok_or(ProbeError::Invariant(
-                        "return reached a merge without a call",
-                    ))?;
-                    let next = agent.children[side.index()]
-                        .ok_or(ProbeError::Invariant("return toward an erased side"))?;
-                    Ok(Step::Next(Token::Return { at: next, outcome }))
-                }
-                TreeRef::Site(site) => {
-                    let epoch = self.epoch;
-                    let topology = self.topology;
+            Token::Resume { site, outcome } => {
+                let epoch = self.epoch;
+                let topology = self.topology;
+                let (outcome, consumer, late_copy) = {
                     let agent = self.site_mut(site)?;
+                    let mut late_copy = false;
                     let outcome = match outcome {
                         Some(outcome) => {
                             if topology == Topology::ReplyOnData {
                                 // A late copy: the site missed the broadcast.
                                 agent.parked = Some((outcome.clone(), epoch));
-                                self.detail.data_copies += 1;
+                                late_copy = true;
                             }
                             outcome
                         }
@@ -599,20 +571,22 @@ impl Machine {
                             }
                         },
                     };
-                    Ok(Step::Next(Token::Resume { site, outcome }))
+                    (outcome, agent.consumer, late_copy)
+                };
+                if late_copy {
+                    self.detail.data_copies += 1;
                 }
-                TreeRef::Fan(_) => Err(ProbeError::Invariant("return entered a data fan")),
-            },
-            Token::Resume { site, outcome } => match self.site(site)?.consumer {
-                None => Ok(Step::Done(outcome)),
-                Some((parent, slot)) => self.resume(parent, slot, outcome),
-            },
+                match consumer {
+                    None => Ok(Step::Done(outcome)),
+                    Some((parent, slot)) => self.resume(parent, slot, outcome),
+                }
+            }
         }
     }
 
     /// A consumer demands an operand.  With reply-on-data a valid parked copy
     /// answers without any control traffic; otherwise the call enters the used
-    /// cell's control tree.
+    /// cell's control tree, carrying this site as its return address.
     fn call(&mut self, site: usize) -> Result<Step, ProbeError> {
         self.stats.requests += 1;
         let epoch = self.epoch;
@@ -620,15 +594,20 @@ impl Machine {
             && let Some((outcome, when)) = &self.site(site)?.parked
             && valid(outcome, *when, epoch)
         {
-            let outcome = outcome.clone();
             self.stats.memo_hits += 1;
             self.detail.site_hits += 1;
-            return Ok(Step::Next(Token::Resume { site, outcome }));
+            return Ok(Step::Next(Token::Resume {
+                site,
+                outcome: None,
+            }));
         }
-        Ok(Step::Next(Token::Climb(TreeRef::Site(site))))
+        Ok(Step::Next(Token::Climb {
+            at: TreeRef::Site(site),
+            from: site,
+        }))
     }
 
-    fn at_cell(&mut self, cid: Cid) -> Result<Step, ProbeError> {
+    fn at_cell(&mut self, cid: Cid, from: usize) -> Result<Step, ProbeError> {
         let epoch = self.epoch;
         let cell = self
             .cells
@@ -637,16 +616,14 @@ impl Machine {
         if cell.evaluating {
             return Err(ProbeError::Invariant("cyclic call"));
         }
-        let control_root = cell.control_uses;
         if let Some((outcome, when)) = &cell.result
             && valid(outcome, *when, epoch)
         {
             let outcome = outcome.clone();
             self.stats.memo_hits += 1;
             self.detail.cell_hits += 1;
-            let at = control_root.ok_or(ProbeError::Invariant("cached cell has no caller"))?;
-            return Ok(Step::Next(Token::Return {
-                at,
+            return Ok(Step::Next(Token::Resume {
+                site: from,
                 outcome: Some(outcome),
             }));
         }
@@ -666,14 +643,14 @@ impl Machine {
         self.stats.evaluations += 1;
         *self.stats.node_evaluations.entry(cid).or_default() += 1;
         match expr {
-            Expr::Value(value) => self.complete(cid, Outcome::Value(value)),
+            Expr::Value(value) => self.complete(cid, Outcome::Value(value), from),
             Expr::Hole(name) => {
                 let outcome = self
                     .bindings
                     .get(&name)
                     .cloned()
                     .map_or(Outcome::Unknown, Outcome::Value);
-                self.complete(cid, outcome)
+                self.complete(cid, outcome, from)
             }
             Expr::Add(_, _) | Expr::Mul(_, _) => self.demand(
                 cid,
@@ -681,8 +658,9 @@ impl Machine {
                 Phase::Left {
                     multiply: matches!(expr, Expr::Mul(_, _)),
                 },
+                from,
             ),
-            Expr::If { .. } => self.demand(cid, 0, Phase::Condition),
+            Expr::If { .. } => self.demand(cid, 0, Phase::Condition, from),
         }
     }
 
@@ -761,7 +739,6 @@ impl Machine {
                 let merge = self.new_merge(Merge {
                     up: Up::Cell(child),
                     children: [Some(old), Some(TreeRef::Site(site))],
-                    active: None,
                 });
                 self.set_up(Tree::Control, old, Up::Merge(merge, Side::Left))?;
                 self.site_mut(site)?.control_up = Up::Merge(merge, Side::Right);
@@ -780,9 +757,15 @@ impl Machine {
         Ok(())
     }
 
-    /// A cell demands one of its operands: record what it waits for and send
-    /// the token to that operand's use site.
-    fn demand(&mut self, cid: Cid, slot: usize, phase: Phase) -> Result<Step, ProbeError> {
+    /// A cell demands one of its operands: record what it waits for and where
+    /// its own caller waits, then send the token to that operand's use site.
+    fn demand(
+        &mut self,
+        cid: Cid,
+        slot: usize,
+        phase: Phase,
+        return_to: usize,
+    ) -> Result<Step, ProbeError> {
         let cell = self
             .cells
             .get_mut(&cid)
@@ -793,11 +776,20 @@ impl Machine {
             .copied()
             .flatten()
             .ok_or(ProbeError::Invariant("demand through an erased use site"))?;
-        cell.control = Control::Waiting { slot, phase };
+        cell.control = Control::Waiting {
+            slot,
+            phase,
+            return_to,
+        };
         Ok(Step::Next(Token::Call(site)))
     }
 
-    fn complete(&mut self, cid: Cid, outcome: Outcome) -> Result<Step, ProbeError> {
+    fn complete(
+        &mut self,
+        cid: Cid,
+        outcome: Outcome,
+        return_to: usize,
+    ) -> Result<Step, ProbeError> {
         let epoch = self.epoch;
         let cell = self
             .cells
@@ -814,21 +806,14 @@ impl Machine {
         }
         match self.topology {
             Topology::ReplyOnData => Ok(Step::Next(Token::Distribute {
-                cid,
                 pending: data_root.into_iter().collect(),
                 outcome,
+                return_to,
             })),
-            Topology::ReplyOnControl => {
-                let at = self
-                    .cells
-                    .get(&cid)
-                    .and_then(|cell| cell.control_uses)
-                    .ok_or(ProbeError::Invariant("completed cell has no caller"))?;
-                Ok(Step::Next(Token::Return {
-                    at,
-                    outcome: Some(outcome),
-                }))
-            }
+            Topology::ReplyOnControl => Ok(Step::Next(Token::Resume {
+                site: return_to,
+                outcome: Some(outcome),
+            })),
         }
     }
 
@@ -840,6 +825,7 @@ impl Machine {
         let Control::Waiting {
             slot: waiting_slot,
             phase,
+            return_to,
         } = std::mem::take(&mut cell.control)
         else {
             return Err(ProbeError::Invariant(
@@ -852,7 +838,7 @@ impl Machine {
         match phase {
             Phase::Left { multiply } => {
                 if matches!(outcome, Outcome::Error(_)) {
-                    return self.complete(parent, outcome);
+                    return self.complete(parent, outcome, return_to);
                 }
                 self.demand(
                     parent,
@@ -861,24 +847,26 @@ impl Machine {
                         multiply,
                         left: outcome,
                     },
+                    return_to,
                 )
             }
             Phase::Right { multiply, left } => {
-                self.complete(parent, combine(left, outcome, multiply))
+                self.complete(parent, combine(left, outcome, multiply), return_to)
             }
             Phase::Condition => match outcome {
                 Outcome::Value(Scalar::Bool(chosen)) => {
                     let (selected, rejected) = if chosen { (1, 2) } else { (2, 1) };
                     self.erase_use(parent, rejected)?;
-                    self.demand(parent, selected, Phase::Branch)
+                    self.demand(parent, selected, Phase::Branch, return_to)
                 }
                 Outcome::Value(_) => self.complete(
                     parent,
                     Outcome::Error(Fault::Type("if condition is not a boolean")),
+                    return_to,
                 ),
-                other => self.complete(parent, other),
+                other => self.complete(parent, other, return_to),
             },
-            Phase::Branch => self.complete(parent, outcome),
+            Phase::Branch => self.complete(parent, outcome, return_to),
         }
     }
 
@@ -940,8 +928,7 @@ impl Machine {
     }
 
     /// Remove a site from both trees of the cell it uses, collapsing fans and
-    /// merges left with one side.  A merge with a call active on its other
-    /// side is kept so the return can follow its mark.  Returns the used node.
+    /// merges left with one side.  Returns the used node.
     fn detach_site(&mut self, site: usize) -> Result<Cid, ProbeError> {
         let agent = self
             .sites
@@ -950,77 +937,58 @@ impl Machine {
             .ok_or(ProbeError::Invariant("detached a missing site"))?;
         self.site_count -= 1;
         self.detail.teardown_steps += 1;
-        let mut up = agent.data_up;
-        loop {
-            self.detail.teardown_steps += 1;
-            match up {
-                Up::Cell(cid) => {
-                    if let Some(cell) = self.cells.get_mut(&cid) {
-                        cell.data_uses = None;
-                    }
-                    break;
-                }
-                Up::Fan(fan, side) => {
-                    let f = self.fan_mut(fan)?;
-                    f.children[side.index()] = None;
-                    match f.children[side.other().index()] {
-                        None => {
-                            up = f.up;
-                            self.fans[fan] = None;
-                            self.fan_count -= 1;
+        for tree in [Tree::Data, Tree::Control] {
+            let mut up = if tree == Tree::Data {
+                agent.data_up
+            } else {
+                agent.control_up
+            };
+            loop {
+                self.detail.teardown_steps += 1;
+                match up {
+                    Up::Cell(cid) => {
+                        if let Some(cell) = self.cells.get_mut(&cid) {
+                            match tree {
+                                Tree::Data => cell.data_uses = None,
+                                Tree::Control => cell.control_uses = None,
+                            }
                         }
-                        Some(sibling) => {
-                            let above = f.up;
-                            self.fans[fan] = None;
-                            self.fan_count -= 1;
-                            self.set_up(Tree::Data, sibling, above)?;
-                            self.replace_child(Tree::Data, above, TreeRef::Fan(fan), sibling)?;
-                            break;
-                        }
+                        break;
                     }
-                }
-                Up::Merge(..) => return Err(ProbeError::Invariant("data tree contains a merge")),
-            }
-        }
-        let mut up = agent.control_up;
-        loop {
-            self.detail.teardown_steps += 1;
-            match up {
-                Up::Cell(cid) => {
-                    if let Some(cell) = self.cells.get_mut(&cid) {
-                        cell.control_uses = None;
-                    }
-                    break;
-                }
-                Up::Merge(merge, side) => {
-                    let m = self.merge_mut(merge)?;
-                    if m.active == Some(side) {
-                        return Err(ProbeError::Invariant("erased the side of an active call"));
-                    }
-                    m.children[side.index()] = None;
-                    match m.children[side.other().index()] {
-                        None => {
-                            up = m.up;
-                            self.merges[merge] = None;
-                            self.merge_count -= 1;
-                        }
-                        Some(_) if m.active.is_some() => break,
-                        Some(sibling) => {
-                            let above = m.up;
-                            self.merges[merge] = None;
-                            self.merge_count -= 1;
-                            self.set_up(Tree::Control, sibling, above)?;
-                            self.replace_child(
-                                Tree::Control,
-                                above,
-                                TreeRef::Merge(merge),
-                                sibling,
-                            )?;
-                            break;
+                    Up::Fan(node, side) if tree == Tree::Data => {
+                        let children = &mut self.fan_mut(node)?.children;
+                        children[side.index()] = None;
+                        let sibling = children[side.other().index()];
+                        let above = self.fan(node)?.up;
+                        self.fans[node] = None;
+                        self.fan_count -= 1;
+                        match sibling {
+                            None => up = above,
+                            Some(sibling) => {
+                                self.set_up(tree, sibling, above)?;
+                                self.replace_child(tree, above, TreeRef::Fan(node), sibling)?;
+                                break;
+                            }
                         }
                     }
+                    Up::Merge(node, side) if tree == Tree::Control => {
+                        let children = &mut self.merge_mut(node)?.children;
+                        children[side.index()] = None;
+                        let sibling = children[side.other().index()];
+                        let above = self.merge(node)?.up;
+                        self.merges[node] = None;
+                        self.merge_count -= 1;
+                        match sibling {
+                            None => up = above,
+                            Some(sibling) => {
+                                self.set_up(tree, sibling, above)?;
+                                self.replace_child(tree, above, TreeRef::Merge(node), sibling)?;
+                                break;
+                            }
+                        }
+                    }
+                    _ => return Err(ProbeError::Invariant("tree node in the wrong tree")),
                 }
-                Up::Fan(..) => return Err(ProbeError::Invariant("control tree contains a fan")),
             }
         }
         Ok(agent.child)
@@ -1409,20 +1377,23 @@ mod tests {
             assert_eq!(run.stats.memo_hits, 31);
             let detail = machine.detail();
             match topology {
-                // One climb and one return through the whole chain, then
-                // thirty-one site hits with no control traffic at all.
+                // Thirty-one site hits with no control traffic at all.  Every
+                // completion copies to its consumers: 32 copies of the shared
+                // node (one broadcast, 31 on attach), one per inner addition
+                // (30), the root to its observer (1), and the constants (2).
                 Topology::ReplyOnData => {
                     assert_eq!(detail.site_hits, 31);
-                    // Every completion copies to its consumers: 32 copies of
-                    // the shared node (one broadcast, 31 on attach), one per
-                    // inner addition (30), the root to its observer (1), and
-                    // the constants 6 and 7 (2).
+                    assert_eq!(detail.control_hops, 0);
                     assert_eq!(detail.data_copies, 65);
                 }
-                // Every consumer calls: the chain is traversed each time.
+                // Every later consumer calls while its site is still the
+                // newest leaf of the merge chain (one hop), except the
+                // innermost `Add(shared, shared)`, which attaches both of its
+                // sites before calling: its left site is one level deeper.
+                // Replies come straight back and cost nothing.
                 Topology::ReplyOnControl => {
                     assert_eq!(detail.cell_hits, 31);
-                    assert!(detail.control_hops > 62, "{detail:?}");
+                    assert_eq!(detail.control_hops, 32);
                 }
             }
             assert_eq!(run.stats.live, 2);

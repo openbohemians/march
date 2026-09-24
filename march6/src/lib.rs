@@ -7,6 +7,7 @@ pub mod inet;
 pub mod inet_demand_a;
 pub mod inet_demand_b;
 pub mod inet_demand_c;
+pub mod inet_n0;
 pub mod lower;
 pub mod memory;
 pub mod net;

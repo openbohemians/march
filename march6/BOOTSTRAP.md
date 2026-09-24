@@ -1,7 +1,8 @@
 # Bootstrap: FORTH's self-extension on an immutable substrate
 
-Status: principle plus a proposed falsification gate.  Drafted by @march-claude
-from a reading of the archived March 1–5 lineages (see `../VERSIONS.md`).
+Status: B0a reflection and B0b reader foundation implemented; the complete B0
+gate remains open. Drafted by @march-claude from the archived March 1–5
+lineages (see `../VERSIONS.md`), updated with the provisional surface choices.
 
 ## The principle
 
@@ -74,7 +75,7 @@ reconciliation is designed deliberately, March 6 will repeat the pattern.
 
 ## The reconciliation
 
-March 6 now has every ingredient: guarded families, explicit state records,
+March 6 has the core ingredients: guarded families, explicit state records,
 lazy quotations, closed code values, and canonical images.  The proposal:
 
 - **The compiler state is an explicit immutable value.**  It is a record
@@ -105,9 +106,10 @@ lazy quotations, closed code values, and canonical images.  The proposal:
 
 ## Decisions already settled by the history
 
-- **Traditional FORTH surface, not "symbols all the way down".**  March 3
+- **FORTH-like composition, with provisional name-first definitions.** March 3
   weighed bare identifiers as symbols with explicit `.` execution; its
-  EXAMPLE.md judged the noise not worth it.
+  EXAMPLE.md judged the noise not worth it. Current working spellings are
+  recorded in `SYNTAX.md`; historical spellings are not binding requirements.
 - **Guards are pure.**  March 5 required it, and March 6 enforces it
   syntactically.
 - **Names are outside object identity.**  A separate index maps names to CIDs
@@ -119,8 +121,9 @@ lazy quotations, closed code values, and canonical images.  The proposal:
 
 ## Still open
 
-- Quotation delimiters: `( )` in March 2, `[ ]` in March 4.  Word definition:
-  `: … ;` versus the Logo-style `to … end`.
+- The working seed uses `name : expression ;` and `( ... )` quotations.
+  `quote name` provisionally retrieves held code. Final spelling, optional
+  named inputs, and surface context guards remain open (see `SYNTAX.md`).
 - How far user-defined grammar words go: reading N tokens, reading to a
   sentinel, or also rewriting the token stream.
 - The format context: whether parse traces are stored so text round-trips
@@ -180,15 +183,28 @@ No surface spelling occurs in this mechanism.  B0a proves the construction
 needed by `;`; it does not yet prove the outer interpreter, alternate syntax,
 self-extension, or split/reload image laws in B0.1–B0.5.
 
+### Progress: B0b reader foundation
+
+`NextToken`, `ParseInt`, `Lookup`, and `PutKey` are implemented, staged,
+reflectable, and image-serializable. A graph-defined reader counts token
+frequencies in an immutable dictionary; it survives every token-boundary
+save/reload of the tested input with the same final image CID. A separate
+dictionary-held-code test retrieves and invokes `square` after reload.
+See `READER.md` for contracts, tests, and resource limits.
+
+This is not the seed compiler: the frequency reader assigns no language
+meaning to tokens. Complete syntax, self-extension, streamed input, and broad
+linear scaling remain to be demonstrated.
+
 ### Nucleus capabilities (Rust)
 
 The nucleus must stay free of syntax: no knowledge of `:` `;` `[` `]` or any
 other word.  It needs only:
 
 1. The existing reducer, guarded families, records, quotations, and images.
-2. Text values and a primitive tokenizer step, of the form
-   `(text, position) -> (token, position')`, split on whitespace.  Text in and
-   tokens out; no meaning attached.
+2. Text values, a byte-cursor whitespace tokenizer step, optional checked
+   decimal conversion, and dynamic record-key lookup/update (B0b). Text in and
+   tokens out; the seed supplies interpretation and dictionary policy.
 3. **Reflection.**  Code descriptions must be ordinary values, and a
    primitive must intern a description into a code CID.  This is the key new
    capability, since `;` must *construct* a definition.  My recommendation is
@@ -211,23 +227,25 @@ Written as hand-built graphs at first, since no parser exists yet to read it:
     mode (the immediate case): apply it to the state;
   - the mode is compiling: compile the token's word into the symbolic stack;
   - otherwise (interpreting): execute the word.
-- **`:`**: read the next token as the name; mode becomes compiling; start an
-  empty symbolic stack.
-- **`;`**: turn the symbolic stack into a Quote or Family description, intern
-  it, bind the name in a new dictionary record, and set the mode back to
-  interpreting.
-- **`[` and `]`**: nest and close a quotation under construction.
+- **Name-first binding and `:`**: preserve the proposed binding name; enter
+  expression construction/evaluation when `:` follows. The seed must resolve
+  lookahead and existing-name redefinition; no Rust syntax case may do it.
+- **`;`**: bind the constructed value in a new dictionary record. A constant
+  expression binds data, while a quotation expression binds validated code.
+- **`(` and `)`**: nest and close a quotation under construction. Closing
+  turns its symbolic stack into a Quote/Family description and interns it.
 - **Stack shuffles** (`dup`, `drop`, `swap`) compile to wiring on the
   symbolic stack, not to nodes.  This is March 5's builder insight:
   "maintain a stack of producer indices; shuffles become wiring".
 
 ### Pass conditions
 
-- **B0.1 Equivalence.**  Reading `: square dup * ;` binds `square` to exactly
-  the CID of the hand-built `Quote{1, Mul(Param 0, Param 0)}`.
+- **B0.1 Equivalence.** Reading `square : ( dup * ) ;` binds `square` to
+  exactly the CID of the hand-built `Quote{1, Mul(Param 0, Param 0)}`;
+  `7 square` then yields `49`. `answer : 6 7 * ;` binds the data value `42`.
 - **B0.2 No syntax in the nucleus.**  A test builds a *different* seed image
-  in which the defining word is spelled `to … end`, and the same nucleus
-  reads `to square dup * end` to the same CID.  If swapping the syntax
+  using conventional `: square dup * ;`, and the same nucleus reads it to
+  the same CID. If swapping the syntax
   requires any nucleus change, B0 fails.
 - **B0.3 Self-extension.**  A source file defines a new parsing word, then
   uses it later in the same file (for example, defining `to`/`end` in terms

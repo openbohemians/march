@@ -83,6 +83,21 @@ pub enum Node {
     /// guarded family.  The description vocabulary names semantic graph
     /// operations, never surface-language tokens.
     Intern(Cid),
+    /// Split only on ASCII whitespace; position is a UTF-8 byte offset.
+    NextToken {
+        text: Cid,
+        position: Cid,
+    },
+    ParseInt(Cid),
+    Lookup {
+        record: Cid,
+        key: Cid,
+    },
+    PutKey {
+        record: Cid,
+        key: Cid,
+        value: Cid,
+    },
 }
 
 impl Node {
@@ -202,6 +217,13 @@ impl Node {
                 }
             }
             Self::Intern(description) => encode_unary(&mut out, 19, *description),
+            Self::NextToken { text, position } => encode_binary(&mut out, 20, *text, *position),
+            Self::ParseInt(text) => encode_unary(&mut out, 21, *text),
+            Self::Lookup { record, key } => encode_binary(&mut out, 22, *record, *key),
+            Self::PutKey { record, key, value } => {
+                encode_binary(&mut out, 23, *record, *key);
+                put_cid(&mut out, *value);
+            }
         }
         out
     }
@@ -237,6 +259,10 @@ impl Node {
                 .chain(arguments.iter().copied())
                 .collect(),
             Self::Recur(arguments) => arguments.clone(),
+            Self::NextToken { text, position } => vec![*text, *position],
+            Self::ParseInt(text) => vec![*text],
+            Self::Lookup { record, key } => vec![*record, *key],
+            Self::PutKey { record, key, value } => vec![*record, *key, *value],
         }
     }
 }
@@ -425,6 +451,17 @@ impl Store {
             Some(Node::Intern(description)) => {
                 format!("(intern {})", self.format(*description))
             }
+            Some(Node::NextToken { text, position }) => {
+                self.format_binary("next-token", *text, *position)
+            }
+            Some(Node::ParseInt(text)) => format!("(parse-int {})", self.format(*text)),
+            Some(Node::Lookup { record, key }) => self.format_binary("lookup", *record, *key),
+            Some(Node::PutKey { record, key, value }) => format!(
+                "(put-key {} {} {})",
+                self.format(*record),
+                self.format(*key),
+                self.format(*value)
+            ),
         }
     }
 

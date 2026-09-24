@@ -4,6 +4,8 @@ use crate::reflect::{ReflectError, intern_description};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+mod reader;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReductionStats {
     pub steps: usize,
@@ -192,6 +194,10 @@ struct LinearitySummary {
 #[derive(Debug)]
 enum EvalFrame {
     Enter(Cid),
+    Reader {
+        source: Cid,
+        node: Node,
+    },
     Return {
         source: Cid,
     },
@@ -478,7 +484,22 @@ impl<'a> Reducer<'a> {
                             frames.push(EvalFrame::Intern { source: cid });
                             frames.push(EvalFrame::Enter(description));
                         }
+                        node @ (Node::NextToken { .. }
+                        | Node::ParseInt(_)
+                        | Node::Lookup { .. }
+                        | Node::PutKey { .. }) => {
+                            let children = node.children();
+                            frames.push(EvalFrame::Reader { source: cid, node });
+                            for child in children.into_iter().rev() {
+                                frames.push(EvalFrame::Enter(child));
+                            }
+                        }
                     }
+                }
+                EvalFrame::Reader { source, node } => {
+                    let children = values.split_off(values.len() - node.children().len());
+                    let result = self.reduce_reader(node, children)?;
+                    self.finish_evaluation(source, result, &mut values);
                 }
                 EvalFrame::Return { source } => {
                     let result = Self::pop_value(&mut values);
@@ -1386,6 +1407,20 @@ impl<'a> Reducer<'a> {
                 }
             },
             Node::Intern(_) => Node::Intern(children.next().expect("intern description child")),
+            Node::NextToken { .. } => Node::NextToken {
+                text: children.next().expect("reader text"),
+                position: children.next().expect("reader position"),
+            },
+            Node::ParseInt(_) => Node::ParseInt(children.next().expect("parse-int text")),
+            Node::Lookup { .. } => Node::Lookup {
+                record: children.next().expect("lookup record"),
+                key: children.next().expect("lookup key"),
+            },
+            Node::PutKey { .. } => Node::PutKey {
+                record: children.next().expect("put-key record"),
+                key: children.next().expect("put-key key"),
+                value: children.next().expect("put-key value"),
+            },
             Node::Const(_)
             | Node::Hole(_)
             | Node::Param(_)
@@ -1546,6 +1581,7 @@ impl<'a> Reducer<'a> {
                 Node::Const(Atom::Trace(_))
                 | Node::Hole(_)
                 | Node::Put { .. }
+                | Node::PutKey { .. }
                 | Node::Quote { .. }
                 | Node::Apply { .. }
                 | Node::Emit { .. }
@@ -1563,6 +1599,9 @@ impl<'a> Reducer<'a> {
                 | Node::First(_)
                 | Node::Second(_)
                 | Node::Record(_)
+                | Node::NextToken { .. }
+                | Node::ParseInt(_)
+                | Node::Lookup { .. }
                 | Node::Get { .. } => pending.extend(node.children()),
             }
         }
@@ -1733,8 +1772,8 @@ impl<'a> Reducer<'a> {
 
 fn reducer_cid() -> Cid {
     Cid::digest(
-        b"march6/reducer/v6",
-        b"lazy-quote-and-arguments;ordered-guarded-families;lexical-recur;pure-explicit-effects;no-captured-capabilities;strict-guard-demand-sharing;incremental-linear-capability-summary;syntax-neutral-validated-reflection",
+        b"march6/reducer/v7",
+        b"lazy-quote-and-arguments;ordered-guarded-families;lexical-recur;pure-explicit-effects;no-captured-capabilities;strict-guard-demand-sharing;incremental-linear-capability-summary;syntax-neutral-validated-reflection;ascii-whitespace-byte-cursor;checked-optional-decimal;dynamic-record-keys",
     )
 }
 

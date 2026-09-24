@@ -45,3 +45,6 @@ can extend that same image reproducibly.
 [REFLECTION.md](REFLECTION.md) records the implemented B0a boundary: ordinary
 March records describe code, and a strict, budgeted, syntax-neutral reducer
 operation interns only validated closed quotations and families.
+[READER.md](READER.md) records the B0b token/dictionary foundation and
+graph-defined reader resume tests. [SYNTAX.md](SYNTAX.md) fixes provisional
+name-first spellings for the forthcoming seed; they are not yet a compiler.

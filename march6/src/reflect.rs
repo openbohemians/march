@@ -163,6 +163,10 @@ enum Build {
     Dispatch,
     Recur,
     Intern,
+    NextToken,
+    ParseInt,
+    Lookup,
+    PutKey,
 }
 
 enum Decoded {
@@ -467,6 +471,21 @@ impl Decoder<'_> {
                     children: vec![take(&operation, &mut fields, "description")?],
                 }
             }
+            "next-token" | "parse-int" | "lookup" | "put-key" => {
+                let (build, names): (Build, &[&str]) = match operation.as_str() {
+                    "next-token" => (Build::NextToken, &["text", "position"]),
+                    "parse-int" => (Build::ParseInt, &["text"]),
+                    "lookup" => (Build::Lookup, &["record", "key"]),
+                    "put-key" => (Build::PutKey, &["record", "key", "value"]),
+                    _ => unreachable!(),
+                };
+                exact_fields(&operation, &fields, names)?;
+                let children = names
+                    .iter()
+                    .map(|name| take(&operation, &mut fields, name))
+                    .collect::<Result<_, _>>()?;
+                Decoded::Deferred { build, children }
+            }
             _ => return Err(ReflectError::UnknownOperation(operation)),
         };
         Ok(decoded)
@@ -708,6 +727,20 @@ fn build_node(build: Build, children: Vec<Cid>) -> Node {
         },
         Build::Recur => Node::Recur(children.collect()),
         Build::Intern => Node::Intern(children.next().expect("intern description")),
+        Build::NextToken => Node::NextToken {
+            text: children.next().expect("reader text"),
+            position: children.next().expect("reader position"),
+        },
+        Build::ParseInt => Node::ParseInt(children.next().expect("parse-int text")),
+        Build::Lookup => Node::Lookup {
+            record: children.next().expect("lookup record"),
+            key: children.next().expect("lookup key"),
+        },
+        Build::PutKey => Node::PutKey {
+            record: children.next().expect("put-key record"),
+            key: children.next().expect("put-key key"),
+            value: children.next().expect("put-key value"),
+        },
     }
 }
 

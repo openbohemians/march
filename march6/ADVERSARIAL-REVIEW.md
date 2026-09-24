@@ -92,6 +92,14 @@ passing test suite cannot quietly redefine the research question.
 
 ## Claims narrowed
 
+- B0b adds syntax-neutral token/dictionary primitives and a graph-defined
+  reader witness, not the surface compiler. Token-quota pause/reload uses the
+  same complete source plus byte cursor; streamed chunk concatenation and
+  inside-token suspension are not established. Byte/field work is budgeted,
+  but flat dictionary copies and existing text cloning leave the broad B0
+  linear-scaling gate open. These additions advance reducer identity to v7
+  using additive node tags under the existing V2 image envelope.
+
 - The concrete reachability checker mirrors the planner's criterion in a
   different representation.  It is useful for implementation consistency but
   is not an independent proof or semantic last-use oracle.

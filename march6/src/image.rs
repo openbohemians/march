@@ -313,6 +313,20 @@ fn decode_node(bytes: &[u8]) -> Result<Node, ImageError> {
             )
         }
         19 => Node::Intern(input.cid()?),
+        20 => Node::NextToken {
+            text: input.cid()?,
+            position: input.cid()?,
+        },
+        21 => Node::ParseInt(input.cid()?),
+        22 => Node::Lookup {
+            record: input.cid()?,
+            key: input.cid()?,
+        },
+        23 => Node::PutKey {
+            record: input.cid()?,
+            key: input.cid()?,
+            value: input.cid()?,
+        },
         tag => return Err(ImageError::UnknownTag(tag)),
     };
     input.finish()?;

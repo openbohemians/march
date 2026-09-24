@@ -12,7 +12,7 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass.  There are currently 132 unit, integration, generated, and
+All checks pass.  There are currently 145 unit, integration, generated, and
 differential test cases, with none ignored.  One passing test performs 10,440
 generated staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses
 found by external review and whether they are fixed, narrowed, or still open.
@@ -36,9 +36,9 @@ The sample specializes a static choice into this residual graph:
 
 Supplying `input = 41` later produces the content-addressed value `42`.
 Specialization identity includes source artifact, complete supplied context,
-and reducer/rule-set identity.  The current v6 identity records the
+and reducer/rule-set identity.  The current v7 identity records the
 history-independent guard-demand sharing, linear-capability summary, and
-validated reflection rules.
+validated reflection and syntax-neutral text/dictionary rules.
 Primitive operation tags are part of node identity, closing the March 5
 add/sub CID collision.
 
@@ -68,8 +68,21 @@ memoized by description CID, charged to the explicit work budget, and atomic
 with respect to newly reflected nodes.  Unknown descriptions residualize for a
 later epoch.  There is no textual-CID authority path and no operation for
 constructing a trace capability.  This establishes the B0a construction
-boundary, not the complete B0 bootstrap; token stepping, dynamic dictionary
-keys, the outer interpreter, and the seed image remain.
+boundary, not the complete B0 bootstrap. B0b now adds token stepping, optional
+decimal conversion, and dynamic dictionary keys; the seed compiler remains.
+
+B0b's graph-defined token-frequency reader completes 10,000 tokens, including
+on a 256 KiB native test-thread stack. Save/reload at every boundary of an
+eight-token input produces the same final state and image CIDs as a single
+run. Unknown source text can also residualize and resume after image reload.
+A dictionary-held quotation survives reload and computes `49` from parsed
+`7`. Eight primitive tests additionally cover 500 generated integer
+round-trips, UTF-8 cursor boundaries, all input-subset staging combinations,
+reflection/substitution, guard purity, capability safety, and byte budgets.
+See `READER.md` for exact contracts and limits, and `SYNTAX.md` for provisional
+surface choices. These witnesses do not yet compile the chosen surface syntax
+or establish the B0 self-extension and scaling gates. Flat dictionaries and
+existing whole-text clones can still cause superlinear host work.
 
 Reflection tests round-trip 300 generated closed code values, mutate 400
 descriptions without a panic, sweep budgets, and compare original versus

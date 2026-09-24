@@ -64,6 +64,10 @@ are ordinary `Pair(head, tail)` lists ending in `Unit`.
 | `dispatch` | `family`, `arguments: List(description)` | family dispatch |
 | `recur` | `arguments: List(description)` | lexical family recursion |
 | `intern` | `description` | reflective construction in generated code |
+| `next-token` | `text`, `position` | whitespace token step |
+| `parse-int` | `text` | optional checked decimal conversion |
+| `lookup` | `record`, `key` | dynamic text-key lookup |
+| `put-key` | `record`, `key`, `value` | immutable dynamic text-key update |
 
 `embed` accepts a graph edge to a code value already held by the description;
 there is intentionally no text-, byte-, integer-, name-, or hash-to-CID
@@ -108,11 +112,10 @@ code a smaller dictionary gives it less authority.
 
 ## What remains for B0
 
-B0a deliberately stops at the code-construction boundary.  The next checkpoint
-needs syntax-neutral text stepping plus dynamic record-key operations, because
-the outer interpreter must look up a token-derived dictionary key.  Decisions
+B0b now provides syntax-neutral text stepping and dynamic record-key operations
+(see `READER.md`), so a graph can look up a token-derived dictionary key. Decisions
 such as whether a token is a number, whether a word is immediate, what ends a
 comment or string, and what compiler mode means belong in the seed image, not
-in Rust.  Only then can the hand-built seed define `: ... ;`, prove the
-alternate `to ... end` spelling, and exercise deterministic split/reload
-bootstrap epochs.
+in Rust. The hand-built seed must next implement the working `name : ... ;`
+surface, prove an alternate spelling, and exercise deterministic split/reload
+bootstrap epochs. See `SYNTAX.md` for the provisional choices.

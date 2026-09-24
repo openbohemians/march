@@ -76,6 +76,19 @@ passing test suite cannot quietly redefine the research question.
   captured and potentially duplicated by repeated application.
 - The guarded-call lowerer rejects computed auxiliary arguments whose detached
   nets could otherwise raise an error before the selected clause erased them.
+- Syntax-neutral reflection now converts strict ordinary record/list
+  descriptions into closed quotations and non-empty families with an
+  iterative, budgeted, memoized work list.  The existing closure,
+  parameter/recur, capability, and guard-purity checks remain the single
+  validation authority; rejected construction rolls back newly reflected
+  nodes.
+- Reflection has no data-to-CID operation.  It can embed only a quotation or
+  family already held through a graph edge, so knowing a hash does not grant
+  access and effect capabilities cannot be minted.  Remote CID resolution is
+  deferred to a separately supplied authority-bearing resolver.
+- The `Intern` node has a canonical tag, reducer semantics advance to v6, and
+  the image envelope/image-CID domain advance to v2 while existing node CIDs
+  stay stable.
 
 ## Claims narrowed
 
@@ -112,6 +125,9 @@ passing test suite cannot quietly redefine the research question.
 - Guarded INet calls keep rejected templates out of the live agent count, but
   the immutable template table is still host metadata.  It is not yet a
   self-hosted net representation of definitions.
+- Reflection proves only that March values can construct validated code.  It
+  does not yet prove that a March-defined outer interpreter owns token meaning,
+  dictionary policy, immediacy, or alternate surface spellings.
 
 ## Still open and high priority
 
@@ -144,3 +160,7 @@ passing test suite cannot quietly redefine the research question.
     than silently capture or duplicate the wrong subnet.
 11. Replace the content-only E0 `Trace` stand-in with a typed capability model
     that can distinguish independently created resources with equal history.
+12. Complete bootstrap gate B0 above reflection: syntax-neutral text stepping,
+    token-derived dynamic dictionary keys, a hand-built outer interpreter and
+    seed image, alternate `: ... ;` / `to ... end` spellings, self-extension,
+    and deterministic split/reload image construction.

@@ -1,5 +1,6 @@
 use crate::cid::{Cid, put_cid};
 use crate::net::{Atom, Bindings, Clause, Node, Store};
+use crate::reflect::{ReflectError, intern_description};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -103,6 +104,7 @@ pub enum ReduceError {
     UnboundRecursion,
     OpenCodeValue(String),
     ImpureGuard(Cid),
+    Reflection(ReflectError),
 }
 
 impl fmt::Display for ReduceError {
@@ -146,6 +148,7 @@ impl fmt::Display for ReduceError {
             Self::ImpureGuard(cid) => {
                 write!(f, "guard {cid} is outside the pure guard subset")
             }
+            Self::Reflection(error) => error.fmt(f),
         }
     }
 }
@@ -224,6 +227,9 @@ enum EvalFrame {
         arguments: Vec<Cid>,
     },
     Emit {
+        source: Cid,
+    },
+    Intern {
         source: Cid,
     },
     DispatchFamily {
@@ -468,6 +474,10 @@ impl<'a> Reducer<'a> {
                             frames.push(EvalFrame::Enter(family));
                         }
                         Node::Recur(_) => return Err(ReduceError::UnboundRecursion),
+                        Node::Intern(description) => {
+                            frames.push(EvalFrame::Intern { source: cid });
+                            frames.push(EvalFrame::Enter(description));
+                        }
                     }
                 }
                 EvalFrame::Return { source } => {
@@ -704,6 +714,34 @@ impl<'a> Reducer<'a> {
                             ));
                         }
                         _ => self.store.intern(Node::Emit { token, message }),
+                    };
+                    self.finish_evaluation(source, result, &mut values);
+                }
+                EvalFrame::Intern { source } => {
+                    let description = Self::pop_value(&mut values);
+                    let result = if self.is_ground(description)? {
+                        let reflected =
+                            match intern_description(self.store, description, self.remaining_steps)
+                            {
+                                Ok(reflected) => reflected,
+                                Err(ReflectError::WorkLimit) => {
+                                    self.remaining_steps = 0;
+                                    return Err(ReduceError::BudgetExhausted {
+                                        limit: self.step_limit,
+                                    });
+                                }
+                                Err(error) => return Err(ReduceError::Reflection(error)),
+                            };
+                        self.remaining_steps -= reflected.work;
+                        self.stats.steps += reflected.work;
+                        self.stats.peak_frames = self.stats.peak_frames.max(reflected.peak_frames);
+                        if let Err(error) = self.validate_code_value(reflected.root) {
+                            reflected.rollback(self.store);
+                            return Err(error);
+                        }
+                        reflected.root
+                    } else {
+                        self.store.intern(Node::Intern(description))
                     };
                     self.finish_evaluation(source, result, &mut values);
                 }
@@ -1347,6 +1385,7 @@ impl<'a> Reducer<'a> {
                     Node::Recur(children.by_ref().collect())
                 }
             },
+            Node::Intern(_) => Node::Intern(children.next().expect("intern description child")),
             Node::Const(_)
             | Node::Hole(_)
             | Node::Param(_)
@@ -1425,6 +1464,9 @@ impl<'a> Reducer<'a> {
                     parameters,
                     clauses,
                 } => {
+                    if clauses.is_empty() {
+                        return Err(ReduceError::EmptyFamily);
+                    }
                     for Clause { guard, body } in clauses {
                         self.validate_guard_purity(guard)?;
                         pending.push((
@@ -1464,6 +1506,9 @@ impl<'a> Reducer<'a> {
                 parameters,
                 clauses,
             } => {
+                if clauses.is_empty() {
+                    return Err(ReduceError::EmptyFamily);
+                }
                 for Clause { guard, body } in clauses {
                     self.validate_guard_purity(guard)?;
                     pending.push((
@@ -1506,7 +1551,8 @@ impl<'a> Reducer<'a> {
                 | Node::Emit { .. }
                 | Node::Family { .. }
                 | Node::Dispatch { .. }
-                | Node::Recur(_) => return Err(ReduceError::ImpureGuard(root)),
+                | Node::Recur(_)
+                | Node::Intern(_) => return Err(ReduceError::ImpureGuard(root)),
                 Node::Const(_)
                 | Node::Param(_)
                 | Node::Add(_, _)
@@ -1687,8 +1733,8 @@ impl<'a> Reducer<'a> {
 
 fn reducer_cid() -> Cid {
     Cid::digest(
-        b"march6/reducer/v5",
-        b"lazy-quote-and-arguments;ordered-guarded-families;lexical-recur;pure-explicit-effects;no-captured-capabilities;strict-guard-demand-sharing;incremental-linear-capability-summary",
+        b"march6/reducer/v6",
+        b"lazy-quote-and-arguments;ordered-guarded-families;lexical-recur;pure-explicit-effects;no-captured-capabilities;strict-guard-demand-sharing;incremental-linear-capability-summary;syntax-neutral-validated-reflection",
     )
 }
 

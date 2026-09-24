@@ -3,7 +3,7 @@ use crate::net::{Atom, Clause, Node, Store};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-const MAGIC: &[u8] = b"MARCH6-IMAGE\0V1";
+const MAGIC: &[u8] = b"MARCH6-IMAGE\0V2";
 
 /// A canonical, self-contained snapshot rooted in one or more graph objects.
 /// Only nodes reachable from the ordered roots are serialized, so unrelated
@@ -104,7 +104,7 @@ impl Image {
     }
 
     pub fn cid(&self) -> Cid {
-        Cid::digest(b"march6/image/v1", &self.bytes)
+        Cid::digest(b"march6/image/v2", &self.bytes)
     }
 }
 
@@ -312,6 +312,7 @@ fn decode_node(bytes: &[u8]) -> Result<Node, ImageError> {
                     .collect::<Result<Vec<_>, _>>()?,
             )
         }
+        19 => Node::Intern(input.cid()?),
         tag => return Err(ImageError::UnknownTag(tag)),
     };
     input.finish()?;

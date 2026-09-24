@@ -79,6 +79,10 @@ pub enum Node {
     /// A family-local recursive call.  It is replaced with `Dispatch` when a
     /// selected clause is instantiated, avoiding cyclic content identities.
     Recur(Vec<Cid>),
+    /// Validate and intern an ordinary value describing a closed quotation or
+    /// guarded family.  The description vocabulary names semantic graph
+    /// operations, never surface-language tokens.
+    Intern(Cid),
 }
 
 impl Node {
@@ -197,6 +201,7 @@ impl Node {
                     put_cid(&mut out, *argument);
                 }
             }
+            Self::Intern(description) => encode_unary(&mut out, 19, *description),
         }
         out
     }
@@ -212,7 +217,7 @@ impl Node {
                 when_true,
                 when_false,
             } => vec![*condition, *when_true, *when_false],
-            Self::First(value) | Self::Second(value) => vec![*value],
+            Self::First(value) | Self::Second(value) | Self::Intern(value) => vec![*value],
             Self::Record(fields) => fields.iter().map(|(_, value)| *value).collect(),
             Self::Get { record, .. } => vec![*record],
             Self::Put { record, value, .. } => vec![*record, *value],
@@ -416,6 +421,9 @@ impl Store {
                     .collect::<Vec<_>>()
                     .join(" ");
                 format!("(recur {arguments})")
+            }
+            Some(Node::Intern(description)) => {
+                format!("(intern {})", self.format(*description))
             }
         }
     }

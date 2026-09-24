@@ -12,7 +12,7 @@ cargo test --offline
 cargo run --offline -- demo
 ```
 
-All checks pass.  There are currently 104 unit, integration, generated, and
+All checks pass.  There are currently 132 unit, integration, generated, and
 differential test cases, with none ignored.  One passing test performs 10,440
 generated staging comparisons.  `ADVERSARIAL-REVIEW.md` tracks weaknesses
 found by external review and whether they are fixed, narrowed, or still open.
@@ -36,8 +36,9 @@ The sample specializes a static choice into this residual graph:
 
 Supplying `input = 41` later produces the content-addressed value `42`.
 Specialization identity includes source artifact, complete supplied context,
-and reducer/rule-set identity.  The current v5 identity records the
-history-independent guard-demand sharing and linear-capability summary rules.
+and reducer/rule-set identity.  The current v6 identity records the
+history-independent guard-demand sharing, linear-capability summary, and
+validated reflection rules.
 Primitive operation tags are part of node identity, closing the March 5
 add/sub CID collision.
 
@@ -59,6 +60,31 @@ execution budget reuses a successful semantic result.  Failed reductions are
 not cached.
 The cache is not yet persisted in an image, and the semantic rule-set version
 is still maintained explicitly rather than derived from rule artifacts.
+
+The reducer's v6 identity adds syntax-neutral validated reflection.  A strict
+`Intern` operation now reduces an ordinary record/list description to the
+exact CID of a closed quotation or guarded family.  Decoding is iterative,
+memoized by description CID, charged to the explicit work budget, and atomic
+with respect to newly reflected nodes.  Unknown descriptions residualize for a
+later epoch.  There is no textual-CID authority path and no operation for
+constructing a trace capability.  This establishes the B0a construction
+boundary, not the complete B0 bootstrap; token stepping, dynamic dictionary
+keys, the outer interpreter, and the seed image remain.
+
+Reflection tests round-trip 300 generated closed code values, mutate 400
+descriptions without a panic, sweep budgets, and compare original versus
+reloaded-image results.  Additional cases exercise every reflectable node
+shape, malformed schemas and lists, scope and guard-purity violations, exact
+DAG sharing, runtime code generation, and attempts to turn spelled CIDs or
+effect values into authority.  These are construction and validation tests;
+the generated bodies are not necessarily well-typed executable programs.
+
+Rollback covers decoding and code-validation failures within an `Intern`
+attempt.  It does not make an entire reduction transactional: successful
+earlier construction or ordinary normalization may remain after a later
+failure.  The existing cached closure/purity validator is iterative but does
+not yet charge its own visits; the reflection decoder does.  The work budget
+therefore is not a complete CPU or memory quota.
 
 The equality is no longer represented by a single example.  A deterministic
 generator currently checks 10,440 combinations of small programs, runtime

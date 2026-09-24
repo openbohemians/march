@@ -42,3 +42,6 @@ essential net topology from optional teleological topology analysis.
 [BOOTSTRAP.md](BOOTSTRAP.md) turns the self-extension claim into the B0 gate:
 a syntax-free nucleus must load a seed image whose March-defined `:` and `;`
 can extend that same image reproducibly.
+[REFLECTION.md](REFLECTION.md) records the implemented B0a boundary: ordinary
+March records describe code, and a strict, budgeted, syntax-neutral reducer
+operation interns only validated closed quotations and families.

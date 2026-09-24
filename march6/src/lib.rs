@@ -6,11 +6,13 @@ pub mod lower;
 pub mod memory;
 pub mod net;
 pub mod reduce;
+pub mod reflect;
 pub mod template;
 
 pub use cid::Cid;
 pub use image::{Image, ImageError};
 pub use net::{Atom, Bindings, Clause, Node, Store};
 pub use reduce::{
-    DEFAULT_REDUCTION_BUDGET, Reducer, Reduction, Specialization, SpecializationCache,
+    DEFAULT_REDUCTION_BUDGET, ReduceError, Reducer, Reduction, Specialization, SpecializationCache,
 };
+pub use reflect::ReflectError;

@@ -129,11 +129,56 @@ lazy quotations, closed code values, and canonical images.  The proposal:
 - Broader multi-modal contexts from March 1: type checking, documentation, and
   profiling as reduction under other contexts.  This is a promising
   unification, but it comes after the bootstrap gate.
+- Remote or cross-image lookup by CID.  `Intern` deliberately cannot forge a
+  reference from CID-shaped data.  Later lookup should require an explicitly
+  supplied resolver/import capability; its authorized result is then an
+  ordinary held value.  Dictionaries and namespaces consequently double as
+  explicit grants of reachable code.
 
 ## Proposed gate: B0, a self-defined colon
 
 Goal: falsify, or earn, the claim that March's surface syntax can live
 entirely in a content-addressed seed image above a syntax-free nucleus.
+
+### Candidates from March 5 for the next checkpoint
+
+These are design inputs from the archived exploration, not inherited language
+requirements.  Their fit must be tested against the current reducer.
+
+- **Effect-token pool:** keep symbolic token wires indexed by effect domain
+  beside the compiler's symbolic data stack.  The seed can thread those wires
+  through generated code and return the final tokens.  This could keep source
+  stack notation compact while preserving explicit effects.  An empty pool is
+  sufficient for the first pure bootstrap; read/write distinctions and optional
+  effects need separate semantics and tests.
+- **Multiple results:** prefer existing pairs/unit and projections as the
+  first experiment for words with multiple outputs.  Retain the B0.1 scalar
+  result convention for `square`.  Record stack effects in dictionary entries
+  so composition knows which projections to construct.
+- **Namespaces:** resolve source names through the reader's dictionary and
+  embed the resulting held code values in definitions.  This supports static
+  linkage without deciding whether all future namespaces must be compile-time
+  only.  Interface contracts, provider lockfiles, and remote import resolution
+  remain later work.
+- **Rules in images:** investigate versioned rule artifacts as a route to
+  deriving reducer identity from content.  User-defined rewrite rules raise
+  additional validation and semantic questions.  The B0 gate can establish
+  FORTH-style syntax extension with the present fixed primitive reducer.
+
+### Progress: B0a reflection
+
+The first checkpoint is implemented.  `Intern(description)` consumes ordinary
+record/list values, iteratively constructs the described semantic graph, and
+returns it only when the existing validator proves it is a closed quotation or
+non-empty family with pure guards and no captured effect capability.  It is
+strict but staged: an unknown description remains a residual `Intern`, while a
+malformed ground description is an error.  Construction work is budgeted and
+failed attempts roll back their newly inserted nodes.  The schema and tests are
+documented in `REFLECTION.md`.
+
+No surface spelling occurs in this mechanism.  B0a proves the construction
+needed by `;`; it does not yet prove the outer interpreter, alternate syntax,
+self-extension, or split/reload image laws in B0.1–B0.5.
 
 ### Nucleus capabilities (Rust)
 

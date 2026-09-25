@@ -3,7 +3,8 @@
 //! This is **not** the principal-pair interaction-net backend, and it does not
 //! claim Lafont locality.  A request arriving at a fan's *auxiliary* side
 //! climbs to the fan's principal side; that is exactly the one departure from
-//! pure nets that `INET-DEMAND.md` (section 9.4) identifies for variant B.  A
+//! pure nets that `6f17b9b:march6/INET-DEMAND.md` (section 9.4, in Git history)
+//! identifies for variant B. A
 //! single explicit continuation carries the one demand token, so at most one
 //! request is ever in flight and two requests can never race at one fan.
 //! Determinism therefore rests on that invariant, not on confluence.

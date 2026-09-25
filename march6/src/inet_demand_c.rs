@@ -16,7 +16,7 @@
 //!
 //! One sequential scheduler succeeding is not evidence of confluence.  The
 //! critical pairs that a free scheduler would have to resolve are listed in
-//! `INET-DEMAND.md`, section 10.
+//! `git show 6f17b9b:march6/INET-DEMAND.md`, section 10 (retired research).
 //!
 //! The token carries its own return address: the use site to resume.  A
 //! reply therefore goes straight back to its caller, and nothing on the way

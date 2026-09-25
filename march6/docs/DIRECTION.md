@@ -92,6 +92,15 @@ until measurements support it.
 - March 4: consult conventional execution, persistent-map, and memory work
   when it answers a concrete implementation question; no wholesale restoration.
 
+Relevant March 4 memory notes are preserved on
+`archive/march4/preserved/docs-2026-09-23`: `docs/design/MEMORY-MANAGEMENT.md`,
+`docs/planning/PLAN-REFGRAPH.md`, `docs/design/FORMAL-MODEL.md`, and
+`docs/design/HAMT.md`. They explore per-word reference-graph summaries, call-site
+composition, and persistent sharing. These are inputs to future lifetime work,
+not proof that the current lazy runtime can avoid ordinary reclamation.
+Immutability alone is not a general proof that recursive lazy structures are
+acyclic or have statically predictable lifetimes.
+
 ## First implementation milestone
 
 1. Establish non-INet performance baselines: cold build/load versus repeated

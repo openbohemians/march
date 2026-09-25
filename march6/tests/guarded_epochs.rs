@@ -13,7 +13,7 @@ struct Workload {
     root: march_research::Cid,
 }
 
-/// Build the vertical-slice workload from MODEL.md:
+/// Build the historical workload from `6f17b9b:march6/MODEL.md`:
 ///
 ///   6*7 + main(flag, n)
 ///   main false _ = 0

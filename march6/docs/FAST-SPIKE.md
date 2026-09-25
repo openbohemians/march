@@ -55,15 +55,32 @@ Use `first` and `second` to inspect fields selectively.
   outputs remain usable when another output fails.
 - Canonical, content-addressed code; quotation identity; separately computed
   value content identities; deterministic, validated binary code images.
+- A March-defined input-stream interpreter: whitespace-delimited words,
+  **numbers before dictionary lookup**, and input-consuming dictionary words.
+  Colon, comments, and user-defined immediate words participate in compilation;
+  the interpreter and dictionary flags persist in images. See [BOOTSTRAP.md](BOOTSTRAP.md).
 - Explicit evaluation task stack, stale/cross-executor handle checks, bounded
   fuel and storage, and demanded-slot recursive-cycle detection.
 
-The host-side source compiler is scaffolding, not the old self-hosted seed.
+The CLI now uses `stream::compile`, not the legacy `source::compile` reader.
+`stream-seed.march` owns the read/number/lookup/execute-or-compile loop. Native
+primitives provide input advancement, immutable compiler state, graph builders,
+stack inference, and validation. The initial seed is assembled once through the
+older host reader; loaded seed images need no such reader for subsequent input.
+This is stream-fed self-extension, not a completed bootstrap fixed point.
+
+Words are whitespace-delimited, including `:`, `;`, `[` and `]`. Punctuation is
+not split automatically. `--` is a dictionary word that consumes through newline;
+`(` consumes through the first `)` and legacy backslash is a line-comment alias.
 `ctx key` reads a context value. `family name N M guard body ... ;` seals an
 ordered family. Guards take the same N arguments and return one Boolean; bodies
 return M outputs. Parenthesized comments are comments, not checked signatures.
-Definitions must precede references; `recur` provides self-recursion. Builtin
-names are reserved. Source errors do not roll back earlier installed definitions.
+Definitions must precede references; `recur` provides self-recursion. Dictionary
+names are redefinable, including primitive/defining/comment words. Numeric names
+are legal but numeric input wins over lookup; explicit quotation can still look
+up such a name. Signed decimal i64 overflow is an error before lookup.
+Each stream compilation is atomic on failure. `--load-image PATH --extend SOURCE`
+uses the saved March interpreter/dictionary and executes the new entry.
 
 ## Representation and execution
 
@@ -110,7 +127,7 @@ outputs of a recursive call must not be falsely rejected as a cycle.
 
 ## Measurements and limits
 
-Final release measurements across three pinned processes, using reused
+The pre-stream-frontend release measurements across three pinned processes, using reused
 executors and runtime inputs: source square **24.2–35.0 ns**, shared call
 **23.4–42.3 ns**, conditional **181.2–317.1 ns**, contextual family
 **524.6–692.1 ns**, 64-add chain **243.8–331.2 ns** per invocation. Host noise
@@ -122,11 +139,12 @@ the final checkpoint superseding earlier faster timings.
 **Memory is still unfinished, but scalar tail recursion has a bounded path.**
 The contextual countdown now runs in three registers, with no lazy frames/cells,
 including the tested depth 100,000. This optimization applies to the one-input,
-one-output family subset described below. General lazy frames/cells still remain
-until invocation reset/drop: the selective evaluator control at depth 10,000
-retains 40,003 frames and 130,009 cells. There is no general within-invocation
-reclamation. Storage limits cap entries, not total bytes; vector capacity may
-remain from a prior run. This is not a solved general memory-management design.
+one-output family subset described below. The generic evaluator now supports
+explicit collection between host observations, described below; without it,
+frames/cells remain until invocation reset/drop. The selective countdown control
+at depth 10,000 still retains 40,003 frames and 130,009 cells during one force.
+There is no automatic collection within a force. Storage limits cap entries,
+not total bytes. This is not a solved general memory-management design.
 
 ### Scalar family tail loops
 
@@ -156,11 +174,46 @@ This is conservative tail-call elimination, not a GC or general eager calling.
 Example: `examples/fast/countdown.march`. Same-code comparison benchmark:
 `cargo run --offline --release --example fast_tail_bench`.
 
+### Explicit boundary collection
+
+The Rust embedding API provides
+`Executor::collect(&[Handle], budget) -> Result<Vec<Handle>, Error>`.
+Supply every handle the host wants to retain; the collector traces pending
+dependencies and memoized values without evaluating anything. It compacts the
+heap and returns replacement roots in the same order, preserving duplicates:
+
+```rust,ignore
+let roots = executor.collect(&[fast_cursor, slow_cursor], 20_000)?;
+fast_cursor = roots[0];
+slow_cursor = roots[1];
+```
+
+Success invalidates **all** previous handles, including fields of previously
+returned pairs. Re-force a retained pair to obtain fresh field handles, or
+include separately held fields among the roots. Invalid roots, insufficient
+collection budget, or storage-limit errors leave the old heap/handles unchanged.
+The collection budget is separate from evaluation fuel; collection does not
+refill fuel or revive an aborted invocation. Semantic error memos survive while
+reachable. Empty roots release the lazy heap of a non-aborted invocation.
+
+With collection every 64 observations, the incrementing-stream benchmark
+consumes a million values with a peak of 390 cell slots, or 453 with two consumers
+32 positions apart, with no recomputation. This uses generic `start` / `force`,
+not scalar tail-loop optimization. Holding the stream head retains its prefix;
+walking only tails without demanding heads retains their pending arithmetic
+chain. Those are live dependencies, not garbage.
+
+This is an opt-in embedding API, not automatic CLI reclamation. It cannot run
+inside `force` / `content_id` and does not remove live recursive continuations.
+Collection scans the allocated heap and temporarily holds old/new storage plus
+marking tables. See [FAST-MEMORY.md](FAST-MEMORY.md#explicit-boundary-collection)
+for costs, measurements, and the exact storage-accounting limits.
+
 Other missing pieces:
 
 - Missing context is currently an error, not an unknown value that produces a
-  residual program. Partial evaluation/staging and pending-state images remain
-  a significant gap relative to the older reference.
+  residual program. Explicit execution of compiler words now works; general
+  partial evaluation/staging and pending-state images remain a significant gap.
 - Guarded word families are not yet full module-level context groups.
 - No effectful I/O protocol, live development image, self-hosted reader/compiler,
   persistent general-value store, rich collection library, or native backend.
@@ -171,7 +224,8 @@ Other missing pieces:
 ## Verification and next decisions
 
 Tests are split into `fast_core`, `fast_source`, `fast_image`, `fast_reference`,
-`fast_values`, `fast_tail`, and `fast_adversarial_claude`; the old implementations
+`fast_values`, `fast_tail`, `fast_adversarial_claude`, `fast_collection`,
+`fast_reclamation_claude`, and `fast_stream`; the old implementations
 and tests are retained. These cover
 selective demand, sharing, overflow/error order, recursion, dynamic quotation
 arity, image corruption and canonicality, lazy streams, value identity, and
@@ -195,8 +249,26 @@ additional independent tests also pass locally in both profiles: 432 tests
 total, including 87 fast-engine tests. [FAST-MEMORY.md](FAST-MEMORY.md) records constant-workspace evidence
 and the same-code timing comparison.
 
-The next useful work is an allocation/lifetime improvement with these demand
-tests held fixed, followed by richer contextual groups and a deliberate staging
-interface. Before claiming this replaces the reference, settle the independent
+The explicit-collection checkpoint adds 11 collector tests plus Claude's 17
+independent semantic/reclamation tests: **460 tests total, 115 fast-engine
+tests**, passing in debug and release. All-target Clippy with warnings denied,
+formatting, and whitespace checks pass. The tests preserve sharing, lazy errors,
+cycle identity across relocation, atomic failure, and bounded consumed-stream
+windows. `examples/fast_stream_bench.rs` measures the same generic code with and
+without collection.
+
+The stream-nucleus checkpoint has 16 tests in `fast_stream`: **476 total, 131
+fast-engine tests**, passing in debug and release. They replace the discarded
+token-plan prototype's tests. Numeric priority, raw stream consumption,
+redefinable punctuation, new defining words, contextual immediate behavior,
+lazy runtime semantics, and persisted interpreter code are exercised. See
+`examples/fast/compiler.march` and BOOTSTRAP.md for the remaining native
+responsibilities, explicit compiler-state interface, and resource limits.
+
+The next bootstrap priority is reducing native seed assembly and graph/stack
+construction, and resolving the compiler-state versus runtime-stack interface.
+Memory work still includes live-continuation/forwarding behavior
+and automatic root management. Richer contextual groups and general staging
+remain separate priorities. Before claiming this replaces the reference, settle the independent
 equal-call sharing contract and the missing-context/residualization contract.
 Self-hosting should build on those decisions, not conceal them.

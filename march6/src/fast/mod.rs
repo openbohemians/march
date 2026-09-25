@@ -1,13 +1,17 @@
 //! Conventional execution spike: immutable CAS code, local register identities,
 //! shared lazy slots, explicit contexts. No interaction-net dependency.
 use crate::Cid;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod collect;
 mod image;
+mod input;
+pub use input::InputNode;
 pub mod source;
+pub mod stream;
 mod tail;
 
 pub type WordId = usize;
@@ -61,6 +65,11 @@ pub enum Op {
     Pair(Slot, Slot),
     First(Slot),
     Second(Slot),
+    /// Pure compiler-state primitive, available only inside a stream session.
+    Kernel {
+        primitive: stream::Primitive,
+        arguments: Vec<Slot>,
+    },
     /// Created by add_family: ordered, pure guards; instantiate chosen body only.
     Dispatch {
         clauses: Vec<(WordId, WordId)>,
@@ -82,8 +91,10 @@ pub enum Error {
     Budget,
     StorageLimit,
     StaleHandle,
+    CollectionBusy,
     Output(usize),
     Image(String),
+    Compiler(String),
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -105,6 +116,7 @@ pub enum Value {
     Unit,
     Quote(Cid),
     Pair(Handle, Handle),
+    CompilerState(stream::StateHandle),
 }
 
 impl Value {
@@ -126,7 +138,7 @@ impl Value {
                 bytes.push(3);
                 bytes.extend_from_slice(&cid.0);
             }
-            Self::Pair(..) => return None,
+            Self::Pair(..) | Self::CompilerState(_) => return None,
         }
         Some(Cid::digest(b"march-fast-value-v1", &bytes))
     }
@@ -148,6 +160,7 @@ pub struct Program {
     words: Vec<Word>,
     identities: HashMap<Cid, WordId>,
     names: BTreeMap<String, WordId>,
+    immediate: BTreeSet<String>,
 }
 
 fn put(out: &mut Vec<u8>, n: usize) {
@@ -184,7 +197,23 @@ impl Program {
     pub fn bind(&mut self, name: &str, word: WordId) -> Result<(), Error> {
         self.word(word)?;
         self.names.insert(name.into(), word);
+        self.immediate.remove(name);
         Ok(())
+    }
+    pub fn mark_immediate(&mut self, name: &str) -> Result<(), Error> {
+        let word = self
+            .lookup(name)
+            .ok_or_else(|| Error::Compiler(format!("unknown word '{name}'")))?;
+        if self.signature(word)? != (1, 1) {
+            return Err(Error::Compiler(
+                "compiler word must have signature state -> state".into(),
+            ));
+        }
+        self.immediate.insert(name.into());
+        Ok(())
+    }
+    pub fn is_immediate(&self, name: &str) -> bool {
+        self.immediate.contains(name)
     }
     pub fn is_fast(&self, word: WordId) -> Result<bool, Error> {
         Ok(self.word(word)?.fast.is_some())
@@ -209,6 +238,12 @@ impl Program {
                 ));
             }
             match op {
+                Op::Kernel {
+                    primitive,
+                    arguments,
+                } if arguments.len() != primitive.arity() => {
+                    return Err(Error::InvalidCode("compiler primitive arity".into()));
+                }
                 Op::Arg(n) if *n >= inputs => {
                     return Err(Error::InvalidCode("argument index".into()));
                 }
@@ -333,6 +368,14 @@ impl Program {
         put(&mut out, ops.len());
         for op in ops {
             match op {
+                Op::Kernel {
+                    primitive,
+                    arguments,
+                } => {
+                    out.push(13);
+                    out.push(*primitive as u8);
+                    slots_bytes(&mut out, arguments);
+                }
                 Op::Arg(n) => {
                     out.push(0);
                     put(&mut out, *n);
@@ -436,9 +479,10 @@ fn dependencies(op: &Op) -> Vec<Slot> {
             when_true,
             when_false,
         } => vec![*condition, *when_true, *when_false],
-        Op::Call { arguments, .. } | Op::Recur { arguments } | Op::Dispatch { arguments, .. } => {
-            arguments.clone()
-        }
+        Op::Call { arguments, .. }
+        | Op::Recur { arguments }
+        | Op::Dispatch { arguments, .. }
+        | Op::Kernel { arguments, .. } => arguments.clone(),
         Op::Project { call, .. } => vec![*call],
         Op::First(a) | Op::Second(a) => vec![*a],
         Op::Apply {
@@ -475,6 +519,7 @@ fn canonical_ops(ops: Vec<Op>) -> (Vec<Op>, Vec<Slot>) {
                 rewrite(when_false);
             }
             Op::Call { arguments, .. }
+            | Op::Kernel { arguments, .. }
             | Op::Recur { arguments }
             | Op::Dispatch { arguments, .. } => {
                 for s in arguments {
@@ -643,6 +688,7 @@ enum Datum {
     Quote(WordId),
     Pair(usize, usize),
     Frame(usize),
+    CompilerState(stream::StateHandle),
 }
 impl From<Literal> for Datum {
     fn from(l: Literal) -> Self {
@@ -680,6 +726,9 @@ struct Cell {
     value: Datum,
     frame: usize,
     slot: usize,
+    // Stable semantic argument identity, independent of a future storage move.
+    // Parameter aliases inherit the supplied cell's identity without forcing it.
+    identity: u64,
 }
 struct Frame {
     word: WordId,
@@ -687,6 +736,7 @@ struct Frame {
     arguments: Vec<usize>,
     recur: WordId,
     key_hash: u64,
+    identities: Vec<u64>,
 }
 #[derive(Clone, Copy)]
 enum Task {
@@ -698,6 +748,7 @@ enum Task {
     Field(usize, usize, bool),
     Apply(usize, usize),
     Guard(usize, usize, usize), // destination, clause index, guard result cell
+    Kernel(usize),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -712,6 +763,30 @@ pub struct Stats {
     pub fast_runs: usize,
     pub tail_iterations: usize,
     pub peak_registers: usize,
+    pub collections: usize,
+    pub collected_cells: usize,
+    pub collected_frames: usize,
+    pub collection_steps: usize,
+}
+
+/// Current invocation storage, separate from cumulative/high-water counters.
+/// Vector bytes count structural capacities, not RSS or live payload bytes.
+/// They exclude allocator overhead, hash-table buckets, owned context/error
+/// payloads, collector scratch space, and immutable Program code.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Storage {
+    /// Allocated slots, including reserved but unreachable slots of live frames.
+    pub cells: usize,
+    /// Non-padding slots; not a reachability count before collection.
+    pub live_cells: usize,
+    pub frames: usize,
+    pub arguments: usize,
+    pub cell_capacity: usize,
+    pub frame_capacity: usize,
+    pub task_capacity: usize,
+    pub failures: usize,
+    pub active_demands: usize,
+    pub vector_bytes: usize,
 }
 static EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -719,6 +794,7 @@ static EPOCH: AtomicU64 = AtomicU64::new(1);
 /// invalidates old handles; dropping/resetting it releases all pending cells.
 pub struct Executor<'p> {
     program: &'p Program,
+    kernel: Option<&'p mut stream::Kernel>,
     cells: Vec<Cell>,
     frames: Vec<Frame>,
     work: Vec<Task>,
@@ -726,6 +802,7 @@ pub struct Executor<'p> {
     context: Context,
     remaining: usize,
     epoch: u64,
+    next_identity: u64,
     aborted: Option<Error>,
     stats: Stats,
     registers: Vec<Datum>,
@@ -738,6 +815,7 @@ impl<'p> Executor<'p> {
     pub fn new(program: &'p Program) -> Self {
         Self {
             program,
+            kernel: None,
             cells: Vec::new(),
             frames: Vec::new(),
             work: Vec::new(),
@@ -745,6 +823,7 @@ impl<'p> Executor<'p> {
             context: Context::new(),
             remaining: 0,
             epoch: 0,
+            next_identity: 0,
             aborted: None,
             stats: Stats::default(),
             registers: Vec::new(),
@@ -757,6 +836,36 @@ impl<'p> Executor<'p> {
     pub fn stats(&self) -> &Stats {
         &self.stats
     }
+    pub fn storage(&self) -> Storage {
+        Storage {
+            cells: self.cells.len(),
+            live_cells: self.cells.iter().filter(|c| c.state != 4).count(),
+            frames: self.frames.len(),
+            arguments: self.argument_slots,
+            cell_capacity: self.cells.capacity(),
+            frame_capacity: self.frames.capacity(),
+            task_capacity: self.work.capacity(),
+            failures: self.failures.len(),
+            active_demands: self.active_demands.values().map(Vec::len).sum(),
+            vector_bytes: self.cells.capacity() * std::mem::size_of::<Cell>()
+                + self.frames.capacity() * std::mem::size_of::<Frame>()
+                + self.work.capacity() * std::mem::size_of::<Task>()
+                + self.registers.capacity() * std::mem::size_of::<Datum>()
+                + self
+                    .frames
+                    .iter()
+                    .map(|f| {
+                        f.arguments.capacity() * std::mem::size_of::<usize>()
+                            + f.identities.capacity() * std::mem::size_of::<u64>()
+                    })
+                    .sum::<usize>()
+                + self
+                    .active_demands
+                    .values()
+                    .map(|v| v.capacity() * std::mem::size_of::<usize>())
+                    .sum::<usize>(),
+        }
+    }
     fn reset(&mut self, budget: usize) {
         self.cells.clear();
         self.frames.clear();
@@ -767,6 +876,7 @@ impl<'p> Executor<'p> {
         self.stats = Stats::default();
         self.argument_slots = 0;
         self.active_demands.clear();
+        self.next_identity = 0;
         self.epoch = EPOCH.fetch_add(1, Ordering::Relaxed);
     }
     fn validate_args(&self, word: WordId, args: &[Literal]) -> Result<(), Error> {
@@ -817,32 +927,57 @@ impl<'p> Executor<'p> {
                 }
                 let parent = &self.frames[cell.frame];
                 match self.program.word(parent.word)?.ops[cell.slot] {
-                    Op::Arg(i) => *arg = parent.arguments[i],
+                    Op::Arg(i) => {
+                        *arg = parent.arguments[i];
+                        assert_ne!(
+                            *arg,
+                            usize::MAX,
+                            "live parameter refers to a collected argument"
+                        );
+                    }
                     _ => break,
                 }
             }
         }
+        let identities: Vec<_> = if w.cycle_tracking {
+            arguments.iter().map(|&a| self.cells[a].identity).collect()
+        } else {
+            Vec::new()
+        };
         let key_hash = if w.cycle_tracking {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            (word, recur, &arguments).hash(&mut hasher);
+            (word, recur, &identities).hash(&mut hasher);
             hasher.finish()
         } else {
             0
         };
         let id = self.frames.len();
         let base = self.cells.len();
-        self.cells.extend((0..w.ops.len()).map(|slot| Cell {
-            state: 0,
-            value: Datum::Unit,
-            frame: id,
-            slot,
-        }));
+        let first_identity = self.next_identity;
+        self.next_identity = first_identity
+            .checked_add(w.ops.len() as u64)
+            .ok_or(Error::StorageLimit)?;
+        self.cells.reserve(w.ops.len());
+        for slot in 0..w.ops.len() {
+            let identity = match w.ops[slot] {
+                Op::Arg(i) => self.cells[arguments[i]].identity,
+                _ => first_identity + slot as u64 + 1,
+            };
+            self.cells.push(Cell {
+                state: 0,
+                value: Datum::Unit,
+                frame: id,
+                slot,
+                identity,
+            });
+        }
         self.frames.push(Frame {
             word,
             base,
             arguments,
             recur,
             key_hash,
+            identities,
         });
         self.stats.calls += 1;
         self.stats.peak_cells = self.stats.peak_cells.max(self.cells.len());
@@ -862,12 +997,15 @@ impl<'p> Executor<'p> {
             return Err(Error::StorageLimit);
         }
         self.context.clone_from(context);
-        self.cells.extend(args.iter().map(|&v| Cell {
-            state: 2,
-            value: v.into(),
-            frame: usize::MAX,
-            slot: 0,
-        }));
+        self.next_identity = args.len() as u64;
+        self.cells
+            .extend(args.iter().enumerate().map(|(i, &v)| Cell {
+                state: 2,
+                value: v.into(),
+                frame: usize::MAX,
+                slot: 0,
+                identity: i as u64 + 1,
+            }));
         let root = self.frame(word, (0..args.len()).collect(), word)?;
         let base = self.frames[root].base;
         Ok(self
@@ -976,6 +1114,7 @@ impl<'p> Executor<'p> {
             Datum::Bool(b) => Value::Bool(b),
             Datum::Unit => Value::Unit,
             Datum::Quote(w) => Value::Quote(self.program.cid(w)?),
+            Datum::CompilerState(s) => Value::CompilerState(s),
             Datum::Pair(a, b) => Value::Pair(
                 Handle {
                     epoch: self.epoch,
@@ -1007,7 +1146,7 @@ impl<'p> Executor<'p> {
             self.remaining -= 1;
             self.stats.steps += 1;
             if let Err(e) = self.step(task) {
-                if matches!(e, Error::StorageLimit) {
+                if matches!(e, Error::StorageLimit | Error::Budget) {
                     self.aborted = Some(e.clone());
                 } else {
                     for (i, c) in self.cells.iter_mut().enumerate() {
@@ -1060,7 +1199,12 @@ impl<'p> Executor<'p> {
                             todo.push(Visit::Need(a));
                         }
                         value => {
-                            memo.insert(h.cell, value.scalar_cid().expect("scalar"));
+                            memo.insert(
+                                h.cell,
+                                value.scalar_cid().ok_or(Error::Type(
+                                    "compiler state has no persistent value CID",
+                                ))?,
+                            );
                         }
                     }
                 }
@@ -1108,6 +1252,7 @@ impl<'p> Executor<'p> {
                     }
                     1 => return Err(Error::Cycle),
                     3 => return Err(self.failures[&dst].clone()),
+                    4 => return Err(Error::CollectionBusy), // Collected frame padding.
                     _ => (),
                 }
                 // Recursive demand for a different output can be productive.
@@ -1121,7 +1266,7 @@ impl<'p> Executor<'p> {
                             let prior = &self.frames[self.cells[other].frame];
                             if prior.word == frame.word
                                 && prior.recur == frame.recur
-                                && prior.arguments == frame.arguments
+                                && prior.identities == frame.identities
                             {
                                 return Err(Error::Cycle);
                             }
@@ -1134,8 +1279,19 @@ impl<'p> Executor<'p> {
                 let f = &self.frames[c.frame];
                 let base = f.base;
                 match &program.word(f.word)?.ops[c.slot] {
+                    Op::Kernel { arguments, .. } => {
+                        self.work.push(Task::Kernel(dst));
+                        for slot in arguments.iter().rev() {
+                            self.work.push(Task::Need(base + slot));
+                        }
+                    }
                     Op::Arg(i) => {
                         let src = f.arguments[*i];
+                        assert_ne!(
+                            src,
+                            usize::MAX,
+                            "live parameter refers to a collected argument"
+                        );
                         self.copy_later(dst, src);
                     }
                     Op::Const(v) => self.ready(dst, (*v).into()),
@@ -1199,6 +1355,33 @@ impl<'p> Executor<'p> {
                 }
             }
             Task::Copy(dst, src) => self.ready(dst, self.value(src)),
+            Task::Kernel(dst) => {
+                let cell = self.cells[dst];
+                let frame = &self.frames[cell.frame];
+                let Op::Kernel {
+                    primitive,
+                    arguments,
+                } = &self.program.words[frame.word].ops[cell.slot]
+                else {
+                    unreachable!()
+                };
+                let args = arguments
+                    .iter()
+                    .map(|s| self.external(self.value(frame.base + s)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let kernel = self.kernel.as_mut().ok_or_else(|| {
+                    Error::Compiler("compiler primitive outside stream session".into())
+                })?;
+                let result = kernel.invoke(*primitive, &args, &mut self.remaining)?;
+                let value = match result {
+                    Value::Int(n) => Datum::Int(n),
+                    Value::Bool(b) => Datum::Bool(b),
+                    Value::Unit => Datum::Unit,
+                    Value::CompilerState(s) => Datum::CompilerState(s),
+                    _ => return Err(Error::Type("invalid compiler primitive result")),
+                };
+                self.ready(dst, value);
+            }
             Task::Apply(dst, src) => {
                 let Datum::Quote(word) = self.value(src) else {
                     return Err(Error::Type("application needs closed quotation"));

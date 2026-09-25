@@ -1,0 +1,29 @@
+-- These are ordinary March words, built once into the seed dictionary.
+-- All subsequent source is pulled from its input stream by this loop.
+: seed.yes drop true ;
+family seed.compile-mode 1 1 stream.immediate? stream.execute seed.yes stream.compile-call ;
+family seed.mode 1 1 stream.compiling? seed.compile-mode seed.yes stream.execute ;
+: seed.dictionary stream.find seed.mode ;
+family seed.classified 1 1 stream.number? stream.emit-number seed.yes seed.dictionary ;
+: seed.next stream.number seed.classified stream.word recur 1 1 ;
+family seed.loop 1 1 stream.eof? stream.end-source seed.yes seed.next ;
+: stream.interpret stream.word seed.loop ;
+
+-- Defining/comment/quotation words consume their own input. No native lexer
+-- recognizes these spellings when user source runs through the stream loop.
+: seed.colon stream.word stream.begin ;
+: seed.comment 41 stream.read-until ;
+: seed.quote stream.word stream.quote ;
+: seed.context stream.word stream.context ;
+: seed.recur stream.word stream.number stream.count stream.word stream.number stream.recur ;
+: seed.apply stream.word stream.number stream.count stream.word stream.number stream.apply ;
+
+-- Family syntax is also a stream-consuming dictionary word.
+: seed.family-end? 59 stream.word-byte= ;
+: seed.clause stream.find stream.family-guard stream.word stream.find stream.family-body stream.word recur 1 1 ;
+family seed.clauses 1 1 seed.family-end? stream.family-end seed.yes seed.clause ;
+: seed.family
+  stream.word stream.family-begin
+  stream.word stream.number dup stream.number-value stream.family-inputs
+  stream.word stream.number dup stream.number-value stream.family-outputs
+  stream.word seed.clauses ;

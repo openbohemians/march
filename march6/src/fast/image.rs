@@ -6,6 +6,7 @@ use super::{Binary, Cid, Error, Literal, Op, Program, WordId, put, text_bytes};
 use std::collections::HashSet;
 
 const MAGIC: &[u8; 8] = b"MARCHF01";
+const STREAM_MAGIC: &[u8; 8] = b"MARCHF03";
 const MAX_BYTES: usize = 32 * 1024 * 1024;
 const MAX_WORDS: usize = 100_000;
 const MAX_OPS: usize = 1_000_000;
@@ -129,6 +130,10 @@ impl<'a> Reader<'a> {
                 arguments: self.slots()?,
                 outputs: self.number()?,
             },
+            13 => Op::Kernel {
+                primitive: super::stream::Primitive::decode(self.byte()?)?,
+                arguments: self.slots()?,
+            },
             _ => return Err(invalid("unknown operation tag")),
         })
     }
@@ -215,7 +220,16 @@ impl Program {
         if self.names.len() > MAX_WORDS {
             return Err(invalid("dictionary size limit"));
         }
-        let mut out = MAGIC.to_vec();
+        // Ordinary v1 artifacts remain byte-identical. V3 supports kernel ops
+        // and immediate flags on ordinary dictionary entries, not a parser map.
+        let extended = !self.immediate.is_empty()
+            || order.iter().any(|&id| {
+                self.words[id]
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, Op::Kernel { .. }))
+            });
+        let mut out = if extended { STREAM_MAGIC } else { MAGIC }.to_vec();
         put(&mut out, order.len());
         for id in order {
             let word = self.word(id)?;
@@ -235,6 +249,15 @@ impl Program {
             text_bytes(&mut out, name);
             out.extend_from_slice(&self.cid(id)?.0);
         }
+        if extended {
+            put(&mut out, self.immediate.len());
+            for name in &self.immediate {
+                if out.len().saturating_add(8).saturating_add(name.len()) > MAX_BYTES {
+                    return Err(invalid("image size limit"));
+                }
+                text_bytes(&mut out, name);
+            }
+        }
         out.extend_from_slice(&self.cid(entry)?.0);
         if out.len() > MAX_BYTES {
             return Err(invalid("image size limit"));
@@ -253,9 +276,14 @@ impl Program {
             return Err(invalid("image size limit"));
         }
         let mut reader = Reader::new(bytes);
-        if reader.take(MAGIC.len())? != MAGIC {
+        let version = reader.take(MAGIC.len())?;
+        let extended = if version == MAGIC {
+            false
+        } else if version == STREAM_MAGIC {
+            true
+        } else {
             return Err(invalid("image magic/version"));
-        }
+        };
         let count = reader.count(MAX_WORDS, 40)?;
         let mut program = Self::new();
         let mut operations = 0usize;
@@ -303,6 +331,18 @@ impl Program {
             let id = reader.word(&program)?;
             program.bind(&name, id)?;
             previous = Some(name);
+        }
+        if extended {
+            let count = reader.count(MAX_WORDS, 8)?;
+            let mut previous = None;
+            for _ in 0..count {
+                let name = reader.string()?;
+                if previous.as_ref().is_some_and(|p| p >= &name) {
+                    return Err(invalid("duplicate or unordered immediate name"));
+                }
+                program.mark_immediate(&name)?;
+                previous = Some(name);
+            }
         }
         let entry = reader.word(&program)?;
         if reader.remaining() != 0 {

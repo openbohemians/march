@@ -276,9 +276,9 @@ exact counters, and each result was asserted equal to integer zero:
 | 10,000 | 0 | 220,012 | 20,001 | 10,001 | 130,009 | 40,003 | 40,003 |
 
 This is linear retention: about 13 cells and 4 frames/argument slots for each
-additional countdown level. The evaluator avoids recursive Rust stack growth,
-but **does not perform tail-call elimination or reclaim completed frames/cells
-within an invocation**. Counters describe stored entries, not resident bytes or
+additional countdown level. At this checkpoint the evaluator avoided recursive
+Rust stack growth, but **did not perform tail-call elimination or reclaim
+completed frames/cells within an invocation**. Counters describe stored entries, not resident bytes or
 allocator capacity. Reset logically clears the invocation workspace and may keep
 vector capacity for reuse; dropping the executor releases its allocations. This
 is an explicit remaining limitation for long-running programs and lazy streams,
@@ -290,7 +290,9 @@ not evidence that memory management is solved.
 qualifying scalar contextual tail loops now use constant workspace. The old
 retention table above remains the selective-evaluator control, not the optimized
 `run` result. The follow-up includes same-code timing, explicit scope, and a
-smoke check of the existing workloads. It does not claim general reclamation.
+smoke check of the existing workloads. A subsequent section there records explicit
+collection between host observations and bounded consumed-stream windows.
+Neither improvement provides automatic general reclamation inside a force.
 
 ## Interpretation limits
 

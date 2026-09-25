@@ -8,12 +8,12 @@ Interaction nets are no longer an execution direction.
 
 1. [Implementation guide](FAST-SPIKE.md): run the language, understand its
    semantics, and check what is still missing.
-2. [Direction](DIRECTION.md): language goals, execution decisions, and open contracts.
-3. [Bootstrap goals](BOOTSTRAP.md): FORTH-style self-extension, context-driven
-   compilation, and what remains to be built.
+2. [Direction](DIRECTION.md): goals/status table, execution decisions, and open contracts.
+3. [Bootstrap](BOOTSTRAP.md): the March-defined input-stream interpreter,
+   numbers-first lookup, defining words, and the remaining native nucleus.
 4. [Measurements](FAST-BENCHMARKS.md): execution baselines and their limitations.
-5. [Memory follow-up](FAST-MEMORY.md): bounded scalar tail loops and the remaining
-   general reclamation problem.
+5. [Memory follow-up](FAST-MEMORY.md): bounded scalar tail loops, explicit lazy-heap
+   collection, stream measurements, and the remaining continuation/root problem.
 
 Source paths and shell commands in these notes are relative to `march6/`,
 unless explicitly stated otherwise.

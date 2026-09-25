@@ -1,9 +1,11 @@
-# Tail-loop memory follow-up — 2026-09-25
+# Runtime memory follow-up — 2026-09-25
 
 Source paths and shell commands in this report are relative to `march6/`.
 
-The first memory improvement is conservative tail-call elimination, not a
-collector. Exact eligibility and remaining limitations are in
+Two improvements are now implemented: conservative scalar tail-call elimination
+and explicit lazy-heap collection between host observations. The first section
+records the tail-loop checkpoint; the [collection section](#explicit-boundary-collection)
+records the later generic stream work. Exact eligibility and API limits are in
 [FAST-SPIKE.md](FAST-SPIKE.md#scalar-family-tail-loops).
 The earlier countdown-retention measurements remain reproducible through
 `start` / `force`; optimized `run` / `run_into` now avoid that allocation.
@@ -24,8 +26,9 @@ argument. The host input conversion/output buffers are constant-sized, not
 zero allocations. Counts are logical entries, not RSS or allocator capacity.
 A reused executor can retain vector capacity from an earlier generic run.
 
-This does **not** bound general non-tail recursion or live lazy structures.
-Their existing selective evaluator and retention behavior are unchanged.
+Tail-call elimination alone does **not** bound general non-tail recursion or
+live lazy structures. The later collector reclaims unreachable history between
+observations, but cannot remove live continuations during a single force.
 
 ## Same-code timing
 
@@ -102,3 +105,121 @@ tests). They cover construction/instance sharing, the independent-equal-call
 gap, lazy failures and application checks, cycles/fuel, recursion binding, and
 tail-loop agreement with dynamic-application fallback. The shared left-first
 demand-order invariant is now cross-referenced in the compiler and evaluator.
+
+## Explicit boundary collection
+
+`src/fast/collect.rs` implements `Executor::collect(roots, budget)`. This is an
+opt-in Rust embedding API, not automatic collection during CLI execution.
+The host supplies every handle it will need after collection. Success returns
+replacement roots in the same order (including duplicates) and invalidates all
+old handles through a fresh epoch. Fields from previously returned pairs must
+either be supplied as roots or obtained again by forcing a retained pair.
+Omitting a root deliberately relinquishes it; retaining a stream head pins its
+reachable prefix.
+
+Collection never evaluates pending work. Pending cells retain their operation
+dependencies; ready pairs retain fields; ready call bundles retain callee outputs.
+Ready scalars and semantic failures retain their outcome, not their construction
+history. Frames needed by pending cells still reserve contiguous operation slots,
+but unneeded slots in those blocks are padding, not strong references.
+Stable argument-identity tags preserve recursive-cycle checks across relocation;
+the tags are not roots and are distinct from code/value CIDs.
+
+Tracing/remapping builds a replacement heap before committing. Invalid roots,
+collection-budget exhaustion, and storage-limit errors leave the old evaluator,
+handles, and statistics unchanged. Collection fuel is separate from evaluation
+fuel; it does not refill fuel or retry failures. Aborted invocations reject
+collection and require a new start. Empty roots release all lazy cells/frames
+and error memos in a non-aborted invocation. Code images and CIDs are unchanged.
+
+### Stream evidence
+
+Reproduce from `march6/`:
+
+```sh
+cargo build --offline --release --example fast_stream_bench
+timeout --kill-after=2s 30s taskset -c 0 target/release/examples/fast_stream_bench
+```
+
+The source is `: from dup 1 + recur 1 1 pair ; from`, started with runtime
+input zero through generic `start` / `force`. Each step forces/checks its head
+and advances to its tail. The two-consumer variant also reads the same stream
+32 positions behind. Every case performs exactly N−1 additions, including with
+two consumers: collection preserves sharing rather than recomputing values.
+The optimized scalar/tail paths are not used.
+
+Collection runs every 64 steps plus once at the end. Collected runs have a
+1,024-cell limit, 256-argument limit, 20,000-unit collection budget, and finite
+evaluation fuel. Each benchmark process has a 30-second external cap. Three
+CPU-0-pinned release processes were run sequentially with no project tests
+running; the host as a whole was not isolated.
+
+| Values consumed | Consumers | Collection | Peak cell slots | Final cells / frames | Sampled peak vector bytes | Final vector bytes |
+|---:|---:|---|---:|---:|---:|---:|
+| 10,000 | 1 or 2 | none | 60,004 | 60,004 / 10,001 | 6,058,408 | 6,058,408 |
+| 10,000 | 1 | every 64 | 390 | 6 / 1 | 54,448 | 432 |
+| 10,000 | 2, lag 32 | every 64 | 453 | 69 / 1 | 47,272 | 3,960 |
+| 1,000,000 | 1 | every 64 | 390 | 6 / 1 | 54,448 | 432 |
+| 1,000,000 | 2, lag 32 | every 64 | 453 | 69 / 1 | 47,272 | 3,960 |
+
+The collected plateau is unchanged from 1,000 through 1,000,000 consumed
+values. Final heaps contain one padding slot, hence 5 / 68 non-padding cells.
+The million-element cases perform 999,999 additions and 15,626 collections.
+The two-consumer vector-capacity peak happens to be smaller because vector
+growth starts from different compacted capacities; it is not less live data.
+
+Elapsed milliseconds, including checks, collection, and storage sampling:
+
+| Values / consumers / collection | Run 1 | Run 2 | Run 3 |
+|---|---:|---:|---:|
+| 10,000 / 1 / none | 7.562 | 7.740 | 7.451 |
+| 10,000 / 1 / every 64 | 6.067 | 6.235 | 6.095 |
+| 10,000 / 2 / none | 7.188 | 7.258 | 7.362 |
+| 10,000 / 2 / every 64 | 6.426 | 6.612 | 6.629 |
+| 1,000,000 / 1 / every 64 | 640.536 | 599.439 | 588.228 |
+| 1,000,000 / 2 / every 64 | 739.170 | 629.834 | 654.757 |
+
+These are single checked traversals per case/process, not seven-batch medians
+or a universal speedup claim. The important result is bounded retained storage
+with unchanged computation counts. No uncollected million-element run was
+attempted; the smaller controls already show linear retention.
+
+### Accounting and remaining limits
+
+- `Storage::cells` counts allocated slots, including live-frame padding.
+  `live_cells` counts non-padding slots, not traced reachability before collection.
+  Stats retain cumulative/high-water counts; collection does not reset them.
+- Vector bytes count structural vector capacities, sampled before collection
+  and at the final boundary. They exclude allocator overhead, hash-table
+  buckets, context/error payloads, immutable code, and temporary collector
+  scratch. They are not RSS or a peak measurement inside `force`/collection.
+  Fresh compacted cell/frame vectors shrink capacity; reused scalar-register
+  scratch can retain capacity from an earlier run.
+- Collection work scales with the allocated heap plus traced edges and retained
+  blocks, not just the live graph. Old/new heaps and marking/remapping tables
+  coexist temporarily. The work budget is not a hard byte or wall-clock bound;
+  cell/argument limits are entry limits, not a complete memory cap.
+- Merely walking tails without forcing heads can keep the whole deferred
+  addition chain live, even after releasing the original head. Claude's fixture
+  confirms that forcing the current head resolves that chain, after which
+  collection releases its history. The collector must not silently force it.
+- There is no collection inside `force` or `content_id`, nor automatic root
+  registration. A recursive March consumer inside one force may still retain
+  live continuations. General forwarding/tail behavior and automatic root
+  management are separate remaining work; this collector alone cannot fix them.
+
+Stable identity bookkeeping adds a tag per cell and an identity vector to
+cycle-tracked frames. Thus the uncollected generic heap is somewhat larger than
+before this change. One final-build CPU-0-pinned `fast_bench 20000` smoke run
+gave reused-executor medians (ns): Square 18.5, Quad 23.5, Conditional 177.7,
+SharedCall 23.4, ContextFamily 470.6, Chain64 210.0, SourceSquare 21.4. These do
+not show an obvious slowdown, but timing noise/preexisting drift prevents using
+this single run as proof of zero identity-bookkeeping overhead.
+
+Verification: 460 tests pass across all targets in debug and release, including
+115 fast-engine tests. Eleven new collector tests plus Claude's 17 independent
+semantic/reclamation fixtures cover bounded windows, shared pending work,
+retained heads, semantic errors, atomic collection failure, stale handles,
+relocation-safe cycle identity, and unchanged code images. Claude also reviewed
+the collector's root edges and remapping. All-target Clippy with warnings denied,
+formatting, and whitespace checks pass.

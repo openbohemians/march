@@ -1,11 +1,12 @@
 //! Command-line entry point for the deliberately provisional conventional spike.
 
-use march_research::fast::{Context, Executor, Literal, Program, source};
+use march_research::fast::{Context, Executor, Literal, Program, stream};
 use std::{env, fs, io::Read, process};
 
 fn usage() -> &'static str {
     "usage: march-fast [--budget N] [--context key=value] [--arg value]\n\
      [--save-image PATH] (--eval SOURCE | FILE | --load-image PATH)\n\
+     [--extend SOURCE (with --load-image, compile using its dictionary)]\n\
      values: signed integers, true, false, or unit; default budget: 100000\n\
      images contain code/dictionary only, not context or suspended execution"
 }
@@ -27,6 +28,7 @@ fn run() -> Result<(), String> {
     let mut input = None;
     let mut load_image = None;
     let mut save_image = None;
+    let mut extension = None;
     let mut context = Context::new();
     let mut arguments = Vec::new();
     let mut budget = 100_000;
@@ -51,6 +53,12 @@ fn run() -> Result<(), String> {
                     return Err("context key cannot be empty".into());
                 }
                 context.insert(key.to_string(), literal(value)?);
+            }
+            "--extend" => {
+                if extension.is_some() {
+                    return Err("provide only one --extend".into());
+                }
+                extension = Some(args.next().ok_or("--extend requires source text")?);
             }
             "--load-image" => {
                 if load_image.is_some() {
@@ -89,10 +97,13 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    let (program, word) = match (input, load_image) {
+    if extension.is_some() && load_image.is_none() {
+        return Err("--extend requires --load-image".into());
+    }
+    let (mut program, mut word) = match (input, load_image) {
         (Some(input), None) => {
-            let mut program = Program::new();
-            let word = source::compile(&mut program, &input).map_err(|e| e.to_string())?;
+            let mut program = stream::seed().map_err(|e| e.to_string())?;
+            let word = stream::compile(&mut program, &input).map_err(|e| e.to_string())?;
             (program, word)
         }
         (None, Some(path)) => {
@@ -109,6 +120,9 @@ fn run() -> Result<(), String> {
         (None, None) => return Err(usage().into()),
         (Some(_), Some(_)) => return Err("choose source or --load-image, not both".into()),
     };
+    if let Some(source) = extension {
+        word = stream::compile(&mut program, &source).map_err(|e| e.to_string())?;
+    }
     if let Some(path) = save_image {
         let bytes = program.to_image(word).map_err(|e| e.to_string())?;
         fs::write(&path, &bytes).map_err(|e| format!("{path}: {e}"))?;

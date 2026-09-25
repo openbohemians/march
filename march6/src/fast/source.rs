@@ -1,4 +1,6 @@
-//! Provisional host-side Forth reader for the conventional execution spike.
+//! Legacy host-side reader used for one-time seed construction and old tests.
+//! The active CLI uses `stream::compile` and its March-defined interpreter.
+//! Do not add user-facing syntax policy here; stream words own their input.
 //!
 //! Missing stack inputs are inferred. Public arguments and results are ordered
 //! bottom-to-top: `: subtract - ;` receives `[left, right]`. Quotations are closed
@@ -18,7 +20,7 @@
 //!   explicit signature is provisional and validated by runtime operations.
 //! - `pair`, `first`, `second` construct and project lazy immutable pairs.
 //! - Parentheses contain comments, not checked stack-effect declarations;
-//!   backslash starts a comment extending to the end of the line.
+//!   `--` starts a line comment; legacy backslash comments are also accepted.
 //!
 //! No forward names, lexical captures, or effects are
 //! provided. Builtin names cannot be redefined through this reader yet.
@@ -149,7 +151,16 @@ fn tokenize(source: &str) -> Result<Vec<Token>, SourceError> {
                     }
                     text.push(chars.next().unwrap());
                 }
-                tokens.push(Token { text, line });
+                if text == "--" {
+                    for c in chars.by_ref() {
+                        if c == '\n' {
+                            line += 1;
+                            break;
+                        }
+                    }
+                } else {
+                    tokens.push(Token { text, line });
+                }
             }
         }
     }
@@ -162,21 +173,48 @@ struct StackValue {
     quote: Option<WordId>,
 }
 
-#[derive(Default)]
-struct Body {
+#[derive(Clone, Default)]
+pub(super) struct Body {
     ops: Vec<Op>,
     stack: Vec<StackValue>,
     inputs: usize,
 }
 
 impl Body {
+    pub(super) fn dynamic(&mut self, inputs: usize, outputs: usize, recur: bool) {
+        let function = if recur {
+            None
+        } else {
+            Some(self.take(1)[0].slot)
+        };
+        let arguments = self.take(inputs).into_iter().map(|v| v.slot).collect();
+        let op = if let Some(function) = function {
+            Op::Apply {
+                function,
+                arguments,
+                outputs,
+            }
+        } else {
+            Op::Recur { arguments }
+        };
+        let call = self.emit(op, None).slot;
+        for output in 0..outputs {
+            self.push_op(Op::Project { call, output }, None);
+        }
+    }
+    pub(super) fn static_call(&mut self, program: &Program) -> Result<(), SourceError> {
+        let word = self.take(1)[0].quote.ok_or_else(|| {
+            SourceError("call needs a known quotation; use apply for dynamic code".into())
+        })?;
+        self.call(program, word)
+    }
     fn emit(&mut self, op: Op, quote: Option<WordId>) -> StackValue {
         let slot = self.ops.len();
         self.ops.push(op);
         StackValue { slot, quote }
     }
 
-    fn push_op(&mut self, op: Op, quote: Option<WordId>) {
+    pub(super) fn push_op(&mut self, op: Op, quote: Option<WordId>) {
         let value = self.emit(op, quote);
         self.stack.push(value);
     }
@@ -194,7 +232,7 @@ impl Body {
         self.stack.split_off(self.stack.len() - count)
     }
 
-    fn call(&mut self, program: &Program, word: WordId) -> Result<(), SourceError> {
+    pub(super) fn call(&mut self, program: &Program, word: WordId) -> Result<(), SourceError> {
         let (inputs, outputs) = program.signature(word).map_err(runtime_error)?;
         let arguments = self.take(inputs).into_iter().map(|v| v.slot).collect();
         let call = self.emit(Op::Call { word, arguments }, None).slot;
@@ -204,7 +242,7 @@ impl Body {
         Ok(())
     }
 
-    fn finish(mut self, program: &mut Program) -> Result<WordId, SourceError> {
+    pub(super) fn finish(mut self, program: &mut Program) -> Result<WordId, SourceError> {
         // Each newly discovered missing input lies below earlier inputs.
         for op in &mut self.ops {
             if let Op::Arg(index) = op {

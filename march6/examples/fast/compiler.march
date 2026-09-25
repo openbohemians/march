@@ -1,0 +1,14 @@
+-- No syntax registration or pre-tokenized body spans.
+-- Both words are compiled by the March input-stream interpreter.
+: define stream.word stream.begin ; immediate
+
+-- A defining word reads its own name, evaluates normal March arithmetic now,
+-- emits the resulting literal, and closes the new definition.
+: answer: stream.word stream.begin 20 22 + stream.emit-literal stream.end ; immediate
+
+define square dup * ;
+answer: answer
+
+-- Numeric recognition wins even over a dictionary entry named "42".
+: 42 999 ;
+7 square answer 42

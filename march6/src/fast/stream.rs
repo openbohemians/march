@@ -1,0 +1,653 @@
+//! Stream-fed compiler nucleus. WORD only splits on whitespace; the interpreter
+//! and input-consuming defining words are March code in stream-seed.march.
+use super::*;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+const SEED: &str = include_str!("stream-seed.march");
+static STATE_IDS: AtomicU64 = AtomicU64::new(1);
+
+/// Session-local immutable compiler-state reference. Cannot be fabricated in
+/// March, serialized, or confused with an integer or code quotation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StateHandle(u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Primitive {
+    Word,
+    Eof,
+    Number,
+    IsNumber,
+    NumberValue,
+    Find,
+    Compiling,
+    Immediate,
+    EmitNumber,
+    CompileCall,
+    Execute,
+    Begin,
+    End,
+    MarkImmediate,
+    EndSource,
+    EmitLiteral,
+    SkipLine,
+    ReadUntil,
+    Quote,
+    Context,
+    BeginQuote,
+    EndQuote,
+    StaticCall,
+    Count,
+    Recur,
+    Apply,
+    WordByteEquals,
+    FamilyBegin,
+    FamilyInputs,
+    FamilyOutputs,
+    FamilyGuard,
+    FamilyBody,
+    FamilyEnd,
+}
+const PRIMITIVES: &[(Primitive, &str)] = &[
+    (Primitive::Word, "stream.word"),
+    (Primitive::Eof, "stream.eof?"),
+    (Primitive::Number, "stream.number"),
+    (Primitive::IsNumber, "stream.number?"),
+    (Primitive::NumberValue, "stream.number-value"),
+    (Primitive::Find, "stream.find"),
+    (Primitive::Compiling, "stream.compiling?"),
+    (Primitive::Immediate, "stream.immediate?"),
+    (Primitive::EmitNumber, "stream.emit-number"),
+    (Primitive::CompileCall, "stream.compile-call"),
+    (Primitive::Execute, "stream.execute"),
+    (Primitive::Begin, "stream.begin"),
+    (Primitive::End, "stream.end"),
+    (Primitive::MarkImmediate, "stream.immediate"),
+    (Primitive::EndSource, "stream.end-source"),
+    (Primitive::EmitLiteral, "stream.emit-literal"),
+    (Primitive::SkipLine, "stream.skip-line"),
+    (Primitive::ReadUntil, "stream.read-until"),
+    (Primitive::Quote, "stream.quote"),
+    (Primitive::Context, "stream.context"),
+    (Primitive::BeginQuote, "stream.begin-quote"),
+    (Primitive::EndQuote, "stream.end-quote"),
+    (Primitive::StaticCall, "stream.call"),
+    (Primitive::Count, "stream.count"),
+    (Primitive::Recur, "stream.recur"),
+    (Primitive::Apply, "stream.apply"),
+    (Primitive::WordByteEquals, "stream.word-byte="),
+    (Primitive::FamilyBegin, "stream.family-begin"),
+    (Primitive::FamilyInputs, "stream.family-inputs"),
+    (Primitive::FamilyOutputs, "stream.family-outputs"),
+    (Primitive::FamilyGuard, "stream.family-guard"),
+    (Primitive::FamilyBody, "stream.family-body"),
+    (Primitive::FamilyEnd, "stream.family-end"),
+];
+impl Primitive {
+    pub fn arity(self) -> usize {
+        match self {
+            Self::EmitLiteral
+            | Self::ReadUntil
+            | Self::WordByteEquals
+            | Self::FamilyInputs
+            | Self::FamilyOutputs => 2,
+            _ => 1,
+        }
+    }
+    pub(crate) fn decode(tag: u8) -> Result<Self, Error> {
+        PRIMITIVES
+            .iter()
+            .find(|(p, _)| *p as u8 == tag)
+            .map(|(p, _)| *p)
+            .ok_or_else(|| Error::Image("unknown compiler primitive".into()))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Limits {
+    pub fuel: usize,
+    pub states: usize,
+    pub cells: usize,
+    pub nesting: usize,
+    pub kernel_depth: usize,
+    pub source_bytes: usize,
+    pub code_words: usize,
+}
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            fuel: 2_000_000,
+            states: 16_384,
+            cells: 1_000_000,
+            nesting: 128,
+            kernel_depth: 64,
+            source_bytes: 4 * 1024 * 1024,
+            code_words: 100_000,
+        }
+    }
+}
+
+#[derive(Clone)]
+enum Definition {
+    Named(String),
+    Quotation,
+}
+#[derive(Clone)]
+struct Frame {
+    definition: Definition,
+    body: source::Body,
+}
+#[derive(Clone)]
+struct Family {
+    name: String,
+    inputs: Option<usize>,
+    outputs: Option<usize>,
+    guard: Option<WordId>,
+    clauses: Vec<(WordId, WordId)>,
+}
+#[derive(Clone)]
+struct State {
+    program: Rc<Program>,
+    input: Rc<str>,
+    cursor: usize,
+    word: Option<(usize, usize)>,
+    number: Option<i64>,
+    entry: Option<(WordId, bool)>,
+    outer: source::Body,
+    frames: Vec<Frame>,
+    last: Option<String>,
+    count: Option<usize>,
+    family: Option<Family>,
+}
+impl State {
+    fn text(&self) -> Result<&str, Error> {
+        self.word
+            .map(|(a, b)| &self.input[a..b])
+            .ok_or_else(|| fail("expected input word, found EOF"))
+    }
+    fn body(&mut self) -> &mut source::Body {
+        self.frames
+            .last_mut()
+            .map(|f| &mut f.body)
+            .unwrap_or(&mut self.outer)
+    }
+    fn compile_call(&mut self, word: WordId) -> Result<(), Error> {
+        let program = self.program.clone();
+        self.body().call(&program, word).map_err(|e| fail(e.0))
+    }
+    fn literal(&mut self, value: Literal) {
+        self.body().push_op(
+            Op::Const(value),
+            match value {
+                Literal::Quote(w) => Some(w),
+                _ => None,
+            },
+        );
+    }
+}
+fn fail(message: impl Into<String>) -> Error {
+    Error::Compiler(message.into())
+}
+fn count(value: i64) -> Result<usize, Error> {
+    usize::try_from(value)
+        .ok()
+        .filter(|&n| n <= 4096)
+        .ok_or_else(|| fail("stack count must be between 0 and 4096"))
+}
+
+/// Compiler states form an immutable, bounded session arena. Old snapshots
+/// stay valid for the session; no mutation is exposed through a StateHandle.
+pub(super) struct Kernel {
+    states: HashMap<u64, State>,
+    limits: Limits,
+    depth: usize,
+}
+impl Kernel {
+    fn insert(&mut self, state: State) -> Result<StateHandle, Error> {
+        if self.states.len() >= self.limits.states || state.program.len() > self.limits.code_words {
+            return Err(Error::StorageLimit);
+        }
+        let id = STATE_IDS.fetch_add(1, Ordering::Relaxed);
+        self.states.insert(id, state);
+        Ok(StateHandle(id))
+    }
+    fn state(&self, handle: StateHandle) -> Result<&State, Error> {
+        self.states
+            .get(&handle.0)
+            .ok_or_else(|| fail("foreign compiler state"))
+    }
+    fn execute(
+        &mut self,
+        word: WordId,
+        state: StateHandle,
+        fuel: &mut usize,
+    ) -> Result<StateHandle, Error> {
+        if self.depth >= self.limits.kernel_depth {
+            return Err(Error::StorageLimit);
+        }
+        let program = self.state(state)?.program.clone();
+        if program.signature(word)? != (1, 1) {
+            return Err(fail("compiler word needs state -> state signature"));
+        }
+        let context = Context::from([
+            ("compiler".into(), Literal::Bool(true)),
+            (
+                "compiling".into(),
+                Literal::Bool(!self.state(state)?.frames.is_empty()),
+            ),
+        ]);
+        let cells = self.limits.cells;
+        self.depth += 1;
+        let result = {
+            let mut e = Executor::new(&program);
+            e.cell_limit = cells;
+            e.argument_limit = cells;
+            e.kernel = Some(self);
+            let result = e
+                .start_graph(
+                    word,
+                    &[InputNode::CompilerState(state)],
+                    &[0],
+                    &context,
+                    *fuel,
+                )
+                .and_then(|h| e.force(h[0]));
+            *fuel = e.remaining;
+            result
+        };
+        self.depth -= 1;
+        match result? {
+            Value::CompilerState(s) => {
+                self.state(s)?;
+                Ok(s)
+            }
+            _ => Err(fail("compiler word did not return a compiler state")),
+        }
+    }
+    pub(super) fn invoke(
+        &mut self,
+        op: Primitive,
+        args: &[Value],
+        fuel: &mut usize,
+    ) -> Result<Value, Error> {
+        let Some(Value::CompilerState(handle)) = args.first() else {
+            return Err(Error::Type("compiler primitive needs explicit state"));
+        };
+        let handle = *handle;
+        let old = self.state(handle)?;
+        let integer = || match args.get(1) {
+            Some(Value::Int(n)) => Ok(*n),
+            _ => Err(Error::Type("compiler primitive needs integer")),
+        };
+        // Predicates return ordinary March values. Control flow is in the seed,
+        // not in a native read/classify/dispatch loop.
+        match op {
+            Primitive::Eof => return Ok(Value::Bool(old.word.is_none())),
+            Primitive::IsNumber => return Ok(Value::Bool(old.number.is_some())),
+            Primitive::NumberValue => {
+                return old
+                    .number
+                    .map(Value::Int)
+                    .ok_or_else(|| fail("input word is not a number"));
+            }
+            Primitive::Compiling => return Ok(Value::Bool(!old.frames.is_empty())),
+            Primitive::Immediate => {
+                return Ok(Value::Bool(
+                    old.entry.ok_or_else(|| fail("no dictionary entry"))?.1,
+                ));
+            }
+            Primitive::WordByteEquals => {
+                return Ok(Value::Bool(
+                    old.text()?.as_bytes()
+                        == [u8::try_from(integer()?).map_err(|_| fail("invalid byte"))?],
+                ));
+            }
+            _ => (),
+        }
+        let mut state = old.clone();
+        match op {
+            Primitive::Word => {
+                let mut start = state.cursor;
+                for ch in state.input[start..].chars() {
+                    if !ch.is_whitespace() {
+                        break;
+                    }
+                    start += ch.len_utf8();
+                }
+                let mut end = start;
+                for ch in state.input[start..].chars() {
+                    if ch.is_whitespace() {
+                        break;
+                    }
+                    end += ch.len_utf8();
+                }
+                state.cursor = end;
+                state.word = (start != end).then_some((start, end));
+                state.number = None;
+                state.entry = None;
+            }
+            Primitive::Number => {
+                let text = state.text()?;
+                let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+                state.number = if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+                    Some(text.parse().map_err(|_| Error::Overflow)?)
+                } else {
+                    None
+                };
+            }
+            Primitive::Find => {
+                let name = state.text()?;
+                let word = state
+                    .program
+                    .lookup(name)
+                    .ok_or_else(|| fail(format!("unknown word '{name}'")))?;
+                state.entry = Some((word, state.program.is_immediate(name)));
+            }
+            Primitive::EmitNumber => state.literal(Literal::Int(
+                state.number.ok_or_else(|| fail("no parsed number"))?,
+            )),
+            Primitive::CompileCall => {
+                state.compile_call(state.entry.ok_or_else(|| fail("no dictionary entry"))?.0)?
+            }
+            Primitive::Execute => {
+                let (word, immediate) = state.entry.ok_or_else(|| fail("no dictionary entry"))?;
+                if immediate {
+                    return self.execute(word, handle, fuel).map(Value::CompilerState);
+                }
+                // Lazy interpretation composes pending work on the outer stack;
+                // observing the resulting entry demands it in the normal VM.
+                state.compile_call(word)?;
+            }
+            Primitive::Begin => {
+                if !state.frames.is_empty() || state.family.is_some() {
+                    return Err(fail("nested named definition"));
+                }
+                let name = state.text()?.to_owned();
+                state.frames.push(Frame {
+                    definition: Definition::Named(name),
+                    body: source::Body::default(),
+                });
+            }
+            Primitive::End | Primitive::EndQuote => {
+                let frame = state
+                    .frames
+                    .pop()
+                    .ok_or_else(|| fail("no open definition"))?;
+                if matches!(
+                    (&frame.definition, op),
+                    (Definition::Named(_), Primitive::EndQuote)
+                        | (Definition::Quotation, Primitive::End)
+                ) {
+                    return Err(fail("mismatched definition terminator"));
+                }
+                let word = frame
+                    .body
+                    .finish(Rc::make_mut(&mut state.program))
+                    .map_err(|e| fail(e.0))?;
+                match frame.definition {
+                    Definition::Named(name) => {
+                        Rc::make_mut(&mut state.program).bind(&name, word)?;
+                        state.last = Some(name);
+                    }
+                    Definition::Quotation => state.literal(Literal::Quote(word)),
+                }
+            }
+            Primitive::MarkImmediate => {
+                let name = state
+                    .last
+                    .as_ref()
+                    .ok_or_else(|| fail("no completed definition"))?;
+                Rc::make_mut(&mut state.program).mark_immediate(name)?;
+            }
+            Primitive::EndSource => {
+                if !state.frames.is_empty() || state.family.is_some() {
+                    return Err(fail("unfinished definition at EOF"));
+                }
+            }
+            Primitive::EmitLiteral => {
+                let literal = match args.get(1) {
+                    Some(Value::Int(n)) => Literal::Int(*n),
+                    Some(Value::Bool(b)) => Literal::Bool(*b),
+                    Some(Value::Unit) => Literal::Unit,
+                    Some(Value::Quote(cid)) => Literal::Quote(
+                        *state
+                            .program
+                            .identities
+                            .get(cid)
+                            .ok_or_else(|| fail("unknown quotation"))?,
+                    ),
+                    _ => return Err(Error::Type("compiler literal must be scalar or quotation")),
+                };
+                state.literal(literal);
+            }
+            Primitive::SkipLine | Primitive::ReadUntil => {
+                let byte = if op == Primitive::SkipLine {
+                    b'\n'
+                } else {
+                    u8::try_from(integer()?)
+                        .ok()
+                        .filter(|b| b.is_ascii())
+                        .ok_or_else(|| fail("delimiter must be ASCII"))?
+                };
+                match state.input.as_bytes()[state.cursor..]
+                    .iter()
+                    .position(|&b| b == byte)
+                {
+                    Some(n) => state.cursor += n + 1,
+                    None if op == Primitive::SkipLine => state.cursor = state.input.len(),
+                    None => return Err(fail("input delimiter not found")),
+                }
+            }
+            Primitive::Quote => {
+                let word = state
+                    .program
+                    .lookup(state.text()?)
+                    .ok_or_else(|| fail("unknown quoted word"))?;
+                state.literal(Literal::Quote(word));
+            }
+            Primitive::Context => {
+                let key = state.text()?.to_owned();
+                state.body().push_op(Op::Context(key), None);
+            }
+            Primitive::BeginQuote => {
+                if state.frames.len() >= self.limits.nesting {
+                    return Err(Error::StorageLimit);
+                }
+                state.frames.push(Frame {
+                    definition: Definition::Quotation,
+                    body: source::Body::default(),
+                });
+            }
+            Primitive::StaticCall => {
+                let program = state.program.clone();
+                state.body().static_call(&program).map_err(|e| fail(e.0))?;
+            }
+            Primitive::Count => {
+                state.count = Some(count(
+                    state.number.ok_or_else(|| fail("expected stack count"))?,
+                )?);
+            }
+            Primitive::Recur | Primitive::Apply => {
+                let inputs = state
+                    .count
+                    .take()
+                    .ok_or_else(|| fail("missing input count"))?;
+                let outputs = count(state.number.ok_or_else(|| fail("expected output count"))?)?;
+                state
+                    .body()
+                    .dynamic(inputs, outputs, op == Primitive::Recur);
+            }
+            Primitive::FamilyBegin => {
+                if !state.frames.is_empty() || state.family.is_some() {
+                    return Err(fail("family definition must be top level"));
+                }
+                state.family = Some(Family {
+                    name: state.text()?.into(),
+                    inputs: None,
+                    outputs: None,
+                    guard: None,
+                    clauses: Vec::new(),
+                });
+            }
+            Primitive::FamilyInputs | Primitive::FamilyOutputs => {
+                let value = count(integer()?)?;
+                let family = state
+                    .family
+                    .as_mut()
+                    .ok_or_else(|| fail("no open family"))?;
+                if op == Primitive::FamilyInputs {
+                    family.inputs = Some(value);
+                } else {
+                    family.outputs = Some(value);
+                }
+            }
+            Primitive::FamilyGuard | Primitive::FamilyBody => {
+                let word = state.entry.ok_or_else(|| fail("no dictionary entry"))?.0;
+                let family = state
+                    .family
+                    .as_mut()
+                    .ok_or_else(|| fail("no open family"))?;
+                if op == Primitive::FamilyGuard {
+                    family.guard = Some(word);
+                } else {
+                    family.clauses.push((
+                        family.guard.take().ok_or_else(|| fail("missing guard"))?,
+                        word,
+                    ));
+                }
+            }
+            Primitive::FamilyEnd => {
+                let family = state.family.take().ok_or_else(|| fail("no open family"))?;
+                let program = Rc::make_mut(&mut state.program);
+                let word = program.add_family(
+                    family.inputs.ok_or_else(|| fail("missing family inputs"))?,
+                    family
+                        .outputs
+                        .ok_or_else(|| fail("missing family outputs"))?,
+                    family.clauses,
+                )?;
+                program.bind(&family.name, word)?;
+                state.last = Some(family.name);
+            }
+            _ => unreachable!(),
+        }
+        self.insert(state).map(Value::CompilerState)
+    }
+}
+
+/// Create the initial dictionary. Only this one-time seed build uses the older
+/// host reader; subsequent source goes through the persisted March interpreter.
+pub fn seed() -> Result<Program, Error> {
+    let mut program = Program::new();
+    for &(primitive, name) in PRIMITIVES {
+        let n = primitive.arity();
+        let mut ops: Vec<_> = (0..n).map(Op::Arg).collect();
+        ops.push(Op::Kernel {
+            primitive,
+            arguments: (0..n).collect(),
+        });
+        let word = program.add_word(n, ops, vec![n])?;
+        program.bind(name, word)?;
+    }
+    // Runtime primitives are ordinary dictionary entries, not reader cases.
+    for (name, source) in [
+        ("dup", "dup"),
+        ("drop", "drop"),
+        ("swap", "swap"),
+        ("over", "over"),
+        ("+", "+"),
+        ("-", "-"),
+        ("*", "*"),
+        ("=", "="),
+        ("<", "<"),
+        ("pair", "pair"),
+        ("first", "first"),
+        ("second", "second"),
+        ("select", "select"),
+        ("true", "true"),
+        ("false", "false"),
+        ("unit", "unit"),
+    ] {
+        let word = source::compile(&mut program, source).map_err(|e| fail(e.0))?;
+        program.bind(name, word)?;
+    }
+    source::compile(&mut program, SEED).map_err(|e| fail(e.0))?;
+    for (name, implementation) in [
+        (":", "seed.colon"),
+        (";", "stream.end"),
+        ("immediate", "stream.immediate"),
+        ("--", "stream.skip-line"),
+        ("\\", "stream.skip-line"),
+        ("(", "seed.comment"),
+        ("'", "seed.quote"),
+        ("quote", "seed.quote"),
+        ("ctx", "seed.context"),
+        ("[", "stream.begin-quote"),
+        ("]", "stream.end-quote"),
+        ("call", "stream.call"),
+        ("recur", "seed.recur"),
+        ("apply", "seed.apply"),
+        ("family", "seed.family"),
+    ] {
+        let word = program
+            .lookup(implementation)
+            .ok_or_else(|| fail("missing seed word"))?;
+        program.bind(name, word)?;
+        program.mark_immediate(name)?;
+    }
+    Ok(program)
+}
+
+/// Interpret source into canonical pending code. Numeric recognition precedes
+/// lookup in the March seed, even if the dictionary contains the same spelling.
+/// Compilation is atomic: failures do not change the supplied Program.
+pub fn compile(program: &mut Program, input: &str) -> Result<WordId, Error> {
+    compile_with_limits(program, input, &Limits::default())
+}
+pub fn compile_with_limits(
+    program: &mut Program,
+    input: &str,
+    limits: &Limits,
+) -> Result<WordId, Error> {
+    if input.len() > limits.source_bytes {
+        return Err(fail("source exceeds configured byte limit (default 4 MiB)"));
+    }
+    let interpreter = program
+        .lookup("stream.interpret")
+        .ok_or_else(|| fail("image has no stream interpreter; load a stream seed"))?;
+    let state = State {
+        program: Rc::new(program.clone()),
+        input: Rc::from(input),
+        cursor: 0,
+        word: None,
+        number: None,
+        entry: None,
+        outer: source::Body::default(),
+        frames: Vec::new(),
+        last: None,
+        count: None,
+        family: None,
+    };
+    let mut kernel = Kernel {
+        states: HashMap::new(),
+        limits: limits.clone(),
+        depth: 0,
+    };
+    let initial = kernel.insert(state)?;
+    let mut fuel = limits.fuel;
+    let result = kernel.execute(interpreter, initial, &mut fuel)?;
+    let mut state = kernel.state(result)?.clone();
+    if !state.frames.is_empty() || state.family.is_some() {
+        return Err(fail("unfinished definition"));
+    }
+    let entry = state
+        .outer
+        .finish(Rc::make_mut(&mut state.program))
+        .map_err(|e| fail(e.0))?;
+    if state.program.len() > limits.code_words {
+        return Err(Error::StorageLimit);
+    }
+    *program = (*state.program).clone();
+    Ok(entry)
+}

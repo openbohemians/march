@@ -15,9 +15,12 @@ cargo run --offline --release --bin march-fast -- --context enabled=true example
 ```
 
 The prototype supports shared lazy evaluation, immutable pairs, closed
-quotations, recursion, guarded word families, and canonical code images.
-General memory reclamation, full contextual modules, staging, and self-hosting
-remain unfinished; this is not a complete March implementation.
+quotations, recursion, guarded word families, canonical code images, and explicit
+lazy-heap collection between host observations. A first self-extension proof
+runs a March-defined input-stream interpreter with numbers before dictionary
+lookup. Defining/comment words consume input themselves; their code and flags
+persist in images. Automatic reclamation within evaluation,
+full contextual modules, general staging, and full self-hosting remain unfinished.
 
 ## Documentation and checks
 

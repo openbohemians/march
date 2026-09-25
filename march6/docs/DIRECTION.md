@@ -132,9 +132,46 @@ are not automatically merged: stronger reference sharing remains an explicit
 open contract, not a silently satisfied requirement. Missing-context
 residualization and live pending-state images are also not implemented here.
 
-Next priorities are allocation/lifetime improvements, richer contextual groups,
-and an explicit staging interface. A conservative scalar family tail-loop path
-now keeps the countdown probe in constant workspace; general lazy recursion
-still retains frames until invocation reset. Neither perfect lifetime planning
-nor a new computational substrate is required to address that ordinary
-implementation problem. See FAST-SPIKE.md for the exact optimization boundary.
+Thomas has moved FORTH-style self-extension ahead of further general memory work:
+it is foundational, not an optional feature to attach to a finished language.
+The first token-view/action-plan prototype was the wrong boundary and has been
+replaced. The current nucleus runs a March-defined input-stream loop: read a
+whitespace-delimited word, recognize numbers FIRST, then dictionary lookup and
+execution/compilation. Defining/comment words consume input themselves. The seed
+and immediate flags persist in images. Native stream operations, graph builders,
+stack inference, and initial seed assembly remain; see [BOOTSTRAP.md](BOOTSTRAP.md)
+for the precise scope and compiler-state/runtime-stack distinction.
+
+A conservative scalar family tail-loop path
+now keeps the countdown probe in constant workspace. Explicit-root collection
+between host observations also bounds the consumed-stream window, preserving
+shared results and lazy failures. It is not automatic: general recursion inside
+one force can still retain live continuations and frames until invocation reset.
+Next memory work must address those continuations and automatic root management,
+not merely add collection calls. Neither perfect lifetime planning nor a new
+computational substrate is required. See FAST-SPIKE.md for the exact boundaries
+and FAST-MEMORY.md for evidence and remaining costs.
+
+## Goals and status — conventional engine
+
+These statuses describe the prototype, not production readiness or the older
+reference implementation. Verification at this checkpoint: 476 tests across all
+targets in debug/release, including 131 fast-engine tests.
+
+| Goal | Status | Remaining boundary |
+|---|---|---|
+| FORTH composition | Working core | Words, inferred stack interfaces, recursion, closed quotations; practical library remains. |
+| Fast execution | Partial, measured | Scalar and restricted tail paths work; broader workloads and optimization remain. |
+| Content-addressed code | Working core | Canonical definitions and code images; no remote/general value store. |
+| Immutable values | Working core | Scalars and lazy pairs; richer persistent collections remain. |
+| Lazy evaluation | Working core | Selective branches/arguments/outputs/fields; no automatic parallelism. |
+| Shared computation | Working with open contract | Instances share; independently equal runtime calls are not automatically merged. |
+| Memory reclamation | Partial | Scalar tail loops and explicit boundary collection; automatic roots/live continuations remain. |
+| Contextual programming | Partial | Guarded families and compiler context; module-level groups/composition remain. |
+| Compiler self-extension | Stream proof working | March read/number/lookup loop and defining words persist; native graph builders and explicit compiler-state interface remain. |
+| Full bootstrap | Not achieved | Initial seed assembly and graph/stack building still native; need a bootstrap fixed point. |
+| Staging | Explicit compiler execution only | General partial evaluation and unknown-context residualization remain. |
+| Images | Code, dictionary, immediate flags | No live values/suspended computations/session snapshots. |
+| Data/library support | Minimal | Strings, maps, arrays, and useful libraries remain. |
+| Effects / language I/O | Not implemented | Need an explicit protocol compatible with lazy sharing. |
+| Source syntax | Stream-fed FORTH | Whitespace words, numbers before dictionary, ordinary comment/defining words; final richer notation remains open. |

@@ -1,0 +1,7 @@
+\ Pass --context enabled=true or --context enabled=false.
+: enabled ctx enabled ;
+: always true ;
+: yes 7 ;
+: no 8 ;
+family choice 0 1 enabled yes always no ;
+choice

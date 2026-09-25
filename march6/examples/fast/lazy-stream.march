@@ -1,0 +1,3 @@
+\ An unbounded sequence; only the second element is demanded.
+: from dup 1 + recur 1 1 pair ;
+10 from second first

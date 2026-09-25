@@ -1,6 +1,7 @@
 pub mod cid;
 pub mod collect;
 pub mod demand;
+pub mod fast;
 pub mod flow;
 pub mod image;
 pub mod inet;

@@ -1,0 +1,8 @@
+\ This family qualifies for bounded scalar tail-loop execution.
+\ Run with --budget 1000000; default input is 10000.
+: zero 0 = ;
+: always drop true ;
+: base drop 0 ;
+: step 1 - recur 1 1 ;
+family countdown 1 1 zero base always step ;
+10000 countdown

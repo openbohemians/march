@@ -1,5 +1,9 @@
 # Syntax-neutral reader foundation
 
+Reference implementation only: this is not the current `march-fast` reader.
+See the [reference index](README.md). Source paths and commands are relative
+to `march6/`.
+
 Status: B0b implemented. This is the substrate for a seed interpreter, not a
 parser for the provisional syntax in `SYNTAX.md`.
 

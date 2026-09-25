@@ -1,5 +1,12 @@
 # Architecture decision
 
+**Superseding decision — 2026-09-25:** Thomas has retired the interaction-net
+approach and directed March toward a fast CAS, immutable, lazy, context-oriented
+FORTH. See [DIRECTION.md](DIRECTION.md). Preserve the research and historical
+memory notes below, but their INet gates and next-step instructions no longer
+authorize work. A conventional runtime need not intern every execution
+temporary or literally share the reference reducer's implementation.
+
 Status: proceed with a bounded March 6 research line, but narrow the memory
 claim and keep the interaction-net backend optional until the next gate.
 
@@ -64,6 +71,27 @@ does not.
 Arenas remain useful as scoped fallbacks and allocation mechanisms.  They are
 not the semantic memory model.  B-trees may make sense for persistent image
 extents and free-space indexes, but not for individual reducer-agent allocation.
+
+If a conventional backend replaces the interaction net, much of its transient
+memory design already exists in March 4 (branch
+`archive/march4/preserved/docs-2026-09-23`):
+`docs/design/MEMORY-MANAGEMENT.md` and `docs/planning/PLAN-REFGRAPH.md` (a
+compile-time reference graph with the type stack as the unique root set,
+per-word mini-graphs stored by CID and stitched at call sites, and frees at
+`Reach(p) \ Reach(p′)`), `docs/design/FORMAL-MODEL.md`,
+`docs/design/DESIGN-CONSIDERATION.md` (per-type specialization on first use,
+which corresponds to the specialization cache here), and `docs/design/HAMT.md`
+(an implemented persistent map).  Three March 6 facts change that design's
+difficulty.  Immutable values cannot form cycles, which removes March 4's
+`set-at` cycle problem.  An explicit compiler-state value removes the
+clobbered-global-state failure that stalled March 4's Phase 2.  Plans must be
+templates over dynamic instances with ownership summaries at word and clause
+boundaries (see `RESULTS.md`).  Compile-time frees should then cover values
+that are unique by construction.  Compiler-inserted reference counting remains
+necessary where structure is shared persistently (for example, HAMT path
+copying shares subtrees between versions) or where higher-order escape defeats
+proof.  Persistent CAS objects stay outside this analysis and are reclaimed by
+tracing from explicit roots.
 
 ## Recommended architecture
 

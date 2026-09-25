@@ -1,5 +1,11 @@
 # March: a FORTH-inspired self-extending reducer
 
+**Historical model:** [DIRECTION.md](DIRECTION.md) supersedes this document's
+interaction-net execution, fan/eraser, and same-reducer implementation claims.
+FORTH-style composition/self-extension, content identity, immutable contexts,
+and lazy shared evaluation remain goals; their realization is no longer tied
+to interaction nets.
+
 ## Thesis
 
 March is not primarily a functional language with FORTH-like notation. It is

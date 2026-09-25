@@ -1,5 +1,22 @@
 # March research prototype
 
+**Active direction (2026-09-25):** a fast, content-addressed, immutable, lazy,
+context-oriented FORTH using a conventional execution engine. Interaction-net
+development is retired. See [DIRECTION.md](DIRECTION.md) for the current plan;
+the overview and research links below describe retained prototypes, not active
+INet milestones. The existing CAS reducer remains useful evidence, not a
+promise of fast execution or a mandatory backend representation.
+
+**Working conventional spike:** [FAST-SPIKE.md](FAST-SPIKE.md) has runnable
+examples, current semantics, and known gaps. [FAST-BENCHMARKS.md](FAST-BENCHMARKS.md)
+has measured execution costs and memory retention. Quick start:
+
+```sh
+cargo run --offline --release --bin march-fast -- --eval ': square dup * ; 7 square'
+```
+
+## Retained reference and research overview
+
 This directory is a deliberately small experimental successor to March 4 and
 March 5. It now includes a small executable seed language, not a complete March
 implementation. Its purpose is to test the

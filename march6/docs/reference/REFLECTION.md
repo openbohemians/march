@@ -1,5 +1,9 @@
 # Syntax-neutral reflection
 
+Reference implementation only: these reflection operations have not been
+ported into `march-fast`. See the [reference index](README.md). Source paths
+and commands are relative to `march6/`.
+
 Status: B0a implemented with independent adversarial tests.  This is one nucleus
 mechanism needed by the bootstrap gate; it is not yet the outer interpreter or
 the seed image.

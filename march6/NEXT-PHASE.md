@@ -1,5 +1,60 @@
 # Next phase: a stronger reference and a decisive INet experiment
 
+**Superseded — 2026-09-25:** Thomas has dropped interaction nets entirely from
+March's execution architecture. [DIRECTION.md](DIRECTION.md) is now the active
+plan: a fast CAS, immutable, lazy, context-oriented FORTH with conventional
+execution. Everything below is historical, including the suggested net
+worklist/storage performance experiment. Do not resume those tasks.
+
+The replacement execution spike now works: see [FAST-SPIKE.md](FAST-SPIKE.md)
+and its next-decision list, with measurements in [FAST-BENCHMARKS.md](FAST-BENCHMARKS.md).
+
+## Direction update — 2026-09-24
+
+Thomas approved a rules-first contextual-net investigation. See
+`CONTEXTUAL-NET-EXPERIMENT.md` for the current candidate model, five hand traces,
+review assignment, and bounded runner plan. Further reference-matching work
+(including the canonical identity overlay and N0b) is paused while this is
+investigated. Existing implementations and tests remain useful comparisons;
+their exact sharing/error behavior is not automatically the new net's language
+specification. The plan below records the previous track, not authorization
+to resume its next implementation steps.
+
+The first forward-release runner reproduces its reviewed hand traces.
+`SELECTIVE-ACTIVATION.md` records the second bounded candidate and executable
+results: an unknown condition holds both branches passive, then a local selector
+activates only the chosen branch. Independently reviewed rules pass nine variant
+tests; the thirteen original example tests still pass. The general
+passive-description/shared-instance mechanism is still an open design.
+
+Priority update — 2026-09-25: Thomas authorized proceeding with the independent
+demand Join experiment. `DEMAND-JOIN.md` records the exact two-active-port rules,
+isolated implementation, and bounded results: independent consumers activate
+one shared producer, delayed consumers reuse its result, and discarding one
+use preserves the other. Claude independently reproduced the original 36
+example tests and found no blocking issues in the engine, rules, or scope.
+`CROSS-BRANCH-SHARING.md` remains a reviewed, unimplemented narrower control;
+`COMPUTED-CONDITIONS.md` is also reviewed but unimplemented. Effects remain
+outside this step. `CONDITIONAL-JOIN.md` now records the implemented composition
+with conditional selection: both choices compute the shared producer once,
+discard-first preserves the selected use, and all 45 example tests pass in
+debug and release. Independent composition review is requested from Claude;
+review that evidence before extending to nested demand or computed conditions.
+Private execution instances must not be confused with
+reusable passive code descriptions; this is not yet a general lazy evaluator.
+
+Performance checkpoint — 2026-09-25: at Thomas's request, `NET-PERFORMANCE.md`
+measures the current Join/selector runner with full diagnostics, without tracing,
+and without tracing/global reduction audits. The tiny finite conditional remains
+thousands of times more expensive than direct checked arithmetic; unrelated
+passive graph size exposes scheduler scanning costs. Forty-seven example tests
+pass with diagnostic-mode equivalence checks. Recommended next investigation:
+bounded worklist/storage performance experiment before more feature layering,
+then direct-code lowering of a predictable pure region. This is a recommendation,
+not an implemented optimization or a performance verdict on all possible nets.
+
+## Previous track and checkpoint
+
 Status: implementation authorized by Thomas; the first C0/protocol experiments
 are in progress. Prepared after `23d6279` (218 passing tests). Candidate
 encodings remain alternatives, not architecture decisions. Bootstrap is deferred.

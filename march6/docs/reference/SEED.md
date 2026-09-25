@@ -1,5 +1,9 @@
 # B0c/B0d: an executable, demand-driven seed compiler
 
+Reference implementation only: this describes the retained graph-defined seed,
+not the host-side `march-fast` compiler. See the [reference index](README.md).
+Source paths and commands are relative to `march6/`.
+
 The working surface now runs. From `march6/`:
 
 ```sh

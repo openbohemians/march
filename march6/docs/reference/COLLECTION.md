@@ -1,5 +1,9 @@
 # Explicit-root CAS collection
 
+Reference implementation only: this describes the retained CAS store/reducer,
+not the conventional `march-fast` runtime. See the [reference index](README.md).
+Source paths and commands are relative to `march6/`.
+
 The reference store now supports `Store::collect(&roots)`. This is a host-side
 safe-point operation, not a new graph node, reduction rule, or image version.
 It removes obsolete intermediate compiler/evaluation graphs from memory. It

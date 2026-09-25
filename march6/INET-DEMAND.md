@@ -383,11 +383,15 @@ whose control port is closed until it is forced.
   on data wires at all.
 - **The control-side counterpart of a fan is a merge.** A shared cell with
   `k` consumers has `k` control wires entering one control port through a
-  merge tree that remembers which caller is active and routes the return to
-  it.  Asynchronous circuit design has such an element, CALL (to check).  The
-  symmetry is the point: on the data side a fan copies a value out to `k`
-  consumers and holds no state; on the control side a merge admits one of `k`
-  callers and remembers who it was.
+  merge tree.  The merge holds no state: the token carries its own return
+  address (the use site to resume), so a reply goes straight back to its
+  caller and nothing on the way in has to remember who called.  (A first
+  version had merges remember the active caller and retrace the path on the
+  way back, like an asynchronous-circuit CALL element.  Thomas pointed out
+  that this is backward and inefficient; once the token carried its
+  continuation the probe's control hops halved.)  The symmetry is the point:
+  a fan copies a value out to `k` consumers, a merge passes one of `k` calls
+  in, and neither holds state.
 - **Values return either way.** The reply can ride back on the control return
   wire with the token, or the data fan can distribute copies to every consumer
   when the cell completes, each copy parked at its leaf until that consumer is
@@ -396,7 +400,7 @@ whose control port is closed until it is forced.
   tree into the cell (its request ports) and returns values on the control
   path.  Variant B pushes the merge's memory into the data fans (the asking
   marks) and lets requests climb data wires.  C is the unfused form: explicit
-  control wires, stateless data fans, stateful control merges.  This is a
+  control wires, stateless data fans and merges.  This is a
   reading of the design space, not a proven equivalence; section 10 gives
   small trace mappings and the mismatches.
 - **Authorize and collect.** Token arrival at a region's control port
@@ -571,13 +575,13 @@ is by construction under the constraints in 10.3, not a confluence result.
 
 | Agent | State |
 | --- | --- |
-| `Cell` (one per reached node) | cached result with its epoch; evaluating; materialized; operand use sites; control state `Idle` or `Waiting { slot, phase }`; roots of its data tree and control tree |
+| `Cell` (one per reached node) | cached result with its epoch; evaluating; materialized; operand use sites; control state `Idle` or `Waiting { slot, phase, return_to }`; roots of its data tree and control tree |
 | `Site` (one per materialized use site) | used cell; consumer `(cell, slot)` or the observer; position in the data tree and in the control tree; parked copy with epoch (reply-on-data) |
 | `Fan` (data tree node) | parent and two children; no state |
-| `Merge` (control tree node) | parent and two children; the active side |
-| continuation | the chain of waiting cells, linked through sites and active merges; no host-side evaluation frame stack |
+| `Merge` (control tree node) | parent and two children; no state |
+| continuation | the chain of waiting cells, each holding the site its own caller waits at; no host-side evaluation frame stack |
 | holds | static use counts per program node, host-side, as in B |
-| token | position and optional carried value; distribution also holds a host pending-work vector |
+| token | position, its return site, and optional carried value; distribution also holds a host pending-work vector |
 
 ### 10.2 Rules
 
@@ -586,34 +590,35 @@ materialization (template-sized) and the release cascade (S3).
 
 - **Call** at a site: with reply-on-data, a valid parked copy resumes the
   consumer at once (a site hit); otherwise the call climbs the control tree.
-- **Climb** into a merge from side `s`: an already active merge is an
-  invariant error; otherwise record `active = s` and continue up.  Reaching
-  the cell yields **AtCell**.
+- **Climb** through a merge: continue upward; the merge records nothing.
+  Reaching the cell yields **AtCell**, still carrying the calling site.
 - **AtCell**: an evaluating cell is a cyclic call (error).  A valid cached
-  result returns down the control tree carrying the value (a cell hit).
+  result resumes the calling site directly, carrying the value (a cell hit).
   Otherwise materialize if needed (operand sites attached to both trees of
   each operand; with reply-on-data a site attached to a cell that already has
   a valid value receives its copy at once), mark evaluating, count the
   evaluation, and either complete (constant, hole) or **Demand** operand 0.
-- **Demand**: the cell records `Waiting { slot, phase }` and the token moves
-  to that operand's site.
+- **Demand**: the cell records `Waiting { slot, phase, return_to }`, where
+  `return_to` is the site its own caller waits at, and the token moves to that
+  operand's site.  In the probe `return_to` is a site index resolved by
+  direct host lookup; the explicit return site is a bookkeeping choice that
+  halved measured control hops, not by itself a validated local port rewrite,
+  nor free, nor a confluence claim.
 - **Complete**: store the result with the epoch; a value releases the cell's
   operand sites (last-consumer release).  Then, reply-on-data: **Distribute**;
-  reply-on-control: **Return** carrying the value.
+  reply-on-control: **Resume** the caller's site with the value.
 - **Distribute** (S2): one tree node per transition; a fan pushes its
-  children, a site parks the copy.  When nothing is pending, **Return**
-  carrying nothing.
-- **Return** at a merge: take the active side and descend to it.  At a site:
-  a carried value is a late copy (parked, with reply-on-data) and resumes the
-  consumer; an empty return resumes with the site's parked copy, which must be
-  valid.
+  children, a site parks the copy.  When nothing is pending, **Resume** the
+  caller's site with nothing carried.
+- **Resume** at a site: a carried value is a late copy (parked, with
+  reply-on-data); an empty resume reads the site's parked copy, which must be
+  valid.  The site's consumer then continues.
 - **Resume** at the consumer: its `Waiting` phase decides.  Left: an error
   completes, otherwise demand the right operand.  Right: combine and
   complete.  Condition: a Boolean erases the rejected branch's site and
   demands the selected one; a non-Boolean is a type error; unknown or error
   completes as such.  Branch: complete.  The observer's resume ends the run.
-- **Erase**: detach the site from both trees (fans collapse; a merge with a
-  call active on its other side is kept), release one static use of the used
+- **Erase**: detach the site from both trees (fans and merges collapse), release one static use of the used
   node; when its last use goes, drop its cell and release what it held,
   through its sites if materialized, otherwise through its static operands.
 
@@ -632,9 +637,12 @@ free scheduler these pairs would have to be resolved:
    state (the copy is dropped at the collapsed fan, or the parked copy is
    dropped with the site); a fan rule for an erased child is needed.  Here
    S2 and S3 keep them sequential.
-3. **Erasure against an active merge.**  Cannot arise: with a DAG and one
-   token, an erased branch contains no cell on the token's path.  The machine
-   still reports the case as an invariant error rather than assuming it.
+3. **Erasure against a call in progress.**  Merges hold no state, so
+   collapsing one while a call climbs elsewhere cannot corrupt a reply: the
+   reply is addressed to its site directly.  What must not happen is erasing
+   the site a call will return to.  With a DAG and one token an erased branch
+   contains no cell on the token's path, and the release cascade reports a
+   waiting cell as an invariant error rather than assuming it.
 4. **Last-consumer deletion against a pending return.**  Cannot arise: a
    waiting cell is held by its caller's site.  Guarded by an invariant.
 5. **Completion against stale parked copies.**  Copies carry epochs; a stale
@@ -652,16 +660,17 @@ probe's comparison test; A and B for scale):
 
 | Workload | A | B | C reply-on-data | C reply-on-control |
 | --- | --- | --- | --- | --- |
-| nested sharing, depth 30 | 122 / 61 / 30 / 122 / 31 | 213 / 90 / 30 / 153 / 2 | 397 / 90 / 30 / 153 / 2 | 425 / 120 / 30 / 153 / 2 |
-| wide sharing, 32 sites | 130 / 65 / 31 / 128 / 34 | 256 / 63 / 31 / 158 / 2 | 300 / 0 / 31 / 158 / 2 | 389 / 64 / 31 / 158 / 2 |
-| dynamic first consumer | 18 / 9 / 1 / 20 / 8 | 29 / 2 / 1 / 23 / 2 | 62 / 3 / 1 / 20 / 2 | 47 / 2 / 1 / 20 / 2 |
+| nested sharing, depth 30 | 122 / 61 / 30 / 122 / 31 | 213 / 90 / 30 / 153 / 2 | 336 / 60 / 30 / 153 / 2 | 304 / 60 / 30 / 153 / 2 |
+| wide sharing, 32 sites | 130 / 65 / 31 / 128 / 34 | 256 / 63 / 31 / 158 / 2 | 266 / 0 / 31 / 158 / 2 | 292 / 32 / 31 / 158 / 2 |
+| dynamic first consumer | 18 / 9 / 1 / 20 / 8 | 29 / 2 / 1 / 23 / 2 | 53 / 2 / 1 / 20 / 2 | 37 / 1 / 1 / 20 / 2 |
 
 Reading: reply-on-data does no control routing at all for repeat demands
 (the wide case shows zero routing and 31 site hits) but pays for every copy
 at completion, including copies to sites later erased (65 copies in the wide
 case: 32 for the shared node, 30 for the inner additions, 1 to the observer,
-2 for the constants).  Reply-on-control makes no copies and pays a merge
-traversal per demand.  C charges copies and hops as separate transitions,
+2 for the constants).  Reply-on-control makes no copies and pays one climb
+per demand; replies are direct, which is why C's control cost is half what
+the first, caller-remembering version measured.  C charges copies and hops as separate transitions,
 which is why its transition counts exceed B's; B's fan-parked copy sits
 between the two (copied on demand, climbing to the nearest parked copy).  A
 and B agree with C on every outcome and on one evaluation per node.  Only A
@@ -678,9 +687,9 @@ these figures are not total memory usage or equal-cost instructions. See
 | Feature | A | B | C |
 | --- | --- | --- | --- |
 | request routing | direct CID lookup (not a net) | climbs the data fan tree | climbs the control merge tree |
-| who remembers the caller | the cell's request port | the fan's asking mark | the merge's active side |
+| who remembers the caller | the cell's request port | the fan's asking mark | nobody: the token carries its return site |
 | where copies live | the requesting slot, filled on return | the fan below the turn-around, on demand | every site, at completion (reply-on-data) or nowhere (reply-on-control) |
-| continuation | host frame stack | host frame stack | waiting cells plus active merges |
+| continuation | host frame stack | host frame stack | the chain of waiting cells, each with its return site |
 | reclamation | none (cells retained) | last-consumer | last-consumer |
 
 The reading "A fuses the merge into the cell; B moves its memory into the
@@ -690,21 +699,42 @@ is filled lazily where C reply-on-data broadcasts, B loses a parked copy when
 a fan collapses (the cell serves it), and C reply-on-control needs no
 late-copy rule while reply-on-data does.
 
-### 10.6 N0 under C: sketch and obstruction
+### 10.6 N0 under C: the probe, and the sharing gap it exposed
 
 `Apply(code, args)`: the token enters the apply agent's control port, calls
 the function operand (a code value, data side), materializes a fresh instance
 of the template with the arguments wired to the instance's operand sites and
-the instance's control port wired to the apply agent's continuation, and
+the instance's control port wired to the apply agent's return site, and
 enters it.  A fan meeting a code value copies the reference; nothing walks
-into code. One candidate partial-application representation would capture an
-unevaluated `x` as an explicit *wire* (a site on `x`'s cell). Copying such a
-captured-code value can create dynamic consumers beyond the scalar probe's
-static hold table; that route needs dynamic lifetime tracking. This is not
-a decision to add implicit lexical closures, nor the current semantics of
-under-applied `Apply`. The reference's reflected closed-code construction is
-another route to compare, including how it preserves pending-work sharing.
-The scalar probe does not touch `Intern` or `Quote`, and nothing here claims N0.
+into code.  This is what the N0a probe (`src/inet_n0.rs`, `N0-PROBE.md`)
+implements, with cells keyed by `(instance, template node)` and parameters
+as proxies onto the caller's argument cells.
+
+March has no closures.  What a quotation built at run time can hold is fixed
+by the reference: `Intern` requires a ground description and constructors are
+strict, so it embeds only values (integers, Booleans, text, other code
+values); and `Apply` rejects an arity mismatch, so no partial application
+can leave an argument pending.  An earlier draft of this section feared a
+quotation holding a wire to a shared pending cell, whose copies would make
+that cell's consumer count dynamic at run time.  Under current semantics that
+case does not arise; it would return only if a future extension (lazy
+aggregates, R1) let code embed a suspended computation.
+
+The real obstruction is different and confirmed by integration review
+(`N0-PROBE.md` section 7).  The reference shares by *canonical identity*:
+instantiation substitutes arguments into the body and interns the result, so
+`Apply(Quote(1, Mul(6,7)), [1])` and `Apply(Quote(1, Mul(6,7)), [2])`
+evaluate one multiply, and `Quote(2, Add(Mul(P0,7), Mul(P1,7)))` applied to
+`[6,6]` evaluates one multiply, not two.  Keying cells by instance and
+template node keeps only *wiring occurrence* identity: separate instances,
+and separate template nodes inside one instance, duplicate work the CAS
+would coalesce.  The same gap changes what is observed on self-application:
+`omega = Quote(1, Apply(P0,[P0]))` applied to itself is a `Cycle` error in
+the reference (re-entry of an active canonical CID) and fuel exhaustion in
+the probe (fresh instances forever).  Fuel exhaustion is not that error.
+Canonical instantiated-work identity, preserving CAS sharing without merging
+truly different inputs and alongside reclamation and dynamic holds, is the
+open gate before N0b.  Nothing here claims N0.
 
 ### 10.7 Established and not established
 

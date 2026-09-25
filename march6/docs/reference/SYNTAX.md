@@ -1,4 +1,8 @@
-# Working surface syntax
+# Reference seed surface syntax
+
+Reference implementation only: these spellings describe the old seed, not
+the current [conventional source compiler](../FAST-SPIKE.md). See the
+[reference index](README.md). Source paths and commands are relative to `march6/`.
 
 Status: provisional seed-language choices; the B0c subset is executable. The
 Rust nucleus does not recognize these spellings. Changing them should require

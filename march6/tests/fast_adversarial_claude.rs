@@ -5,13 +5,13 @@
 //! L2 = one suspended instance computed once for every consumer; L3 =
 //! independently constructed equal calls, NOT merged (characterized here,
 //! not required).
-use march_research::fast::{Context, Error, Executor, Literal, Op, Program, Value, source};
+use march_research::fast::{Context, Error, Executor, Literal, Op, Program, Value, stream};
 
 const BUDGET: usize = 100_000;
 
 fn compile(text: &str) -> (Program, usize) {
-    let mut program = Program::new();
-    let word = source::compile(&mut program, text).unwrap();
+    let mut program = stream::seed().unwrap();
+    let word = stream::compile(&mut program, text).unwrap();
     (program, word)
 }
 
@@ -73,14 +73,14 @@ fn l1_repeated_identical_call_costs_nothing_extra_regardless_of_body_size() {
 }
 
 #[test]
-fn l1_shuffles_are_erased_from_code_identity_but_arithmetic_is_not() {
+fn definition_identity_preserves_shuffles_even_when_lowering_erases_them() {
     assert!(boolean("[ dup * ] [ dup * ] ="));
-    assert!(boolean("[ dup * ] [ dup dup * swap drop ] ="));
+    assert!(!boolean("[ dup * ] [ dup dup * swap drop ] ="));
     assert!(!boolean("[ dup * ] [ dup * 0 + ] ="));
     assert!(!boolean("[ dup * ] [ dup + ] ="));
-    // The same holds for named words: equal bodies are one word, so equal
-    // code values compare equal across names.
-    assert!(boolean(": a dup * ; : b dup dup * swap drop ; ' a ' b ="));
+    // Naming does not erase differences between composed definitions.
+    assert!(!boolean(": a dup * ; : b dup dup * swap drop ; ' a ' b ="));
+    assert!(boolean(": a dup * ; : b dup * ; ' a ' b ="));
 }
 
 #[test]

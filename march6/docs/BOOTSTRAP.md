@@ -8,8 +8,8 @@ it. His deliberate difference from traditional FORTH is **numbers before
 dictionary lookup**.
 
 The earlier token-view/action-plan extension prototype has been replaced, not
-retained as another active frontend. This checkpoint is still not a complete
-self-hosted language or bootstrap fixed point.
+retained as another active frontend. The interpreter now has a tested rebuild
+fixed point, but this is still not a complete self-hosted language.
 
 ## What actually runs
 
@@ -105,8 +105,8 @@ Native code still supplies:
 
 - Stream cursor/word/delimiter operations and numeric conversion.
 - Dictionary lookup, immutable compiler-state storage, and binding/flag updates.
-- Validated graph builders, stack-interface inference, literal/call emission,
-  quotation/family construction, and canonicalization.
+- Definition-sequence builders, derived graph lowering and stack-interface
+  inference, quotation/family construction, and canonical encoding.
 - The ordinary runtime primitive operations and execution engine.
 
 Compiler state is explicit and immutable: source/cursor, current word,
@@ -127,23 +127,67 @@ manipulation, richer reflection/data, and full contextual mode selection still
 need design/work. Immediate flags are a first dictionary-level mechanism, not
 a claim that the complete contextual compiler model is finished.
 
-The one-time `stream::seed()` construction uses the retained host reader to
-assemble the initial March seed and native primitive wrappers. After that,
+The one-time `stream::seed()` construction uses the retained host reader in
+composition mode to assemble the initial March seed. Native primitive wrappers
+are built directly. After that,
 `stream::compile` runs the saved March interpreter; neither new source nor
-new word bodies are passed to that reader. The older `source::compile` API
-remains for legacy tests/bootstrap scaffolding, not as the CLI frontend.
+new word bodies are passed to that reader. The host `source::compile` API remains
+for tests/bootstrap scaffolding, not as the CLI frontend. It now emits exactly
+the same composed-definition identities; there is no graph-identity source
+compiler. Its convenience tokenization (adjacent punctuation, nested comments,
+reserved primitive spellings) remains host scaffolding, not March's syntax.
 
-The next bootstrap milestone is to reduce that initial native assembly and
-move more graph/stack construction into March, then demonstrate a reproducible
-compiler bootstrap fixed point. The present proof is stream-driven
-self-extension, not completion of that goal.
+`fast_definition::march_rebuilds_its_seed_across_images_with_stable_definitions`
+uses the installed March interpreter to compile `stream-seed.march` for three
+generations, saving/reloading between them. Successive images are byte-identical;
+the final interpreter still compiles definitions and honors numbers-first.
+The host test harness reinstalls the defining-word aliases and immediate flags.
+This proves a fixed point for the current interpreter layer, **not** full
+self-hosting: initial assembly, primitive semantics, lowering, and alias setup
+still have native support. The next bootstrap milestone is to reduce those
+responsibilities and resolve the compiler-state versus runtime-stack interface.
+
+## Definition identity versus execution
+
+The canonical definition of `: square dup * ;` is the ordered sequence
+`[word CID(dup), word CID(*)]`, not its inferred register graph. The sequence
+also supports tagged literals (including quotation CIDs), context-key reads,
+static quotation application, and symbolic recursion/dynamic-application
+contracts. `apply N M` and `recur N M` retain their explicit N/M contracts;
+ordinary inferred input/output counts and argument wiring are excluded.
+Ordered families hash guard/body CIDs; their arity is derived from the clauses.
+No parametric type-signature representation has been added yet.
+
+Quotation equality is definition equality: the same ordered words, literals,
+context keys, and explicit contracts. Shuffles remain in identity even when the
+derived graph erases them. Static `call` derives its target from the preceding
+quotation value. `recur` is contextually bound to the active family or standalone
+word by the invoking frame; that target is not embedded in the body definition.
+
+Runtime primitive leaves have stable semantic identifiers; kernel leaves have
+explicit numeric tags, with a test pinning every tag/name pair and kernel CID.
+Neither hashes its Rust implementation. Definitions
+use the `march-definition-v1` domain with explicit kinds and lengths. These
+are encoding/meaning versions, not compiler release numbers. Names/immediate
+flags belong to dictionary images, not individual definition identity.
+
+There is no pre-hash arithmetic normalization: `1 1 +` differs from `2`.
+Whitespace, comments, and integer spelling do not survive into the definition.
+Execution plans and structurally shared register graphs are derived afterward;
+optimizing them cannot change a definition's CID. Runtime context values are
+not baked into reusable word identities. Compile-time execution can deliberately
+emit a computed literal, as `answer:` does above.
 
 ## Images, bounds, and verification
 
-Images containing kernel words/immediate flags use `MARCHF03`; ordinary
-non-kernel code images remain byte-for-byte `MARCHF01`. The unreleased
-token-plan prototype's `MARCHF02` is not supported. Loading validates code and
-flags without executing the saved interpreter. A loaded stream image can
+Only `MARCHF05` is supported: every record is a canonical definition. Loading
+checks CIDs and lowers definitions afresh; derived execution graphs are never
+serialized. All previous prototype formats (F01–F04) are rejected; regenerate
+images from source. There is no compatibility reader, writer, or mixed-record
+mode. The low-level `add_word` API remains for in-memory evaluator fixtures in
+a separate diagnostic identity domain. Such fixtures cannot be saved or
+referenced by canonical definitions. Loading validates code and flags without
+executing the saved interpreter. A loaded stream image can
 interpret further source without rerunning `stream::seed()`.
 
 Use a fresh output path: saving overwrites the named file.

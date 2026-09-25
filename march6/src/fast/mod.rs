@@ -7,6 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod collect;
+pub mod definition;
 mod image;
 mod input;
 pub use input::InputNode;
@@ -146,6 +147,7 @@ impl Value {
 
 #[derive(Clone, Debug)]
 struct Word {
+    definition: Option<definition::Definition>,
     inputs: usize,
     ops: Vec<Op>,
     outputs: Vec<Slot>,
@@ -222,11 +224,23 @@ impl Program {
         Ok(self.word(word)?.tail.is_some())
     }
 
+    /// Build an in-memory graph fixture for evaluator experiments/tests. This
+    /// is not March source identity; fixtures cannot be stored in code images.
     pub fn add_word(
         &mut self,
         inputs: usize,
         ops: Vec<Op>,
         outputs: Vec<Slot>,
+    ) -> Result<WordId, Error> {
+        self.add_lowered(inputs, ops, outputs, None)
+    }
+
+    fn add_lowered(
+        &mut self,
+        inputs: usize,
+        ops: Vec<Op>,
+        outputs: Vec<Slot>,
+        definition: Option<definition::Definition>,
     ) -> Result<WordId, Error> {
         if inputs > 65535 || ops.len() > 1_000_000 || outputs.len() > 65535 {
             return Err(Error::InvalidCode("word size limit".into()));
@@ -285,8 +299,14 @@ impl Program {
         }
         let (ops, remap) = canonical_ops(ops);
         let outputs: Vec<_> = outputs.into_iter().map(|s| remap[s]).collect();
-        let bytes = self.encode_word(inputs, &ops, &outputs)?;
-        let cid = Cid::digest(b"march-fast-word-v1", &bytes);
+        let cid = if let Some(definition) = &definition {
+            Cid::digest(definition::DOMAIN, &self.encode_definition(definition)?)
+        } else {
+            Cid::digest(
+                b"march-evaluator-graph-v1",
+                &self.encode_word(inputs, &ops, &outputs)?,
+            )
+        };
         if let Some(&id) = self.identities.get(&cid) {
             return Ok(id);
         }
@@ -302,6 +322,7 @@ impl Program {
         });
         let id = self.words.len();
         self.words.push(Word {
+            definition,
             inputs,
             ops,
             outputs,
@@ -320,14 +341,29 @@ impl Program {
         outputs: usize,
         clauses: Vec<(WordId, WordId)>,
     ) -> Result<WordId, Error> {
-        if inputs > 65535 || outputs > 65535 {
+        self.add_source_family(inputs, outputs, clauses, false)
+    }
+    fn add_source_family(
+        &mut self,
+        inputs: usize,
+        outputs: usize,
+        clauses: Vec<(WordId, WordId)>,
+        composed: bool,
+    ) -> Result<WordId, Error> {
+        if inputs > 65535 || outputs > 65535 || (composed && clauses.len() > 100_000) {
             return Err(Error::InvalidCode("family size limit".into()));
         }
         for &(guard, body) in &clauses {
+            if composed && (self.definition(guard)?.is_none() || self.definition(body)?.is_none()) {
+                return Err(Error::InvalidCode(
+                    "family cannot reference graph-only evaluator fixtures".into(),
+                ));
+            }
             if self.signature(guard)? != (inputs, 1) || self.signature(body)? != (inputs, outputs) {
                 return Err(Error::InvalidCode("family clause signature".into()));
             }
         }
+        let definition = composed.then(|| definition::Definition::Family(clauses.clone()));
         let mut ops: Vec<_> = (0..inputs).map(Op::Arg).collect();
         let call = ops.len();
         ops.push(Op::Dispatch {
@@ -341,7 +377,7 @@ impl Program {
                 s
             })
             .collect();
-        self.add_word(inputs, ops, results)
+        self.add_lowered(inputs, ops, results, definition)
     }
 
     fn encode_literal(&self, out: &mut Vec<u8>, value: Literal) -> Result<(), Error> {

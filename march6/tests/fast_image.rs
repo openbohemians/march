@@ -1,6 +1,10 @@
 use march_research::{
     Cid,
-    fast::{Context, Executor, Literal, Program, Value, source},
+    fast::{
+        Context, Executor, Literal, Program, Value,
+        definition::{Definition, Item},
+        source,
+    },
 };
 
 fn compile(text: &str) -> (Program, usize) {
@@ -115,23 +119,18 @@ fn truncated_corrupt_and_trailing_data_are_rejected() {
 fn number(bytes: &mut Vec<u8>, n: usize) {
     bytes.extend_from_slice(&(n as u64).to_le_bytes());
 }
-fn word(inputs: usize, operation: &[u8], outputs: &[usize]) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    number(&mut bytes, inputs);
-    number(&mut bytes, usize::from(!operation.is_empty()));
-    bytes.extend_from_slice(operation);
-    number(&mut bytes, outputs.len());
-    for &output in outputs {
-        number(&mut bytes, output);
-    }
+fn word(items: &[u8], count: usize) -> Vec<u8> {
+    let mut bytes = vec![2];
+    number(&mut bytes, count);
+    bytes.extend_from_slice(items);
     bytes
 }
 fn image(words: &[Vec<u8>], names: &[(&[u8], usize)], entry: usize) -> Vec<u8> {
     let cids: Vec<_> = words
         .iter()
-        .map(|w| Cid::digest(b"march-fast-word-v1", w))
+        .map(|w| Cid::digest(b"march-definition-v1", w))
         .collect();
-    let mut bytes = b"MARCHF01".to_vec();
+    let mut bytes = b"MARCHF05".to_vec();
     number(&mut bytes, words.len());
     for (w, cid) in words.iter().zip(&cids) {
         bytes.extend_from_slice(&cid.0);
@@ -144,43 +143,36 @@ fn image(words: &[Vec<u8>], names: &[(&[u8], usize)], entry: usize) -> Vec<u8> {
         bytes.extend_from_slice(name);
         bytes.extend_from_slice(&cids[target].0);
     }
+    number(&mut bytes, 0); // immediate names
     bytes.extend_from_slice(&cids[entry].0);
     bytes
 }
 
 #[test]
-fn rehashed_hostile_word_encodings_are_rejected() {
-    let mut invalid_arg = vec![0];
-    number(&mut invalid_arg, 0);
+fn rehashed_hostile_definition_encodings_are_rejected() {
     let mut forward_quote = vec![1, 3];
     forward_quote.extend_from_slice(&[0; 32]);
-    let mut invalid_binary = vec![3, 255];
-    number(&mut invalid_binary, 0);
-    number(&mut invalid_binary, 0);
     let mut invalid_context = vec![2];
     number(&mut invalid_context, 1);
     invalid_context.push(255);
-    let mut huge_recur = vec![7];
-    huge_recur.extend_from_slice(&u64::MAX.to_le_bytes());
+    let mut huge_recur = vec![5];
+    number(&mut huge_recur, usize::MAX);
+    number(&mut huge_recur, 1);
     for payload in [
-        word(0, &[255], &[0]),
-        word(0, &[1, 1, 2], &[0]),
-        word(0, &invalid_arg, &[0]),
-        word(0, &forward_quote, &[0]),
-        word(0, &invalid_binary, &[0]),
-        word(0, &invalid_context, &[0]),
-        word(0, &huge_recur, &[0]),
-        word(usize::MAX, &[1, 2], &[0]),
-        word(0, &[1, 2], &[1]),
+        word(&[255], 1),
+        word(&[1, 1, 2], 1),
+        word(&forward_quote, 1),
+        word(&invalid_context, 1),
+        word(&huge_recur, 1),
+        word(&[], usize::MAX),
     ] {
         assert!(Program::from_image(&image(&[payload], &[], 0)).is_err());
     }
 }
-
 #[test]
 fn duplicate_words_names_unknown_roots_and_unreachable_records_rejected() {
-    let empty = word(0, &[], &[]);
-    let unit = word(0, &[1, 2], &[0]);
+    let empty = word(&[], 0);
+    let unit = word(&[1, 2], 1);
     for bytes in [
         image(&[empty.clone(), empty.clone()], &[], 0),
         image(std::slice::from_ref(&empty), &[(b"x", 0), (b"x", 0)], 0),
@@ -203,24 +195,13 @@ fn oversized_images_are_rejected_before_decoding() {
 
 #[test]
 fn deep_dependency_chain_uses_an_explicit_worklist() {
-    use march_research::fast::Op;
     let mut program = Program::new();
     let mut entry = program
-        .add_word(0, vec![Op::Const(Literal::Int(7))], vec![0])
+        .add_definition(Definition::Sequence(vec![Item::Literal(Literal::Int(7))]))
         .unwrap();
     for _ in 0..2000 {
         entry = program
-            .add_word(
-                0,
-                vec![
-                    Op::Call {
-                        word: entry,
-                        arguments: vec![],
-                    },
-                    Op::Project { call: 0, output: 0 },
-                ],
-                vec![1],
-            )
+            .add_definition(Definition::Sequence(vec![Item::Word(entry)]))
             .unwrap();
     }
     let bytes = program.to_image(entry).unwrap();

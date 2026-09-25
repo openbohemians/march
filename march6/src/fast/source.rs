@@ -1,4 +1,5 @@
-//! Legacy host-side reader used for one-time seed construction and old tests.
+//! Host-side seed assembler and test convenience reader. Uses the same canonical
+//! definitions as the March stream compiler, never graph-based language identity.
 //! The active CLI uses `stream::compile` and its March-defined interpreter.
 //! Do not add user-facing syntax policy here; stream words own their input.
 //!
@@ -25,7 +26,7 @@
 //! No forward names, lexical captures, or effects are
 //! provided. Builtin names cannot be redefined through this reader yet.
 
-use super::{Binary, Literal, Op, Program, Slot, WordId};
+use super::{Literal, Op, Program, Slot, WordId};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,10 +179,35 @@ pub(super) struct Body {
     ops: Vec<Op>,
     stack: Vec<StackValue>,
     inputs: usize,
+    definition: Option<Vec<super::definition::Item>>,
 }
 
 impl Body {
+    pub(super) fn operation_count(&self) -> usize {
+        self.ops.len()
+    }
+    pub(super) fn composed() -> Self {
+        Self {
+            definition: Some(Vec::new()),
+            ..Self::default()
+        }
+    }
+    fn record(&mut self, item: super::definition::Item) -> bool {
+        if let Some(items) = &mut self.definition {
+            items.push(item);
+            true
+        } else {
+            false
+        }
+    }
     pub(super) fn dynamic(&mut self, inputs: usize, outputs: usize, recur: bool) {
+        if self.record(if recur {
+            super::definition::Item::Recur { inputs, outputs }
+        } else {
+            super::definition::Item::Apply { inputs, outputs }
+        }) {
+            return;
+        }
         let function = if recur {
             None
         } else {
@@ -203,10 +229,13 @@ impl Body {
         }
     }
     pub(super) fn static_call(&mut self, program: &Program) -> Result<(), SourceError> {
+        if self.record(super::definition::Item::StaticCall) {
+            return Ok(());
+        }
         let word = self.take(1)[0].quote.ok_or_else(|| {
             SourceError("call needs a known quotation; use apply for dynamic code".into())
         })?;
-        self.call(program, word)
+        self.lower_call(program, word)
     }
     fn emit(&mut self, op: Op, quote: Option<WordId>) -> StackValue {
         let slot = self.ops.len();
@@ -215,6 +244,18 @@ impl Body {
     }
 
     pub(super) fn push_op(&mut self, op: Op, quote: Option<WordId>) {
+        let recorded = match &op {
+            Op::Const(value) => self.record(super::definition::Item::Literal(*value)),
+            Op::Context(key) => self.record(super::definition::Item::Context(key.clone())),
+            _ => false,
+        };
+        if recorded {
+            return;
+        }
+        debug_assert!(
+            self.definition.is_none(),
+            "composed builders accept definition items, not register operations"
+        );
         let value = self.emit(op, quote);
         self.stack.push(value);
     }
@@ -233,7 +274,52 @@ impl Body {
     }
 
     pub(super) fn call(&mut self, program: &Program, word: WordId) -> Result<(), SourceError> {
+        if self.record(super::definition::Item::Word(word)) {
+            return Ok(());
+        }
+        self.lower_call(program, word)
+    }
+    fn lower_call(&mut self, program: &Program, word: WordId) -> Result<(), SourceError> {
         let (inputs, outputs) = program.signature(word).map_err(runtime_error)?;
+        // Inline semantic primitive leaves only in the derived graph. Keep the
+        // original word reference in the canonical sequence, including shuffles.
+        if matches!(
+            program.definition(word).map_err(runtime_error)?,
+            Some(super::definition::Definition::Primitive(_))
+        ) {
+            let args = self.take(inputs);
+            let primitive = program.word(word).map_err(runtime_error)?;
+            let mut values: Vec<StackValue> = Vec::new();
+            for op in &primitive.ops {
+                let value = match *op {
+                    Op::Arg(n) => args[n],
+                    Op::Const(v) => self.emit(Op::Const(v), None),
+                    Op::Binary(b, a, c) => {
+                        self.emit(Op::Binary(b, values[a].slot, values[c].slot), None)
+                    }
+                    Op::Pair(a, b) => self.emit(Op::Pair(values[a].slot, values[b].slot), None),
+                    Op::First(a) => self.emit(Op::First(values[a].slot), None),
+                    Op::Second(a) => self.emit(Op::Second(values[a].slot), None),
+                    Op::Select {
+                        condition,
+                        when_true,
+                        when_false,
+                    } => self.emit(
+                        Op::Select {
+                            condition: values[condition].slot,
+                            when_true: values[when_true].slot,
+                            when_false: values[when_false].slot,
+                        },
+                        None,
+                    ),
+                    _ => unreachable!("runtime primitive leaf"),
+                };
+                values.push(value);
+            }
+            self.stack
+                .extend(primitive.outputs.iter().map(|&s| values[s]));
+            return Ok(());
+        }
         let arguments = self.take(inputs).into_iter().map(|v| v.slot).collect();
         let call = self.emit(Op::Call { word, arguments }, None).slot;
         for output in 0..outputs {
@@ -243,6 +329,14 @@ impl Body {
     }
 
     pub(super) fn finish(mut self, program: &mut Program) -> Result<WordId, SourceError> {
+        let items = self.definition.take().ok_or_else(|| {
+            SourceError("only a composed definition can be installed by the source builder".into())
+        })?;
+        program
+            .add_definition(super::definition::Definition::Sequence(items))
+            .map_err(runtime_error)
+    }
+    pub(super) fn lowered(mut self) -> (usize, Vec<Op>, Vec<Slot>) {
         // Each newly discovered missing input lies below earlier inputs.
         for op in &mut self.ops {
             if let Op::Arg(index) = op {
@@ -250,9 +344,7 @@ impl Body {
             }
         }
         let outputs = self.stack.into_iter().map(|v| v.slot).collect();
-        program
-            .add_word(self.inputs, self.ops, outputs)
-            .map_err(runtime_error)
+        (self.inputs, self.ops, outputs)
     }
 }
 
@@ -305,7 +397,7 @@ impl Reader<'_> {
         }
         let word = self
             .program
-            .add_family(inputs, outputs, clauses)
+            .add_source_family(inputs, outputs, clauses, true)
             .map_err(runtime_error)?;
         self.program.bind(&name.text, word).map_err(runtime_error)
     }
@@ -319,7 +411,7 @@ impl Reader<'_> {
         if depth > 128 {
             return Err(SourceError("quotation nesting exceeds 128".into()));
         }
-        let mut body = Body::default();
+        let mut body = Body::composed();
         while let Some(token) = self.next() {
             let text = token.text.as_str();
             if Some(text) == end {
@@ -327,6 +419,14 @@ impl Reader<'_> {
             }
             let local_error =
                 |message: String| SourceError(format!("line {}: {message}", token.line));
+            if super::definition::RUNTIME_PRIMITIVES.contains(&text) {
+                let word = self
+                    .program
+                    .lookup(text)
+                    .ok_or_else(|| local_error("missing primitive".into()))?;
+                body.call(self.program, word)?;
+                continue;
+            }
             match text {
                 ":" if definitions => {
                     let name = self.required("definition name")?;
@@ -340,9 +440,6 @@ impl Reader<'_> {
                     body.push_op(Op::Const(Literal::Quote(word)), Some(word));
                 }
                 "]" | ";" | ":" => return Err(local_error(format!("unexpected '{text}'"))),
-                "true" => body.push_op(Op::Const(Literal::Bool(true)), None),
-                "false" => body.push_op(Op::Const(Literal::Bool(false)), None),
-                "unit" => body.push_op(Op::Const(Literal::Unit), None),
                 "ctx" => {
                     let key = self.required("context key")?;
                     if "[]:;".contains(&key.text) {
@@ -354,88 +451,13 @@ impl Reader<'_> {
                     let word = self.named("quoted word name")?;
                     body.push_op(Op::Const(Literal::Quote(word)), Some(word));
                 }
-                "dup" => {
-                    body.ensure(1);
-                    body.stack.push(*body.stack.last().unwrap());
-                }
-                "drop" => {
-                    body.take(1);
-                }
-                "swap" => {
-                    body.ensure(2);
-                    let n = body.stack.len();
-                    body.stack.swap(n - 1, n - 2);
-                }
-                "over" => {
-                    body.ensure(2);
-                    body.stack.push(body.stack[body.stack.len() - 2]);
-                }
-                "+" | "-" | "*" | "=" | "<" => {
-                    let args = body.take(2);
-                    let binary = match text {
-                        "+" => Binary::Add,
-                        "-" => Binary::Sub,
-                        "*" => Binary::Mul,
-                        "=" => Binary::Eq,
-                        "<" => Binary::Lt,
-                        _ => unreachable!(),
-                    };
-                    body.push_op(Op::Binary(binary, args[0].slot, args[1].slot), None);
-                }
-                "select" => {
-                    let args = body.take(3);
-                    body.push_op(
-                        Op::Select {
-                            condition: args[0].slot,
-                            when_true: args[1].slot,
-                            when_false: args[2].slot,
-                        },
-                        // Even equal quoted branches must not allow static
-                        // `call` to silently bypass demand on the condition.
-                        None,
-                    );
-                }
-                "pair" => {
-                    let args = body.take(2);
-                    body.push_op(Op::Pair(args[0].slot, args[1].slot), None);
-                }
-                "first" | "second" => {
-                    let value = body.take(1)[0];
-                    body.push_op(
-                        if text == "first" {
-                            Op::First(value.slot)
-                        } else {
-                            Op::Second(value.slot)
-                        },
-                        None,
-                    );
-                }
                 "call" => {
-                    let quote = body.take(1)[0].quote.ok_or_else(|| {
-                        local_error(
-                            "'call' requires a statically known quotation in this spike".into(),
-                        )
-                    })?;
-                    body.call(self.program, quote)?;
+                    body.static_call(self.program)?;
                 }
                 "apply" => {
                     let inputs = stack_count(self.required("apply input count")?)?;
                     let outputs = stack_count(self.required("apply output count")?)?;
-                    let function = body.take(1)[0].slot;
-                    let arguments = body.take(inputs).into_iter().map(|v| v.slot).collect();
-                    let call = body
-                        .emit(
-                            Op::Apply {
-                                function,
-                                arguments,
-                                outputs,
-                            },
-                            None,
-                        )
-                        .slot;
-                    for output in 0..outputs {
-                        body.push_op(Op::Project { call, output }, None);
-                    }
+                    body.dynamic(inputs, outputs, false);
                 }
                 "recur" => {
                     let inputs = self.required("recur input count")?;
@@ -444,11 +466,7 @@ impl Reader<'_> {
                     let outputs = stack_count(outputs)?;
                     // The runtime checks these projections against the enclosing
                     // word/family signature. No unfinished name lookup is needed.
-                    let arguments = body.take(inputs).into_iter().map(|v| v.slot).collect();
-                    let call = body.emit(Op::Recur { arguments }, None).slot;
-                    for output in 0..outputs {
-                        body.push_op(Op::Project { call, output }, None);
-                    }
+                    body.dynamic(inputs, outputs, true);
                 }
                 _ => {
                     if let Ok(value) = text.parse::<i64>() {
@@ -473,6 +491,20 @@ impl Reader<'_> {
 /// Compile definitions and a final expression, returning the expression word.
 /// Earlier successful definitions remain installed if a later form fails.
 pub fn compile(program: &mut Program, source: &str) -> Result<WordId, SourceError> {
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(SourceError("source exceeds 4 MiB limit".into()));
+    }
+    for &name in super::definition::RUNTIME_PRIMITIVES {
+        if program.lookup(name).is_none() {
+            let word = program
+                .add_definition(super::definition::Definition::Primitive(name.into()))
+                .map_err(runtime_error)?;
+            program.bind(name, word).map_err(runtime_error)?;
+        }
+    }
+    compile_composed(program, source)
+}
+pub(super) fn compile_composed(program: &mut Program, source: &str) -> Result<WordId, SourceError> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(SourceError("source exceeds 4 MiB limit".into()));
     }

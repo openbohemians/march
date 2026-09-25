@@ -138,8 +138,11 @@ The first token-view/action-plan prototype was the wrong boundary and has been
 replaced. The current nucleus runs a March-defined input-stream loop: read a
 whitespace-delimited word, recognize numbers FIRST, then dictionary lookup and
 execution/compilation. Defining/comment words consume input themselves. The seed
-and immediate flags persist in images. Native stream operations, graph builders,
-stack inference, and initial seed assembly remain; see [BOOTSTRAP.md](BOOTSTRAP.md)
+and immediate flags persist in images. Word identity now hashes the composed
+definition (dependency CIDs/literals), not inferred stack wiring. The interpreter
+rebuilds itself across three saved-image generations with stable identities.
+Native stream operations, definition builders, lowering, stack inference, and
+initial seed assembly remain; see [BOOTSTRAP.md](BOOTSTRAP.md)
 for the precise scope and compiler-state/runtime-stack distinction.
 
 A conservative scalar family tail-loop path
@@ -155,23 +158,22 @@ and FAST-MEMORY.md for evidence and remaining costs.
 ## Goals and status — conventional engine
 
 These statuses describe the prototype, not production readiness or the older
-reference implementation. Verification at this checkpoint: 476 tests across all
-targets in debug/release, including 131 fast-engine tests.
+reference implementation. See FAST-SPIKE.md for verification checkpoints.
 
 | Goal | Status | Remaining boundary |
 |---|---|---|
 | FORTH composition | Working core | Words, inferred stack interfaces, recursion, closed quotations; practical library remains. |
 | Fast execution | Partial, measured | Scalar and restricted tail paths work; broader workloads and optimization remain. |
-| Content-addressed code | Working core | Canonical definitions and code images; no remote/general value store. |
+| Content-addressed code | Composed-definition identity | Ordered dependency CIDs/literals; execution graphs derived; no remote/general value store or pre-hash arithmetic normalization. |
 | Immutable values | Working core | Scalars and lazy pairs; richer persistent collections remain. |
 | Lazy evaluation | Working core | Selective branches/arguments/outputs/fields; no automatic parallelism. |
 | Shared computation | Working with open contract | Instances share; independently equal runtime calls are not automatically merged. |
 | Memory reclamation | Partial | Scalar tail loops and explicit boundary collection; automatic roots/live continuations remain. |
 | Contextual programming | Partial | Guarded families and compiler context; module-level groups/composition remain. |
 | Compiler self-extension | Stream proof working | March read/number/lookup loop and defining words persist; native graph builders and explicit compiler-state interface remain. |
-| Full bootstrap | Not achieved | Initial seed assembly and graph/stack building still native; need a bootstrap fixed point. |
+| Full bootstrap | Interpreter fixed point tested; not full bootstrap | Three image generations stabilize; primitive semantics, lowering, initial assembly, and alias installation still native. |
 | Staging | Explicit compiler execution only | General partial evaluation and unknown-context residualization remain. |
-| Images | Code, dictionary, immediate flags | No live values/suspended computations/session snapshots. |
+| Images | One definition-only format (F05) | Old prototype formats rejected; no live values/suspended computations/session snapshots. |
 | Data/library support | Minimal | Strings, maps, arrays, and useful libraries remain. |
 | Effects / language I/O | Not implemented | Need an explicit protocol compatible with lazy sharing. |
 | Source syntax | Stream-fed FORTH | Whitespace words, numbers before dictionary, ordinary comment/defining words; final richer notation remains open. |

@@ -53,8 +53,9 @@ Use `first` and `second` to inspect fields selectively.
   A standalone word recurs into itself.
 - Shared pending instances memoize their result or semantic error. Independent
   outputs remain usable when another output fails.
-- Canonical, content-addressed code; quotation identity; separately computed
-  value content identities; deterministic, validated binary code images.
+- Canonical composed definitions addressed by ordered dependency CIDs/literals;
+  quotation identity; separately computed value content identities; deterministic,
+  validated images. Stack wiring and optimized plans are derived, not word identity.
 - A March-defined input-stream interpreter: whitespace-delimited words,
   **numbers before dictionary lookup**, and input-consuming dictionary words.
   Colon, comments, and user-defined immediate words participate in compilation;
@@ -62,12 +63,17 @@ Use `first` and `second` to inspect fields selectively.
 - Explicit evaluation task stack, stale/cross-executor handle checks, bounded
   fuel and storage, and demanded-slot recursive-cycle detection.
 
-The CLI now uses `stream::compile`, not the legacy `source::compile` reader.
+The CLI uses `stream::compile`, not the host `source::compile` test/seed reader.
+Both readers now produce the same definition identity and quotation equality.
 `stream-seed.march` owns the read/number/lookup/execute-or-compile loop. Native
-primitives provide input advancement, immutable compiler state, graph builders,
-stack inference, and validation. The initial seed is assembled once through the
+primitives provide input advancement, immutable compiler state, definition
+builders, graph lowering, stack inference, and validation. The initial seed is assembled once through the
 older host reader; loaded seed images need no such reader for subsequent input.
-This is stream-fed self-extension, not a completed bootstrap fixed point.
+The interpreter now passes a three-generation saved-image rebuild fixed-point
+test; native lowering/primitive semantics and host alias installation remain.
+This is not full self-hosting. Only definition-only `MARCHF05` images are
+supported; old formats must be regenerated from source. See BOOTSTRAP.md for the
+identity boundary, explicit recursion contracts, and compatibility details.
 
 Words are whitespace-delimited, including `:`, `;`, `[` and `]`. Punctuation is
 not split automatically. `--` is a dictionary word that consumes through newline;
@@ -264,6 +270,16 @@ redefinable punctuation, new defining words, contextual immediate behavior,
 lazy runtime semantics, and persisted interpreter code are exercised. See
 `examples/fast/compiler.march` and BOOTSTRAP.md for the remaining native
 responsibilities, explicit compiler-state interface, and resource limits.
+
+The definition-identity checkpoint adds tests for exact sequence hashing,
+dependency changes, quotation/context/family identity, symbolic recursion,
+optimization-independent identity, obsolete-image rejection, hostile definition
+records, and the interpreter rebuild fixed point.
+The follow-up cleanup removes old-image compatibility and graph-based source
+identity, pins kernel tags, and checks host/stream identity agreement.
+Verification: **494 total tests, including 149 fast-engine tests**, pass in
+debug and release, along with all-target Clippy (warnings denied), formatting,
+and whitespace checks.
 
 The next bootstrap priority is reducing native seed assembly and graph/stack
 construction, and resolving the compiler-state versus runtime-stack interface.

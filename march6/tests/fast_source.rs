@@ -70,7 +70,7 @@ fn context_and_ordered_family_dispatch() {
 }
 
 #[test]
-fn comments_and_adjacent_delimiters() {
+fn host_assembler_comments_and_adjacent_delimiters_are_not_stream_syntax() {
     assert_eq!(
         integers(evaluate(
             "( nested ( comment ) ) :square dup *; \\ comment\n7[ square ]call",

@@ -2,15 +2,14 @@
 //! Dependencies are addressed by CID and precede their users. A bounded,
 //! iterative walk omits unreachable historical definitions and all caches.
 
-use super::{Binary, Cid, Error, Literal, Op, Program, WordId, put, text_bytes};
+use super::definition::{self, Definition, Item};
+use super::{Cid, Error, Literal, Program, WordId, put, text_bytes};
 use std::collections::HashSet;
 
-const MAGIC: &[u8; 8] = b"MARCHF01";
-const STREAM_MAGIC: &[u8; 8] = b"MARCHF03";
+const MAGIC: &[u8; 8] = b"MARCHF05";
 const MAX_BYTES: usize = 32 * 1024 * 1024;
 const MAX_WORDS: usize = 100_000;
 const MAX_OPS: usize = 1_000_000;
-const MAX_STACK: usize = 65_535;
 
 fn invalid(message: &str) -> Error {
     Error::Image(message.into())
@@ -63,10 +62,6 @@ impl<'a> Reader<'a> {
         let n = self.count(MAX_BYTES, 1)?;
         String::from_utf8(self.take(n)?.to_vec()).map_err(|_| invalid("invalid UTF-8"))
     }
-    fn slots(&mut self) -> Result<Vec<usize>, Error> {
-        let n = self.count(MAX_STACK, 8)?;
-        (0..n).map(|_| self.number()).collect()
-    }
     fn literal(&mut self, program: &Program) -> Result<Literal, Error> {
         Ok(match self.byte()? {
             0 => Literal::Int(i64::from_le_bytes(self.take(8)?.try_into().unwrap())),
@@ -80,99 +75,55 @@ impl<'a> Reader<'a> {
             _ => return Err(invalid("unknown literal tag")),
         })
     }
-    fn operation(&mut self, program: &Program) -> Result<Op, Error> {
+    fn definition(&mut self, program: &Program) -> Result<Definition, Error> {
         Ok(match self.byte()? {
-            0 => Op::Arg(self.number()?),
-            1 => Op::Const(self.literal(program)?),
-            2 => Op::Context(self.string()?),
-            3 => {
-                let op = match self.byte()? {
-                    0 => Binary::Add,
-                    1 => Binary::Sub,
-                    2 => Binary::Mul,
-                    3 => Binary::Eq,
-                    4 => Binary::Lt,
-                    _ => return Err(invalid("unknown binary operation")),
-                };
-                Op::Binary(op, self.number()?, self.number()?)
-            }
-            4 => Op::Select {
-                condition: self.number()?,
-                when_true: self.number()?,
-                when_false: self.number()?,
-            },
-            5 => Op::Call {
-                word: self.word(program)?,
-                arguments: self.slots()?,
-            },
-            6 => Op::Project {
-                call: self.number()?,
-                output: self.number()?,
-            },
-            7 => Op::Recur {
-                arguments: self.slots()?,
-            },
-            8 => Op::Pair(self.number()?, self.number()?),
-            9 => Op::First(self.number()?),
-            10 => Op::Second(self.number()?),
-            11 => {
-                let n = self.count(MAX_WORDS, 64)?;
-                let clauses = (0..n)
-                    .map(|_| Ok((self.word(program)?, self.word(program)?)))
+            0 => Definition::Primitive(self.string()?),
+            1 => Definition::Kernel(super::stream::Primitive::decode(self.byte()?)?),
+            2 => {
+                let n = self.count(MAX_OPS, 1)?;
+                let items = (0..n)
+                    .map(|_| {
+                        Ok(match self.byte()? {
+                            0 => Item::Word(self.word(program)?),
+                            1 => Item::Literal(self.literal(program)?),
+                            2 => Item::Context(self.string()?),
+                            3 => Item::StaticCall,
+                            4 => Item::Apply {
+                                inputs: self.number()?,
+                                outputs: self.number()?,
+                            },
+                            5 => Item::Recur {
+                                inputs: self.number()?,
+                                outputs: self.number()?,
+                            },
+                            _ => return Err(invalid("unknown definition item")),
+                        })
+                    })
                     .collect::<Result<_, Error>>()?;
-                Op::Dispatch {
-                    clauses,
-                    arguments: self.slots()?,
-                }
+                Definition::Sequence(items)
             }
-            12 => Op::Apply {
-                function: self.number()?,
-                arguments: self.slots()?,
-                outputs: self.number()?,
-            },
-            13 => Op::Kernel {
-                primitive: super::stream::Primitive::decode(self.byte()?)?,
-                arguments: self.slots()?,
-            },
-            _ => return Err(invalid("unknown operation tag")),
+            3 => {
+                let n = self.count(MAX_WORDS, 64)?;
+                Definition::Family(
+                    (0..n)
+                        .map(|_| Ok((self.word(program)?, self.word(program)?)))
+                        .collect::<Result<_, Error>>()?,
+                )
+            }
+            _ => return Err(invalid("unknown definition kind")),
         })
     }
 }
 
 impl Program {
     fn image_dependencies(&self, id: WordId) -> Result<Vec<WordId>, Error> {
-        let mut deps = Vec::new();
-        for op in &self.word(id)?.ops {
-            // Keep writer limits symmetric with the bounded decoder, including
-            // code constructed directly through the Rust API rather than the
-            // narrower source reader.
-            match op {
-                Op::Call { arguments, .. }
-                | Op::Recur { arguments }
-                | Op::Apply { arguments, .. }
-                | Op::Dispatch { arguments, .. }
-                    if arguments.len() > MAX_STACK =>
-                {
-                    return Err(invalid("image argument count limit"));
-                }
-                Op::Dispatch { clauses, .. } if clauses.len() > MAX_WORDS => {
-                    return Err(invalid("image clause count limit"));
-                }
-                Op::Context(key) if key.len() > MAX_BYTES => {
-                    return Err(invalid("image context key limit"));
-                }
-                _ => {}
-            }
-            match op {
-                Op::Const(Literal::Quote(w)) | Op::Call { word: w, .. } => deps.push(*w),
-                Op::Dispatch { clauses, .. } => {
-                    for &(a, b) in clauses {
-                        deps.extend([a, b]);
-                    }
-                }
-                _ => {}
-            }
+        let definition = self
+            .definition(id)?
+            .ok_or_else(|| invalid("graph-only evaluator fixtures cannot be saved"))?;
+        if self.encode_definition(definition)?.len() > MAX_BYTES {
+            return Err(invalid("definition size limit"));
         }
+        let mut deps = definition.dependencies();
         deps.sort_unstable_by_key(|&id| self.words[id].cid);
         deps.dedup();
         Ok(deps)
@@ -220,20 +171,15 @@ impl Program {
         if self.names.len() > MAX_WORDS {
             return Err(invalid("dictionary size limit"));
         }
-        // Ordinary v1 artifacts remain byte-identical. V3 supports kernel ops
-        // and immediate flags on ordinary dictionary entries, not a parser map.
-        let extended = !self.immediate.is_empty()
-            || order.iter().any(|&id| {
-                self.words[id]
-                    .ops
-                    .iter()
-                    .any(|op| matches!(op, Op::Kernel { .. }))
-            });
-        let mut out = if extended { STREAM_MAGIC } else { MAGIC }.to_vec();
+        let mut out = MAGIC.to_vec();
         put(&mut out, order.len());
         for id in order {
             let word = self.word(id)?;
-            let bytes = self.encode_word(word.inputs, &word.ops, &word.outputs)?;
+            let bytes = self.encode_definition(
+                word.definition
+                    .as_ref()
+                    .ok_or_else(|| invalid("graph-only evaluator fixtures cannot be saved"))?,
+            )?;
             if out.len().saturating_add(40).saturating_add(bytes.len()) > MAX_BYTES {
                 return Err(invalid("image size limit"));
             }
@@ -249,7 +195,7 @@ impl Program {
             text_bytes(&mut out, name);
             out.extend_from_slice(&self.cid(id)?.0);
         }
-        if extended {
+        {
             put(&mut out, self.immediate.len());
             for name in &self.immediate {
                 if out.len().saturating_add(8).saturating_add(name.len()) > MAX_BYTES {
@@ -276,14 +222,9 @@ impl Program {
             return Err(invalid("image size limit"));
         }
         let mut reader = Reader::new(bytes);
-        let version = reader.take(MAGIC.len())?;
-        let extended = if version == MAGIC {
-            false
-        } else if version == STREAM_MAGIC {
-            true
-        } else {
-            return Err(invalid("image magic/version"));
-        };
+        if reader.take(MAGIC.len())? != MAGIC {
+            return Err(invalid("image magic/version: only MARCHF05 is supported"));
+        }
         let count = reader.count(MAX_WORDS, 40)?;
         let mut program = Self::new();
         let mut operations = 0usize;
@@ -294,31 +235,23 @@ impl Program {
             }
             let length = reader.count(MAX_BYTES, 1)?;
             let canonical = reader.take(length)?;
-            if Cid::digest(b"march-fast-word-v1", canonical) != expected {
+            if Cid::digest(definition::DOMAIN, canonical) != expected {
                 return Err(invalid("word CID mismatch"));
             }
             let mut word = Reader::new(canonical);
-            let inputs = word.number()?;
-            if inputs > MAX_STACK {
-                return Err(invalid("word input limit"));
+            let definition = word.definition(&program)?;
+            if word.remaining() != 0 {
+                return Err(invalid("trailing definition bytes"));
             }
-            let count = word.count(MAX_OPS, 1)?;
+            let id = program.add_definition(definition)?;
             operations = operations
-                .checked_add(count)
+                .checked_add(program.word(id)?.ops.len())
                 .ok_or_else(|| invalid("operation limit"))?;
             if operations > MAX_OPS {
                 return Err(invalid("aggregate operation limit"));
             }
-            let ops = (0..count)
-                .map(|_| word.operation(&program))
-                .collect::<Result<Vec<_>, _>>()?;
-            let outputs = word.slots()?;
-            if word.remaining() != 0 {
-                return Err(invalid("trailing word bytes"));
-            }
-            let id = program.add_word(inputs, ops, outputs)?;
             if program.cid(id)? != expected {
-                return Err(invalid("noncanonical word encoding"));
+                return Err(invalid("noncanonical definition"));
             }
         }
         let count = reader.count(MAX_WORDS, 40)?;
@@ -332,7 +265,7 @@ impl Program {
             program.bind(&name, id)?;
             previous = Some(name);
         }
-        if extended {
+        {
             let count = reader.count(MAX_WORDS, 8)?;
             let mut previous = None;
             for _ in 0..count {

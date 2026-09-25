@@ -6,13 +6,13 @@
 //! a collector may lower them freely. The first nine fixtures use no
 //! collection API at all; the `collect()` section at the end exercises the
 //! explicit boundary collector (`Executor::collect`) that landed afterwards.
-use march_research::fast::{Context, Error, Executor, Handle, Literal, Program, Value, source};
+use march_research::fast::{Context, Error, Executor, Handle, Literal, Program, Value, stream};
 
 const BUDGET: usize = 200_000;
 
 fn compile(text: &str) -> (Program, usize) {
-    let mut program = Program::new();
-    let word = source::compile(&mut program, text).unwrap();
+    let mut program = stream::seed().unwrap();
+    let word = stream::compile(&mut program, text).unwrap();
     (program, word)
 }
 

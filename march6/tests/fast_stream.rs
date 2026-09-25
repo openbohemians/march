@@ -165,7 +165,7 @@ fn saved_seed_interprets_further_source_without_reinitializing_native_syntax() {
     )
     .unwrap();
     let bytes = p.to_image(e).unwrap();
-    assert_eq!(&bytes[..8], b"MARCHF03");
+    assert_eq!(&bytes[..8], b"MARCHF05");
     let (mut q, qe) = Program::from_image(&bytes).unwrap();
     assert_eq!(q.to_image(qe).unwrap(), bytes);
     assert_eq!(run(&q, qe, &[]), [Value::Int(49)]);
@@ -313,13 +313,16 @@ fn compiler_state_cannot_be_forged_by_an_integer_or_used_without_a_session() {
 }
 
 #[test]
-fn old_code_images_stay_v1_and_loading_a_seed_executes_no_compiler_code() {
+fn host_reader_images_use_current_format_and_loading_executes_no_compiler_code() {
     let mut old = Program::new();
     let w = march_research::fast::source::compile(&mut old, "7").unwrap();
     let bytes = old.to_image(w).unwrap();
-    assert_eq!(&bytes[..8], b"MARCHF01");
+    assert_eq!(&bytes[..8], b"MARCHF05");
     assert_eq!(
-        Program::from_image(&bytes).unwrap().0.to_image(w).unwrap(),
+        {
+            let (p, e) = Program::from_image(&bytes).unwrap();
+            p.to_image(e).unwrap()
+        },
         bytes
     );
     let mut p = stream::seed().unwrap();

@@ -14,40 +14,41 @@ pub struct StateHandle(u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
+// Persistent semantic tags: explicit assignments, never renumber or reuse.
 pub enum Primitive {
-    Word,
-    Eof,
-    Number,
-    IsNumber,
-    NumberValue,
-    Find,
-    Compiling,
-    Immediate,
-    EmitNumber,
-    CompileCall,
-    Execute,
-    Begin,
-    End,
-    MarkImmediate,
-    EndSource,
-    EmitLiteral,
-    SkipLine,
-    ReadUntil,
-    Quote,
-    Context,
-    BeginQuote,
-    EndQuote,
-    StaticCall,
-    Count,
-    Recur,
-    Apply,
-    WordByteEquals,
-    FamilyBegin,
-    FamilyInputs,
-    FamilyOutputs,
-    FamilyGuard,
-    FamilyBody,
-    FamilyEnd,
+    Word = 0,
+    Eof = 1,
+    Number = 2,
+    IsNumber = 3,
+    NumberValue = 4,
+    Find = 5,
+    Compiling = 6,
+    Immediate = 7,
+    EmitNumber = 8,
+    CompileCall = 9,
+    Execute = 10,
+    Begin = 11,
+    End = 12,
+    MarkImmediate = 13,
+    EndSource = 14,
+    EmitLiteral = 15,
+    SkipLine = 16,
+    ReadUntil = 17,
+    Quote = 18,
+    Context = 19,
+    BeginQuote = 20,
+    EndQuote = 21,
+    StaticCall = 22,
+    Count = 23,
+    Recur = 24,
+    Apply = 25,
+    WordByteEquals = 26,
+    FamilyBegin = 27,
+    FamilyInputs = 28,
+    FamilyOutputs = 29,
+    FamilyGuard = 30,
+    FamilyBody = 31,
+    FamilyEnd = 32,
 }
 const PRIMITIVES: &[(Primitive, &str)] = &[
     (Primitive::Word, "stream.word"),
@@ -84,6 +85,64 @@ const PRIMITIVES: &[(Primitive, &str)] = &[
     (Primitive::FamilyBody, "stream.family-body"),
     (Primitive::FamilyEnd, "stream.family-end"),
 ];
+
+#[cfg(test)]
+mod primitive_identity_tests {
+    use super::*;
+
+    #[test]
+    fn kernel_semantic_tags_and_names_are_pinned() {
+        let names = [
+            "stream.word",
+            "stream.eof?",
+            "stream.number",
+            "stream.number?",
+            "stream.number-value",
+            "stream.find",
+            "stream.compiling?",
+            "stream.immediate?",
+            "stream.emit-number",
+            "stream.compile-call",
+            "stream.execute",
+            "stream.begin",
+            "stream.end",
+            "stream.immediate",
+            "stream.end-source",
+            "stream.emit-literal",
+            "stream.skip-line",
+            "stream.read-until",
+            "stream.quote",
+            "stream.context",
+            "stream.begin-quote",
+            "stream.end-quote",
+            "stream.call",
+            "stream.count",
+            "stream.recur",
+            "stream.apply",
+            "stream.word-byte=",
+            "stream.family-begin",
+            "stream.family-inputs",
+            "stream.family-outputs",
+            "stream.family-guard",
+            "stream.family-body",
+            "stream.family-end",
+        ];
+        assert_eq!(PRIMITIVES.len(), names.len());
+        let mut p = Program::new();
+        for (tag, name) in names.into_iter().enumerate() {
+            let &(primitive, _) = PRIMITIVES.iter().find(|(_, n)| *n == name).unwrap();
+            assert_eq!(primitive as u8, tag as u8);
+            assert_eq!(Primitive::decode(tag as u8).unwrap(), primitive);
+            let word = p
+                .add_definition(definition::Definition::Kernel(primitive))
+                .unwrap();
+            assert_eq!(
+                p.cid(word).unwrap(),
+                Cid::digest(definition::DOMAIN, &[1, tag as u8])
+            );
+        }
+    }
+}
 impl Primitive {
     pub fn arity(self) -> usize {
         match self {
@@ -366,7 +425,7 @@ impl Kernel {
                 let name = state.text()?.to_owned();
                 state.frames.push(Frame {
                     definition: Definition::Named(name),
-                    body: source::Body::default(),
+                    body: source::Body::composed(),
                 });
             }
             Primitive::End | Primitive::EndQuote => {
@@ -456,7 +515,7 @@ impl Kernel {
                 }
                 state.frames.push(Frame {
                     definition: Definition::Quotation,
-                    body: source::Body::default(),
+                    body: source::Body::composed(),
                 });
             }
             Primitive::StaticCall => {
@@ -520,12 +579,13 @@ impl Kernel {
             Primitive::FamilyEnd => {
                 let family = state.family.take().ok_or_else(|| fail("no open family"))?;
                 let program = Rc::make_mut(&mut state.program);
-                let word = program.add_family(
+                let word = program.add_source_family(
                     family.inputs.ok_or_else(|| fail("missing family inputs"))?,
                     family
                         .outputs
                         .ok_or_else(|| fail("missing family outputs"))?,
                     family.clauses,
+                    true,
                 )?;
                 program.bind(&family.name, word)?;
                 state.last = Some(family.name);
@@ -541,38 +601,15 @@ impl Kernel {
 pub fn seed() -> Result<Program, Error> {
     let mut program = Program::new();
     for &(primitive, name) in PRIMITIVES {
-        let n = primitive.arity();
-        let mut ops: Vec<_> = (0..n).map(Op::Arg).collect();
-        ops.push(Op::Kernel {
-            primitive,
-            arguments: (0..n).collect(),
-        });
-        let word = program.add_word(n, ops, vec![n])?;
+        let word = program.add_definition(super::definition::Definition::Kernel(primitive))?;
         program.bind(name, word)?;
     }
     // Runtime primitives are ordinary dictionary entries, not reader cases.
-    for (name, source) in [
-        ("dup", "dup"),
-        ("drop", "drop"),
-        ("swap", "swap"),
-        ("over", "over"),
-        ("+", "+"),
-        ("-", "-"),
-        ("*", "*"),
-        ("=", "="),
-        ("<", "<"),
-        ("pair", "pair"),
-        ("first", "first"),
-        ("second", "second"),
-        ("select", "select"),
-        ("true", "true"),
-        ("false", "false"),
-        ("unit", "unit"),
-    ] {
-        let word = source::compile(&mut program, source).map_err(|e| fail(e.0))?;
+    for &name in super::definition::RUNTIME_PRIMITIVES {
+        let word = program.add_definition(super::definition::Definition::Primitive(name.into()))?;
         program.bind(name, word)?;
     }
-    source::compile(&mut program, SEED).map_err(|e| fail(e.0))?;
+    source::compile_composed(&mut program, SEED).map_err(|e| fail(e.0))?;
     for (name, implementation) in [
         (":", "seed.colon"),
         (";", "stream.end"),
@@ -623,7 +660,7 @@ pub fn compile_with_limits(
         word: None,
         number: None,
         entry: None,
-        outer: source::Body::default(),
+        outer: source::Body::composed(),
         frames: Vec::new(),
         last: None,
         count: None,

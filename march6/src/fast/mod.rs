@@ -1,7 +1,7 @@
 //! Conventional execution spike: immutable CAS code, local register identities,
 //! shared lazy slots, explicit contexts. No interaction-net dependency.
 use crate::Cid;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,6 +11,7 @@ pub mod data;
 pub mod definition;
 mod image;
 mod input;
+mod reflection;
 pub use input::InputNode;
 pub mod source;
 pub mod stream;
@@ -181,8 +182,10 @@ pub struct Program {
     text_bytes: usize,
     words: Vec<Word>,
     identities: HashMap<Cid, WordId>,
-    names: BTreeMap<String, WordId>,
-    immediate: BTreeSet<String>,
+    // Persistent HAMTs share untouched paths across compiler-state snapshots.
+    // Hash iteration order is never a canonical image or definition order.
+    names: imbl::HashMap<String, WordId>,
+    immediate: imbl::HashSet<String>,
 }
 
 fn put(out: &mut Vec<u8>, n: usize) {
@@ -839,8 +842,8 @@ struct Frame {
     key_hash: u64,
     identities: Vec<u64>,
 }
-#[derive(Clone, Copy)]
 enum Task {
+    Construct(Box<reflection::Transfer>),
     Data(usize, usize), // destination, next argument phase
     TupleCheck(usize, usize, usize),
     EqualFinish(usize),
@@ -1408,6 +1411,7 @@ impl<'p> Executor<'p> {
     }
     fn step(&mut self, task: Task) -> Result<(), Error> {
         match task {
+            Task::Construct(transfer) => self.construct_step(transfer)?,
             Task::Need(dst) => {
                 let c = self.cells[dst];
                 match c.state {
@@ -1543,6 +1547,25 @@ impl<'p> Executor<'p> {
                 else {
                     unreachable!()
                 };
+                let primitive = *primitive;
+                let descriptor = arguments.get(1).map(|s| frame.base + s);
+                if primitive == stream::Primitive::Construct {
+                    if self.kernel.is_none() {
+                        return Err(Error::Compiler(
+                            "compiler primitive outside stream session".into(),
+                        ));
+                    }
+                    let Datum::CompilerState(state) = self.value(frame.base + arguments[0]) else {
+                        return Err(Error::Type("compiler primitive needs explicit state"));
+                    };
+                    self.work
+                        .push(Task::Construct(Box::new(reflection::Transfer::new(
+                            dst,
+                            descriptor.unwrap(),
+                            state,
+                        ))));
+                    return Ok(());
+                }
                 let args = arguments
                     .iter()
                     .map(|s| self.external(self.value(frame.base + s)))
@@ -1550,12 +1573,24 @@ impl<'p> Executor<'p> {
                 let kernel = self.kernel.as_mut().ok_or_else(|| {
                     Error::Compiler("compiler primitive outside stream session".into())
                 })?;
-                let result = kernel.invoke(*primitive, &args, &mut self.remaining)?;
+                if primitive == stream::Primitive::Describe {
+                    let tree = kernel.describe(
+                        &args,
+                        &mut self.remaining,
+                        self.cell_limit,
+                        self.text_byte_limit,
+                    )?;
+                    let value = self.import_descriptor(tree)?;
+                    self.ready(dst, value);
+                    return Ok(());
+                }
+                let result = kernel.invoke(primitive, &args, &mut self.remaining)?;
                 let value = match result {
                     Value::Int(n) => Datum::Int(n),
                     Value::Bool(b) => Datum::Bool(b),
                     Value::Unit => Datum::Unit,
                     Value::CompilerState(s) => Datum::CompilerState(s),
+                    Value::Text(text) => self.store_text(text)?,
                     _ => return Err(Error::Type("invalid compiler primitive result")),
                 };
                 self.ready(dst, value);

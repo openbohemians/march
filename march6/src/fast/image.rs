@@ -191,7 +191,9 @@ impl Program {
             out.extend_from_slice(&bytes);
         }
         put(&mut out, self.names.len());
-        for (name, &id) in &self.names {
+        let mut names: Vec<_> = self.names.iter().collect();
+        names.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        for (name, &id) in names {
             if out.len().saturating_add(40).saturating_add(name.len()) > MAX_BYTES {
                 return Err(invalid("image size limit"));
             }
@@ -200,7 +202,9 @@ impl Program {
         }
         {
             put(&mut out, self.immediate.len());
-            for name in &self.immediate {
+            let mut immediate: Vec<_> = self.immediate.iter().collect();
+            immediate.sort_unstable();
+            for name in immediate {
                 if out.len().saturating_add(8).saturating_add(name.len()) > MAX_BYTES {
                     return Err(invalid("image size limit"));
                 }

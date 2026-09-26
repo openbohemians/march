@@ -175,12 +175,23 @@ reference implementation. See FAST-SPIKE.md for verification checkpoints.
 | Full bootstrap | Interpreter fixed point tested; not full bootstrap | Three image generations stabilize; primitive semantics, lowering, initial assembly, and alias installation still native. |
 | Staging | Explicit compiler execution only | General partial evaluation and unknown-context residualization remain. |
 | Images | One definition-only format (F05) | Old prototype formats rejected; no live values/suspended computations/session snapshots. |
-| Data/library support | Text and tuples working | Packed arrays, maps, definition reflection/construction, and useful libraries remain. |
+| Data/library support | Text, tuples, and compiler definition data working | Packed arrays, language-visible maps, namespaces, and useful libraries remain. |
 | Effects / language I/O | Not implemented | Need an explicit protocol compatible with lazy sharing. |
 | Source syntax | Stream-fed FORTH | Whitespace words, numbers before dictionary, ordinary comment/defining words; final richer notation remains open. |
 
 ## Open design TODOs
 
+- [x] Expose canonical definition inspection/construction to March; the
+  explicit-state interface and acceptance examples are in BOOTSTRAP.md. Native
+  validation/lowering and compiler-state/runtime-stack separation still remain.
+- [ ] Add language-visible immutable maps and namespace behavior. The compiler
+  dictionary now uses `imbl` HAMTs, but this does not yet expose a March map value
+  or turn dotted names into namespaces. Start with text-key namespace needs;
+  review lazy values, general key semantics, canonical identity, lookup/import
+  rules, and binding metadata separately.
+- [ ] Investigate CHAMP after establishing library-backed map workloads. Use
+  the existing persistent-data-structure library first; changing the runtime
+  backing must not change map semantics or canonical CIDs.
 - [ ] Revisit universal type ordering (Erlang-style). Thomas is leaning **yes**,
   but has not decided to adopt it. Until then, `eq?` returns false across value
   types and `lt?`, `gt?`, `lte?`, and `gte?` remain type-strict. Before deciding:

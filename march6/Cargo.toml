@@ -5,4 +5,5 @@ edition = "2024"
 default-run = "march-research"
 
 [dependencies]
+imbl = "7.0"
 sha2 = "0.10"

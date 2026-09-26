@@ -172,6 +172,86 @@ self-hosting: initial assembly, primitive semantics, lowering, and alias setup
 still have native support. The next bootstrap milestone is to reduce those
 responsibilities and resolve the compiler-state versus runtime-stack interface.
 
+### Canonical definition data
+
+Five compiler operations now expose definitions as ordinary immutable data.
+They retain the explicit compiler-state interface:
+
+| Operation | Stack contract | Purpose |
+|---|---|---|
+| `stream.cid-of` | state name-text → cid-text | Resolve a dictionary name. |
+| `stream.describe` | state cid → tuple | Inspect that canonical definition. |
+| `stream.construct` | state tuple → state | Validate/intern a definition in a new state, without binding or executing it. |
+| `stream.last-cid` | state → cid-text | Read the result of the last construct in this state's history. |
+| `stream.bind` | state name-text cid → state | Bind existing code under a name in a new state. |
+
+CID inputs accept full 64-character lowercase hexadecimal text or an existing
+quotation. Outputs always use CID text. Unknown references are rejected against
+the supplied state's Program, not assumed to exist in the executor's Program.
+`stream.bind` clears that name's immediate flag and makes it the last completed
+name; `stream.immediate` can deliberately mark it again. A new compilation
+session has no last constructed CID until `stream.construct` succeeds.
+
+Reflection queries are lazy too: `dup "missing-word" stream.cid-of drop`
+does not perform the unused lookup. A demanded lookup does fail. Marking a
+word `immediate` checks its state → state signature at marking time, not first
+invocation.
+
+The descriptor schema below uses explanatory tuple notation, **not** March
+source parentheses. A one-element record is a singleton tuple, not its field;
+an empty items/clauses tuple is `unit`.
+
+```text
+definition = ("primitive", semantic-name) | ("kernel", kernel-name)
+           | ("sequence", items-tuple) | ("family", clauses-tuple)
+clause     = (guard-cid, body-cid)
+item       = ("word", cid) | ("int", integer) | ("bool", boolean)
+           | ("unit",) | ("text", text) | ("quote", cid)
+           | ("context", key-text) | ("call",)
+           | ("apply", inputs, outputs) | ("recur", inputs, outputs)
+           | ("tuple", arity) | ("untuple", arity)
+```
+
+Item/clause order is preserved. Primitive names are semantic identifiers (`=`
+and `<`, for example), not dictionary aliases (`eq?` and `lt?`). Kernel names
+come from the stable kernel table, such as `stream.word`. Dictionary names,
+immediate flags, lowered graph slots, and inferred arity are not definition data.
+
+An executor can hold an older immutable Program than the compiler state it is
+processing. CIDs prevent a newly constructed word from becoming an invalid
+local quotation in that older executor. Constructed code lives in the new
+state; bind it and compile subsequent uses, or invoke it through the existing
+compiler-word execution mechanism when appropriate. There is no new implicit
+execution or unified compile-time/runtime stack.
+
+Construction demands the complete finite descriptor but no unrelated stack
+values. The ordinary VM task stack drives field demand; it does not recursively
+call public `force` and discard existing continuations. The schema bounds depth
+to three edges from the root. Node and text-byte limits bound temporary transfer;
+fuel bounds demand and descriptor traversal. Unknown tags, extra fields, bad
+contracts, unknown CIDs, and compiler-state capabilities are rejected. The
+normal `add_definition` validator/lowerer is shared with source and images.
+Failed construction does not alter prior states; failed source compilation
+does not publish partially constructed definitions, text, bindings, or flags.
+
+For example, this constructs the same canonical word as `: answer 42 ;`:
+
+```forth
+: answer-data "sequence" "int" 42 tuple 2 tuple 1 tuple 2 ;
+: make-answer answer-data stream.construct
+    dup stream.last-cid "answer" swap stream.bind ; immediate
+make-answer
+answer
+```
+
+`examples/fast/reflection.march` additionally edits this descriptor using tuple
+operations to construct `answer43`, leaving `answer` unchanged. The tests
+round-trip every seed definition and every item kind, verify source-equivalent
+CIDs, construct code across snapshot boundaries, reject hostile descriptors,
+bound divergence, and save/reload/extend without host seed reassembly.
+Native validation, canonical encoding, lowering, and primitive semantics remain;
+this is a bootstrap step, not full self-hosting.
+
 ## Definition identity versus execution
 
 The canonical definition of `: square dup * ;` is the ordered sequence
@@ -240,12 +320,15 @@ Program is unchanged. Each successful call starts a fresh input/compiler-state
 session with the existing dictionary. It is not yet a persistent REPL cursor
 or compile-time data stack across calls.
 
-The first implementation retains bounded immutable state snapshots for a
-compilation call, copies builders, and uses copy-on-write Program snapshots.
-That can be expensive for large sources; no compiler-throughput or constant
-compiler-memory claim is made. Runtime scalar/lazy execution paths remain the
-existing engine. Stream-state lifetime improvements are separate from runtime
-lazy-heap collection.
+The implementation retains bounded immutable state snapshots for a compilation
+call and uses copy-on-write Program snapshots. Dictionary names and immediate
+flags now use `imbl` persistent HAMTs, so those containers share unchanged paths.
+Builders, the word vector, text intern tables, and the CID index still incur
+copying costs. This is not a fully persistent Program and can remain expensive
+for large sources; no compiler-throughput or constant compiler-memory claim is
+made. Images explicitly sort dictionary names and flags rather than depending
+on hash iteration order. Runtime scalar/lazy execution paths remain the existing
+engine. Stream-state lifetime improvements are separate from lazy-heap collection.
 
 `tests/fast_stream.rs` covers numeric precedence (including immediate numeric
 bindings), overflow, raw-input comments/custom delimiters, redefinable

@@ -53,6 +53,11 @@ pub enum Primitive {
     EmitText = 34,
     Tuple = 35,
     Untuple = 36,
+    CidOf = 37,
+    Describe = 38,
+    Construct = 39,
+    LastCid = 40,
+    Bind = 41,
 }
 const PRIMITIVES: &[(Primitive, &str)] = &[
     (Primitive::Word, "stream.word"),
@@ -92,6 +97,11 @@ const PRIMITIVES: &[(Primitive, &str)] = &[
     (Primitive::EmitText, "stream.emit-text"),
     (Primitive::Tuple, "stream.tuple"),
     (Primitive::Untuple, "stream.untuple"),
+    (Primitive::CidOf, "stream.cid-of"),
+    (Primitive::Describe, "stream.describe"),
+    (Primitive::Construct, "stream.construct"),
+    (Primitive::LastCid, "stream.last-cid"),
+    (Primitive::Bind, "stream.bind"),
 ];
 
 #[cfg(test)]
@@ -182,6 +192,11 @@ mod primitive_identity_tests {
                 "stream.emit-text",
                 "stream.tuple",
                 "stream.untuple",
+                "stream.cid-of",
+                "stream.describe",
+                "stream.construct",
+                "stream.last-cid",
+                "stream.bind",
             ])
             .collect();
         assert_eq!(PRIMITIVES.len(), names.len());
@@ -203,6 +218,8 @@ mod primitive_identity_tests {
 impl Primitive {
     pub fn arity(self) -> usize {
         match self {
+            Self::Bind => 3,
+            Self::CidOf | Self::Describe | Self::Construct => 2,
             Self::EmitLiteral
             | Self::ReadUntil
             | Self::WordByteEquals
@@ -217,6 +234,16 @@ impl Primitive {
             .find(|(p, _)| *p as u8 == tag)
             .map(|(p, _)| *p)
             .ok_or_else(|| Error::Image("unknown compiler primitive".into()))
+    }
+    pub(super) fn name(self) -> &'static str {
+        PRIMITIVES.iter().find(|(op, _)| *op == self).unwrap().1
+    }
+    pub(super) fn from_name(name: &str) -> Result<Self, Error> {
+        PRIMITIVES
+            .iter()
+            .find(|(_, n)| *n == name)
+            .map(|(op, _)| *op)
+            .ok_or_else(|| fail("unknown kernel primitive"))
     }
 }
 
@@ -273,6 +300,7 @@ struct State {
     outer: source::Body,
     frames: Vec<Frame>,
     last: Option<String>,
+    last_cid: Option<Cid>,
     count: Option<usize>,
     family: Option<Family>,
 }
@@ -320,6 +348,33 @@ pub(super) struct Kernel {
     depth: usize,
 }
 impl Kernel {
+    pub(super) fn describe(
+        &self,
+        args: &[Value],
+        fuel: &mut usize,
+        cells: usize,
+        bytes: usize,
+    ) -> Result<reflection::Tree, Error> {
+        let Some(Value::CompilerState(state)) = args.first() else {
+            return Err(Error::Type("compiler primitive needs explicit state"));
+        };
+        let p = &self.state(*state)?.program;
+        let cid = reflection::value_cid(&args[1])?;
+        let word = reflection::resolve(p, cid)?;
+        reflection::describe(p, word, fuel, cells, bytes)
+    }
+    pub(super) fn construct(
+        &mut self,
+        handle: StateHandle,
+        tree: &reflection::Tree,
+    ) -> Result<StateHandle, Error> {
+        let mut state = self.state(handle)?.clone();
+        let p = Rc::make_mut(&mut state.program);
+        let definition = reflection::definition(p, tree)?;
+        let word = p.add_definition(definition)?;
+        state.last_cid = Some(p.cid(word)?);
+        self.insert(state)
+    }
     fn insert(&mut self, state: State) -> Result<StateHandle, Error> {
         if self.states.len() >= self.limits.states || state.program.len() > self.limits.code_words {
             return Err(Error::StorageLimit);
@@ -399,6 +454,22 @@ impl Kernel {
         // Predicates return ordinary March values. Control flow is in the seed,
         // not in a native read/classify/dispatch loop.
         match op {
+            Primitive::CidOf => {
+                let Some(Value::Text(name)) = args.get(1) else {
+                    return Err(Error::Type("word name must be text"));
+                };
+                let word = old
+                    .program
+                    .lookup(name)
+                    .ok_or_else(|| fail(format!("unknown word '{name}'")))?;
+                return Ok(Value::Text(old.program.cid(word)?.to_string()));
+            }
+            Primitive::LastCid => {
+                return old
+                    .last_cid
+                    .map(|cid| Value::Text(cid.to_string()))
+                    .ok_or_else(|| fail("no constructed definition"));
+            }
             Primitive::IsText => return Ok(Value::Bool(old.text()?.starts_with('"'))),
             Primitive::Eof => return Ok(Value::Bool(old.word.is_none())),
             Primitive::IsNumber => return Ok(Value::Bool(old.number.is_some())),
@@ -424,6 +495,15 @@ impl Kernel {
         }
         let mut state = old.clone();
         match op {
+            Primitive::Bind => {
+                let Some(Value::Text(name)) = args.get(1) else {
+                    return Err(Error::Type("word name must be text"));
+                };
+                let cid = reflection::value_cid(&args[2])?;
+                let word = reflection::resolve(&state.program, cid)?;
+                Rc::make_mut(&mut state.program).bind(name, word)?;
+                state.last = Some(name.clone());
+            }
             Primitive::EmitText => {
                 let start = state.word.ok_or_else(|| fail("expected text"))?.0;
                 let (text, end) = data::read_text(&state.input, start)?;
@@ -741,6 +821,7 @@ pub fn compile_with_limits(
         outer: source::Body::composed(),
         frames: Vec::new(),
         last: None,
+        last_cid: None,
         count: None,
         family: None,
     };

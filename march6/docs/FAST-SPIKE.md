@@ -60,6 +60,9 @@ Use `first` and `second` to inspect fields selectively.
   **numbers before dictionary lookup**, and input-consuming dictionary words.
   Colon, comments, and user-defined immediate words participate in compilation;
   the interpreter and dictionary flags persist in images. See [BOOTSTRAP.md](BOOTSTRAP.md).
+- Canonical definition inspection/construction through ordinary text/tuple
+  descriptors and explicit compiler state; computed names bind constructed
+  code without reparsing source. `examples/fast/reflection.march` demonstrates it.
 - Explicit evaluation task stack, stale/cross-executor handle checks, bounded
   fuel and storage, and demanded-slot recursive-cycle detection.
 
@@ -310,8 +313,9 @@ IDs. Code images still do not contain live tuple heaps or pending computations.
 
 Tests are split into `fast_core`, `fast_source`, `fast_image`, `fast_reference`,
 `fast_values`, `fast_tail`, `fast_adversarial_claude`, `fast_collection`,
-`fast_reclamation_claude`, `fast_stream`, `fast_definition`, `fast_data`, and
-`fast_comparison`; the old implementations
+`fast_reclamation_claude`, `fast_stream`, `fast_definition`, `fast_data`,
+`fast_comparison`, `fast_dictionary`, `fast_reflection`, and
+`fast_reflection_claude`; the old implementations
 and tests are retained. These cover
 selective demand, sharing, overflow/error order, recursion, dynamic quotation
 arity, image corruption and canonicality, lazy streams, value identity, and
@@ -381,11 +385,37 @@ image round trips, and rebinding. **525 total tests, including 180 fast-engine
 tests**, pass in debug and release, along with all-target Clippy (warnings
 denied), formatting, and whitespace checks. The CLI predicate smoke test passes.
 
+The persistent-dictionary follow-up uses `imbl` 7.0.2 HAMTs for names and
+immediate flags. Five new tests cover snapshot isolation, retained versions,
+canonical image order, immutable compiled references, and failed-compilation
+atomicity. **530 total tests, including 185 fast-engine tests**, pass in debug
+and release, with all-target Clippy (warnings denied), formatting, and whitespace
+checks passing. A code image saved before/after the storage change is byte-identical.
+FAST-BENCHMARKS.md records the container-only probe. This is not a language-visible
+map or namespace implementation, and other Program fields still copy on update.
+
+The definition-data checkpoint adds ten tests: every seed definition and every
+item kind round-trips through March data; constructed/transformed code has the
+expected CID and runs across image reload; snapshot skew, malformed input,
+failure atomicity, depth/code limits, and divergent descriptor fields are
+covered. **540 total tests, including 195 fast-engine tests**, pass in debug and
+release, with all-target Clippy (warnings denied), formatting, and whitespace
+checks passing. CLI save/load/extend of `examples/fast/reflection.march` produces
+42 and 43 before and after reload. Claude reviewed the interface and supplied
+15 independent implementation tests covering CID/quote equivalence, snapshot
+isolation, newly constructed references, recursive families, atomic rejection,
+immediacy, numeric priority, image reachability, and undemanded queries.
+The combined checkpoint passes **555 total tests, including 210 fast-engine
+tests**, in debug and release, plus all-target Clippy (warnings denied),
+formatting, and whitespace checks.
+
 The next bootstrap priority is reducing native seed assembly and graph/stack
 construction, and resolving the compiler-state versus runtime-stack interface.
 Advanced memory-management research is deferred to a later "2.0"; for now retain
-correctness and safety limits using straightforward storage. The next bootstrap
-slice uses text/tuples to expose definition inspection and construction to March.
+correctness and safety limits using straightforward storage. Definition data
+now exposes inspection/construction through text/tuples; the next data slice is
+language-visible immutable maps and namespaces, building on the persistent
+dictionary without tying language identity to its implementation.
 Richer contextual groups and general staging
 remain separate priorities. Before claiming this replaces the reference, settle the independent
 equal-call sharing contract and the missing-context/residualization contract.

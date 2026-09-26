@@ -307,3 +307,32 @@ within i64; overflow/laziness are separate correctness tests.
 The CAS baselines are the existing reference implementation, with its own
 semantics and data structures. Equal scalar answers on these examples do not
 establish whole-language semantic equivalence.
+
+## Persistent dictionary container probe (2026-09-25)
+
+`cargo run --offline --release --example fast_dictionary_bench` compares the
+previous `std::collections::BTreeMap<String, usize>` with `imbl` 7.0.2's
+persistent HAMT. Rust 1.90.0, release build, one warm-up and seven measured
+batches; values are local word-handle stand-ins. All keys and initial maps are
+built outside timing. Snapshot/rebind includes cloning the map, replacing one
+existing binding, and dropping the changed version while retaining the original.
+
+| Bindings | BTree snapshot/rebind (µs) | HAMT snapshot/rebind (µs) | BTree 1,000 lookups (µs) | HAMT 1,000 lookups (µs) |
+|---|---:|---:|---:|---:|
+| 32 | 0.639 | 0.307 | 14.696 | 15.530 |
+| 1,000 | 23.442 | 0.667 | 59.850 | 23.748 |
+| 10,000 | 230.713 | 0.850 | 89.529 | 24.062 |
+
+Numbers are local median timings, not promised speedups. Tiny-map lookup is
+slightly slower with HAMT in this run. Lookup probes hit existing keys; this is
+not a collision stress test or a complete map workload. Snapshot/rebind repeats
+per batch are 3,125, 100, and 10 respectively; lookup batches repeat 100 times.
+The benchmark prints ranges as well as medians and checks the original remains
+unchanged.
+
+This supports using the library for dictionary snapshots, not a claim of a
+similar whole-compiler speedup. Program cloning still copies other tables and
+word definitions; compilation also copies builders. Serialization explicitly
+sorts bindings/flags and therefore still pays a canonical-ordering cost. No
+CHAMP implementation, language-visible map, or namespace resolution was added
+by this change.

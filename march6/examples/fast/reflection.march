@@ -1,0 +1,14 @@
+-- Build code from ordinary immutable text/tuple data, without reparsing source.
+: answer-data "sequence" "int" 42 tuple 2 tuple 1 tuple 2 ;
+: make-answer answer-data stream.construct
+    dup stream.last-cid "answer" swap stream.bind ; immediate
+make-answer
+
+-- Replace the first literal item, retaining the original definition unchanged.
+: changed dup 1 nth 0 "int" 43 tuple 2 tuple-set 1 swap tuple-set ;
+: make-changed dup dup "answer" stream.cid-of stream.describe changed stream.construct
+    dup stream.last-cid "answer43" swap stream.bind ; immediate
+make-changed
+
+answer answer43
+-- Results: 42, 43.

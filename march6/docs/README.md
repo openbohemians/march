@@ -14,6 +14,8 @@ Interaction nets are no longer an execution direction.
 4. [Measurements](FAST-BENCHMARKS.md): execution baselines and their limitations.
 5. [Memory follow-up](FAST-MEMORY.md): bounded scalar tail loops, explicit lazy-heap
    collection, stream measurements, and the remaining continuation/root problem.
+6. [Dependency evolution](DEPENDENCY-EVOLUTION.md): initial design for interface
+   and implementation locks, reproducible rebuilds, and explicit updates.
 
 Source paths and shell commands in these notes are relative to `march6/`,
 unless explicitly stated otherwise.

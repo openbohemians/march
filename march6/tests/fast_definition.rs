@@ -332,7 +332,7 @@ fn rehashed_family_with_mismatched_clause_signatures_is_rejected_on_load() {
 }
 #[test]
 fn host_and_stream_readers_agree_on_definition_identity_and_quote_equality() {
-    let source = ": a dup * ; : b dup dup * swap drop ; ' a ' b =";
+    let source = ": a dup * ; : b dup dup * swap drop ; ' a ' b eq?";
     let mut host = Program::new();
     let h = march_research::fast::source::compile(&mut host, source).unwrap();
     let mut p = stream::seed().unwrap();

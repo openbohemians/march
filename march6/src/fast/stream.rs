@@ -49,6 +49,10 @@ pub enum Primitive {
     FamilyGuard = 30,
     FamilyBody = 31,
     FamilyEnd = 32,
+    IsText = 33,
+    EmitText = 34,
+    Tuple = 35,
+    Untuple = 36,
 }
 const PRIMITIVES: &[(Primitive, &str)] = &[
     (Primitive::Word, "stream.word"),
@@ -84,11 +88,55 @@ const PRIMITIVES: &[(Primitive, &str)] = &[
     (Primitive::FamilyGuard, "stream.family-guard"),
     (Primitive::FamilyBody, "stream.family-body"),
     (Primitive::FamilyEnd, "stream.family-end"),
+    (Primitive::IsText, "stream.text?"),
+    (Primitive::EmitText, "stream.emit-text"),
+    (Primitive::Tuple, "stream.tuple"),
+    (Primitive::Untuple, "stream.untuple"),
 ];
 
 #[cfg(test)]
 mod primitive_identity_tests {
     use super::*;
+
+    #[test]
+    fn compiler_state_remains_noncomparable_across_types_and_inside_tuples() {
+        let mut p = seed().unwrap();
+        let w = compile(&mut p, "eq?").unwrap();
+        let nodes = [
+            InputNode::CompilerState(StateHandle(0)),
+            InputNode::Scalar(Literal::Int(1)),
+            InputNode::Tuple(vec![1]),
+            InputNode::Tuple(vec![0]),
+            InputNode::Scalar(Literal::Unit),
+        ];
+        for roots in [[0, 0], [0, 1], [1, 0], [0, 2], [2, 0], [2, 3], [0, 4]] {
+            let mut e = Executor::new(&p);
+            let h = e
+                .start_graph(w, &nodes, &roots, &Context::new(), 1000)
+                .unwrap();
+            assert!(matches!(e.force(h[0]), Err(Error::Type(_))));
+        }
+    }
+
+    #[test]
+    fn compiler_state_inside_tuple_has_no_content_identity() {
+        let mut p = seed().unwrap();
+        let w = compile(&mut p, "dup").unwrap();
+        let mut e = Executor::new(&p);
+        let h = e
+            .start_graph(
+                w,
+                &[
+                    InputNode::CompilerState(StateHandle(0)),
+                    InputNode::Tuple(vec![0]),
+                ],
+                &[1],
+                &Context::new(),
+                1000,
+            )
+            .unwrap();
+        assert!(matches!(e.content_id(h[0]), Err(Error::Type(_))));
+    }
 
     #[test]
     fn kernel_semantic_tags_and_names_are_pinned() {
@@ -127,6 +175,15 @@ mod primitive_identity_tests {
             "stream.family-body",
             "stream.family-end",
         ];
+        let names: Vec<_> = names
+            .into_iter()
+            .chain([
+                "stream.text?",
+                "stream.emit-text",
+                "stream.tuple",
+                "stream.untuple",
+            ])
+            .collect();
         assert_eq!(PRIMITIVES.len(), names.len());
         let mut p = Program::new();
         for (tag, name) in names.into_iter().enumerate() {
@@ -342,6 +399,7 @@ impl Kernel {
         // Predicates return ordinary March values. Control flow is in the seed,
         // not in a native read/classify/dispatch loop.
         match op {
+            Primitive::IsText => return Ok(Value::Bool(old.text()?.starts_with('"'))),
             Primitive::Eof => return Ok(Value::Bool(old.word.is_none())),
             Primitive::IsNumber => return Ok(Value::Bool(old.number.is_some())),
             Primitive::NumberValue => {
@@ -366,6 +424,24 @@ impl Kernel {
         }
         let mut state = old.clone();
         match op {
+            Primitive::EmitText => {
+                let start = state.word.ok_or_else(|| fail("expected text"))?.0;
+                let (text, end) = data::read_text(&state.input, start)?;
+                if state.input[end..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| !c.is_whitespace())
+                {
+                    return Err(fail("text literal needs a whitespace separator"));
+                }
+                let id = Rc::make_mut(&mut state.program).intern_text(&text)?;
+                state.cursor = end;
+                state.literal(Literal::Text(id));
+            }
+            Primitive::Tuple | Primitive::Untuple => {
+                let n = count(state.number.ok_or_else(|| fail("expected tuple arity"))?)?;
+                state.body().tuple(n, op == Primitive::Untuple);
+            }
             Primitive::Word => {
                 let mut start = state.cursor;
                 for ch in state.input[start..].chars() {
@@ -466,6 +542,9 @@ impl Kernel {
             }
             Primitive::EmitLiteral => {
                 let literal = match args.get(1) {
+                    Some(Value::Text(text)) => {
+                        Literal::Text(Rc::make_mut(&mut state.program).intern_text(text)?)
+                    }
                     Some(Value::Int(n)) => Literal::Int(*n),
                     Some(Value::Bool(b)) => Literal::Bool(*b),
                     Some(Value::Unit) => Literal::Unit,
@@ -605,10 +684,7 @@ pub fn seed() -> Result<Program, Error> {
         program.bind(name, word)?;
     }
     // Runtime primitives are ordinary dictionary entries, not reader cases.
-    for &name in super::definition::RUNTIME_PRIMITIVES {
-        let word = program.add_definition(super::definition::Definition::Primitive(name.into()))?;
-        program.bind(name, word)?;
-    }
+    super::definition::install_runtime(&mut program)?;
     source::compile_composed(&mut program, SEED).map_err(|e| fail(e.0))?;
     for (name, implementation) in [
         (":", "seed.colon"),
@@ -626,6 +702,8 @@ pub fn seed() -> Result<Program, Error> {
         ("recur", "seed.recur"),
         ("apply", "seed.apply"),
         ("family", "seed.family"),
+        ("tuple", "seed.tuple"),
+        ("untuple", "seed.untuple"),
     ] {
         let word = program
             .lookup(implementation)

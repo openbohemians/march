@@ -1,7 +1,7 @@
 use march_research::fast::{Binary, Context, Error, Executor, Literal, Op, Program, Value, source};
 
 const COUNTDOWN: &str = "
-    : zero 0 = ; : always drop true ; : base drop 0 ;
+    : zero 0 eq? ; : always drop true ; : base drop 0 ;
     : step 1 - recur 1 1 ;
     family countdown 1 1 zero base always step ;";
 
@@ -77,7 +77,7 @@ fn unselected_recursive_argument_is_never_evaluated() {
     let mut p = Program::new();
     source::compile(
         &mut p,
-        ": zero 0 = ; : always drop true ; : base drop 7 ;
+        ": zero 0 eq? ; : always drop true ; : base drop 7 ;
         : bad drop 9223372036854775807 1 + recur 1 1 ;
         family f 1 1 zero base always bad ;",
     )
@@ -134,7 +134,7 @@ fn same_argument_alias_cycles_but_equal_recomputed_value_does_not() {
         source::compile(
             &mut p,
             &format!(
-                ": zero 0 = ; : base drop 0 ; : yes drop true ;
+                ": zero 0 eq? ; : base drop 0 ; : yes drop true ;
             : step {step} ; family f 1 1 zero base yes step ;"
             ),
         )
@@ -205,7 +205,7 @@ fn wrappers_do_not_discard_input_transformation() {
 
 #[test]
 fn no_matching_clause_and_guard_error_precedence_match() {
-    for (guard, arg) in [("0 <", 1), ("0 =", i64::MIN)] {
+    for (guard, arg) in [("0 lt?", 1), ("0 eq?", i64::MIN)] {
         let mut p = Program::new();
         source::compile(
             &mut p,
@@ -229,8 +229,8 @@ fn later_guard_fault_precedes_recursive_body_fault() {
     let mut p = Program::new();
     source::compile(
         &mut p,
-        ": zero 0 = ; : base drop 7 ;
-        : badguard drop 9223372036854775807 1 + 0 = ;
+        ": zero 0 eq? ; : base drop 7 ;
+        : badguard drop 9223372036854775807 1 + 0 eq? ;
         : badbody true + recur 1 1 ;
         family f 1 1 zero base badguard badbody ;",
     )
@@ -240,10 +240,8 @@ fn later_guard_fault_precedes_recursive_body_fault() {
     for (arg, expected) in [
         (Literal::Int(0), Ok(vec![Value::Int(7)])),
         (Literal::Int(1), Err(Error::Overflow)),
-        (
-            Literal::Bool(true),
-            Err(Error::Type("binary operand types")),
-        ),
+        // Cross-type equality is false, so the later guard is now reached.
+        (Literal::Bool(true), Err(Error::Overflow)),
     ] {
         assert_eq!(
             Executor::new(&p).run(word, &[arg], &Context::new(), 1000),
@@ -286,7 +284,7 @@ fn multioutput_families_and_selective_observation_keep_general_evaluator() {
     let mut p = Program::new();
     source::compile(
         &mut p,
-        ": zero 0 = ; : yes drop true ;
+        ": zero 0 eq? ; : yes drop true ;
         : base drop 0 ctx missing ; : step 1 - recur 1 2 ;
         family f 1 2 zero base yes step ;",
     )

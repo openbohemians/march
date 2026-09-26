@@ -23,7 +23,7 @@ impl Executor<'_> {
     ///
     /// May be called only between observations. The caller must supply every
     /// handle it intends to keep, including fields held in previously returned
-    /// Pair values. Successful collection invalidates ALL old handles and returns
+    /// Tuple/Pair values. Successful collection invalidates ALL old handles and returns
     /// replacements for the supplied roots, preserving their order/duplicates.
     /// Re-observe a retained pair to acquire new handles to its fields.
     ///
@@ -52,11 +52,17 @@ impl Executor<'_> {
             self.frames.len(),
             self.argument_slots,
             roots.len(),
+            self.tuples.len(),
+            self.tuple_fields,
+            self.texts.len(),
+            self.text_bytes,
         ] {
             charge(&mut remaining, count)?;
         }
         let mut marked = vec![false; self.cells.len()];
         let mut frames_marked = vec![false; self.frames.len()];
+        let mut tuples_marked = vec![false; self.tuples.len()];
+        let mut texts_marked = vec![false; self.texts.len()];
         let mut todo = Vec::new();
         for h in roots {
             enqueue(h.cell, &mut marked, &mut todo);
@@ -84,6 +90,18 @@ impl Executor<'_> {
                     }
                 }
                 2 => match cell.value {
+                    Datum::Tuple(t) => {
+                        if !tuples_marked[t] {
+                            tuples_marked[t] = true;
+                            charge(&mut remaining, self.tuples[t].len())?;
+                            for &field in &self.tuples[t] {
+                                enqueue(field, &mut marked, &mut todo);
+                            }
+                        }
+                    }
+                    Datum::Text(data::TextRef::Runtime(t)) => {
+                        texts_marked[t] = true;
+                    }
                     Datum::Pair(a, b) => {
                         charge(&mut remaining, 2)?;
                         enqueue(a, &mut marked, &mut todo);
@@ -180,6 +198,26 @@ impl Executor<'_> {
             return Err(Error::StorageLimit);
         }
         let mut failures = HashMap::new();
+        let mut tuple_map = vec![usize::MAX; self.tuples.len()];
+        let mut tuples = Vec::new();
+        let mut tuple_fields = 0;
+        for (i, fields) in self.tuples.iter().enumerate() {
+            if tuples_marked[i] {
+                tuple_map[i] = tuples.len();
+                tuple_fields += fields.len();
+                tuples.push(fields.iter().map(|&c| cell_map[c]).collect());
+            }
+        }
+        let mut text_map = vec![usize::MAX; self.texts.len()];
+        let mut texts = Vec::new();
+        let mut text_bytes = 0;
+        for (i, text) in self.texts.iter().enumerate() {
+            if texts_marked[i] {
+                text_map[i] = texts.len();
+                text_bytes += text.len();
+                texts.push(text.clone());
+            }
+        }
         for (old, c) in self.cells.iter().enumerate() {
             if !marked[old] {
                 continue;
@@ -192,6 +230,10 @@ impl Executor<'_> {
             };
             if c.state == 2 {
                 c.value = match c.value {
+                    Datum::Tuple(t) => Datum::Tuple(tuple_map[t]),
+                    Datum::Text(data::TextRef::Runtime(t)) => {
+                        Datum::Text(data::TextRef::Runtime(text_map[t]))
+                    }
                     Datum::Pair(a, b) => Datum::Pair(cell_map[a], cell_map[b]),
                     Datum::Frame(f) => Datum::Frame(frame_map[f]),
                     other => other,
@@ -216,6 +258,10 @@ impl Executor<'_> {
         self.stats.collected_cells += self.cells.len() - cells.len();
         self.stats.collected_frames += self.frames.len() - frames.len();
         self.cells = cells;
+        self.tuples = tuples;
+        self.tuple_fields = tuple_fields;
+        self.texts = texts;
+        self.text_bytes = text_bytes;
         self.frames = frames;
         self.argument_slots = argument_slots;
         self.failures = failures;

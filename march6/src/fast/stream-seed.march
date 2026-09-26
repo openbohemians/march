@@ -4,7 +4,8 @@
 family seed.compile-mode 1 1 stream.immediate? stream.execute seed.yes stream.compile-call ;
 family seed.mode 1 1 stream.compiling? seed.compile-mode seed.yes stream.execute ;
 : seed.dictionary stream.find seed.mode ;
-family seed.classified 1 1 stream.number? stream.emit-number seed.yes seed.dictionary ;
+family seed.text-or-word 1 1 stream.text? stream.emit-text seed.yes seed.dictionary ;
+family seed.classified 1 1 stream.number? stream.emit-number seed.yes seed.text-or-word ;
 : seed.next stream.number seed.classified stream.word recur 1 1 ;
 family seed.loop 1 1 stream.eof? stream.end-source seed.yes seed.next ;
 : stream.interpret stream.word seed.loop ;
@@ -17,6 +18,8 @@ family seed.loop 1 1 stream.eof? stream.end-source seed.yes seed.next ;
 : seed.context stream.word stream.context ;
 : seed.recur stream.word stream.number stream.count stream.word stream.number stream.recur ;
 : seed.apply stream.word stream.number stream.count stream.word stream.number stream.apply ;
+: seed.tuple stream.word stream.number stream.tuple ;
+: seed.untuple stream.word stream.number stream.untuple ;
 
 -- Family syntax is also a stream-consuming dictionary word.
 : seed.family-end? 59 stream.word-byte= ;

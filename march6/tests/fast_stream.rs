@@ -137,7 +137,7 @@ fn lazy_quotations_context_and_recursion_keep_runtime_semantics() {
     ] {
         assert_eq!(evaluate(text), [Value::Int(expected)], "{text}");
     }
-    let fib = ": zero 0 = ; : one 1 = ; : always drop true ; : base dup drop ;
+    let fib = ": zero 0 eq? ; : one 1 eq? ; : always drop true ; : base dup drop ;
         : step dup 1 - recur 1 1 swap 2 - recur 1 1 + ;
         family fib 1 1 zero base one base always step ; 10 fib";
     assert_eq!(evaluate(fib), [Value::Int(55)]);

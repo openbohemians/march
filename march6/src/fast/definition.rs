@@ -7,11 +7,79 @@ pub(super) const DOMAIN: &[u8] = b"march-definition-v1";
 /// These spellings are stable semantic primitive identifiers, not dictionary
 /// bindings. Changing a primitive's meaning requires a new identifier/version.
 pub const RUNTIME_PRIMITIVES: &[&str] = &[
-    "dup", "drop", "swap", "over", "+", "-", "*", "=", "<", "pair", "first", "second", "select",
-    "true", "false", "unit",
+    "dup",
+    "drop",
+    "swap",
+    "over",
+    "+",
+    "-",
+    "*",
+    "=",
+    "<",
+    "pair",
+    "first",
+    "second",
+    "select",
+    "true",
+    "false",
+    "unit",
+    "tuple-length",
+    "nth",
+    "tuple-set",
+    "text-bytes",
+    "text-chars",
+    "text-concat",
+    "text-slice",
 ];
 
+/// Source names are separate from the stable primitive identities above.
+/// Renaming a dictionary entry must not change the CID of existing code.
+pub(super) fn install_runtime(program: &mut Program) -> Result<(), Error> {
+    for &semantic in RUNTIME_PRIMITIVES {
+        let name = match semantic {
+            "=" => "eq?",
+            "<" => "lt?",
+            name => name,
+        };
+        if program.lookup(name).is_none() {
+            let word = program.add_definition(Definition::Primitive(semantic.into()))?;
+            program.bind(name, word)?;
+        }
+    }
+    // Ordinary compositions, exactly as if defined in March:
+    // : gt? swap lt? ; : gte? lt? false true select ;
+    // : lte? gt? false true select ;
+    for (name, body) in [
+        ("gt?", &["swap", "lt?"][..]),
+        ("gte?", &["lt?", "false", "true", "select"][..]),
+        ("lte?", &["gt?", "false", "true", "select"][..]),
+    ] {
+        if program.lookup(name).is_none() {
+            let items =
+                body.iter()
+                    .map(|name| {
+                        program.lookup(name).map(Item::Word).ok_or_else(|| {
+                            Error::InvalidCode("missing comparison dependency".into())
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+            let word = program.add_definition(Definition::Sequence(items))?;
+            program.bind(name, word)?;
+        }
+    }
+    Ok(())
+}
+
 fn primitive(name: &str) -> Result<(usize, Vec<Op>, Vec<Slot>), Error> {
+    if let Some(&(_, primitive)) = super::data::PRIMITIVES.iter().find(|(n, _)| *n == name) {
+        let n = primitive.arity();
+        let mut ops: Vec<_> = (0..n).map(Op::Arg).collect();
+        ops.push(Op::Data {
+            primitive,
+            arguments: (0..n).collect(),
+        });
+        return Ok((n, ops, vec![n]));
+    }
     let (inputs, operation, outputs) = match name {
         "dup" => (1, None, vec![0, 0]),
         "drop" => (1, None, vec![]),
@@ -52,6 +120,8 @@ fn primitive(name: &str) -> Result<(usize, Vec<Op>, Vec<Slot>), Error> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item {
+    Tuple(usize),
+    Untuple(usize),
     Word(WordId),
     Literal(Literal),
     Context(String),
@@ -124,6 +194,12 @@ impl Program {
                 let mut body = source::Body::default();
                 for item in items {
                     match item {
+                        Item::Tuple(n) | Item::Untuple(n) => {
+                            if *n > 4096 {
+                                return Err(Error::InvalidCode("tuple contract limit".into()));
+                            }
+                            body.tuple(*n, matches!(item, Item::Untuple(_)));
+                        }
                         Item::Word(w) => {
                             body.call(self, *w).map_err(|e| Error::InvalidCode(e.0))?
                         }
@@ -182,6 +258,14 @@ impl Program {
                 put(&mut out, items.len());
                 for item in items {
                     match item {
+                        Item::Tuple(n) => {
+                            out.push(6);
+                            put(&mut out, *n);
+                        }
+                        Item::Untuple(n) => {
+                            out.push(7);
+                            put(&mut out, *n);
+                        }
                         Item::Word(w) => {
                             out.push(0);
                             out.extend_from_slice(&self.cid(*w)?.0);

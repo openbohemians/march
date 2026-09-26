@@ -19,7 +19,8 @@ fixed point, but this is still not a complete self-hosted language.
 2. Stop at EOF, checking that definitions are complete.
 3. Try the word as a number.
 4. If numeric, place that literal in the current pending expression/definition.
-5. Otherwise look it up in the ordinary dictionary.
+5. Otherwise, if it starts with `"`, consume/decode a text literal; otherwise
+   look it up in the ordinary dictionary.
 6. Execute a compiler word, or compile/compose the referenced ordinary word
    according to the current mode and the entry's immediate flag.
 7. Repeat.
@@ -68,6 +69,12 @@ These spellings are dictionary entries, not reserved reader cases. Runtime
 primitives such as `dup` and `+` are dictionary words too. Redefinition changes
 subsequent lookup; existing compiled references retain their old code identity.
 
+Comparison bindings are `eq?`, `lt?`, `gt?`, `gte?`, and `lte?`, without default
+symbolic aliases. The first two retain the semantic primitive identifiers `=`
+and `<` in canonical definitions; this dictionary rename does not alter their
+CIDs. The other three are ordinary compositions installed by the seed builder
+(see FAST-SPIKE.md), and can be rebuilt identically in March.
+
 Whitespace separates words: `: square dup * ;` works; `:square`, `*;`, and
 `7[` are each distinct words, not punctuation split by a lexer. Conversely,
 a comment or custom delimiter-reading word can consume arbitrary raw text that
@@ -100,6 +107,24 @@ cargo run --offline --release --bin march-fast -- examples/fast/compiler.march
 ```
 
 ## Native boundary and remaining bootstrap work
+
+Text recognition is a March family (`seed.text-or-word`) after number
+recognition. `stream.text?` tests the current word's leading quote;
+`stream.emit-text` consumes the full literal from the raw input, validates its
+terminator/escapes, interns the decoded UTF-8, and emits the literal. WORD itself
+remains whitespace-only. Text uses conventional `"hello world"` and `""`, with
+`\"`, `\\`, `\n`, `\r`, and `\t` escapes. Unknown escapes and unterminated
+strings are errors. A closing quote must be followed by whitespace or EOF in
+the stream syntax. Newlines inside a literal are preserved. No normalization
+or interpolation is performed.
+
+`tuple N` and `untuple N` are also input-consuming March words; N is a fixed
+compile-time stack contract (0–4096), not a demanded runtime count. These emit
+canonical definition items, lowered through the same engine on image reload.
+`stream.emit-literal` now accepts text, but rejects runtime tuples and compiler
+state: saving code must not silently demand a live heap. A word that *constructs*
+a tuple is ordinary serializable code. Arrays/auto-classifying parentheses are
+not implemented; `(` still denotes the existing comment word for now.
 
 Native code still supplies:
 

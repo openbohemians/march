@@ -74,13 +74,15 @@ fn l1_repeated_identical_call_costs_nothing_extra_regardless_of_body_size() {
 
 #[test]
 fn definition_identity_preserves_shuffles_even_when_lowering_erases_them() {
-    assert!(boolean("[ dup * ] [ dup * ] ="));
-    assert!(!boolean("[ dup * ] [ dup dup * swap drop ] ="));
-    assert!(!boolean("[ dup * ] [ dup * 0 + ] ="));
-    assert!(!boolean("[ dup * ] [ dup + ] ="));
+    assert!(boolean("[ dup * ] [ dup * ] eq?"));
+    assert!(!boolean("[ dup * ] [ dup dup * swap drop ] eq?"));
+    assert!(!boolean("[ dup * ] [ dup * 0 + ] eq?"));
+    assert!(!boolean("[ dup * ] [ dup + ] eq?"));
     // Naming does not erase differences between composed definitions.
-    assert!(!boolean(": a dup * ; : b dup dup * swap drop ; ' a ' b ="));
-    assert!(boolean(": a dup * ; : b dup * ; ' a ' b ="));
+    assert!(!boolean(
+        ": a dup * ; : b dup dup * swap drop ; ' a ' b eq?"
+    ));
+    assert!(boolean(": a dup * ; : b dup * ; ' a ' b eq?"));
 }
 
 #[test]
@@ -205,7 +207,7 @@ fn cycle_same_argument_cell_is_a_cycle_but_equal_recomputed_value_is_fuel() {
         Error::Cycle
     );
     // A cycle is an error outcome, never a cached value: a fresh run works.
-    let (program, word) = compile(": choose 0 = 7 3 select ; choose");
+    let (program, word) = compile(": choose 0 eq? 7 3 select ; choose");
     let mut executor = Executor::new(&program);
     assert_eq!(
         ints(
@@ -357,7 +359,7 @@ fn a_raw_call_bundle_as_output_is_a_type_error_not_a_panic() {
 fn a_helper_word_called_from_a_clause_body_recurs_into_itself_not_the_family() {
     // `helper` recurs into itself with an unchanged argument: Cycle. It must
     // not silently re-enter the family with a different meaning.
-    let text = ": zero 0 = ; : always drop true ; : base dup drop ; : helper recur 1 1 ; \
+    let text = ": zero 0 eq? ; : always drop true ; : base dup drop ; : helper recur 1 1 ; \
                 : step helper ; family down 1 1 zero base always step ; 3 down";
     assert_eq!(failure(text, BUDGET), Error::Cycle);
 }
@@ -366,7 +368,7 @@ fn a_helper_word_called_from_a_clause_body_recurs_into_itself_not_the_family() {
 
 fn tail_source(entry: &str) -> String {
     format!(
-        ": zero 0 = ; : always drop true ; : base dup drop ; : step 1 - recur 1 1 ; \
+        ": zero 0 eq? ; : always drop true ; : base dup drop ; : step 1 - recur 1 1 ; \
          family down 1 1 zero base always step ; {entry}"
     )
 }
@@ -400,7 +402,7 @@ fn tail_loop_and_generic_engine_agree_on_values_errors_and_cycles() {
         );
     }
     // Unchanged-argument recursion cycles under both derivations.
-    let text = ": zero 0 = ; : always drop true ; : base dup drop ; : same recur 1 1 ; \
+    let text = ": zero 0 eq? ; : always drop true ; : base dup drop ; : same recur 1 1 ; \
                 family stuck 1 1 zero base always same ;";
     assert_eq!(failure(&format!("{text} 3 stuck"), BUDGET), Error::Cycle);
     assert_eq!(
@@ -409,7 +411,7 @@ fn tail_loop_and_generic_engine_agree_on_values_errors_and_cycles() {
     );
     // Neither derivation runs the unselected recursive argument: with the
     // base clause selected first, an overflowing step argument is never built.
-    let text = ": zero 0 = ; : always drop true ; : base dup drop ; \
+    let text = ": zero 0 eq? ; : always drop true ; : base dup drop ; \
                 : step 9223372036854775807 + recur 1 1 ; \
                 family safe 1 1 zero base always step ;";
     for entry in ["0 safe", "0 ' safe apply 1 1"] {

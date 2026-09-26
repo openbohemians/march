@@ -63,6 +63,32 @@ Use `first` and `second` to inspect fields selectively.
 - Explicit evaluation task stack, stale/cross-executor handle checks, bounded
   fuel and storage, and demanded-slot recursive-cycle detection.
 
+Comparisons use postfix predicate names, each taking `a b` and returning a
+Boolean:
+
+| Word | Meaning |
+|---|---|
+| `eq?` | a equals b |
+| `lt?` | a is less than b |
+| `gt?` | a is greater than b |
+| `lte?` | a is less than or equal to b |
+| `gte?` | a is greater than or equal to b |
+
+The seed does not bind `=`, `<`, `>`, `<=`, or `>=`. These are still legal names
+for user definitions. `eq?` and `lt?` bind the existing semantic primitives;
+their CIDs do not change with the source spelling. The other three are ordinary
+composed words, not additional native operations:
+
+```forth
+: gt? swap lt? ;
+: gte? lt? false true select ;
+: lte? gt? false true select ;
+```
+
+Ordering is defined for two integers or two texts, not across types. The
+reversed comparisons inherit the demand order of `swap lt?`. No universal
+type ordering has been introduced.
+
 The CLI uses `stream::compile`, not the host `source::compile` test/seed reader.
 Both readers now produce the same definition identity and quotation equality.
 `stream-seed.march` owns the read/number/lookup/execute-or-compile loop. Native
@@ -227,11 +253,65 @@ Other missing pieces:
 - Execution budgets count implementation work and differ between scalar and
   generic paths; they are safety limits, not semantic cost measurements.
 
+## Text and lazy tuples
+
+Text is a distinct immutable UTF-8 value, not an integer list. Literals use
+`"..."`/`""` with `\"`, `\\`, `\n`, `\r`, and `\t`. Exact decoded bytes
+determine identity: composed/decomposed Unicode spellings remain distinct.
+`eq?` compares text bytes and `lt?` orders UTF-8 bytes, not locale collation.
+Code-point operations do not claim grapheme/user-perceived-character behavior.
+
+| Word | Stack contract | Behavior |
+|---|---|---|
+| `tuple N` | N values → tuple | Fixed arity; no fields demanded. |
+| `untuple N` | tuple → N values | Checks exact arity when an output is demanded; dropped outputs stay lazy. |
+| `tuple-length` | tuple → integer | Demands the container, not fields. |
+| `nth` | tuple index → value | Zero-based; container, index, range check, then selected field. |
+| `tuple-set` | tuple index replacement → tuple | New tuple sharing other fields; replacement stays lazy. |
+| `text-bytes` | text → integer | UTF-8 byte length. |
+| `text-chars` | text → integer | Unicode scalar count; linear scan. |
+| `text-concat` | text text → text | Copies into a new immutable buffer. |
+| `text-slice` | text start end → text | Half-open byte offsets; rejects invalid UTF-8 boundaries; copies. |
+
+Zero fields is `unit`; one field is a distinct singleton tuple; two fields are
+the existing pair representation. `first`/`second` select tuple fields 0/1.
+Host callers still see `Value::Pair` for two fields and `Value::Tuple` for
+other nonempty arities. Tuple equality compares arity, then fields left-to-right
+using their scalar/tuple equality rules, short-circuiting at a difference.
+`eq?` returns false across different value types, including mismatched tuple
+field types; it does not coerce values. Both operands are still demanded, so
+evaluation errors and divergence remain observable. Internal compiler-state
+capabilities are not comparable. Ordering predicates and arithmetic remain type-strict.
+Even two references to the same tuple do not skip potentially failing fields.
+Full `content_id` observes all fields with bounded traversal. `untuple 0` has
+no result to demand, so does not force or validate its input.
+
+```forth
+"hello" 7 ctx absent tuple 3 0 nth
+-- Text("hello"); the missing context field is never demanded.
+```
+
+Program text literals are interned under a 32 MiB aggregate byte cap. Their
+definition/image encoding contains text bytes, never local text IDs. Runtime
+text buffers and non-pair tuple fields use simple executor arenas; explicit
+collection traces/remaps them alongside cells. `text_byte_limit` defaults to
+32 MiB and `tuple_field_limit` to 1,000,000 slots. Byte-scanning/copying operations
+charge fuel. `Storage` reports runtime text bytes and tuple field slots; program
+literals and host-owned returned strings are excluded. Limits are logical
+payload limits, not a hard process RSS guarantee. Collection remains atomic,
+requires explicit roots, and invalidates previously returned field handles.
+Slices copy now; shared-buffer slicing and advanced memory planning are deferred.
+
+The native host API supports `Program::intern_text`, `Literal::Text`, and
+`InputNode::Text`/`Tuple`; local literal IDs belong to their Program, like word
+IDs. Code images still do not contain live tuple heaps or pending computations.
+
 ## Verification and next decisions
 
 Tests are split into `fast_core`, `fast_source`, `fast_image`, `fast_reference`,
 `fast_values`, `fast_tail`, `fast_adversarial_claude`, `fast_collection`,
-`fast_reclamation_claude`, and `fast_stream`; the old implementations
+`fast_reclamation_claude`, `fast_stream`, `fast_definition`, `fast_data`, and
+`fast_comparison`; the old implementations
 and tests are retained. These cover
 selective demand, sharing, overflow/error order, recursion, dynamic quotation
 arity, image corruption and canonicality, lazy streams, value identity, and
@@ -281,10 +361,32 @@ Verification: **494 total tests, including 149 fast-engine tests**, pass in
 debug and release, along with all-target Clippy (warnings denied), formatting,
 and whitespace checks.
 
+The text/tuple checkpoint adds 22 integration tests and one kernel-state
+containment test: **517 total tests, including 172 fast-engine tests**, pass in
+debug and release. All-target Clippy (warnings denied), formatting, and
+whitespace checks pass. Coverage includes seed-controlled string recognition,
+UTF-8 boundaries, independently lazy tuple fields, structural equality and
+value CIDs, code-image round trips, bounded divergent observations, storage
+limits, and atomic collection of tuple fields and runtime text.
+
+The cross-type equality follow-up adds three tests covering all-pairs value
+comparisons, mixed tuple fields, preserved demand errors, and noncomparable
+compiler-state capabilities. **520 total tests, including 175 fast-engine
+tests**, pass in debug and release; all-target Clippy (warnings denied),
+formatting, and whitespace checks pass.
+
+The postfix-predicate follow-up adds five tests for `eq?`, `lt?`, `gt?`,
+`lte?`, and `gte?`, including host/stream identity, composed definitions,
+image round trips, and rebinding. **525 total tests, including 180 fast-engine
+tests**, pass in debug and release, along with all-target Clippy (warnings
+denied), formatting, and whitespace checks. The CLI predicate smoke test passes.
+
 The next bootstrap priority is reducing native seed assembly and graph/stack
 construction, and resolving the compiler-state versus runtime-stack interface.
-Memory work still includes live-continuation/forwarding behavior
-and automatic root management. Richer contextual groups and general staging
+Advanced memory-management research is deferred to a later "2.0"; for now retain
+correctness and safety limits using straightforward storage. The next bootstrap
+slice uses text/tuples to expose definition inspection and construction to March.
+Richer contextual groups and general staging
 remain separate priorities. Before claiming this replaces the reference, settle the independent
 equal-call sharing contract and the missing-context/residualization contract.
 Self-hosting should build on those decisions, not conceal them.

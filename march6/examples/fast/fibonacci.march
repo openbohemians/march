@@ -1,6 +1,6 @@
 \ A contextual definition example, not a performance benchmark.
-: zero 0 = ;
-: one 1 = ;
+: zero 0 eq? ;
+: one 1 eq? ;
 : always drop true ;
 : base dup drop ;
 : step dup 1 - recur 1 1 swap 2 - recur 1 1 + ;

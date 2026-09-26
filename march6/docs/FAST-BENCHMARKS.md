@@ -259,7 +259,7 @@ The benchmark also compiles this tail-recursive source family and invokes its
 `countdown` word directly, without a source-root wrapper:
 
 ```forth
-: zero 0 = ;
+: zero 0 eq? ;
 : always drop true ;
 : base drop 0 ;
 : step 1 - recur 1 1 ;

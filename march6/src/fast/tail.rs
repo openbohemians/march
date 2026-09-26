@@ -144,7 +144,8 @@ impl Executor<'_> {
                 FastOp::Const(dst, v) => self.registers[dst] = v.into(),
                 FastOp::Binary(dst, b, a, c) => {
                     self.stats.primitive_ops += 1;
-                    self.registers[dst] = binary(b, self.registers[a], self.registers[c])?;
+                    self.registers[dst] =
+                        self.scalar_binary(b, self.registers[a], self.registers[c])?;
                 }
             }
         }

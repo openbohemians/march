@@ -62,8 +62,9 @@ impl<'a> Reader<'a> {
         let n = self.count(MAX_BYTES, 1)?;
         String::from_utf8(self.take(n)?.to_vec()).map_err(|_| invalid("invalid UTF-8"))
     }
-    fn literal(&mut self, program: &Program) -> Result<Literal, Error> {
+    fn literal(&mut self, program: &mut Program) -> Result<Literal, Error> {
         Ok(match self.byte()? {
+            4 => Literal::Text(program.intern_text(&self.string()?)?),
             0 => Literal::Int(i64::from_le_bytes(self.take(8)?.try_into().unwrap())),
             1 => Literal::Bool(match self.byte()? {
                 0 => false,
@@ -75,7 +76,7 @@ impl<'a> Reader<'a> {
             _ => return Err(invalid("unknown literal tag")),
         })
     }
-    fn definition(&mut self, program: &Program) -> Result<Definition, Error> {
+    fn definition(&mut self, program: &mut Program) -> Result<Definition, Error> {
         Ok(match self.byte()? {
             0 => Definition::Primitive(self.string()?),
             1 => Definition::Kernel(super::stream::Primitive::decode(self.byte()?)?),
@@ -84,6 +85,8 @@ impl<'a> Reader<'a> {
                 let items = (0..n)
                     .map(|_| {
                         Ok(match self.byte()? {
+                            6 => Item::Tuple(self.number()?),
+                            7 => Item::Untuple(self.number()?),
                             0 => Item::Word(self.word(program)?),
                             1 => Item::Literal(self.literal(program)?),
                             2 => Item::Context(self.string()?),
@@ -239,7 +242,7 @@ impl Program {
                 return Err(invalid("word CID mismatch"));
             }
             let mut word = Reader::new(canonical);
-            let definition = word.definition(&program)?;
+            let definition = word.definition(&mut program)?;
             if word.remaining() != 0 {
                 return Err(invalid("trailing definition bytes"));
             }

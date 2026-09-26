@@ -7,6 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod collect;
+pub mod data;
 pub mod definition;
 mod image;
 mod input;
@@ -25,6 +26,7 @@ pub enum Literal {
     Bool(bool),
     Unit,
     Quote(WordId),
+    Text(usize), // Program-local text handle; canonical encoding contains bytes.
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -38,6 +40,15 @@ pub enum Binary {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
+    Tuple(Vec<Slot>),
+    TupleCheck {
+        tuple: Slot,
+        count: usize,
+    },
+    Data {
+        primitive: data::Primitive,
+        arguments: Vec<Slot>,
+    },
     Arg(usize),
     Const(Literal),
     Context(String),
@@ -117,12 +128,14 @@ pub enum Value {
     Unit,
     Quote(Cid),
     Pair(Handle, Handle),
+    Tuple(Vec<Handle>),
+    Text(String),
     CompilerState(stream::StateHandle),
 }
 
 impl Value {
     /// Identity at an explicit observation boundary, never the execution loop.
-    /// A Pair needs its owning Executor's content_id to demand its fields.
+    /// A tuple/pair needs its owning Executor's content_id to demand its fields.
     pub fn scalar_cid(&self) -> Option<Cid> {
         let mut bytes = Vec::new();
         match self {
@@ -139,7 +152,11 @@ impl Value {
                 bytes.push(3);
                 bytes.extend_from_slice(&cid.0);
             }
-            Self::Pair(..) | Self::CompilerState(_) => return None,
+            Self::Text(s) => {
+                bytes.push(6);
+                text_bytes(&mut bytes, s);
+            }
+            Self::Pair(..) | Self::Tuple(_) | Self::CompilerState(_) => return None,
         }
         Some(Cid::digest(b"march-fast-value-v1", &bytes))
     }
@@ -159,6 +176,9 @@ struct Word {
 
 #[derive(Clone, Debug, Default)]
 pub struct Program {
+    texts: Vec<std::sync::Arc<str>>,
+    text_ids: HashMap<std::sync::Arc<str>, usize>,
+    text_bytes: usize,
     words: Vec<Word>,
     identities: HashMap<Cid, WordId>,
     names: BTreeMap<String, WordId>,
@@ -252,6 +272,15 @@ impl Program {
                 ));
             }
             match op {
+                Op::Data {
+                    primitive,
+                    arguments,
+                } if primitive.arity() != arguments.len() => {
+                    return Err(Error::InvalidCode("data primitive arity".into()));
+                }
+                Op::Const(Literal::Text(t)) => {
+                    self.text(*t)?;
+                }
                 Op::Kernel {
                     primitive,
                     arguments,
@@ -382,6 +411,10 @@ impl Program {
 
     fn encode_literal(&self, out: &mut Vec<u8>, value: Literal) -> Result<(), Error> {
         match value {
+            Literal::Text(t) => {
+                out.push(4);
+                text_bytes(out, self.text(t)?);
+            }
             Literal::Int(n) => {
                 out.push(0);
                 out.extend_from_slice(&n.to_le_bytes());
@@ -404,6 +437,23 @@ impl Program {
         put(&mut out, ops.len());
         for op in ops {
             match op {
+                Op::Tuple(fields) => {
+                    out.push(14);
+                    slots_bytes(&mut out, fields);
+                }
+                Op::TupleCheck { tuple, count } => {
+                    out.push(15);
+                    put(&mut out, *tuple);
+                    put(&mut out, *count);
+                }
+                Op::Data {
+                    primitive,
+                    arguments,
+                } => {
+                    out.push(16);
+                    out.push(*primitive as u8);
+                    slots_bytes(&mut out, arguments);
+                }
                 Op::Kernel {
                     primitive,
                     arguments,
@@ -509,6 +559,9 @@ fn slots_bytes(out: &mut Vec<u8>, slots: &[Slot]) {
 }
 fn dependencies(op: &Op) -> Vec<Slot> {
     match op {
+        Op::Tuple(fields) => fields.clone(),
+        Op::TupleCheck { tuple, .. } => vec![*tuple],
+        Op::Data { arguments, .. } => arguments.clone(),
         Op::Binary(_, a, b) | Op::Pair(a, b) => vec![*a, *b],
         Op::Select {
             condition,
@@ -541,6 +594,15 @@ fn canonical_ops(ops: Vec<Op>) -> (Vec<Op>, Vec<Slot>) {
     for mut op in ops {
         let rewrite = |s: &mut Slot| *s = remap[*s];
         match &mut op {
+            Op::Tuple(fields)
+            | Op::Data {
+                arguments: fields, ..
+            } => {
+                for s in fields {
+                    rewrite(s);
+                }
+            }
+            Op::TupleCheck { tuple, .. } => rewrite(tuple),
             Op::Binary(_, a, b) | Op::Pair(a, b) => {
                 rewrite(a);
                 rewrite(b);
@@ -723,6 +785,8 @@ enum Datum {
     Unit,
     Quote(WordId),
     Pair(usize, usize),
+    Tuple(usize),
+    Text(data::TextRef),
     Frame(usize),
     CompilerState(stream::StateHandle),
 }
@@ -733,6 +797,7 @@ impl From<Literal> for Datum {
             Literal::Bool(b) => Self::Bool(b),
             Literal::Unit => Self::Unit,
             Literal::Quote(w) => Self::Quote(w),
+            Literal::Text(t) => Self::Text(data::TextRef::Program(t)),
         }
     }
 }
@@ -776,6 +841,11 @@ struct Frame {
 }
 #[derive(Clone, Copy)]
 enum Task {
+    Data(usize, usize), // destination, next argument phase
+    TupleCheck(usize, usize, usize),
+    EqualFinish(usize),
+    EqualValues(usize, usize),
+    EqualFields(Datum, Datum, usize),
     Need(usize),
     Copy(usize, usize),
     Binary(usize, Binary, usize, usize),
@@ -811,6 +881,8 @@ pub struct Stats {
 /// payloads, collector scratch space, and immutable Program code.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Storage {
+    pub tuple_fields: usize,
+    pub text_bytes: usize,
     /// Allocated slots, including reserved but unreachable slots of live frames.
     pub cells: usize,
     /// Non-padding slots; not a reachability count before collection.
@@ -829,6 +901,13 @@ static EPOCH: AtomicU64 = AtomicU64::new(1);
 /// An invocation-scoped workspace, not a persistent heap. Starting a new run
 /// invalidates old handles; dropping/resetting it releases all pending cells.
 pub struct Executor<'p> {
+    tuples: Vec<Vec<usize>>,
+    tuple_fields: usize,
+    texts: Vec<std::sync::Arc<str>>,
+    text_bytes: usize,
+    comparison: bool,
+    pub tuple_field_limit: usize,
+    pub text_byte_limit: usize,
     program: &'p Program,
     kernel: Option<&'p mut stream::Kernel>,
     cells: Vec<Cell>,
@@ -850,6 +929,13 @@ pub struct Executor<'p> {
 impl<'p> Executor<'p> {
     pub fn new(program: &'p Program) -> Self {
         Self {
+            tuples: Vec::new(),
+            tuple_fields: 0,
+            texts: Vec::new(),
+            text_bytes: 0,
+            comparison: false,
+            tuple_field_limit: 1_000_000,
+            text_byte_limit: 32 * 1024 * 1024,
             program,
             kernel: None,
             cells: Vec::new(),
@@ -874,6 +960,8 @@ impl<'p> Executor<'p> {
     }
     pub fn storage(&self) -> Storage {
         Storage {
+            tuple_fields: self.tuple_fields,
+            text_bytes: self.text_bytes,
             cells: self.cells.len(),
             live_cells: self.cells.iter().filter(|c| c.state != 4).count(),
             frames: self.frames.len(),
@@ -883,7 +971,14 @@ impl<'p> Executor<'p> {
             task_capacity: self.work.capacity(),
             failures: self.failures.len(),
             active_demands: self.active_demands.values().map(Vec::len).sum(),
-            vector_bytes: self.cells.capacity() * std::mem::size_of::<Cell>()
+            vector_bytes: self.tuples.capacity() * std::mem::size_of::<Vec<usize>>()
+                + self
+                    .tuples
+                    .iter()
+                    .map(|v| v.capacity() * std::mem::size_of::<usize>())
+                    .sum::<usize>()
+                + self.texts.capacity() * std::mem::size_of::<std::sync::Arc<str>>()
+                + self.cells.capacity() * std::mem::size_of::<Cell>()
                 + self.frames.capacity() * std::mem::size_of::<Frame>()
                 + self.work.capacity() * std::mem::size_of::<Task>()
                 + self.registers.capacity() * std::mem::size_of::<Datum>()
@@ -903,6 +998,10 @@ impl<'p> Executor<'p> {
         }
     }
     fn reset(&mut self, budget: usize) {
+        self.tuples.clear();
+        self.tuple_fields = 0;
+        self.texts.clear();
+        self.text_bytes = 0;
         self.cells.clear();
         self.frames.clear();
         self.work.clear();
@@ -924,6 +1023,9 @@ impl<'p> Executor<'p> {
             });
         }
         for a in args {
+            if let Literal::Text(t) = a {
+                self.program.text(*t)?;
+            }
             if let Literal::Quote(w) = a {
                 self.program.word(*w)?;
             }
@@ -1099,7 +1201,8 @@ impl<'p> Executor<'p> {
                     FastOp::Const(dst, v) => self.registers[dst] = v.into(),
                     FastOp::Binary(dst, b, a, c) => {
                         self.stats.primitive_ops += 1;
-                        self.registers[dst] = binary(b, self.registers[a], self.registers[c])?;
+                        self.registers[dst] =
+                            self.scalar_binary(b, self.registers[a], self.registers[c])?;
                     }
                 }
             }
@@ -1146,6 +1249,16 @@ impl<'p> Executor<'p> {
     }
     fn external(&self, value: Datum) -> Result<Value, Error> {
         Ok(match value {
+            Datum::Text(t) => Value::Text(self.text_value(t)?.to_owned()),
+            Datum::Tuple(t) => Value::Tuple(
+                self.tuples[t]
+                    .iter()
+                    .map(|&cell| Handle {
+                        epoch: self.epoch,
+                        cell,
+                    })
+                    .collect(),
+            ),
             Datum::Int(n) => Value::Int(n),
             Datum::Bool(b) => Value::Bool(b),
             Datum::Unit => Value::Unit,
@@ -1209,7 +1322,7 @@ impl<'p> Executor<'p> {
         }
         enum Visit {
             Need(Handle),
-            Pair(Handle, Handle, Handle),
+            Fields(Handle, Vec<Handle>),
         }
         let mut todo = vec![Visit::Need(handle)];
         let mut memo = HashMap::new();
@@ -1230,11 +1343,21 @@ impl<'p> Executor<'p> {
                     }
                     match self.force(h)? {
                         Value::Pair(a, b) => {
-                            todo.push(Visit::Pair(h, a, b));
+                            todo.push(Visit::Fields(h, vec![a, b]));
                             todo.push(Visit::Need(b));
                             todo.push(Visit::Need(a));
                         }
+                        Value::Tuple(fields) => {
+                            todo.push(Visit::Fields(h, fields.clone()));
+                            todo.extend(fields.into_iter().rev().map(Visit::Need));
+                        }
                         value => {
+                            if let Value::Text(text) = &value
+                                && let Err(e) = self.data_charge(text.len())
+                            {
+                                self.aborted = Some(e.clone());
+                                return Err(e);
+                            }
                             memo.insert(
                                 h.cell,
                                 value.scalar_cid().ok_or(Error::Type(
@@ -1244,11 +1367,17 @@ impl<'p> Executor<'p> {
                         }
                     }
                 }
-                Visit::Pair(h, a, b) => {
-                    let mut bytes = Vec::with_capacity(65);
-                    bytes.push(4);
-                    bytes.extend_from_slice(&memo[&a.cell].0);
-                    bytes.extend_from_slice(&memo[&b.cell].0);
+                Visit::Fields(h, fields) => {
+                    let mut bytes = Vec::new();
+                    if fields.len() == 2 {
+                        bytes.push(4);
+                    } else {
+                        bytes.push(5);
+                        put(&mut bytes, fields.len());
+                    }
+                    for field in fields {
+                        bytes.extend_from_slice(&memo[&field.cell].0);
+                    }
                     memo.insert(h.cell, Cid::digest(b"march-fast-value-v1", &bytes));
                 }
             }
@@ -1315,6 +1444,16 @@ impl<'p> Executor<'p> {
                 let f = &self.frames[c.frame];
                 let base = f.base;
                 match &program.word(f.word)?.ops[c.slot] {
+                    Op::Tuple(fields) => {
+                        let fields = fields.iter().map(|s| base + s).collect();
+                        let value = self.make_tuple(fields)?;
+                        self.ready(dst, value);
+                    }
+                    Op::TupleCheck { tuple, count } => {
+                        self.work.push(Task::TupleCheck(dst, base + tuple, *count));
+                        self.work.push(Task::Need(base + tuple));
+                    }
+                    Op::Data { .. } => self.work.push(Task::Data(dst, 0)),
                     Op::Kernel { arguments, .. } => {
                         self.work.push(Task::Kernel(dst));
                         for slot in arguments.iter().rev() {
@@ -1338,6 +1477,9 @@ impl<'p> Executor<'p> {
                             .ok_or_else(|| Error::MissingContext(key.clone()))?;
                         if let Literal::Quote(w) = v {
                             self.program.word(w)?;
+                        }
+                        if let Literal::Text(t) = v {
+                            self.program.text(t)?;
                         }
                         self.ready(dst, v.into());
                     }
@@ -1449,8 +1591,15 @@ impl<'p> Executor<'p> {
             }
             Task::Binary(dst, b, a, c) => {
                 self.stats.primitive_ops += 1;
-                let value = binary(b, self.value(a), self.value(c))?;
-                self.ready(dst, value);
+                if b == Binary::Eq && (self.is_tuple(self.value(a)) || self.is_tuple(self.value(c)))
+                {
+                    self.comparison = true;
+                    self.work.push(Task::EqualFinish(dst));
+                    self.work.push(Task::EqualValues(a, c));
+                } else {
+                    let value = self.scalar_binary(b, self.value(a), self.value(c))?;
+                    self.ready(dst, value);
+                }
             }
             Task::Choose(dst, c, t, f) => {
                 let Datum::Bool(b) = self.value(c) else {
@@ -1459,11 +1608,24 @@ impl<'p> Executor<'p> {
                 self.copy_later(dst, if b { t } else { f });
             }
             Task::Field(dst, src, second) => {
-                let Datum::Pair(a, b) = self.value(src) else {
-                    return Err(Error::Type("expected pair"));
-                };
-                self.copy_later(dst, if second { b } else { a });
+                let field = self.tuple_field(self.value(src), usize::from(second))?;
+                self.copy_later(dst, field);
             }
+            Task::Data(dst, phase) => self.data_step(dst, phase)?,
+            Task::TupleCheck(dst, src, count) => {
+                let value = self.value(src);
+                let actual = self.tuple_len(value)?;
+                if actual != count {
+                    return Err(Error::Arity {
+                        expected: count,
+                        actual,
+                    });
+                }
+                self.ready(dst, value);
+            }
+            Task::EqualFinish(dst) => self.ready(dst, Datum::Bool(self.comparison)),
+            Task::EqualValues(a, b) => self.equal_values(self.value(a), self.value(b))?,
+            Task::EqualFields(a, b, index) => self.equal_fields(a, b, index)?,
             Task::Project(dst, src, output) => {
                 let Datum::Frame(frame) = self.value(src) else {
                     return Err(Error::Type("expected call bundle"));

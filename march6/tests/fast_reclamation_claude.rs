@@ -430,7 +430,7 @@ fn cycle_identity_is_stable_across_collections_in_both_directions() {
     assert_eq!(executor.force(handle), Err(Error::Cycle));
     assert_eq!(executor.storage().frames, 0);
     // A family through dynamic application: same rule.
-    let text = ": zero 0 = ; : always drop true ; : base dup drop ; : stay recur 1 1 ; \
+    let text = ": zero 0 eq? ; : always drop true ; : base dup drop ; : stay recur 1 1 ; \
                 family stuck 1 1 zero base always stay ; 3 ' stuck apply 1 1";
     let (program, word) = compile(text);
     let mut executor = Executor::new(&program);

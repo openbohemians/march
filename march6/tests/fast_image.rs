@@ -32,7 +32,7 @@ fn roundtrip_words_quotations_multioutputs_context_pairs_and_recursion() {
         ": square dup * ; quote square [ dup + ]",
         "ctx enabled 7 8 select 1 2 pair second 3 4 pair first unit",
         "7 ctx enabled [ dup * ] [ 1 + ] select apply 1 1",
-        ": zero 0 = ; : one 1 = ; : always drop true ; : base dup drop ; : step dup 1 - recur 1 1 swap 2 - recur 1 1 + ; family fib 1 1 zero base one base always step ; 10 fib",
+        ": zero 0 eq? ; : one 1 eq? ; : always drop true ; : base dup drop ; : step dup 1 - recur 1 1 swap 2 - recur 1 1 + ; family fib 1 1 zero base one base always step ; 10 fib",
     ] {
         let (program, entry) = compile(text);
         let bytes = program.to_image(entry).unwrap();

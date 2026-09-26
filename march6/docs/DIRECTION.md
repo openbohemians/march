@@ -150,9 +150,10 @@ now keeps the countdown probe in constant workspace. Explicit-root collection
 between host observations also bounds the consumed-stream window, preserving
 shared results and lazy failures. It is not automatic: general recursion inside
 one force can still retain live continuations and frames until invocation reset.
-Next memory work must address those continuations and automatic root management,
-not merely add collection calls. Neither perfect lifetime planning nor a new
-computational substrate is required. See FAST-SPIKE.md for the exact boundaries
+Those limitations remain, but Thomas has deferred sophisticated memory work
+to a future "2.0". For now use simple storage, preserve correctness, and retain
+safety limits. Neither perfect lifetime planning nor a new computational
+substrate is required. See FAST-SPIKE.md for the exact boundaries
 and FAST-MEMORY.md for evidence and remaining costs.
 
 ## Goals and status — conventional engine
@@ -165,7 +166,7 @@ reference implementation. See FAST-SPIKE.md for verification checkpoints.
 | FORTH composition | Working core | Words, inferred stack interfaces, recursion, closed quotations; practical library remains. |
 | Fast execution | Partial, measured | Scalar and restricted tail paths work; broader workloads and optimization remain. |
 | Content-addressed code | Composed-definition identity | Ordered dependency CIDs/literals; execution graphs derived; no remote/general value store or pre-hash arithmetic normalization. |
-| Immutable values | Working core | Scalars and lazy pairs; richer persistent collections remain. |
+| Immutable values | Working core | UTF-8 text and independently lazy tuples (pairs included); arrays/maps remain. |
 | Lazy evaluation | Working core | Selective branches/arguments/outputs/fields; no automatic parallelism. |
 | Shared computation | Working with open contract | Instances share; independently equal runtime calls are not automatically merged. |
 | Memory reclamation | Partial | Scalar tail loops and explicit boundary collection; automatic roots/live continuations remain. |
@@ -174,6 +175,24 @@ reference implementation. See FAST-SPIKE.md for verification checkpoints.
 | Full bootstrap | Interpreter fixed point tested; not full bootstrap | Three image generations stabilize; primitive semantics, lowering, initial assembly, and alias installation still native. |
 | Staging | Explicit compiler execution only | General partial evaluation and unknown-context residualization remain. |
 | Images | One definition-only format (F05) | Old prototype formats rejected; no live values/suspended computations/session snapshots. |
-| Data/library support | Minimal | Strings, maps, arrays, and useful libraries remain. |
+| Data/library support | Text and tuples working | Packed arrays, maps, definition reflection/construction, and useful libraries remain. |
 | Effects / language I/O | Not implemented | Need an explicit protocol compatible with lazy sharing. |
 | Source syntax | Stream-fed FORTH | Whitespace words, numbers before dictionary, ordinary comment/defining words; final richer notation remains open. |
+
+## Open design TODOs
+
+- [ ] Revisit universal type ordering (Erlang-style). Thomas is leaning **yes**,
+  but has not decided to adopt it. Until then, `eq?` returns false across value
+  types and `lt?`, `gt?`, `lte?`, and `gte?` remain type-strict. Before deciding:
+  - Weigh generic sorting and heterogeneous ordered keys against silently
+    accepting type mistakes in numeric guards.
+  - Decide whether the existing ordering predicates use the universal order,
+    or an explicit `compare` word provides it separately.
+  - Specify type precedence and within-type ordering, including tuples,
+    quotations, future numeric types, and which values are not comparable.
+  - Require comparison equality to agree with `eq?`, with ordering stable
+    across images and independent of allocation addresses or local IDs.
+  - Specify selective demand for lazy fields: ordering finite values does not
+    guarantee termination when comparing infinite or failing computations.
+  - Try concrete mixed-data sorting, ordered-key, and contextual-guard examples
+    before committing to the policy.

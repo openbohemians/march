@@ -8,7 +8,7 @@ fn main() {
     let mut p = Program::new();
     source::compile(
         &mut p,
-        ": zero 0 = ; : always drop true ; : base drop 0 ;
+        ": zero 0 eq? ; : always drop true ; : base drop 0 ;
         : step 1 - recur 1 1 ; family countdown 1 1 zero base always step ;",
     )
     .unwrap();

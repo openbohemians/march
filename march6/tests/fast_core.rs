@@ -328,7 +328,7 @@ fn reused_recursive_body_targets_its_selected_family() {
     let root = source::compile(
         &mut p,
         "
-        : zero 0 = ; : always drop true ;
+        : zero 0 eq? ; : always drop true ;
         : base-a drop 7 ; : base-b drop 9 ;
         : step 1 - recur 1 1 ;
         family a 1 1 zero base-a always step ;

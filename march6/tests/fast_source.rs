@@ -119,8 +119,8 @@ fn quotations_do_not_capture_surrounding_stack() {
 #[test]
 fn recursive_context_family() {
     let text = "
-        : zero 0 = ;
-        : one 1 = ;
+        : zero 0 eq? ;
+        : one 1 eq? ;
         : always drop true ;
         : base dup drop ;
         : step dup 1 - recur 1 1 swap 2 - recur 1 1 + ;

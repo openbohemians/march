@@ -83,8 +83,8 @@ fn definition_name(token: &Token) -> Result<(), SourceError> {
             | "+"
             | "-"
             | "*"
-            | "="
-            | "<"
+            | "eq?"
+            | "lt?"
             | "select"
             | "pair"
             | "first"
@@ -109,6 +109,41 @@ fn tokenize(source: &str) -> Result<Vec<Token>, SourceError> {
     let mut line = 1;
     while let Some(ch) = chars.next() {
         match ch {
+            '"' => {
+                let start = line;
+                let mut text = String::from("\"");
+                let mut closed = false;
+                while let Some(c) = chars.next() {
+                    text.push(c);
+                    if c == '\n' {
+                        line += 1;
+                    }
+                    if c == '"' {
+                        closed = true;
+                        break;
+                    }
+                    if c == '\\'
+                        && let Some(next) = chars.next()
+                    {
+                        text.push(next);
+                        if next == '\n' {
+                            line += 1;
+                        }
+                    }
+                }
+                if !closed {
+                    return Err(SourceError(format!(
+                        "line {start}: unterminated text literal"
+                    )));
+                }
+                if chars
+                    .peek()
+                    .is_some_and(|c| !c.is_whitespace() && !"[]:;()\\".contains(*c))
+                {
+                    return Err(SourceError("text literal needs a separator".into()));
+                }
+                tokens.push(Token { text, line: start });
+            }
             '\n' => line += 1,
             c if c.is_whitespace() => {}
             '\\' => {
@@ -183,6 +218,32 @@ pub(super) struct Body {
 }
 
 impl Body {
+    pub(super) fn tuple(&mut self, count: usize, unpack: bool) {
+        if self.record(if unpack {
+            super::definition::Item::Untuple(count)
+        } else {
+            super::definition::Item::Tuple(count)
+        }) {
+            return;
+        }
+        if unpack {
+            let tuple = self.take(1)[0].slot;
+            let checked = self.emit(Op::TupleCheck { tuple, count }, None).slot;
+            for i in 0..count {
+                let index = self.emit(Op::Const(Literal::Int(i as i64)), None).slot;
+                self.push_op(
+                    Op::Data {
+                        primitive: super::data::Primitive::Nth,
+                        arguments: vec![checked, index],
+                    },
+                    None,
+                );
+            }
+        } else {
+            let fields = self.take(count).into_iter().map(|v| v.slot).collect();
+            self.push_op(Op::Tuple(fields), None);
+        }
+    }
     pub(super) fn operation_count(&self) -> usize {
         self.ops.len()
     }
@@ -300,6 +361,16 @@ impl Body {
                     Op::Pair(a, b) => self.emit(Op::Pair(values[a].slot, values[b].slot), None),
                     Op::First(a) => self.emit(Op::First(values[a].slot), None),
                     Op::Second(a) => self.emit(Op::Second(values[a].slot), None),
+                    Op::Data {
+                        primitive,
+                        ref arguments,
+                    } => self.emit(
+                        Op::Data {
+                            primitive,
+                            arguments: arguments.iter().map(|&i| values[i].slot).collect(),
+                        },
+                        None,
+                    ),
                     Op::Select {
                         condition,
                         when_true,
@@ -419,12 +490,10 @@ impl Reader<'_> {
             }
             let local_error =
                 |message: String| SourceError(format!("line {}: {message}", token.line));
-            if super::definition::RUNTIME_PRIMITIVES.contains(&text) {
-                let word = self
-                    .program
-                    .lookup(text)
-                    .ok_or_else(|| local_error("missing primitive".into()))?;
-                body.call(self.program, word)?;
+            if text.starts_with('"') {
+                let (value, _) = super::data::read_text(text, 0).map_err(runtime_error)?;
+                let id = self.program.intern_text(&value).map_err(runtime_error)?;
+                body.push_op(Op::Const(Literal::Text(id)), None);
                 continue;
             }
             match text {
@@ -453,6 +522,10 @@ impl Reader<'_> {
                 }
                 "call" => {
                     body.static_call(self.program)?;
+                }
+                "tuple" | "untuple" => {
+                    let count = stack_count(self.required("tuple arity")?)?;
+                    body.tuple(count, text == "untuple");
                 }
                 "apply" => {
                     let inputs = stack_count(self.required("apply input count")?)?;
@@ -494,14 +567,7 @@ pub fn compile(program: &mut Program, source: &str) -> Result<WordId, SourceErro
     if source.len() > MAX_SOURCE_BYTES {
         return Err(SourceError("source exceeds 4 MiB limit".into()));
     }
-    for &name in super::definition::RUNTIME_PRIMITIVES {
-        if program.lookup(name).is_none() {
-            let word = program
-                .add_definition(super::definition::Definition::Primitive(name.into()))
-                .map_err(runtime_error)?;
-            program.bind(name, word).map_err(runtime_error)?;
-        }
-    }
+    super::definition::install_runtime(program).map_err(runtime_error)?;
     compile_composed(program, source)
 }
 pub(super) fn compile_composed(program: &mut Program, source: &str) -> Result<WordId, SourceError> {

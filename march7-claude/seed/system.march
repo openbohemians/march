@@ -1,0 +1,442 @@
+-- March7 system layer, written in March.
+--
+-- Compiling this file with any equivalent system (the generation-zero listing
+-- or an earlier generation of this file) defines a complete new system and
+-- leaves the token of its `boot` word on the stack. `march7 IMAGE --system OUT`
+-- then exports an image whose entry is that word.
+--
+-- Rule that makes generations identical: every *compiled* call in this file
+-- targets a word defined earlier in this file. Words from the running
+-- dictionary may be *executed* at compile time (`:` `;` `immediate` `[` ...),
+-- because executing a word leaves no reference to it in the output. From
+-- `take-over` on, the rest of this file is compiled by the new compiler itself.
+--
+-- Working memory is region 1 (see docs/FIRST-SLICE.md):
+--   0 STATE   8 LATEST   16 HERE (output offset)   24 output region
+--   32 next dictionary byte   40/48/56 input region/length/position
+--   64/72 current word start/length   80/88/96 unfinished definition name
+--   128-440 private temporaries, 344 string start, 520/528 instruction scan
+--   3840-4095 name of the unfinished definition
+--   4096-1048575 dictionary
+--
+-- Trap codes: 1 unknown word, 2 decimal overflow, 4 missing word, 5 nested
+-- definition, 6 `;` outside a definition, 7 bad dictionary data or name,
+-- 8 unterminated string, 10 arithmetic overflow, 11 division by zero,
+-- 12 dictionary full, 13 compile-only word used outside a definition.
+
+-- Phase 1: throwaway compile-time helpers, built from the running dictionary.
+-- They are only ever executed, so they never reach the exported image.
+: [ 0 STATE ! ; immediate
+: ] 1 STATE ! ;
+: prim, 2 c, c, ;
+
+-- Phase 2: primitive wrappers. Each body is one primitive op and a return.
+: dup [ 0 prim, ] ;
+: drop [ 1 prim, ] ;
+: swap [ 2 prim, ] ;
+: over [ 3 prim, ] ;
+: rot [ 4 prim, ] ;
+: u+ [ 5 prim, ] ;
+: u- [ 6 prim, ] ;
+: u* [ 7 prim, ] ;
+: u/ [ 8 prim, ] ;
+: umod [ 9 prim, ] ;
+: eq? [ 10 prim, ] ;
+: ult? [ 11 prim, ] ;
+: and [ 12 prim, ] ;
+: or [ 13 prim, ] ;
+: xor [ 14 prim, ] ;
+: invert [ 15 prim, ] ;
+: lshift [ 16 prim, ] ;
+: rshift [ 17 prim, ] ;
+: c@ [ 18 prim, ] ;
+: c! [ 19 prim, ] ;
+: @ [ 20 prim, ] ;
+: ! [ 21 prim, ] ;
+: region-new [ 22 prim, ] ;
+: region-free [ 23 prim, ] ;
+: region-size [ 24 prim, ] ;
+: call [ 25 prim, ] ;
+: seal [ 26 prim, ] ;
+: code-cid [ 27 prim, ] ;
+: resolve [ 28 prim, ] ;
+: publish [ 29 prim, ] ;
+: blob-cid [ 30 prim, ] ;
+: blob-read [ 31 prim, ] ;
+: trap [ 32 prim, ] ;
+
+-- Phase 3: clean base words.
+: get 1 swap @ ;
+: put 1 swap ! ;
+: 0= 0 eq? ;
+: nip swap drop ;
+: out 24 get ;
+: here 16 get ;
+: c, out here c! here 1 u+ 16 put ;
+: [ 0 0 put ; immediate
+: ] 1 0 put ;
+: prim, 2 c, c, ;
+: u32, dup c, 8 rshift dup c, 8 rshift dup c, 8 rshift c, ;
+: b! out swap c! ;
+: u32! over over b! over 8 rshift over 1 u+ b! over 16 rshift over 2 u+ b! swap 24 rshift swap 3 u+ b! ;
+-- Operand lengths of opcodes 0-9, six bits each: 1 9 2 33 33 5 5 1 33 33.
+: oplen 6 u* 603768572619268673 swap rshift 63 and ;
+
+-- Branch targets are instruction indexes, so count the instructions already
+-- emitted into the output region. This is the one hand-assembled word: its
+-- zero-branch (op 10) exits to op 28 and its branch (op 27) loops to op 6.
+: ops
+  0 520 put 0 528 put
+  520 get here ult? [ 6 c, 28 u32, ]
+  out 520 get c@ oplen 520 get u+ 520 put
+  528 get 1 u+ 528 put
+  [ 5 c, 6 u32, ]
+  528 get ;
+
+-- Phase 4: control flow. Forward references leave the byte position of a
+-- four-byte branch operand; backward ones leave an instruction index.
+: if 6 c, here 0 u32, ; immediate
+: then ops swap u32! ; immediate
+: else 5 c, here 0 u32, swap ops swap u32! ; immediate
+: cycle ops ; immediate
+: again 5 c, u32, ; immediate
+: until 6 c, u32, ; immediate
+: while 6 c, here 0 u32, ; immediate
+: repeat swap 5 c, u32, ops swap u32! ; immediate
+: exit 0 c, ; immediate
+-- Dictionary flags: bit 0 immediate; bit 1 inline primitive, id in bits 8-15.
+: immediate 8 get dup 0= if 7 trap then 16 u+ dup get 1 or swap put ;
+: prim-flag 8 lshift 2 or ;
+
+-- Phase 5: the scratch stack, for temporaries that must survive calls.
+-- It belongs to the machine, not region 1. Every call gets its own scratch
+-- frame, and returning discards whatever the word left there, so a word can
+-- neither leave hidden outputs nor read its caller's values. The words are
+-- compile-only and always emit the primitive inline: a call to a wrapper
+-- would discard the value on the wrapper's own return.
+: compile-only 0 get 0= if 13 trap then ;
+: >r compile-only 33 prim, ; immediate
+: r> compile-only 34 prim, ; immediate
+: r@ compile-only 35 prim, ; immediate
+
+-- Phase 6: the compiler.
+: inc-pos 56 get 1 u+ 56 put ;
+: input-char 40 get 56 get c@ ;
+
+-- ( src-region src-offset dst-region dst-offset n -- )
+: copy 128 put 136 put 144 put 152 put 160 put
+  cycle 128 get while
+    160 get 152 get c@ 144 get 136 get c!
+    152 get 1 u+ 152 put
+    136 get 1 u+ 136 put
+    128 get 1 u- 128 put
+  repeat ;
+
+-- ( xt flags name-region name-offset length -- )
+-- The entry is complete before LATEST points at it.
+: install 176 put 184 put 192 put 200 put 208 put
+  176 get dup 0= swap 256 ult? 0= or if 7 trap then
+  32 get 216 put
+  216 get 32 u+ 176 get u+ 7 u+ -8 and dup 1048576 1 u+ ult? 0= if 12 trap then 224 put
+  8 get 216 get put
+  208 get 216 get 8 u+ put
+  200 get 216 get 16 u+ put
+  176 get 216 get 24 u+ put
+  192 get 184 get 1 216 get 32 u+ 176 get copy
+  224 get 32 put
+  216 get 8 put ;
+
+-- ( region offset length -- entry | 0 )
+: find 256 put 248 put 240 put 8 get 264 put
+  cycle 264 get while
+    264 get 24 u+ get 256 get eq? if
+      0 272 put
+      cycle
+        272 get 256 get ult? if
+          240 get 248 get 272 get u+ c@
+          1 264 get 32 u+ 272 get u+ c@ eq?
+        else 0 then
+      while 272 get 1 u+ 272 put repeat
+      272 get 256 get eq? if 264 get exit then
+    then
+    264 get get 264 put
+  repeat 0 ;
+
+: token 40 get 64 get 72 get ;
+
+-- ( -- flag ) Skip whitespace, then take the next whitespace-delimited word.
+: read-word
+  cycle 56 get 48 get ult? if input-char 33 ult? else 0 then while inc-pos repeat
+  56 get 48 get ult? 0= if 0 72 put 0 exit then
+  56 get 64 put
+  cycle 56 get 48 get ult? if input-char 33 ult? 0= else 0 then while inc-pos repeat
+  56 get 64 get u- 72 put 1 ;
+
+: word read-word 0= if 4 trap then token ;
+
+: scan-char 40 get 288 get c@ ;
+: scan-inc 288 get 1 u+ 288 put ;
+
+-- ( -- n 1 | 0 ) Signed decimal. A decimal that does not fit traps (2)
+-- instead of falling through to a dictionary word with that spelling.
+: number
+  64 get 288 put 64 get 72 get u+ 296 put 0 304 put
+  scan-char 45 eq? if 1 304 put scan-inc else scan-char 43 eq? if scan-inc then then
+  288 get 296 get eq? if 0 exit then
+  288 get 336 put
+  cycle 288 get 296 get ult? while
+    scan-char 48 u- 10 ult? 0= if 0 exit then scan-inc
+  repeat
+  336 get 288 put 0 312 put 9223372036854775807 304 get u+ 320 put
+  cycle 288 get 296 get ult? while
+    scan-char 48 u- 328 put
+    320 get 328 get u- 10 u/ 312 get ult? if 2 trap then
+    312 get 10 u* 328 get u+ 312 put scan-inc
+  repeat
+  312 get 304 get if 0 swap u- then 1 ;
+
+: , 0 360 put cycle 360 get 8 ult? while dup 360 get 8 u* rshift c, 360 get 1 u+ 360 put repeat drop ;
+: literal 1 c, , ;
+: compile, 3 c, out here code-cid here 32 u+ 16 put ;
+: compile-quote 4 c, out here code-cid here 32 u+ 16 put ;
+
+-- ( name-region name-offset length -- ) The name is copied at once, so a
+-- definition may continue in later input after its source buffer is gone.
+: begin 0 get if 5 trap then
+  dup 256 ult? 0= if 7 trap then
+  dup 88 put 1 swap 3840 swap copy
+  1 96 put 3840 80 put
+  65536 region-new 24 put 0 16 put 1 0 put ;
+: colon word begin ;
+: semicolon 0 get 0= if 6 trap then
+  0 c, out 0 here seal 0 96 get 80 get 88 get install
+  out region-free 0 24 put 0 0 put ;
+
+: >xt 8 u+ get ;
+: quote-word word find dup 0= if 1 trap then >xt 0 get if compile-quote then ;
+: emit-recur 7 c, ;
+: line-comment cycle 56 get 48 get ult? while input-char inc-pos 10 eq? if exit then repeat ;
+
+-- ( -- region 0 length ) or, compiling, emit a data operand.
+-- Reads to the next double quote.
+: s"
+  inc-pos 56 get 344 put
+  cycle 56 get 48 get ult? if input-char 34 eq? 0= else 0 then while inc-pos repeat
+  56 get 48 get ult? 0= if 8 trap then
+  40 get 344 get 56 get 344 get u- publish
+  inc-pos
+  0 get if 8 c, out here blob-cid here 32 u+ 16 put else 0 over region-size then ; immediate
+
+-- The outer interpreter over the current input: numbers before lookup.
+-- Compiling a word whose entry is flagged as an inline primitive emits the
+-- primitive op itself instead of a call to its wrapper.
+: interpret
+  cycle read-word while
+    number if
+      0 get if literal then
+    else
+      token find dup 0= if 1 trap then
+      dup 16 u+ get
+      dup 1 and if drop >xt call else
+        0 get 0= if drop >xt call else
+          dup 2 and if nip 8 rshift prim, else drop >xt compile, then
+        then
+      then
+    then
+  repeat ;
+
+-- ( input-region length -- ) Reentrant: the caller's input is restored, so
+-- words may evaluate text while their own input is being interpreted.
+: evaluate
+  40 get >r 48 get >r 56 get >r 64 get >r 72 get >r
+  48 put 40 put 0 56 put interpret
+  r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put ;
+
+-- Hand the rest of this file to the compiler just defined. Whatever
+-- generation is running, everything below is compiled by this file's own
+-- `interpret`, which inlines primitives once they are marked.
+: take-over interpret ;
+take-over
+
+-- Phase 7: compiled by the new compiler.
+-- ( id region offset length -- ) Mark a dictionary word as an inline primitive.
+: mark find dup 0= if 1 trap then 16 u+ swap prim-flag swap put ;
+0 s" dup" mark
+1 s" drop" mark
+2 s" swap" mark
+3 s" over" mark
+4 s" rot" mark
+5 s" u+" mark
+6 s" u-" mark
+7 s" u*" mark
+8 s" u/" mark
+9 s" umod" mark
+10 s" eq?" mark
+11 s" ult?" mark
+12 s" and" mark
+13 s" or" mark
+14 s" xor" mark
+15 s" invert" mark
+16 s" lshift" mark
+17 s" rshift" mark
+18 s" c@" mark
+19 s" c!" mark
+20 s" @" mark
+21 s" !" mark
+22 s" region-new" mark
+23 s" region-free" mark
+24 s" region-size" mark
+25 s" call" mark
+26 s" seal" mark
+27 s" code-cid" mark
+28 s" resolve" mark
+29 s" publish" mark
+30 s" blob-cid" mark
+31 s" blob-read" mark
+32 s" trap" mark
+
+: recover 24 get dup if region-free else drop then
+  0 24 put 0 16 put 0 0 put ;
+
+-- Dictionary export: oldest first, name length, flags, code CID, name bytes.
+: out-byte 400 get 408 get c! 408 get 1 u+ 408 put ;
+: out-cell 0 360 put cycle 360 get 8 ult? while dup 360 get 8 u* rshift out-byte 360 get 1 u+ 360 put repeat drop ;
+: save-list dup 0= if drop exit then dup get recur 440 put
+  440 get 24 u+ get out-cell
+  440 get 16 u+ get out-cell
+  440 get >xt 400 get 408 get code-cid 408 get 32 u+ 408 put
+  1 440 get 32 u+ 400 get 408 get 440 get 24 u+ get copy
+  408 get 440 get 24 u+ get u+ 408 put ;
+: snapshot 1048576 region-new 400 put 0 408 put 8 get save-list 400 get 0 408 get ;
+
+: in-cell 0 352 put 0 360 put
+  cycle 360 get 8 ult? while
+    384 get 392 get c@ 360 get 8 u* lshift 352 get or 352 put
+    392 get 1 u+ 392 put 360 get 1 u+ 360 put
+  repeat 352 get ;
+: restore 416 put 392 put 384 put
+  cycle 392 get 416 get ult? while
+    in-cell 424 put
+    in-cell dup 65536 ult? 0= if 7 trap then 432 put
+    384 get 392 get resolve 392 get 32 u+ 392 put
+    432 get 384 get 392 get 424 get install
+    392 get 424 get u+ 392 put
+  repeat
+  392 get 416 get eq? 0= if 7 trap then ;
+
+-- Signed application arithmetic over the unsigned machine operations.
+-- Results that do not fit a signed 64-bit cell trap (10) instead of wrapping.
+: min-int 9223372036854775807 1 u+ ;
+: negative? min-int and 0= 0= ;
+: negate 0 swap u- ;
+: abs dup negative? if negate then ;
+: lt? swap min-int xor swap min-int xor ult? ;
+: gt? swap lt? ;
+: lte? gt? 0= ;
+: gte? lt? 0= ;
+: + over over u+ >r r@ xor swap r@ xor and negative? if 10 trap then r> ;
+: - over over u- >r over xor swap r@ xor and negative? if 10 trap then r> ;
+: / dup 0= if 11 trap then
+  over min-int eq? over -1 eq? and if 10 trap then
+  over over xor negative? >r
+  abs swap abs swap u/ r> if negate then ;
+: mod over over / u* u- ;
+: * over 0= if drop exit then
+  over over u* >r swap r@ swap / eq? 0= if 10 trap then r> ;
+
+: STATE 1 0 ;
+: HERE 1 16 ;
+: LATEST 1 8 ;
+
+-- The name s" cannot be written with s" itself.
+: sq-name 2 region-new 115 over 0 c! 34 over 1 c! 0 2 ;
+
+: init
+  ' dup 0 prim-flag s" dup" install
+  ' drop 1 prim-flag s" drop" install
+  ' swap 2 prim-flag s" swap" install
+  ' over 3 prim-flag s" over" install
+  ' rot 4 prim-flag s" rot" install
+  ' u+ 5 prim-flag s" u+" install
+  ' u- 6 prim-flag s" u-" install
+  ' u* 7 prim-flag s" u*" install
+  ' u/ 8 prim-flag s" u/" install
+  ' umod 9 prim-flag s" umod" install
+  ' eq? 10 prim-flag s" eq?" install
+  ' ult? 11 prim-flag s" ult?" install
+  ' and 12 prim-flag s" and" install
+  ' or 13 prim-flag s" or" install
+  ' xor 14 prim-flag s" xor" install
+  ' invert 15 prim-flag s" invert" install
+  ' lshift 16 prim-flag s" lshift" install
+  ' rshift 17 prim-flag s" rshift" install
+  ' c@ 18 prim-flag s" c@" install
+  ' c! 19 prim-flag s" c!" install
+  ' @ 20 prim-flag s" @" install
+  ' ! 21 prim-flag s" !" install
+  ' region-new 22 prim-flag s" region-new" install
+  ' region-free 23 prim-flag s" region-free" install
+  ' region-size 24 prim-flag s" region-size" install
+  ' call 25 prim-flag s" call" install
+  ' word 0 s" word" install
+  ' find 0 s" find" install
+  ' >xt 0 s" >xt" install
+  ' begin 0 s" begin" install
+  ' colon 0 s" :" install
+  ' semicolon 1 s" ;" install
+  ' immediate 0 s" immediate" install
+  ' literal 0 s" literal" install
+  ' compile, 0 s" compile," install
+  ' quote-word 1 s" quote" install
+  ' quote-word 1 s" '" install
+  ' , 0 s" ," install
+  ' c, 0 s" c," install
+  ' line-comment 1 s" --" install
+  ' emit-recur 1 s" recur" install
+  ' STATE 0 s" STATE" install
+  ' HERE 0 s" HERE" install
+  ' LATEST 0 s" LATEST" install
+  ' [ 1 s" [" install
+  ' ] 0 s" ]" install
+  ' prim, 0 s" prim," install
+  ' 0= 0 s" 0=" install
+  ' nip 0 s" nip" install
+  ' if 1 s" if" install
+  ' then 1 s" then" install
+  ' else 1 s" else" install
+  ' cycle 1 s" cycle" install
+  ' again 1 s" again" install
+  ' until 1 s" until" install
+  ' while 1 s" while" install
+  ' repeat 1 s" repeat" install
+  ' exit 1 s" exit" install
+  ' s" 1 sq-name install
+  ' >r 1 s" >r" install
+  ' r> 1 s" r>" install
+  ' r@ 1 s" r@" install
+  ' evaluate 0 s" evaluate" install
+  ' negate 0 s" negate" install
+  ' abs 0 s" abs" install
+  ' lt? 0 s" lt?" install
+  ' gt? 0 s" gt?" install
+  ' lte? 0 s" lte?" install
+  ' gte? 0 s" gte?" install
+  ' + 0 s" +" install
+  ' - 0 s" -" install
+  ' * 0 s" *" install
+  ' / 0 s" /" install
+  ' mod 0 s" mod" install
+  ' trap 32 prim-flag s" trap" install
+  ' seal 26 prim-flag s" seal" install
+  ' code-cid 27 prim-flag s" code-cid" install
+  ' resolve 28 prim-flag s" resolve" install
+  ' publish 29 prim-flag s" publish" install
+  ' blob-cid 30 prim-flag s" blob-cid" install
+  ' blob-read 31 prim-flag s" blob-read" install ;
+
+-- ( data-region 0 length -- evaluate recover export )
+: boot 4096 32 put 0 8 put 0 0 put
+  dup if restore else drop drop drop init then
+  ' evaluate ' recover ' snapshot ;
+
+' boot

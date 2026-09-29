@@ -1,0 +1,8 @@
+-- All of these defining words run through the ordinary system machine.
+: define word begin ; immediate
+define square dup u* ;
+
+: forty-two 40 2 u+ literal ; immediate
+: answer forty-two ;
+
+7 square answer

@@ -1,0 +1,12 @@
+[package]
+name = "march7"
+version = "0.1.0"
+edition = "2024"
+default-run = "march7"
+
+[dependencies]
+sha2 = "0.10"
+
+[[bin]]
+name = "march7-seed"
+path = "tools/seed.rs"

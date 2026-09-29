@@ -30,6 +30,8 @@ pub const RUNTIME_PRIMITIVES: &[&str] = &[
     "text-chars",
     "text-concat",
     "text-slice",
+    "store.get",
+    "store.put",
 ];
 
 /// Source names are separate from the stable primitive identities above.
@@ -81,6 +83,8 @@ fn primitive(name: &str) -> Result<(usize, Vec<Op>, Vec<Slot>), Error> {
         return Ok((n, ops, vec![n]));
     }
     let (inputs, operation, outputs) = match name {
+        "store.get" => (1, Some(Op::StoreRead(0)), vec![1]),
+        "store.put" => (2, Some(Op::StoreWrite { value: 0, path: 1 }), vec![]),
         "dup" => (1, None, vec![0, 0]),
         "drop" => (1, None, vec![]),
         "swap" => (2, None, vec![1, 0]),

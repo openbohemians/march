@@ -23,7 +23,7 @@
 //! - Parentheses contain comments, not checked stack-effect declarations;
 //!   `--` starts a line comment; legacy backslash comments are also accepted.
 //!
-//! No forward names, lexical captures, or effects are
+//! No forward names, lexical captures, or external I/O effects are
 //! provided. Builtin names cannot be redefined through this reader yet.
 
 use super::{Literal, Op, Program, Slot, WordId};
@@ -353,6 +353,14 @@ impl Body {
             let mut values: Vec<StackValue> = Vec::new();
             for op in &primitive.ops {
                 let value = match *op {
+                    Op::StoreRead(path) => self.emit(Op::StoreRead(values[path].slot), None),
+                    Op::StoreWrite { value, path } => self.emit(
+                        Op::StoreWrite {
+                            value: values[value].slot,
+                            path: values[path].slot,
+                        },
+                        None,
+                    ),
                     Op::Arg(n) => args[n],
                     Op::Const(v) => self.emit(Op::Const(v), None),
                     Op::Binary(b, a, c) => {

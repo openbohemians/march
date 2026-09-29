@@ -6,4 +6,5 @@ default-run = "march-research"
 
 [dependencies]
 imbl = "7.0"
+merkle-champ = "=0.1.0"
 sha2 = "0.10"

@@ -336,3 +336,26 @@ word definitions; compilation also copies builders. Serialization explicitly
 sorts bindings/flags and therefore still pays a canonical-ordering cost. No
 CHAMP implementation, language-visible map, or namespace resolution was added
 by this change.
+
+### Merkle-CHAMP integration probe
+
+The same container probe now also includes published `merkle-champ` 0.1.0.
+It measures both lookup with an existing `String` key and the temporary owned
+key needed by the current compiler's `&str` API (0.1.0 has no borrowed-key lookup).
+One local release run with no additional target-feature flags requested, same
+batch/warm-up methodology as above, no CPU pinning:
+
+| Bindings | imbl snapshot/rebind (µs) | CHAMP snapshot/rebind (µs) | imbl 1,000 lookups (µs) | CHAMP existing keys (µs) | CHAMP copied keys (µs) |
+|---|---:|---:|---:|---:|---:|
+| 32 | 0.337 | 0.300 | 15.757 | 22.220 | 30.730 |
+| 1,000 | 0.725 | 0.829 | 22.847 | 40.338 | 48.180 |
+| 10,000 | 0.864 | 1.048 | 25.072 | 45.853 | 55.729 |
+
+Consequently the compiler's lookup-only name/flag containers remain on `imbl`:
+they do not yet use subtree identities, and merely replacing them would add
+cost without the intended Merkle benefit. The separate [evaluated-state
+store](STORE.md) uses CHAMP, where snapshot identity is an actual operation.
+This is not a retraction of the library's incremental-identity results, nor
+a claim that these container timings measure the complete March compiler.
+The experimental dictionary migration was tested (including byte-identical
+code images), measured, and reverted; code identity/image encoding is unchanged.

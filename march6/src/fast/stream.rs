@@ -146,6 +146,12 @@ mod primitive_identity_tests {
             )
             .unwrap();
         assert!(matches!(e.content_id(h[0]), Err(Error::Type(_))));
+        let before = store::Store::new();
+        assert!(matches!(
+            e.store_put(&before, &["private"], h[0]),
+            Err(Error::Type(_))
+        ));
+        assert!(before.is_empty());
     }
 
     #[test]
@@ -400,6 +406,12 @@ impl Kernel {
         let program = self.state(state)?.program.clone();
         if program.signature(word)? != (1, 1) {
             return Err(fail("compiler word needs state -> state signature"));
+        }
+        let effects = program.effects(word)?;
+        if effects.reads || effects.writes {
+            return Err(fail(
+                "runtime store operations are unavailable during compiler execution",
+            ));
         }
         let context = Context::from([
             ("compiler".into(), Literal::Bool(true)),

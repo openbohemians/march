@@ -1,4 +1,27 @@
-# Active direction: a fast, CAS, immutable, lazy, context-oriented FORTH
+# Active direction: a fast, CAS, immutable, context-oriented FORTH
+
+## 2026-09-27: strict stack execution supersedes lazy-by-default
+
+Thomas has selected a real stack machine as the semantic/baseline model. Word
+bodies execute in program order; laziness belongs in explicit typed constructs
+and data abstractions. Graphs are compiler tools, not the general evaluator.
+See [STRICT-STACK.md](STRICT-STACK.md) for the new runnable scalar baseline,
+measurements, boundaries, and migration steps. It is opt-in (`--stack`) for now;
+compiler execution and the previous default runtime have not yet migrated.
+
+2026-09-28: the strict baseline now has independently owned shared text/tuples,
+structural equality, text operations, nested namespace store round-trips and
+bounded iterative data traversal/destruction. Semantic identity/image migration,
+typed quotation shapes, and explicit shared laziness remain separate next steps.
+Compatible strict tail calls now reuse pending return checks: a 100,000-iteration
+countdown uses constant control depth. Cumulative allocation counters and their
+limits remain intact, by Thomas's request; they are not live-memory measurements.
+
+The sections and status table below describe the preceding implementation and
+its historical rationale. Their lazy-by-default policies are superseded by this
+decision; CAS, immutable state, contextual families, and self-extension remain.
+
+## Previous execution direction and implementation checkpoints
 
 Source paths and shell commands in these notes are relative to `march6/`.
 
@@ -167,6 +190,7 @@ reference implementation. See FAST-SPIKE.md for verification checkpoints.
 | Fast execution | Partial, measured | Scalar and restricted tail paths work; broader workloads and optimization remain. |
 | Content-addressed code | Composed-definition identity | Ordered dependency CIDs/literals; execution graphs derived; no remote/general value store or pre-hash arithmetic normalization. |
 | Immutable values | Working core | UTF-8 text and independently lazy tuples (pairs included); arrays/maps remain. |
+| Evaluated global state | First runtime slice | Merkle-CHAMP snapshots, `store.get` / `store.put`, implicit sequencing and deep-evaluated writes; compiler/context unification and store images remain. |
 | Lazy evaluation | Working core | Selective branches/arguments/outputs/fields; no automatic parallelism. |
 | Shared computation | Working with open contract | Instances share; independently equal runtime calls are not automatically merged. |
 | Memory reclamation | Partial | Scalar tail loops and explicit boundary collection; automatic roots/live continuations remain. |
@@ -176,7 +200,7 @@ reference implementation. See FAST-SPIKE.md for verification checkpoints.
 | Staging | Explicit compiler execution only | General partial evaluation and unknown-context residualization remain. |
 | Images | One definition-only format (F05) | Old prototype formats rejected; no live values/suspended computations/session snapshots. |
 | Data/library support | Text, tuples, and compiler definition data working | Packed arrays, language-visible maps, namespaces, and useful libraries remain. |
-| Effects / language I/O | Not implemented | Need an explicit protocol compatible with lazy sharing. |
+| Effects / language I/O | Store sequencing only | Static calls/families/recursion carry state; dynamic writing contracts and external I/O remain. |
 | Source syntax | Stream-fed FORTH | Whitespace words, numbers before dictionary, ordinary comment/defining words; final richer notation remains open. |
 
 ## Open design TODOs
@@ -185,13 +209,16 @@ reference implementation. See FAST-SPIKE.md for verification checkpoints.
   explicit-state interface and acceptance examples are in BOOTSTRAP.md. Native
   validation/lowering and compiler-state/runtime-stack separation still remain.
 - [ ] Add language-visible immutable maps and namespace behavior. The compiler
-  dictionary now uses `imbl` HAMTs, but this does not yet expose a March map value
-  or turn dotted names into namespaces. Start with text-key namespace needs;
-  review lazy values, general key semantics, canonical identity, lookup/import
-  rules, and binding metadata separately.
-- [ ] Investigate CHAMP after establishing library-backed map workloads. Use
-  the existing persistent-data-structure library first; changing the runtime
-  backing must not change map semantics or canonical CIDs.
+  dictionary retains its `imbl` HAMTs. The [store](STORE.md) provides nested
+  namespaces, runtime read/write words and implicit state sequencing, but does
+  not yet turn dotted source names into namespace paths. Store writes recursively
+  evaluate data, stopping at explicit deferred code; context/compiler unification
+  and general map values remain.
+- [x] Select CHAMP after measuring map/identity workloads. Use the published,
+  pinned `merkle-champ` 0.1.0 library for evaluated state. Code CIDs and the
+  existing sorted image encoding are unchanged; store identities have their own
+  versioned format. The lookup-only compiler dictionary remains on `imbl` after
+  measurement; this is not a claim that all map workloads become faster.
 - [ ] Revisit universal type ordering (Erlang-style). Thomas is leaning **yes**,
   but has not decided to adopt it. Until then, `eq?` returns false across value
   types and `lt?`, `gt?`, `lte?`, and `gte?` remain type-strict. Before deciding:

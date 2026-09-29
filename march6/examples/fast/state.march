@@ -1,0 +1,8 @@
+-- State is implicit, separate from the ordinary lazy value stack.
+: bump "counter" store.get 1 + "counter" store.put ;
+
+10 "counter" store.put
+"counter" store.get
+bump bump
+"counter" store.get
+-- The two results are 10 and 12, even if the second is demanded first.

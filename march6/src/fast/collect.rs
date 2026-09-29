@@ -33,6 +33,11 @@ impl Executor<'_> {
     /// This baseline does not collect within force/content_id or eliminate live
     /// recursive continuations; their existing bounds remain in force.
     pub fn collect(&mut self, roots: &[Handle], budget: usize) -> Result<Vec<Handle>, Error> {
+        // State edges and retained snapshots need their own collector roots.
+        // Until that tracing is implemented, reject rather than lose effects.
+        if self.state.is_some() {
+            return Err(Error::CollectionBusy);
+        }
         for h in roots {
             if h.epoch != self.epoch || h.cell >= self.cells.len() {
                 return Err(Error::StaleHandle);
@@ -192,6 +197,7 @@ impl Executor<'_> {
                     })
                     .collect(),
                 identities: f.identities.clone(),
+                state_input: f.state_input,
             });
         }
         if argument_slots > self.argument_limit {

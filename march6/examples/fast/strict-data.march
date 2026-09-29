@@ -1,0 +1,7 @@
+-- Run with --stack. Field replacement preserves the original tuple.
+"original" 42 pair
+dup 0 "changed" tuple-set
+"example" "record" pair store.put
+first
+"example" "record" pair store.get first
+-- Results: "original", "changed".

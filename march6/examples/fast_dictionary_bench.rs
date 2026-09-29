@@ -33,6 +33,8 @@ fn main() {
             .map(|(i, k)| (k, i))
             .collect();
         let hamt: imbl::HashMap<_, _> = tree.iter().map(|(k, &v)| (k.clone(), v)).collect();
+        let champ: merkle_champ::ChampMap<_, _> =
+            tree.iter().map(|(k, &v)| (k.clone(), v)).collect();
         let repeats = (100_000 / count).max(10);
         println!("bindings={count}; snapshot/update includes dropping the edited copy");
         measure("BTreeMap snapshot + rebind", repeats, || {
@@ -42,6 +44,11 @@ fn main() {
         });
         measure("imbl HAMT snapshot + rebind", repeats, || {
             let mut next = black_box(&hamt).clone();
+            next.insert(black_box(keys[count / 2].clone()), count);
+            black_box(next);
+        });
+        measure("CHAMP snapshot + rebind", repeats, || {
+            let mut next = black_box(&champ).clone();
             next.insert(black_box(keys[count / 2].clone()), count);
             black_box(next);
         });
@@ -55,7 +62,20 @@ fn main() {
                 black_box(hamt.get(black_box(&keys[(i * 97) % count])));
             }
         });
+        measure("CHAMP 1000 lookups (owned keys available)", 100, || {
+            for i in 0..1000 {
+                black_box(champ.get(black_box(&keys[(i * 97) % count])));
+            }
+        });
+        // Published 0.1.0 lacks borrowed-key lookup. Include the temporary
+        // allocation required by Program's existing &str lookup interface.
+        measure("CHAMP 1000 lookups (copy borrowed key)", 100, || {
+            for i in 0..1000 {
+                black_box(champ.get(&black_box(keys[(i * 97) % count].as_str()).to_owned()));
+            }
+        });
         assert_eq!(tree.get(&keys[count / 2]), Some(&(count / 2)));
         assert_eq!(hamt.get(&keys[count / 2]), Some(&(count / 2)));
+        assert_eq!(champ.get(&keys[count / 2]), Some(&(count / 2)));
     }
 }

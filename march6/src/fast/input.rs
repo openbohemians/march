@@ -92,6 +92,9 @@ impl Executor<'_> {
         }
         let frame = self.frame(word, roots.to_vec(), word)?;
         let base = self.frames[frame].base;
+        if self.program.word(word)?.effects.reads || self.program.word(word)?.effects.writes {
+            self.enable_state(store::Store::new())?;
+        }
         Ok(self.program.words[word]
             .outputs
             .iter()

@@ -1,13 +1,14 @@
 //! Command-line entry point for the deliberately provisional conventional spike.
 
-use march_research::fast::{Context, Executor, Literal, Program, stream};
+use march_research::fast::{Context, Executor, Literal, Program, stack, store::Store, stream};
 use std::{env, fs, io::Read, process};
 
 fn usage() -> &'static str {
-    "usage: march-fast [--budget N] [--context key=value] [--arg value]\n\
+    "usage: march-fast [--stack] [--budget N] [--context key=value] [--arg value]\n\
      [--save-image PATH] (--eval SOURCE | FILE | --load-image PATH)\n\
      [--extend SOURCE (with --load-image, compile using its dictionary)]\n\
      values: signed integers, true, false, or unit; default budget: 100000\n\
+     --stack: experimental strict runtime; source only, no images yet\n\
      images contain code/dictionary only, not context or suspended execution"
 }
 
@@ -32,8 +33,10 @@ fn run() -> Result<(), String> {
     let mut context = Context::new();
     let mut arguments = Vec::new();
     let mut budget = 100_000;
+    let mut strict_stack = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--stack" => strict_stack = true,
             "--help" | "-h" => {
                 println!("{}", usage());
                 return Ok(());
@@ -97,6 +100,9 @@ fn run() -> Result<(), String> {
             }
         }
     }
+    if strict_stack && (load_image.is_some() || save_image.is_some()) {
+        return Err("--stack does not yet load/save images: strict semantic identity must be versioned first".into());
+    }
     if extension.is_some() && load_image.is_none() {
         return Err("--extend requires --load-image".into());
     }
@@ -131,10 +137,17 @@ fn run() -> Result<(), String> {
             march_research::Cid::digest(b"march-fast-image-v1", &bytes)
         );
     }
-    let values = Executor::new(&program)
-        .run(word, &arguments, &context, budget)
-        .map_err(|e| e.to_string())?;
-    println!("{values:?}");
+    if strict_stack {
+        let (values, _) = stack::Machine::new(&program)
+            .run(word, &arguments, &context, budget, &Store::new())
+            .map_err(|e| e.to_string())?;
+        println!("{values:?}");
+    } else {
+        let values = Executor::new(&program)
+            .run(word, &arguments, &context, budget)
+            .map_err(|e| e.to_string())?;
+        println!("{values:?}");
+    }
     Ok(())
 }
 

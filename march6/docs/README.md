@@ -1,13 +1,16 @@
 # March 6 documentation
 
-March is a fast, content-addressed, immutable, lazy, context-oriented FORTH.
-The active implementation is the conventional engine in `src/fast/`.
+March aims to be a fast, content-addressed, immutable, context-oriented FORTH
+with strict stack execution and explicit, typed laziness. The implementation is
+in `src/fast/`; the strict baseline is selectable with `--stack`, while the older
+lazy evaluator remains the default during this bounded transition.
 Interaction nets are no longer an execution direction.
 
 ## Current work
 
-1. [Implementation guide](FAST-SPIKE.md): run the language, understand its
-   semantics, and check what is still missing.
+1. [Strict stack baseline](STRICT-STACK.md): current direction, runnable first
+   slice, transition boundaries, and next steps. [Earlier implementation guide](FAST-SPIKE.md)
+   documents the previous lazy-by-default runtime and retained compiler.
 2. [Direction](DIRECTION.md): goals/status table, execution decisions, and open contracts.
 3. [Bootstrap](BOOTSTRAP.md): the March-defined input-stream interpreter,
    numbers-first lookup, defining words, and the remaining native nucleus.
@@ -16,6 +19,8 @@ Interaction nets are no longer an execution direction.
    collection, stream measurements, and the remaining continuation/root problem.
 6. [Dependency evolution](DEPENDENCY-EVOLUTION.md): initial design for interface
    and implementation locks, reproducible rebuilds, and explicit updates.
+7. [Store and state sequencing](STORE.md): Merkle-CHAMP snapshots, evaluated
+   writes, implicit runtime state, and the remaining compiler/context boundary.
 
 Source paths and shell commands in these notes are relative to `march6/`,
 unless explicitly stated otherwise.

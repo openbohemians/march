@@ -329,6 +329,13 @@ for large sources; no compiler-throughput or constant compiler-memory claim is
 made. Images explicitly sort dictionary names and flags rather than depending
 on hash iteration order. Runtime scalar/lazy execution paths remain the existing
 engine. Stream-state lifetime improvements are separate from lazy-heap collection.
+The [evaluated-state store](STORE.md) now has runtime `store.get` / `store.put`
+words with implicit sequencing, but compiler/context unification remains.
+Runtime store operations are explicitly unavailable during immediate/compiler
+execution; they do not modify compiler state or silently discard runtime writes.
+The dictionary is not migrated merely to change its container: unlike the new
+store it does not request Merkle identities, and the CHAMP 0.1.0 probe shows
+higher lookup costs, including temporary owned keys for the `&str` interface.
 
 `tests/fast_stream.rs` covers numeric precedence (including immediate numeric
 bindings), overflow, raw-input comments/custom delimiters, redefinable

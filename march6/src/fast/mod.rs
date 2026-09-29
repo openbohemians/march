@@ -14,6 +14,9 @@ mod input;
 mod reflection;
 pub use input::InputNode;
 pub mod source;
+pub mod stack;
+pub mod state;
+pub mod store;
 pub mod stream;
 mod tail;
 
@@ -41,6 +44,11 @@ pub enum Binary {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
+    StoreRead(Slot),
+    StoreWrite {
+        value: Slot,
+        path: Slot,
+    },
     Tuple(Vec<Slot>),
     TupleCheck {
         tuple: Slot,
@@ -108,6 +116,7 @@ pub enum Error {
     Output(usize),
     Image(String),
     Compiler(String),
+    Store(String),
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -173,6 +182,7 @@ struct Word {
     fast: Option<FastPlan>,
     tail: Option<Box<tail::TailPlan>>,
     cycle_tracking: bool,
+    effects: state::Effects,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -315,7 +325,22 @@ impl Program {
                         return Err(Error::InvalidCode("empty family".into()));
                     }
                     let count = self.word(clauses[0].1)?.outputs.len();
+                    let writes = clauses.iter().try_fold(false, |writes, &(_, body)| {
+                        Ok::<_, Error>(writes || self.word(body)?.effects.writes)
+                    })?;
                     for &(guard, body) in clauses {
+                        if self.word(guard)?.effects.writes
+                            || (writes
+                                && self
+                                    .word(guard)?
+                                    .ops
+                                    .iter()
+                                    .any(|op| matches!(op, Op::Recur { .. })))
+                        {
+                            return Err(Error::InvalidCode(
+                                "state-writing guards are not supported".into(),
+                            ));
+                        }
                         if self.signature(guard)? != (arguments.len(), 1)
                             || self.signature(body)? != (arguments.len(), count)
                         {
@@ -329,7 +354,7 @@ impl Program {
         if outputs.iter().any(|&s| s >= ops.len()) {
             return Err(Error::InvalidCode("output index".into()));
         }
-        let (ops, remap) = canonical_ops(ops);
+        let (ops, remap) = canonical_ops(self, ops);
         let outputs: Vec<_> = outputs.into_iter().map(|s| remap[s]).collect();
         let cid = if let Some(definition) = &definition {
             Cid::digest(definition::DOMAIN, &self.encode_definition(definition)?)
@@ -342,8 +367,17 @@ impl Program {
         if let Some(&id) = self.identities.get(&cid) {
             return Ok(id);
         }
-        let fast = fast_plan(self, &ops, &outputs);
-        let tail = tail::compile(self, inputs, &ops, &outputs).map(Box::new);
+        let effects = state::effects(self, &ops);
+        let fast = if effects.reads || effects.writes {
+            None
+        } else {
+            fast_plan(self, &ops, &outputs)
+        };
+        let tail = if effects.reads || effects.writes {
+            None
+        } else {
+            tail::compile(self, inputs, &ops, &outputs).map(Box::new)
+        };
         // Static call dependencies are acyclic. A dynamic recursive cycle must
         // traverse a recur, dynamic application, or family dispatch boundary.
         let cycle_tracking = ops.iter().any(|op| {
@@ -362,6 +396,7 @@ impl Program {
             fast,
             tail,
             cycle_tracking,
+            effects,
         });
         self.identities.insert(cid, id);
         Ok(id)
@@ -386,6 +421,11 @@ impl Program {
             return Err(Error::InvalidCode("family size limit".into()));
         }
         for &(guard, body) in &clauses {
+            if self.word(guard)?.effects.writes {
+                return Err(Error::InvalidCode(
+                    "state-writing or recursive guards are not supported".into(),
+                ));
+            }
             if composed && (self.definition(guard)?.is_none() || self.definition(body)?.is_none()) {
                 return Err(Error::InvalidCode(
                     "family cannot reference graph-only evaluator fixtures".into(),
@@ -440,6 +480,15 @@ impl Program {
         put(&mut out, ops.len());
         for op in ops {
             match op {
+                Op::StoreRead(path) => {
+                    out.push(17);
+                    put(&mut out, *path);
+                }
+                Op::StoreWrite { value, path } => {
+                    out.push(18);
+                    put(&mut out, *value);
+                    put(&mut out, *path);
+                }
                 Op::Tuple(fields) => {
                     out.push(14);
                     slots_bytes(&mut out, fields);
@@ -562,6 +611,8 @@ fn slots_bytes(out: &mut Vec<u8>, slots: &[Slot]) {
 }
 fn dependencies(op: &Op) -> Vec<Slot> {
     match op {
+        Op::StoreRead(path) => vec![*path],
+        Op::StoreWrite { value, path } => vec![*value, *path],
         Op::Tuple(fields) => fields.clone(),
         Op::TupleCheck { tuple, .. } => vec![*tuple],
         Op::Data { arguments, .. } => arguments.clone(),
@@ -589,14 +640,19 @@ fn dependencies(op: &Op) -> Vec<Slot> {
 }
 
 // Structural hash-consing is paid once at construction, not on invocation.
-// Every slot is pure under one immutable context and recursion binding.
-fn canonical_ops(ops: Vec<Op>) -> (Vec<Op>, Vec<Slot>) {
+// State-dependent applications cannot be merged across intervening writes.
+fn canonical_ops(program: &Program, ops: Vec<Op>) -> (Vec<Op>, Vec<Slot>) {
     let mut canonical = Vec::new();
     let mut remap = Vec::with_capacity(ops.len());
     let mut seen = HashMap::new();
     for mut op in ops {
         let rewrite = |s: &mut Slot| *s = remap[*s];
         match &mut op {
+            Op::StoreRead(path) => rewrite(path),
+            Op::StoreWrite { value, path } => {
+                rewrite(value);
+                rewrite(path);
+            }
             Op::Tuple(fields)
             | Op::Data {
                 arguments: fields, ..
@@ -641,11 +697,14 @@ fn canonical_ops(ops: Vec<Op>) -> (Vec<Op>, Vec<Slot>) {
             Op::First(s) | Op::Second(s) => rewrite(s),
             _ => (),
         }
-        let slot = if let Some(&s) = seen.get(&op) {
+        let state_sensitive = state::sensitive(program, &op);
+        let slot = if let Some(&s) = seen.get(&op).filter(|_| !state_sensitive) {
             s
         } else {
             let s = canonical.len();
-            seen.insert(op.clone(), s);
+            if !state_sensitive {
+                seen.insert(op.clone(), s);
+            }
             canonical.push(op);
             s
         };
@@ -841,8 +900,10 @@ struct Frame {
     recur: WordId,
     key_hash: u64,
     identities: Vec<u64>,
+    state_input: usize,
 }
 enum Task {
+    State(state::Task),
     Construct(Box<reflection::Transfer>),
     Data(usize, usize), // destination, next argument phase
     TupleCheck(usize, usize, usize),
@@ -884,6 +945,8 @@ pub struct Stats {
 /// payloads, collector scratch space, and immutable Program code.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Storage {
+    pub state_versions: usize,
+    pub state_links: usize,
     pub tuple_fields: usize,
     pub text_bytes: usize,
     /// Allocated slots, including reserved but unreachable slots of live frames.
@@ -897,6 +960,7 @@ pub struct Storage {
     pub task_capacity: usize,
     pub failures: usize,
     pub active_demands: usize,
+    /// Structural vector capacity; excludes shared persistent-store allocations.
     pub vector_bytes: usize,
 }
 static EPOCH: AtomicU64 = AtomicU64::new(1);
@@ -926,6 +990,7 @@ pub struct Executor<'p> {
     registers: Vec<Datum>,
     argument_slots: usize,
     active_demands: HashMap<(u64, Slot), Vec<usize>>,
+    state: Option<state::Execution>,
     pub cell_limit: usize,
     pub argument_limit: usize,
 }
@@ -954,6 +1019,7 @@ impl<'p> Executor<'p> {
             registers: Vec::new(),
             argument_slots: 0,
             active_demands: HashMap::new(),
+            state: None,
             cell_limit: 1_000_000,
             argument_limit: 1_000_000,
         }
@@ -962,7 +1028,13 @@ impl<'p> Executor<'p> {
         &self.stats
     }
     pub fn storage(&self) -> Storage {
+        let (state_versions, state_links, state_bytes) = self
+            .state
+            .as_ref()
+            .map_or((0, 0, 0), state::Execution::storage);
         Storage {
+            state_versions,
+            state_links,
             tuple_fields: self.tuple_fields,
             text_bytes: self.text_bytes,
             cells: self.cells.len(),
@@ -974,7 +1046,8 @@ impl<'p> Executor<'p> {
             task_capacity: self.work.capacity(),
             failures: self.failures.len(),
             active_demands: self.active_demands.values().map(Vec::len).sum(),
-            vector_bytes: self.tuples.capacity() * std::mem::size_of::<Vec<usize>>()
+            vector_bytes: state_bytes
+                + self.tuples.capacity() * std::mem::size_of::<Vec<usize>>()
                 + self
                     .tuples
                     .iter()
@@ -1001,6 +1074,7 @@ impl<'p> Executor<'p> {
         }
     }
     fn reset(&mut self, budget: usize) {
+        self.state = None;
         self.tuples.clear();
         self.tuple_fields = 0;
         self.texts.clear();
@@ -1038,8 +1112,17 @@ impl<'p> Executor<'p> {
     fn frame(
         &mut self,
         word: WordId,
+        arguments: Vec<usize>,
+        recur: WordId,
+    ) -> Result<usize, Error> {
+        self.frame_with_state(word, arguments, recur, 0)
+    }
+    fn frame_with_state(
+        &mut self,
+        word: WordId,
         mut arguments: Vec<usize>,
         recur: WordId,
+        state_input: usize,
     ) -> Result<usize, Error> {
         let w = self.program.word(word)?;
         if w.inputs != arguments.len() {
@@ -1087,7 +1170,7 @@ impl<'p> Executor<'p> {
         };
         let key_hash = if w.cycle_tracking {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            (word, recur, &identities).hash(&mut hasher);
+            (word, recur, &identities, state_input).hash(&mut hasher);
             hasher.finish()
         } else {
             0
@@ -1119,7 +1202,9 @@ impl<'p> Executor<'p> {
             recur,
             key_hash,
             identities,
+            state_input,
         });
+        self.attach_state_frame(id, state_input)?;
         self.stats.calls += 1;
         self.stats.peak_cells = self.stats.peak_cells.max(self.cells.len());
         self.stats.peak_frames = self.stats.peak_frames.max(self.frames.len());
@@ -1149,6 +1234,9 @@ impl<'p> Executor<'p> {
             }));
         let root = self.frame(word, (0..args.len()).collect(), word)?;
         let base = self.frames[root].base;
+        if self.program.word(word)?.effects.reads || self.program.word(word)?.effects.writes {
+            self.enable_state(store::Store::new())?;
+        }
         Ok(self
             .program
             .word(word)?
@@ -1229,6 +1317,12 @@ impl<'p> Executor<'p> {
                 }
             }
         }
+        if self.state.is_some()
+            && let Err(e) = self.finish_state()
+        {
+            result.clear();
+            return Err(e);
+        }
         Ok(())
     }
     fn ready(&mut self, cell: usize, value: Datum) {
@@ -1289,6 +1383,14 @@ impl<'p> Executor<'p> {
         }
         self.work.clear();
         self.work.push(Task::Need(handle.cell));
+        self.drain_work()?;
+        self.external(self.value(handle.cell))
+    }
+    fn drain_work(&mut self) -> Result<(), Error> {
+        if let Some(error) = self.state.as_ref().and_then(|state| state.failure.as_ref()) {
+            self.work.clear();
+            return Err(error.clone());
+        }
         while let Some(task) = self.work.pop() {
             if self.remaining == 0 {
                 self.aborted = Some(Error::Budget);
@@ -1298,6 +1400,9 @@ impl<'p> Executor<'p> {
             self.remaining -= 1;
             self.stats.steps += 1;
             if let Err(e) = self.step(task) {
+                if let Some(state) = &mut self.state {
+                    state.failure = Some(e.clone());
+                }
                 if matches!(e, Error::StorageLimit | Error::Budget) {
                     self.aborted = Some(e.clone());
                 } else {
@@ -1313,7 +1418,7 @@ impl<'p> Executor<'p> {
                 return Err(e);
             }
         }
-        self.external(self.value(handle.cell))
+        Ok(())
     }
     /// Deep observation gives an immutable value identity independent of local
     /// handles and invocation history. This intentionally demands every field;
@@ -1403,7 +1508,8 @@ impl<'p> Executor<'p> {
         };
         let args = arguments.iter().map(|s| parent.base + s).collect();
         let recur = parent.word;
-        let frame = self.frame(guard, args, recur)?;
+        let input = self.state_before(dst);
+        let frame = self.frame_with_state(guard, args, recur, input)?;
         let out = self.frames[frame].base + self.program.word(guard)?.outputs[0];
         self.work.push(Task::Guard(dst, clause, out));
         self.work.push(Task::Need(out));
@@ -1411,6 +1517,7 @@ impl<'p> Executor<'p> {
     }
     fn step(&mut self, task: Task) -> Result<(), Error> {
         match task {
+            Task::State(task) => self.state_step(task)?,
             Task::Construct(transfer) => self.construct_step(transfer)?,
             Task::Need(dst) => {
                 let c = self.cells[dst];
@@ -1436,6 +1543,7 @@ impl<'p> Executor<'p> {
                             if prior.word == frame.word
                                 && prior.recur == frame.recur
                                 && prior.identities == frame.identities
+                                && prior.state_input == frame.state_input
                             {
                                 return Err(Error::Cycle);
                             }
@@ -1448,6 +1556,7 @@ impl<'p> Executor<'p> {
                 let f = &self.frames[c.frame];
                 let base = f.base;
                 match &program.word(f.word)?.ops[c.slot] {
+                    Op::StoreRead(_) | Op::StoreWrite { .. } => self.schedule_store(dst)?,
                     Op::Tuple(fields) => {
                         let fields = fields.iter().map(|s| base + s).collect();
                         let value = self.make_tuple(fields)?;
@@ -1514,7 +1623,8 @@ impl<'p> Executor<'p> {
                     }
                     Op::Call { word, arguments } => {
                         let args = arguments.iter().map(|s| base + s).collect();
-                        let id = self.frame(*word, args, *word)?;
+                        let input = self.state_before(dst);
+                        let id = self.frame_with_state(*word, args, *word, input)?;
                         self.ready(dst, Datum::Frame(id));
                     }
                     Op::Apply { function, .. } => {
@@ -1525,7 +1635,8 @@ impl<'p> Executor<'p> {
                     Op::Recur { arguments } => {
                         let target = f.recur;
                         let args = arguments.iter().map(|s| base + s).collect();
-                        let id = self.frame(target, args, target)?;
+                        let input = self.state_before(dst);
+                        let id = self.frame_with_state(target, args, target, input)?;
                         self.ready(dst, Datum::Frame(id));
                     }
                     Op::Project { call, output } => {
@@ -1599,6 +1710,11 @@ impl<'p> Executor<'p> {
                 let Datum::Quote(word) = self.value(src) else {
                     return Err(Error::Type("application needs closed quotation"));
                 };
+                if self.program.word(word)?.effects.writes {
+                    return Err(Error::Type(
+                        "apply currently accepts only non-writing quotations",
+                    ));
+                }
                 let c = self.cells[dst];
                 let frame = &self.frames[c.frame];
                 let Op::Apply {
@@ -1621,7 +1737,8 @@ impl<'p> Executor<'p> {
                     });
                 }
                 let args = arguments.iter().map(|s| frame.base + s).collect();
-                let id = self.frame(word, args, word)?;
+                let input = self.state_before(dst);
+                let id = self.frame_with_state(word, args, word, input)?;
                 self.ready(dst, Datum::Frame(id));
             }
             Task::Binary(dst, b, a, c) => {
@@ -1691,7 +1808,8 @@ impl<'p> Executor<'p> {
                     let body = clauses[clause].1;
                     let args = arguments.iter().map(|s| f.base + s).collect();
                     let recur = f.word;
-                    let frame = self.frame(body, args, recur)?;
+                    let input = self.state_before(dst);
+                    let frame = self.frame_with_state(body, args, recur, input)?;
                     self.ready(dst, Datum::Frame(frame));
                 }
             }

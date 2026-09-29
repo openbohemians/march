@@ -1,5 +1,10 @@
 # Conventional March spike
 
+**Historical lazy-runtime guide:** the 2026-09-27 direction is strict stack
+execution with explicit laziness. See [STRICT-STACK.md](STRICT-STACK.md) for the
+new opt-in baseline. This guide still describes the previous CLI default and
+the retained compiler; its lazy semantics are not the target direction.
+
 Source paths and shell commands in this guide are relative to `march6/`.
 
 2026-09-25. A working implementation of the new direction, **not an interaction-net
@@ -250,8 +255,9 @@ Other missing pieces:
   residual program. Explicit execution of compiler words now works; general
   partial evaluation/staging and pending-state images remain a significant gap.
 - Guarded word families are not yet full module-level context groups.
-- No effectful I/O protocol, live development image, self-hosted reader/compiler,
-  persistent general-value store, rich collection library, or native backend.
+- No external I/O protocol, live development image, fully self-hosted compiler,
+  disk-backed value store, rich collection library, or native backend. The
+  in-memory evaluated store and implicit state words are described below.
 - No implicit parallelism or closure capture.
 - Execution budgets count implementation work and differ between scalar and
   generic paths; they are safety limits, not semantic cost measurements.
@@ -420,3 +426,51 @@ Richer contextual groups and general staging
 remain separate priorities. Before claiming this replaces the reference, settle the independent
 equal-call sharing contract and the missing-context/residualization contract.
 Self-hosting should build on those decisions, not conceal them.
+
+## Evaluated-store checkpoint
+
+The [store foundation](STORE.md) adds a host-facing persistent namespace store
+backed by published `merkle-champ` 0.1.0. A write deeply evaluates finite data
+into an executor-independent DAG before publishing the snapshot; existing
+closed quotations remain deferred code. This initial host checkpoint did not
+yet introduce March-level store words, implicit state threading, or store images.
+The runtime sequencing checkpoint below adds the first two. The compiler's separate
+lookup-only dictionary stays on `imbl` after the comparative probe found no
+benefit from switching that container without using its Merkle identities.
+
+Sixteen new integration tests cover frozen-value CID compatibility, two store
+format golden vectors, snapshot isolation, exact namespace paths and conflicts,
+failure atomicity, quoted divergence, code-CID resolution across Programs,
+sharing, 20,000 nested tuple levels, an exponentially large logical tree held
+as a small DAG, selective demand/context evaluation, and resource bounds.
+An existing internal test also verifies nested compiler capabilities cannot
+be stored. **571 total tests, including 226 fast-engine tests**, pass in debug
+and release; all-target Clippy with warnings denied passes. The host example
+round-trips a stored tuple through a fresh evaluator. The dictionary migration
+experiment produced byte-identical code images and was then reverted for
+lookup performance; no code/image identity format changed.
+
+## Implicit-state sequencing checkpoint
+
+March now has `store.get ( path -- value )` and
+`store.put ( value path -- )`, using the existing evaluator's task stack.
+State flows separately from ordinary stack results: reads see their preceding
+snapshot, required writes survive dropped results, only selected family bodies
+write, and data is deeply evaluated before a write publishes its snapshot.
+Unused pure work stays lazy. Calls and recursive families thread this implicit
+state; state-sensitive operations are not incorrectly merged across snapshots.
+The example `examples/fast/state.march` returns `10, 12` around two increments.
+
+Twenty-three sequencing tests cover these rules, delayed/reversed observations,
+state-only recursive progress, overwritten failing writes, resource/fuel cuts,
+code-image reload, and compiler/runtime isolation. Together with the store
+foundation, **594 total tests, including 249 fast-engine tests**, pass in debug
+and release. All-target Clippy with warnings denied, formatting, and rustdoc
+checks pass. This checkpoint establishes behavior, not stateful throughput.
+
+Boundaries remain explicit: dynamic `apply` accepts only non-writing targets;
+guards cannot write; immediate/compiler execution cannot use runtime store
+operations until state unification; snapshots are retained until invocation
+reset and stateful `collect` returns `CollectionBusy`. The CLI starts a fresh
+store, not a persistent session. See [STORE.md](STORE.md) for host observation
+boundaries, snapshot publication, and the remaining unification/image work.

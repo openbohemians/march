@@ -1,6 +1,14 @@
+# FROZEN (2026-09-30). This listing exists only to reproduce generation 0,
+# which compiles seed/system.march into the real system. tests/rebuild.rs pins
+# the SHA-256 of the image assembled from it, so any change that alters that
+# image is a foundation change, not maintenance: extend seed/system.march
+# instead. Comments like this one are stripped and do not affect the image.
+# system.march relies on only nine of this listing's dictionary words, the ones
+# it executes before defining its own: : ; immediate STATE ! c, ' -- recur
+#
 # Generation-zero instruction listing. These are March words expressed as
 # instructions before a March source reader exists. No Rust compiler handlers.
-# Region 1 is FORTH working memory; private offsets are defined in SLICE.md.
+# Region 1 is FORTH working memory; offsets are listed in docs/FIRST-SLICE.md.
 entry boot
 root empty
 data empty

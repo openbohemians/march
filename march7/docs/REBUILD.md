@@ -178,7 +178,8 @@ Next candidates:
   the cleaner convention for new code.
 - **A faster dictionary.** `find` scans every entry. It is the largest
   remaining compile cost as the dictionary grows.
-- **Freeze the listing.** `system.asm` is only needed to produce generation 0.
+- **The listing is frozen** (2026-09-30). `system.asm` only reproduces
+  generation 0, and a test pins the SHA-256 of its assembled image.
 
 `tests/rebuild.rs` now has nine tests, adding: scratch stack and nested
 `evaluate`; checked signed arithmetic and its traps; definitions spanning

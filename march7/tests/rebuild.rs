@@ -33,6 +33,23 @@ fn rebuild(image: &Image) -> Image {
     d.system_image(boot).unwrap()
 }
 
+/// The SHA-256 of the image assembled from `seed/system.asm`. The listing is
+/// frozen: its only job is to reproduce generation 0. Changing this value is a
+/// foundation change (docs/FOUNDATION.md, "Bounded generation-zero assembler").
+const GENERATION_ZERO_SHA256: &str =
+    "b9b9c609238803fab214d66698f1d44e09501041245de505571d754bb1d83cea";
+
+#[test]
+fn generation_zero_is_frozen() {
+    use sha2::Digest;
+    let bytes = generation_zero().encode().unwrap();
+    let hash: String = sha2::Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(hash, GENERATION_ZERO_SHA256);
+}
+
 fn generations() -> (Image, Image, Image, Image) {
     let g0 = generation_zero();
     let g1 = rebuild(&g0);

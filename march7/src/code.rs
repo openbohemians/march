@@ -65,6 +65,9 @@ pub enum Primitive {
     BlobCid = 30,
     BlobRead = 31,
     Trap = 32,
+    ScratchPush = 33,
+    ScratchPop = 34,
+    ScratchPeek = 35,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -101,6 +104,9 @@ impl Primitive {
         (Self::BlobCid, "blob-cid"),
         (Self::BlobRead, "blob-read"),
         (Self::Trap, "trap"),
+        (Self::ScratchPush, "scratch-push"),
+        (Self::ScratchPop, "scratch-pop"),
+        (Self::ScratchPeek, "scratch-peek"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

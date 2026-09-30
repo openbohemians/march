@@ -1,6 +1,7 @@
 # The system layer rebuilds itself
 
-2026-09-29. Work by Claude in `march7-claude/`, a copy of `march7/`.
+2026-09-29. Work by Claude, done in a copy of Codex's first slice that has since
+replaced it as `march7/`.
 
 ## Result
 

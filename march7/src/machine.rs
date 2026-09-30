@@ -64,6 +64,10 @@ pub struct Stats {
 /// generation; released slots can be reused without reviving stale addresses.
 pub struct Machine {
     pub stack: Vec<u64>,
+    /// Per-invocation scratch stack. Each call frame owns the values it pushes;
+    /// returning (or tail-calling) discards them, so a word can neither leave
+    /// hidden outputs nor read its caller's scratch values.
+    scratch: Vec<u64>,
     pub stats: Stats,
     pub(crate) blobs: BTreeMap<Cid, Blob>,
     words: Vec<Executable>,
@@ -80,6 +84,7 @@ impl Machine {
         image.validate()?;
         let mut m = Self {
             stack: Vec::new(),
+            scratch: Vec::new(),
             stats: Stats::default(),
             blobs: image.blobs.clone(),
             words: Vec::new(),
@@ -100,6 +105,7 @@ impl Machine {
     pub fn empty() -> Self {
         let mut m = Self {
             stack: Vec::new(),
+            scratch: Vec::new(),
             stats: Stats::default(),
             blobs: BTreeMap::new(),
             words: Vec::new(),
@@ -352,7 +358,10 @@ impl Machine {
     pub fn run(&mut self, xt: u64, mut fuel: u64) -> Result<(), Error> {
         let mut word = self.token(xt)?;
         let mut ip = 0usize;
-        let mut returns = Vec::new();
+        // Each return frame also records its caller's scratch-frame base.
+        let mut returns: Vec<(usize, usize, usize)> = Vec::new();
+        let mut base = 0usize;
+        self.scratch.clear();
         loop {
             if fuel == 0 {
                 return Err(Error::Fuel);
@@ -362,13 +371,17 @@ impl Machine {
             let op = *self.words[word].ops.get(ip).ok_or(Error::InvalidCode)?;
             ip += 1;
             match op {
-                Instruction::Return => match returns.pop() {
-                    Some((w, i)) => {
-                        word = w;
-                        ip = i;
+                Instruction::Return => {
+                    self.scratch.truncate(base);
+                    match returns.pop() {
+                        Some((w, i, b)) => {
+                            word = w;
+                            ip = i;
+                            base = b;
+                        }
+                        None => return Ok(()),
                     }
-                    None => return Ok(()),
-                },
+                }
                 Instruction::Lit(n) => self.push(n)?,
                 Instruction::Quote(w) => self.push(w as u64 + 1)?,
                 Instruction::Data(r, len) => {
@@ -387,7 +400,8 @@ impl Machine {
                     if returns.len() >= 16384 {
                         return Err(Error::Stack);
                     }
-                    returns.push((word, ip));
+                    returns.push((word, ip, base));
+                    base = self.scratch.len();
                     word = w;
                     ip = 0;
                 }
@@ -395,10 +409,13 @@ impl Machine {
                     if returns.len() >= 16384 {
                         return Err(Error::Stack);
                     }
-                    returns.push((word, ip));
+                    returns.push((word, ip, base));
+                    base = self.scratch.len();
                     ip = 0;
                 }
                 Instruction::Tail(w) => {
+                    // The current word is finished: its scratch values go.
+                    self.scratch.truncate(base);
                     word = w;
                     ip = 0;
                 }
@@ -408,9 +425,31 @@ impl Machine {
                     if returns.len() >= 16384 {
                         return Err(Error::Stack);
                     }
-                    returns.push((word, ip));
+                    returns.push((word, ip, base));
+                    base = self.scratch.len();
                     word = w;
                     ip = 0;
+                }
+                Instruction::Prim(Primitive::ScratchPush) => {
+                    let v = self.pop()?;
+                    if self.scratch.len() >= 65536 {
+                        return Err(Error::Stack);
+                    }
+                    self.scratch.push(v);
+                }
+                Instruction::Prim(Primitive::ScratchPop) => {
+                    if self.scratch.len() <= base {
+                        return Err(Error::Stack);
+                    }
+                    let v = self.scratch.pop().ok_or(Error::Stack)?;
+                    self.push(v)?;
+                }
+                Instruction::Prim(Primitive::ScratchPeek) => {
+                    if self.scratch.len() <= base {
+                        return Err(Error::Stack);
+                    }
+                    let v = *self.scratch.last().ok_or(Error::Stack)?;
+                    self.push(v)?;
                 }
                 Instruction::Prim(p) => self.primitive(p)?,
             }
@@ -561,7 +600,7 @@ impl Machine {
                 self.push(n as u64)?;
             }
             Trap => return Err(Error::User(self.pop()?)),
-            Execute => unreachable!(),
+            Execute | ScratchPush | ScratchPop | ScratchPeek => unreachable!(),
         }
         Ok(())
     }

@@ -57,6 +57,45 @@ impl Driver {
         recovery?;
         result
     }
+    /// Export a fresh system image whose entry is the code token `xt`, with an
+    /// empty data root. It contains exactly the blobs reachable from the entry
+    /// through code operands; the host never interprets March data blobs. The
+    /// token comes from March (for example `' boot` left on the stack), so the
+    /// host performs no name lookup.
+    pub fn system_image(&self, xt: u64) -> Result<Image, Error> {
+        let entry = self.machine.cid(xt)?;
+        let mut blobs = std::collections::BTreeMap::new();
+        let mut todo = vec![entry];
+        while let Some(cid) = todo.pop() {
+            if blobs.contains_key(&cid) {
+                continue;
+            }
+            let blob = self
+                .machine
+                .blobs
+                .get(&cid)
+                .ok_or(Error::InvalidCode)?
+                .clone();
+            if let Blob::Code(bytes) = &blob {
+                for op in crate::code::decode(bytes)? {
+                    if let crate::Op::Call(c)
+                    | crate::Op::Quote(c)
+                    | crate::Op::Tail(c)
+                    | crate::Op::Data(c) = op
+                    {
+                        todo.push(c);
+                    }
+                }
+            }
+            blobs.insert(cid, blob);
+        }
+        let empty = Blob::Data(Vec::new());
+        let data = empty.cid();
+        blobs.insert(data, empty);
+        let image = Image { entry, data, blobs };
+        image.validate()?;
+        Ok(image)
+    }
     pub fn snapshot(&mut self) -> Result<Image, Error> {
         let before = self.machine.stack.clone();
         let result = (|| {

@@ -125,7 +125,7 @@ The checker adds about 230 lines to `seed/system.march`. That pushed compiling
 the system over the driver's default budget, though the checker itself does not
 run during a rebuild. The cost was the dictionary's linear lookup, now replaced
 by a hashed dictionary (docs/REBUILD.md). Generation 1 compiles the system in
-5.3 million steps.
+5.3 million steps (6.3 million after quotations were added).
 
 ## Next slices
 
@@ -135,9 +135,9 @@ by a hashed dictionary (docs/REBUILD.md). Generation 1 compiles the system in
    to pick a clause for `+`. The analysis can report the live state at the end
    of a partial definition, so the compiler can ask for the types at the
    current point. Forward branches that are not yet patched need care there.
-2. **Consumer-completed control flow.** `if`, loops and `map` take quotations,
-   type-check them in the caller's context, and inline them. The checker then
-   sees plain branches.
+2. **Consumer-completed control flow.** Done (docs/QUOTATIONS.md): `if`,
+   `while` and `times` inline pending quotations, so the checker sees plain
+   branches. `map` waits for arrays.
 3. **Typed quotation parameters.** A word that calls a quotation it was given
    declares or infers that quotation's effect, so it stops being a dynamic
    call.

@@ -18,16 +18,16 @@ exports an image whose entry is that word.
 | Generation | Built by | Image SHA-256 (prefix) |
 |---|---|---|
 | 0 | assembler, from `seed/system.asm` | `b9b9c609…` |
-| 1 | generation 0 compiling `system.march` | `439ba102…` |
-| 2 | generation 1 compiling `system.march` | `439ba102…` |
-| 3 | generation 2 compiling `system.march` | `439ba102…` |
+| 1 | generation 0 compiling `system.march` | `c731a508…` |
+| 2 | generation 1 compiling `system.march` | `c731a508…` |
+| 3 | generation 2 compiling `system.march` | `c731a508…` |
 
 Generations 1, 2 and 3 are byte-identical. The fixed point holds from the first
 rebuild. After generation 0, only images and March source are involved.
 
 ```sh
 cargo run --offline --bin march7-seed -- seed/system.asm gen0.image
-cargo run --offline -- gen0.image --fuel 20000000 seed/system.march --system gen1.image
+cargo run --offline -- gen0.image --fuel 40000000 seed/system.march --system gen1.image
 cargo run --offline -- gen1.image seed/system.march --system gen2.image
 cmp gen1.image gen2.image
 cargo run --offline -- gen1.image --eval ': square dup u* ; 7 square'
@@ -75,11 +75,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 14.4 million (51 ms) |
-| The same on generation 1 | 5.3 million (18 ms) |
+| Machine steps to compile `system.march` on generation 0 | 18.3 million (67 ms) |
+| The same on generation 1 | 6.3 million (22 ms) |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 47,063 bytes |
-| `system.march` | 682 lines |
+| Rebuilt image size | 56,059 bytes |
+| `system.march` | 824 lines |
 | `system.asm` listing | 1,395 lines |
 
 ## Tests
@@ -179,16 +179,16 @@ newest first so shadowing still finds the newest definition. Names hash with
 hashes the same in the working dictionary and in a store. A test checks it
 against the crate itself. Compiling the system on generation 1 dropped from
 12.5 to 5.3 million steps, and later generations rebuild within the default
-budget again. Generation 0's frozen compiler still scans linearly (14.4
-million steps), so a rebuild from generation 0 on the command line needs
-`--fuel`.
+budget again. Generation 0's frozen compiler still scans linearly (18.3
+million steps as of the quotation work), so a rebuild from generation 0 on the
+command line needs `--fuel`.
 
 The driver's step budget (10 million by default) is a safety net against
 runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
-rebuild tests use an explicit budget of 20 million steps, and a named canary
+rebuild tests use an explicit budget of 40 million steps, and a named canary
 test asserts that a rebuilt system compiles the system source in under 8
-million steps (5.3 million today). When the command line exhausts the budget,
+million steps (6.3 million today). When the command line exhausts the budget,
 it says so and suggests `--fuel`.
 
 Next candidates:

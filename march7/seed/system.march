@@ -146,7 +146,8 @@
 : while 6 c, here 0 u32, ; immediate
 : repeat swap 5 c, u32, ops swap u32! ; immediate
 : exit 0 c, ; immediate
--- Dictionary flags: bit 0 immediate; bit 1 inline primitive, id in bits 8-15.
+-- Dictionary flags: bit 0 immediate; bit 1 inline primitive, id in bits 8-15;
+-- bit 2 transparent (an immediate word that leaves pending quotations alone).
 : immediate 8 get dup 0= if 7 trap then 16 u+ dup get 1 or swap put ;
 : prim-flag 8 lshift 2 or ;
 : , 0 360 put cycle 360 get 8 ult? while dup 360 get 8 u* rshift c, 360 get 1 u+ 360 put repeat drop ;
@@ -506,7 +507,7 @@
   1 96 put 3840 80 put
   65536 region-new 24 put 0 16 put 1 0 put ;
 : colon word begin ;
-: semicolon 0 get 0= if 6 trap then
+: semicolon 0 get 0= if 6 trap then 800 get if 20 trap then
   0 c,
   632 get if out here analyze dup effect-known? 0= if effect-in 100 u+ trap then
   else 0 then
@@ -530,18 +531,123 @@
   inc-pos
   0 get if 8 c, out here blob-cid here 32 u+ 16 put else 0 over region-size then ; immediate
 
+-- Quotations: `[ ... ]` compiles its body into a buffer of its own and leaves
+-- it pending, anchored where it appeared. A consumer (`if`, `while`, `times`)
+-- inlines pending bodies into the definition; anything else first seals each
+-- pending body as an anonymous word and emits a quotation of it in place.
+-- Working memory: 800 nesting depth; 808 pending count; pending entries at
+-- 1024 + 24i (region, length, depth); saved outer builders at 2560 + 24d
+-- (region, offset, STATE); 3400-3432 temporaries for inlining.
+-- Traps: 15 exit or recur inside a quotation, 16 nesting too deep, 17 `]`
+-- without `[`, 18 too many pending quotations, 19 wrong quotations for a
+-- consumer, 20 `;` inside an open quotation.
+: q-entry 24 u* 1024 u+ ;
+-- ( -- k ) Index of the first pending entry at the current depth.
+: pending-start
+  808 get cycle dup if dup 1 u- q-entry 16 u+ get 800 get eq? else 0 then
+  while 1 u- repeat ;
+-- ( -- n ) Pending quotations at the current depth.
+: pending-here 808 get pending-start u- ;
+-- ( region length -- token ) Append a return, seal, free the buffer.
+: seal-quote
+  over over >r >r 0 r> r> c!
+  1 u+ over >r 0 swap seal r> region-free ;
+-- ( -- ) Emit every pending quotation at this depth as a first-class
+-- quotation, oldest first, where it appeared.
+: materialize
+  pending-start dup >r
+  cycle dup 808 get ult? while
+    dup q-entry dup get swap 8 u+ get seal-quote compile-quote
+    1 u+
+  repeat drop r> 808 put ;
+-- ( region pos -- n ) A little-endian 32-bit operand.
+: region-u32
+  over over c@ >r over over 1 u+ c@ 8 lshift r> or >r
+  over over 2 u+ c@ 16 lshift r> or >r 3 u+ c@ 24 lshift r> or ;
+-- ( i -- ) Copy pending body i into the definition, shifting its branch
+-- targets by the instruction index where it lands. Free its buffer.
+: inline-quote
+  q-entry dup get 3400 put 8 u+ get 3408 put ops 3416 put 0 3424 put
+  cycle 3424 get 3408 get ult? while
+    3400 get 3424 get c@ dup oplen 3432 put
+    dup 5 eq? over 6 eq? or if
+      c, 3400 get 3424 get 1 u+ region-u32 3416 get u+ u32,
+    else
+      drop 3400 get 3424 get out here 3432 get copy here 3432 get u+ 16 put
+    then
+    3424 get 3432 get u+ 3424 put
+  repeat 3400 get region-free ;
+-- ( -- ) Drop the newest n pending entries (already inlined).
+: consumed 808 get swap u- 808 put ;
+
+: quote-open
+  800 get 32 ult? 0= if 16 trap then
+  800 get 24 u* 2560 u+ out over put here over 8 u+ put 0 get swap 16 u+ put
+  65536 region-new 24 put 0 16 put 1 0 put
+  800 get 1 u+ 800 put ;
+: quote-close
+  800 get 0= if 17 trap then
+  800 get 1 u- dup 800 put 24 u* 2560 u+ out here rot
+  dup get 24 put dup 8 u+ get 16 put 16 u+ get dup 0 put
+  if
+    808 get 64 ult? 0= if 18 trap then
+    808 get q-entry swap over 8 u+ put swap over put 800 get swap 16 u+ put
+    808 get 1 u+ 808 put
+  else seal-quote then ;
+
+-- ( -- ) Quotation-aware `if`: `c [ t ] [ f ] if`, `c [ t ] if`, or, with
+-- nothing pending, FORTH's `if ... else ... then`.
+: qif
+  pending-here
+  dup 0= if drop 6 c, here 0 u32, exit then
+  dup 1 eq? if drop
+    6 c, here 0 u32, 808 get 1 u- inline-quote 1 consumed ops swap u32! exit then
+  2 eq? 0= if 19 trap then
+  6 c, here 0 u32, 808 get 2 u- inline-quote
+  5 c, here 0 u32, swap ops swap u32!
+  808 get 1 u- inline-quote ops swap u32! 2 consumed ;
+-- ( -- ) `[ c ] [ body ] while`, or FORTH's `cycle ... while ... repeat`.
+: qwhile
+  pending-here
+  dup 0= if drop 6 c, here 0 u32, exit then
+  2 eq? 0= if 19 trap then
+  ops 808 get 2 u- inline-quote
+  6 c, here 0 u32, 808 get 1 u- inline-quote
+  swap 5 c, u32, ops swap u32! 2 consumed ;
+-- ( -- ) `n [ body ] times` runs body n times, with the index 0..n-1 as
+-- `i0` (and the enclosing loop's as `i1`). The limit and index live on the
+-- scratch stack.
+: times
+  pending-here 1 eq? 0= if 19 trap then
+  33 prim, 0 literal 33 prim,
+  ops 34 prim, 35 prim, 3 prim, 33 prim, 11 prim,
+  6 c, here 0 u32, 808 get 1 u- inline-quote 1 consumed
+  34 prim, 1 literal 5 prim, 33 prim,
+  swap 5 c, u32, ops swap u32!
+  34 prim, 1 prim, 34 prim, 1 prim, ;
+: i0 compile-only 35 prim, ;
+: i1 compile-only 34 prim, 34 prim, 35 prim, 4 prim, 4 prim, 33 prim, 33 prim, ;
+: qexit 800 get if 15 trap then 0 c, ;
+: qrecur 800 get if 15 trap then 7 c, ;
+
 -- The outer interpreter over the current input: numbers before lookup.
 -- Compiling a word whose entry is flagged as an inline primitive emits the
--- primitive op itself instead of a call to its wrapper.
+-- primitive op itself instead of a call to its wrapper. Before compiling
+-- anything, or running an immediate word not flagged transparent (bit 2),
+-- pending quotations are materialized where they stand.
 : interpret
   cycle read-word while
     number if
-      0 get if literal then
+      0 get if materialize literal then
     else
       token find dup 0= if 1 trap then
       dup 16 u+ get
-      dup 1 and if drop >xt call else
+      dup 1 and if
+        dup 4 and 0= if 0 get if materialize then then
+        drop >xt call
+      else
         0 get 0= if drop >xt call else
+          materialize
           dup 2 and if nip 8 rshift prim, else drop >xt compile, then
         then
       then
@@ -557,6 +663,10 @@
 
 -- Phase 7: recovery, dictionary export and boot.
 : recover 24 get dup if region-free else drop then
+  cycle 800 get while
+    800 get 1 u- dup 800 put 24 u* 2560 u+ get dup if region-free else drop then
+  repeat
+  cycle 808 get while 808 get 1 u- dup 808 put q-entry get region-free repeat
   0 24 put 0 16 put 0 0 put 0 600 put ;
 
 -- Dictionary export: oldest first, name length, flags, code CID, name bytes.
@@ -652,25 +762,30 @@
   ' quote-word 1 s" '" install
   ' , 0 s" ," install
   ' c, 0 s" c," install
-  ' line-comment 1 s" --" install
-  ' emit-recur 1 s" recur" install
+  ' line-comment 5 s" --" install
+  ' qrecur 1 s" recur" install
   ' STATE 0 s" STATE" install
   ' HERE 0 s" HERE" install
   ' LATEST 0 s" LATEST" install
-  ' [ 1 s" [" install
-  ' ] 0 s" ]" install
+  ' [ 1 s" [[" install
+  ' ] 0 s" ]]" install
+  ' quote-open 5 s" [" install
+  ' quote-close 1 s" ]" install
   ' prim, 0 s" prim," install
   ' 0= 0 s" 0=" install
   ' nip 0 s" nip" install
-  ' if 1 s" if" install
+  ' qif 5 s" if" install
   ' then 1 s" then" install
   ' else 1 s" else" install
   ' cycle 1 s" cycle" install
   ' again 1 s" again" install
   ' until 1 s" until" install
-  ' while 1 s" while" install
+  ' qwhile 5 s" while" install
   ' repeat 1 s" repeat" install
-  ' exit 1 s" exit" install
+  ' qexit 1 s" exit" install
+  ' times 5 s" times" install
+  ' i0 1 s" i0" install
+  ' i1 1 s" i1" install
   ' s" 1 sq-name install
   ' >r 1 s" >r" install
   ' r> 1 s" r>" install

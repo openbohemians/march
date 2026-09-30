@@ -8,8 +8,9 @@
 -- Rule that makes generations identical: every *compiled* call in this file
 -- targets a word defined earlier in this file. Words from the running
 -- dictionary may be *executed* at compile time (`:` `;` `immediate` `[` ...),
--- because executing a word leaves no reference to it in the output. From
--- `take-over` on, the rest of this file is compiled by the new compiler itself.
+-- because executing a word leaves no reference to it in the output. Within
+-- this file, primitive names are immediate words that emit the primitive
+-- itself (phase 2), so every compiler produces the same inlined code.
 --
 -- Working memory is region 1 (see docs/FIRST-SLICE.md):
 --   0 STATE   8 LATEST   16 HERE (output offset)   24 output region
@@ -30,40 +31,81 @@
 : ] 1 STATE ! ;
 : prim, 2 c, c, ;
 
--- Phase 2: primitive wrappers. Each body is one primitive op and a return.
-: dup [ 0 prim, ] ;
-: drop [ 1 prim, ] ;
-: swap [ 2 prim, ] ;
-: over [ 3 prim, ] ;
-: rot [ 4 prim, ] ;
-: u+ [ 5 prim, ] ;
-: u- [ 6 prim, ] ;
-: u* [ 7 prim, ] ;
-: u/ [ 8 prim, ] ;
-: umod [ 9 prim, ] ;
-: eq? [ 10 prim, ] ;
-: ult? [ 11 prim, ] ;
-: and [ 12 prim, ] ;
-: or [ 13 prim, ] ;
-: xor [ 14 prim, ] ;
-: invert [ 15 prim, ] ;
-: lshift [ 16 prim, ] ;
-: rshift [ 17 prim, ] ;
-: c@ [ 18 prim, ] ;
-: c! [ 19 prim, ] ;
-: @ [ 20 prim, ] ;
-: ! [ 21 prim, ] ;
-: region-new [ 22 prim, ] ;
-: region-free [ 23 prim, ] ;
-: region-size [ 24 prim, ] ;
-: call [ 25 prim, ] ;
-: seal [ 26 prim, ] ;
-: code-cid [ 27 prim, ] ;
-: resolve [ 28 prim, ] ;
-: publish [ 29 prim, ] ;
-: blob-cid [ 30 prim, ] ;
-: blob-read [ 31 prim, ] ;
-: trap [ 32 prim, ] ;
+-- Phase 2: primitives. The wrappers, one primitive op and a return each, are
+-- what the exported dictionary binds (`dup` is `p-dup`, flagged inline), so
+-- `' dup` and `call` work in the booted system.
+: p-dup [ 0 prim, ] ;
+: p-drop [ 1 prim, ] ;
+: p-swap [ 2 prim, ] ;
+: p-over [ 3 prim, ] ;
+: p-rot [ 4 prim, ] ;
+: p-u+ [ 5 prim, ] ;
+: p-u- [ 6 prim, ] ;
+: p-u* [ 7 prim, ] ;
+: p-u/ [ 8 prim, ] ;
+: p-umod [ 9 prim, ] ;
+: p-eq? [ 10 prim, ] ;
+: p-ult? [ 11 prim, ] ;
+: p-and [ 12 prim, ] ;
+: p-or [ 13 prim, ] ;
+: p-xor [ 14 prim, ] ;
+: p-invert [ 15 prim, ] ;
+: p-lshift [ 16 prim, ] ;
+: p-rshift [ 17 prim, ] ;
+: p-c@ [ 18 prim, ] ;
+: p-c! [ 19 prim, ] ;
+: p-@ [ 20 prim, ] ;
+: p-! [ 21 prim, ] ;
+: p-region-new [ 22 prim, ] ;
+: p-region-free [ 23 prim, ] ;
+: p-region-size [ 24 prim, ] ;
+: p-call [ 25 prim, ] ;
+: p-seal [ 26 prim, ] ;
+: p-code-cid [ 27 prim, ] ;
+: p-resolve [ 28 prim, ] ;
+: p-publish [ 29 prim, ] ;
+: p-blob-cid [ 30 prim, ] ;
+: p-blob-read [ 31 prim, ] ;
+: p-trap [ 32 prim, ] ;
+
+-- Within this file each primitive name is an immediate word that emits the
+-- primitive op. So compiled code is inlined whatever system compiles this
+-- file, and every generation produces the same bytes. These emitters are
+-- compile-time devices: nothing exported refers to them, and this file never
+-- uses a primitive name outside a definition.
+: dup 0 prim, ; immediate
+: drop 1 prim, ; immediate
+: swap 2 prim, ; immediate
+: over 3 prim, ; immediate
+: rot 4 prim, ; immediate
+: u+ 5 prim, ; immediate
+: u- 6 prim, ; immediate
+: u* 7 prim, ; immediate
+: u/ 8 prim, ; immediate
+: umod 9 prim, ; immediate
+: eq? 10 prim, ; immediate
+: ult? 11 prim, ; immediate
+: and 12 prim, ; immediate
+: or 13 prim, ; immediate
+: xor 14 prim, ; immediate
+: invert 15 prim, ; immediate
+: lshift 16 prim, ; immediate
+: rshift 17 prim, ; immediate
+: c@ 18 prim, ; immediate
+: c! 19 prim, ; immediate
+: @ 20 prim, ; immediate
+: ! 21 prim, ; immediate
+: region-new 22 prim, ; immediate
+: region-free 23 prim, ; immediate
+: region-size 24 prim, ; immediate
+: call 25 prim, ; immediate
+: seal 26 prim, ; immediate
+: code-cid 27 prim, ; immediate
+: resolve 28 prim, ; immediate
+: publish 29 prim, ; immediate
+: blob-cid 30 prim, ; immediate
+: blob-read 31 prim, ; immediate
+: trap 32 prim, ; immediate
 
 -- Phase 3: clean base words.
 : get 1 swap @ ;
@@ -107,6 +149,14 @@
 -- Dictionary flags: bit 0 immediate; bit 1 inline primitive, id in bits 8-15.
 : immediate 8 get dup 0= if 7 trap then 16 u+ dup get 1 or swap put ;
 : prim-flag 8 lshift 2 or ;
+: , 0 360 put cycle 360 get 8 ult? while dup 360 get 8 u* rshift c, 360 get 1 u+ 360 put repeat drop ;
+: literal 1 c, , ;
+
+-- From here on, `get` and `put` compile inline: a literal 1 (working region
+-- 1), a swap, and the load or store. Words above keep calling them, which the
+-- hand-counted `ops` relies on; they only run at compile time.
+: get 1 literal 2 prim, 20 prim, ; immediate
+: put 1 literal 2 prim, 21 prim, ; immediate
 
 -- Phase 5: the scratch stack, for temporaries that must survive calls.
 -- It belongs to the machine, not region 1. Every call gets its own scratch
@@ -195,8 +245,6 @@
   repeat
   312 get 304 get if 0 swap u- then 1 ;
 
-: , 0 360 put cycle 360 get 8 ult? while dup 360 get 8 u* rshift c, 360 get 1 u+ 360 put repeat drop ;
-: literal 1 c, , ;
 : compile, 3 c, out here code-cid here 32 u+ 16 put ;
 : compile-quote 4 c, out here code-cid here 32 u+ 16 put ;
 
@@ -252,49 +300,7 @@
   48 put 40 put 0 56 put interpret
   r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put ;
 
--- Hand the rest of this file to the compiler just defined. Whatever
--- generation is running, everything below is compiled by this file's own
--- `interpret`, which inlines primitives once they are marked.
-: take-over interpret ;
-take-over
-
--- Phase 7: compiled by the new compiler.
--- ( id region offset length -- ) Mark a dictionary word as an inline primitive.
-: mark find dup 0= if 1 trap then 16 u+ swap prim-flag swap put ;
-0 s" dup" mark
-1 s" drop" mark
-2 s" swap" mark
-3 s" over" mark
-4 s" rot" mark
-5 s" u+" mark
-6 s" u-" mark
-7 s" u*" mark
-8 s" u/" mark
-9 s" umod" mark
-10 s" eq?" mark
-11 s" ult?" mark
-12 s" and" mark
-13 s" or" mark
-14 s" xor" mark
-15 s" invert" mark
-16 s" lshift" mark
-17 s" rshift" mark
-18 s" c@" mark
-19 s" c!" mark
-20 s" @" mark
-21 s" !" mark
-22 s" region-new" mark
-23 s" region-free" mark
-24 s" region-size" mark
-25 s" call" mark
-26 s" seal" mark
-27 s" code-cid" mark
-28 s" resolve" mark
-29 s" publish" mark
-30 s" blob-cid" mark
-31 s" blob-read" mark
-32 s" trap" mark
-
+-- Phase 7: recovery, dictionary export and boot.
 : recover 24 get dup if region-free else drop then
   0 24 put 0 16 put 0 0 put ;
 
@@ -352,32 +358,32 @@ take-over
 : sq-name 2 region-new 115 over 0 c! 34 over 1 c! 0 2 ;
 
 : init
-  ' dup 0 prim-flag s" dup" install
-  ' drop 1 prim-flag s" drop" install
-  ' swap 2 prim-flag s" swap" install
-  ' over 3 prim-flag s" over" install
-  ' rot 4 prim-flag s" rot" install
-  ' u+ 5 prim-flag s" u+" install
-  ' u- 6 prim-flag s" u-" install
-  ' u* 7 prim-flag s" u*" install
-  ' u/ 8 prim-flag s" u/" install
-  ' umod 9 prim-flag s" umod" install
-  ' eq? 10 prim-flag s" eq?" install
-  ' ult? 11 prim-flag s" ult?" install
-  ' and 12 prim-flag s" and" install
-  ' or 13 prim-flag s" or" install
-  ' xor 14 prim-flag s" xor" install
-  ' invert 15 prim-flag s" invert" install
-  ' lshift 16 prim-flag s" lshift" install
-  ' rshift 17 prim-flag s" rshift" install
-  ' c@ 18 prim-flag s" c@" install
-  ' c! 19 prim-flag s" c!" install
-  ' @ 20 prim-flag s" @" install
-  ' ! 21 prim-flag s" !" install
-  ' region-new 22 prim-flag s" region-new" install
-  ' region-free 23 prim-flag s" region-free" install
-  ' region-size 24 prim-flag s" region-size" install
-  ' call 25 prim-flag s" call" install
+  ' p-dup 0 prim-flag s" dup" install
+  ' p-drop 1 prim-flag s" drop" install
+  ' p-swap 2 prim-flag s" swap" install
+  ' p-over 3 prim-flag s" over" install
+  ' p-rot 4 prim-flag s" rot" install
+  ' p-u+ 5 prim-flag s" u+" install
+  ' p-u- 6 prim-flag s" u-" install
+  ' p-u* 7 prim-flag s" u*" install
+  ' p-u/ 8 prim-flag s" u/" install
+  ' p-umod 9 prim-flag s" umod" install
+  ' p-eq? 10 prim-flag s" eq?" install
+  ' p-ult? 11 prim-flag s" ult?" install
+  ' p-and 12 prim-flag s" and" install
+  ' p-or 13 prim-flag s" or" install
+  ' p-xor 14 prim-flag s" xor" install
+  ' p-invert 15 prim-flag s" invert" install
+  ' p-lshift 16 prim-flag s" lshift" install
+  ' p-rshift 17 prim-flag s" rshift" install
+  ' p-c@ 18 prim-flag s" c@" install
+  ' p-c! 19 prim-flag s" c!" install
+  ' p-@ 20 prim-flag s" @" install
+  ' p-! 21 prim-flag s" !" install
+  ' p-region-new 22 prim-flag s" region-new" install
+  ' p-region-free 23 prim-flag s" region-free" install
+  ' p-region-size 24 prim-flag s" region-size" install
+  ' p-call 25 prim-flag s" call" install
   ' word 0 s" word" install
   ' find 0 s" find" install
   ' >xt 0 s" >xt" install
@@ -426,13 +432,13 @@ take-over
   ' * 0 s" *" install
   ' / 0 s" /" install
   ' mod 0 s" mod" install
-  ' trap 32 prim-flag s" trap" install
-  ' seal 26 prim-flag s" seal" install
-  ' code-cid 27 prim-flag s" code-cid" install
-  ' resolve 28 prim-flag s" resolve" install
-  ' publish 29 prim-flag s" publish" install
-  ' blob-cid 30 prim-flag s" blob-cid" install
-  ' blob-read 31 prim-flag s" blob-read" install ;
+  ' p-trap 32 prim-flag s" trap" install
+  ' p-seal 26 prim-flag s" seal" install
+  ' p-code-cid 27 prim-flag s" code-cid" install
+  ' p-resolve 28 prim-flag s" resolve" install
+  ' p-publish 29 prim-flag s" publish" install
+  ' p-blob-cid 30 prim-flag s" blob-cid" install
+  ' p-blob-read 31 prim-flag s" blob-read" install ;
 
 -- ( data-region 0 length -- evaluate recover export )
 : boot 4096 32 put 0 8 put 0 0 put

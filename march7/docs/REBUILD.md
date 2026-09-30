@@ -18,17 +18,17 @@ exports an image whose entry is that word.
 | Generation | Built by | Image SHA-256 (prefix) |
 |---|---|---|
 | 0 | assembler, from `seed/system.asm` | `b9b9c609…` |
-| 1 | generation 0 compiling `system.march` | `fe114689…` |
-| 2 | generation 1 compiling `system.march` | `fe114689…` |
-| 3 | generation 2 compiling `system.march` | `fe114689…` |
+| 1 | generation 0 compiling `system.march` | `7b2b6532…` |
+| 2 | generation 1 compiling `system.march` | `7b2b6532…` |
+| 3 | generation 2 compiling `system.march` | `7b2b6532…` |
 
 Generations 1, 2 and 3 are byte-identical. The fixed point holds from the first
 rebuild. After generation 0, only images and March source are involved.
 
 ```sh
 cargo run --offline --bin march7-seed -- seed/system.asm gen0.image
-cargo run --offline -- gen0.image --fuel 1000000000 seed/system.march --system gen1.image
-cargo run --offline -- gen1.image --fuel 1000000000 seed/system.march --system gen2.image
+cargo run --offline -- gen0.image seed/system.march --system gen1.image
+cargo run --offline -- gen1.image seed/system.march --system gen2.image
 cmp gen1.image gen2.image
 cargo run --offline -- gen1.image --eval ': square dup u* ; 7 square'
 ```
@@ -39,8 +39,9 @@ Every compiled call in `system.march` targets a word defined earlier in the same
 file. Words from the running dictionary are only executed at compile time
 (`:` `;` `immediate`, the phase-1 `[` `]` `prim,`). Executing a word leaves no
 reference to it in the output. Numbers, calls and quotations are encoded the same
-way by every generation. So the compiled output does not depend on which
-generation compiled it.
+way by every generation, and primitives are inlined by the file itself (see
+"Inlining" below). So the compiled output does not depend on which generation
+compiled it.
 
 Content addressing also shares byte-identical objects across generations. These
 are the name strings and leaf words such as the one-primitive `dup` wrapper. A
@@ -74,10 +75,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` | see "Costs" below |
-| Three full rebuilds in the test suite | about 0.1 s |
-| Rebuilt image size | about 43 KB |
-| `system.march` | 440 lines, 342 non-comment |
+| Machine steps to compile `system.march` on generation 0 | 7.8 million (27 ms) |
+| The same on generation 1 | 7.3 million (26 ms) |
+| Driver's default budget | 10 million steps |
+| Rebuilt image size | 31,766 bytes |
+| `system.march` | 448 lines |
 | `system.asm` listing | 1,395 lines |
 
 ## Tests
@@ -132,33 +134,50 @@ All four were written in `system.march`. The host changed only to add scratch fr
 
 `examples/inline_probe.rs` reproduces this.
 
-### How inlining keeps generations identical
+### Inlining inside the system source
 
-Inlining depends on the running dictionary's flags. So the file stops relying
-on the running compiler as soon as it has its own. After defining `interpret`
-and `evaluate`, the file executes `take-over`, which runs the new `interpret`
-on the rest of the file's input. Everything below that line is compiled by
-this file's compiler, whatever generation is running. The primitives are
-marked inline only after `take-over`, so the part above it is compiled
-identically everywhere. Generations 1, 2 and 3 remain byte-identical
-(`fe114689…`).
+The dictionary flags serve programs compiled by a booted system. The system
+source cannot rely on them, because they belong to whichever system is
+compiling it, and generation 0 has none. So the file inlines by itself:
+
+- **Primitive names are emitters.** Phase 2 defines each primitive twice. The
+  wrapper (`p-dup`, one primitive op and a return) is what `init` binds as
+  `dup`, flagged inline, so `' dup` and `call` work in a booted system. Then an
+  immediate word named `dup` emits the primitive op. Within the file every use
+  of a primitive therefore compiles inline, whatever system compiles it.
+- **`get` and `put` are emitters too,** from the compiler words onward: a
+  literal 1 (working region 1), a swap, and the load or store. The words above
+  them keep calling `get` and `put`. The hand-counted `ops` depends on that, and
+  those words only run at compile time.
+- These emitters are compile-time devices. Nothing exported refers to them, and
+  the file never uses a primitive name outside a definition.
+
+An earlier version handed the rest of the file to its own compiler partway
+through (`take-over`) and marked the primitives inline after that point. That
+left the compiler words themselves uninlined. Recompiling them in a second pass
+reached the same bytes, but cost more steps than it saved, because the second
+pass ran on the uninlined first-pass compiler. The emitters replace both.
 
 ### Costs and what comes next
 
-Compiling `system.march` now takes about 10.2 million steps on generation 0
-(29 ms) and 15.2 million on generation 1 (41 ms). That exceeds the driver's
-default budget of 10 million steps, so a rebuild needs `--fuel`. Generation 1
-is slower because the compiler words sit above `take-over`. They were compiled
-by the previous compiler, so their primitives are still wrapper calls.
+| Compiling `system.march` | Before | Now |
+|---|---|---|
+| On generation 0 | 10.2 million steps | 7.8 million |
+| On generation 1 | 15.2 million steps | 7.3 million |
+| Rebuilt image | about 43 KB | 31.8 KB |
+
+Every generation now rebuilds within the driver's default budget, and the
+rebuild tests run with it, so growth past it shows up as a failure.
+Generation 1 compiles the system faster than the hand-written listing does.
 
 Next candidates:
 
-- **Recompile the compiler words below `take-over`.** That would inline them
-  too, without duplicating source.
 - **Keep temporaries on the scratch stack.** Words like `find` and `number`
   still use fixed temporary offsets. That is safe now, because `evaluate` is
   reentrant and those words do not call back into user code, but the stack is
   the cleaner convention for new code.
+- **A faster dictionary.** `find` scans every entry. It is the largest
+  remaining compile cost as the dictionary grows.
 - **Freeze the listing.** `system.asm` is only needed to produce generation 0.
 
 `tests/rebuild.rs` now has nine tests, adding: scratch stack and nested

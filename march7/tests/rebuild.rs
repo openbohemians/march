@@ -10,16 +10,16 @@ use march7::{Blob, Driver, Image};
 use std::collections::BTreeSet;
 
 const SYSTEM: &str = include_str!("../seed/system.march");
-const FUEL: u64 = 1_000_000_000;
 
 fn generation_zero() -> Image {
     assembler::assemble(include_str!("../seed/system.asm")).unwrap()
 }
 
 /// Boot `image`, compile the system source, and export the image it defines.
+/// This uses the driver's default fuel, so every generation must rebuild the
+/// system within it.
 fn rebuild(image: &Image) -> Image {
     let mut d = Driver::boot(image).unwrap();
-    d.fuel = FUEL;
     d.evaluate(SYSTEM).unwrap();
     let boot = d
         .machine

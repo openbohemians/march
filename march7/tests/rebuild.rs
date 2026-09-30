@@ -15,11 +15,21 @@ fn generation_zero() -> Image {
     assembler::assemble(include_str!("../seed/system.asm")).unwrap()
 }
 
+/// Step budget for compiling the system source in these tests. Generation 0
+/// takes about 14.4 million steps, because the frozen listing's `find` scans
+/// the dictionary linearly. This budget is only a safety net; compile cost is
+/// tracked by `compiling_the_system_stays_under_its_step_canary`.
+const REBUILD_FUEL: u64 = 20_000_000;
+
+/// Compile-cost canary: steps for a rebuilt system (generation 1) to compile
+/// the system source. It is 5.3 million today. Exceeding it means compile cost
+/// grew; look at why before raising it (docs/REBUILD.md).
+const COMPILE_STEP_CANARY: u64 = 8_000_000;
+
 /// Boot `image`, compile the system source, and export the image it defines.
-/// This uses the driver's default fuel, so every generation must rebuild the
-/// system within it.
 fn rebuild(image: &Image) -> Image {
     let mut d = Driver::boot(image).unwrap();
+    d.fuel = REBUILD_FUEL;
     d.evaluate(SYSTEM).unwrap();
     let boot = d
         .machine
@@ -107,8 +117,26 @@ fn rebuilt_image_contains_no_generation_zero_code() {
             );
         }
     }
-    // Compile-time-only helpers (the phase-1 `[` `]` `prim,`) are not exported.
-    assert!(g1.blobs.len() < 200, "export is reachability-closed");
+}
+
+#[test]
+fn export_leaves_out_compile_time_only_code() {
+    // The export holds only what `boot` reaches. Everything the compiling
+    // session published, including compile-time helpers such as the phase-1
+    // `[` `]` `prim,` and the primitive emitters, is a strict superset.
+    let mut d = Driver::boot(&generation_zero()).unwrap();
+    d.fuel = REBUILD_FUEL;
+    d.evaluate(SYSTEM).unwrap();
+    let boot = d.machine.stack.pop().unwrap();
+    let exported = d.system_image(boot).unwrap();
+    let everything = d.snapshot().unwrap();
+    assert!(exported.blobs.len() < everything.blobs.len());
+    assert!(
+        exported
+            .blobs
+            .keys()
+            .all(|cid| everything.blobs.contains_key(cid))
+    );
 }
 
 #[test]
@@ -293,5 +321,54 @@ fn primitives_compile_inline() {
             Op::Prim(Primitive::Mul),
             Op::Return
         ]
+    );
+}
+
+#[test]
+fn names_hash_exactly_as_merkle_champ_places_keys() {
+    let (_, g1, _, _) = generations();
+    let names = [
+        "dup",
+        "",
+        "namespace.word",
+        "é",
+        "a longer name with spaces",
+    ];
+    let source: String = names
+        .iter()
+        .map(|n| format!("s\" {n}\" hash-bytes "))
+        .collect();
+    let hashes = run(&g1, &source);
+    let expected: Vec<u64> = names
+        .iter()
+        .map(|n| merkle_champ::hash_bytes(n.as_bytes()))
+        .collect();
+    assert_eq!(hashes, expected);
+}
+
+#[test]
+fn the_hashed_dictionary_keeps_shadowing_across_many_words_and_reloads() {
+    let (_, g1, _, _) = generations();
+    let mut d = Driver::boot(&g1).unwrap();
+    d.fuel = 100_000_000; // 3,000 definitions in one input
+    let defs: String = (0..3000).map(|i| format!(": w{i} {i} ; ")).collect();
+    d.evaluate(&defs).unwrap();
+    d.evaluate(": w7 w7 1000 u+ ; w0 w7 w1234 w2999").unwrap();
+    assert_eq!(d.machine.stack, [0, 1007, 1234, 2999]);
+    let saved = Image::decode(&d.snapshot().unwrap().encode().unwrap()).unwrap();
+    assert_eq!(run(&saved, "w7 w2999 dup"), [1007, 2999, 2999]);
+}
+
+#[test]
+fn compiling_the_system_stays_under_its_step_canary() {
+    let (_, g1, _, _) = generations();
+    let mut d = Driver::boot(&g1).unwrap();
+    d.fuel = REBUILD_FUEL;
+    let before = d.machine.stats.steps;
+    d.evaluate(SYSTEM).unwrap();
+    let steps = d.machine.stats.steps - before;
+    assert!(
+        steps < COMPILE_STEP_CANARY,
+        "compiling the system took {steps} steps (canary {COMPILE_STEP_CANARY})"
     );
 }

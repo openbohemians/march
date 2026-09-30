@@ -38,7 +38,10 @@ Changing it later requires updating the seed and its boot contract explicitly.
 addresses; `c@`/`c!` use byte addresses. The seed's private `get`/`put` helpers
 access offsets in region 1. Its dictionary entries are ordinary March memory:
 previous-entry offset, executable token, immediate flag, name length, name bytes,
-then alignment padding. The Rust host knows none of those fields.
+then alignment padding. The Rust host knows none of those fields. (This is the
+frozen generation-0 listing's layout. The system rebuilt from
+`seed/system.march` adds a bucket link before the name, which then starts at
+offset 40, and finds names through a hashed dictionary; see docs/REBUILD.md.)
 
 `:` calls `word begin`. `begin` allocates a bounded 64 KiB output region and
 records the name. `c,` emits one byte; `,` emits eight little-endian bytes even

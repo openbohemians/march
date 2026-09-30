@@ -18,16 +18,16 @@ exports an image whose entry is that word.
 | Generation | Built by | Image SHA-256 (prefix) |
 |---|---|---|
 | 0 | assembler, from `seed/system.asm` | `b9b9c609…` |
-| 1 | generation 0 compiling `system.march` | `7b2b6532…` |
-| 2 | generation 1 compiling `system.march` | `7b2b6532…` |
-| 3 | generation 2 compiling `system.march` | `7b2b6532…` |
+| 1 | generation 0 compiling `system.march` | `439ba102…` |
+| 2 | generation 1 compiling `system.march` | `439ba102…` |
+| 3 | generation 2 compiling `system.march` | `439ba102…` |
 
 Generations 1, 2 and 3 are byte-identical. The fixed point holds from the first
 rebuild. After generation 0, only images and March source are involved.
 
 ```sh
 cargo run --offline --bin march7-seed -- seed/system.asm gen0.image
-cargo run --offline -- gen0.image seed/system.march --system gen1.image
+cargo run --offline -- gen0.image --fuel 20000000 seed/system.march --system gen1.image
 cargo run --offline -- gen1.image seed/system.march --system gen2.image
 cmp gen1.image gen2.image
 cargo run --offline -- gen1.image --eval ': square dup u* ; 7 square'
@@ -75,11 +75,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 7.8 million (27 ms) |
-| The same on generation 1 | 7.3 million (26 ms) |
+| Machine steps to compile `system.march` on generation 0 | 14.4 million (51 ms) |
+| The same on generation 1 | 5.3 million (18 ms) |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 31,766 bytes |
-| `system.march` | 448 lines |
+| Rebuilt image size | 47,063 bytes |
+| `system.march` | 682 lines |
 | `system.asm` listing | 1,395 lines |
 
 ## Tests
@@ -166,9 +166,30 @@ pass ran on the uninlined first-pass compiler. The emitters replace both.
 | On generation 1 | 15.2 million steps | 7.3 million |
 | Rebuilt image | about 43 KB | 31.8 KB |
 
-Every generation now rebuilds within the driver's default budget, and the
-rebuild tests run with it, so growth past it shows up as a failure.
-Generation 1 compiles the system faster than the hand-written listing does.
+After inlining, every generation rebuilt within the driver's default budget.
+The stack-effect checker (docs/CHECKER.md) then added about 230 lines, and
+compiling the system now takes 13.8 million steps on generation 0 and 12.5
+million on generation 1. The rebuild tests caught that growth. The cost is the
+dictionary: every lookup scanned it linearly, so compile cost grew with tokens
+times entries.
+
+The dictionary is now hashed: 1,024 buckets, each a chain through the entries,
+newest first so shadowing still finds the newest definition. Names hash with
+`hash-bytes`, the same function merkle-champ uses to place keys, so a name
+hashes the same in the working dictionary and in a store. A test checks it
+against the crate itself. Compiling the system on generation 1 dropped from
+12.5 to 5.3 million steps, and later generations rebuild within the default
+budget again. Generation 0's frozen compiler still scans linearly (14.4
+million steps), so a rebuild from generation 0 on the command line needs
+`--fuel`.
+
+The driver's step budget (10 million by default) is a safety net against
+runaway programs, and it stays tight on purpose while runaways are common
+(decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
+rebuild tests use an explicit budget of 20 million steps, and a named canary
+test asserts that a rebuilt system compiles the system source in under 8
+million steps (5.3 million today). When the command line exhausts the budget,
+it says so and suggests `--fuel`.
 
 Next candidates:
 
@@ -176,8 +197,6 @@ Next candidates:
   still use fixed temporary offsets. That is safe now, because `evaluate` is
   reentrant and those words do not call back into user code, but the stack is
   the cleaner convention for new code.
-- **A faster dictionary.** `find` scans every entry. It is the largest
-  remaining compile cost as the dictionary grows.
 - **The listing is frozen** (2026-09-30). `system.asm` only reproduces
   generation 0, and a test pins the SHA-256 of its assembled image.
 

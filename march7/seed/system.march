@@ -182,34 +182,59 @@
     128 get 1 u- 128 put
   repeat ;
 
+-- FNV-1a over bytes, finished with the MurmurHash3 64-bit mixer: the same
+-- function as merkle-champ's `hash_bytes`, so a name hashes the same in the
+-- working dictionary and in a store.
+: mix64 dup 33 rshift xor -49064778989728563 u* dup 33 rshift xor
+  -4265267296055464877 u* dup 33 rshift xor ;
+-- ( region offset length -- hash )
+: hash-bytes 760 put 752 put 744 put -3750763034362895579 768 put 0 776 put
+  cycle 776 get 760 get ult? while
+    744 get 752 get 776 get u+ c@ 768 get xor 1099511628211 u* 768 put
+    776 get 1 u+ 776 put
+  repeat
+  768 get 760 get xor mix64 ;
+
+-- The dictionary is hashed: 1,024 buckets in the region whose handle is at
+-- working offset 736, each the head of a chain through the entries' bucket
+-- links, newest first, so the newest definition of a name is found first.
+-- An entry is: previous entry (LATEST chain), token, flags, name length, next
+-- entry in its bucket, then the name bytes from offset 40.
+-- ( region offset length -- bucket-offset )
+: name-bucket hash-bytes 1023 and 8 u* ;
+
 -- ( xt flags name-region name-offset length -- )
--- The entry is complete before LATEST points at it.
+-- The entry is complete before LATEST or its bucket points at it.
 : install 176 put 184 put 192 put 200 put 208 put
   176 get dup 0= swap 256 ult? 0= or if 7 trap then
   32 get 216 put
-  216 get 32 u+ 176 get u+ 7 u+ -8 and dup 1048576 1 u+ ult? 0= if 12 trap then 224 put
+  216 get 40 u+ 176 get u+ 7 u+ -8 and dup 1048576 1 u+ ult? 0= if 12 trap then 224 put
   8 get 216 get put
   208 get 216 get 8 u+ put
   200 get 216 get 16 u+ put
   176 get 216 get 24 u+ put
-  192 get 184 get 1 216 get 32 u+ 176 get copy
+  192 get 184 get 1 216 get 40 u+ 176 get copy
+  192 get 184 get 176 get name-bucket 232 put
+  736 get 232 get @ 216 get 32 u+ put
   224 get 32 put
-  216 get 8 put ;
+  216 get 8 put
+  216 get 736 get 232 get ! ;
 
 -- ( region offset length -- entry | 0 )
-: find 256 put 248 put 240 put 8 get 264 put
+: find 256 put 248 put 240 put
+  736 get 240 get 248 get 256 get name-bucket @ 264 put
   cycle 264 get while
     264 get 24 u+ get 256 get eq? if
       0 272 put
       cycle
         272 get 256 get ult? if
           240 get 248 get 272 get u+ c@
-          1 264 get 32 u+ 272 get u+ c@ eq?
+          1 264 get 40 u+ 272 get u+ c@ eq?
         else 0 then
       while 272 get 1 u+ 272 put repeat
       272 get 256 get eq? if 264 get exit then
     then
-    264 get get 264 put
+    264 get 32 u+ get 264 put
   repeat 0 ;
 
 : token 40 get 64 get 72 get ;
@@ -248,6 +273,231 @@
 : compile, 3 c, out here code-cid here 32 u+ 16 put ;
 : compile-quote 4 c, out here code-cid here 32 u+ 16 put ;
 
+-- Stack effects (checker, slice 1). A word's effect is how many cells it
+-- takes and leaves. The checker derives it from the word's canonical code
+-- bytes, so it is exact whatever syntax produced the code, and it works the
+-- same on a definition being built and on sealed code read back by CID.
+-- Effects are computed on demand and remembered per session (never stored
+-- in images). See docs/CHECKER.md.
+--
+-- Packed effect: bit 0 computed, bit 1 known, bits 8-23 inputs (or, when
+-- unknown, the reason), bits 24-39 outputs. Reasons: 1 dynamic call, 2 calls
+-- a word whose effect is unknown, 3 branches meet at different depths, 4 a
+-- loop changes the depth, 5 returns leave different depths, 6 scratch pop
+-- below the word's frame, 7 never returns, 8 recursion inconsistent with its
+-- base case, 10 limits, 11 invalid code.
+-- ( in out -- packed )
+: effect-pack 24 lshift swap 8 lshift or 3 or ;
+-- ( reason -- packed )
+: effect-unknown 8 lshift 1 or ;
+-- ( packed -- flag )
+: effect-known? 1 rshift 1 and ;
+-- ( packed -- n )
+: effect-in 8 rshift 65535 and ;
+-- ( packed -- n )
+: effect-out 24 rshift 65535 and ;
+
+-- Inputs and outputs of primitives 0-31, two bits each. Execute (25), trap
+-- (32) and the scratch primitives (33-35) are handled specially.
+-- ( id -- n )
+: prim-in 2 u* -4687861376211047515 swap rshift 3 and ;
+-- ( id -- n )
+: prim-out 2 u* -4246594190310025246 swap rshift 3 and ;
+
+-- Each analysis has its own region, so analyses nest (a call analyses its
+-- callee). Its handle is at working offset 600. Fields: 0 code region,
+-- 8 code length, 16 op count, 24 current op, 32 its byte offset, 40 live,
+-- 48 depth, 56 scratch depth, 64 effect of a quotation on top (or 0),
+-- 72 lowest depth, 80 returned?, 88 return depth, 96 unknown reason,
+-- 104 pass, 112 assumed own effect, 120 recurs?. Depths are biased by 2^32
+-- so that unsigned comparison works. Per-op tables start at 256: 0 byte
+-- offset; 1-4 state from forward branches (set?, depth, scratch, quotation);
+-- 5-7 state on arrival (set?, depth, scratch); 8 loop header?.
+-- ( field -- v )
+: an@ 600 get swap @ ;
+-- ( v field -- )
+: an! 600 get swap ! ;
+-- ( k table -- field )
+: tab 16 an@ 8 u* u* 256 u+ swap 8 u* u+ ;
+-- ( k table -- v )
+: tab@ tab an@ ;
+-- ( v k table -- )
+: tab! tab an! ;
+-- ( pos -- byte )
+: code@ 0 an@ swap c@ ;
+-- ( pos -- n )
+: code-u32
+  dup code@ over 1 u+ code@ 8 lshift or
+  over 2 u+ code@ 16 lshift or swap 3 u+ code@ 24 lshift or ;
+
+-- ( region length -- n )
+: count-ops
+  656 put 648 put 0 664 put 0 672 put
+  cycle 664 get 656 get ult? while
+    648 get 664 get c@ oplen 664 get u+ 664 put
+    672 get 1 u+ 672 put
+  repeat 672 get ;
+
+-- ( region length -- )
+: analysis-begin
+  over over count-ops dup 72 u* 256 u+ region-new 600 put
+  16 an! 8 an! 0 an!
+  0 32 an! 0 24 an!
+  cycle 24 an@ 16 an@ ult? while
+    32 an@ 24 an@ 0 tab!
+    32 an@ code@ oplen 32 an@ u+ 32 an!
+    24 an@ 1 u+ 24 an!
+  repeat
+  -- Mark loop headers: targets of backward branches.
+  0 24 an!
+  cycle 24 an@ 16 an@ ult? while
+    24 an@ 0 tab@ dup code@ dup 5 eq? swap 6 eq? or if
+      1 u+ code-u32 dup 24 an@ 1 u+ ult? if 1 swap 8 tab! else drop then
+    else drop then
+    24 an@ 1 u+ 24 an!
+  repeat ;
+
+-- ( reason -- )
+: fail 96 an@ 0= if 96 an! else drop then 16 an@ 24 an! 0 40 an! ;
+-- ( in out -- )
+: apply
+  swap 48 an@ swap u- dup 72 an@ ult? if dup 72 an! then u+ 48 an! ;
+-- ( target -- )
+: pend
+  dup 1 tab@ if
+    dup 2 tab@ 48 an@ eq? over 3 tab@ 56 an@ eq? and 0= if drop 3 fail exit then
+    dup 4 tab@ 64 an@ eq? 0= if 0 over 4 tab! then drop
+  else
+    1 over 1 tab! 48 an@ over 2 tab! 56 an@ over 3 tab! 64 an@ swap 4 tab!
+  then ;
+-- ( target -- )
+: back
+  dup 6 tab@ 48 an@ eq? swap 7 tab@ 56 an@ eq? and 0= if 4 fail then ;
+-- ( -- )
+: arrive
+  24 an@ 1 tab@ if
+    40 an@ if
+      24 an@ 2 tab@ 48 an@ eq? 24 an@ 3 tab@ 56 an@ eq? and 0= if 3 fail exit then
+      24 an@ 4 tab@ 64 an@ eq? 0= if 0 64 an! then
+    else
+      24 an@ 2 tab@ 48 an! 24 an@ 3 tab@ 56 an! 24 an@ 4 tab@ 64 an! 1 40 an!
+    then
+  then
+  40 an@ if
+    24 an@ 8 tab@ if 0 64 an! then
+    1 24 an@ 5 tab! 48 an@ 24 an@ 6 tab! 56 an@ 24 an@ 7 tab!
+  then ;
+
+-- The effect of a callee, through the word stored at working offset 616
+-- (`effect-of`, defined below).
+-- ( token -- packed )
+: callee-effect 616 get call ;
+-- ( -- packed )
+: callee 0 an@ 32 an@ 1 u+ resolve callee-effect ;
+
+-- ( -- )
+: do-return
+  80 an@ if 88 an@ 48 an@ eq? 0= if 5 fail exit then
+  else 1 80 an! 48 an@ 88 an! then 0 40 an! ;
+-- ( -- )
+: do-call
+  callee dup effect-known? if dup effect-in swap effect-out apply 0 64 an!
+  else drop 2 fail then ;
+-- ( -- )
+: do-quote
+  callee 0 1 apply dup effect-known? if 64 an! else drop 0 64 an! then ;
+-- ( -- )
+: do-execute
+  64 an@ dup if 1 0 apply dup effect-in swap effect-out apply 0 64 an!
+  else drop 1 fail then ;
+-- ( id -- )
+: do-prim
+  35 over ult? if drop 11 fail exit then
+  dup 25 eq? if drop do-execute exit then
+  dup 32 eq? if drop 1 0 apply 0 40 an! exit then
+  dup 33 eq? if drop 1 0 apply 56 an@ 1 u+ 56 an! 0 64 an! exit then
+  dup 34 eq? if drop 56 an@ 0= if 6 fail exit then
+    56 an@ 1 u- 56 an! 0 1 apply 0 64 an! exit then
+  dup 35 eq? if drop 56 an@ 0= if 6 fail exit then 0 1 apply 0 64 an! exit then
+  dup 0= if drop 1 2 apply exit then
+  dup prim-in swap prim-out apply 0 64 an! ;
+-- ( -- target )
+: branch-target 32 an@ 1 u+ code-u32 ;
+-- ( target -- )
+: jump 24 an@ over ult? if pend else back then ;
+-- ( -- )
+: do-recur
+  1 120 an! 104 an@ 1 eq? if 0 40 an! exit then
+  112 an@ dup effect-in swap effect-out apply 0 64 an! ;
+
+-- ( -- )
+: step
+  24 an@ 0 tab@ 32 an!
+  32 an@ code@
+  dup 0= if drop do-return exit then
+  dup 1 eq? if drop 0 1 apply 0 64 an! exit then
+  dup 2 eq? if drop 32 an@ 1 u+ code@ do-prim exit then
+  dup 3 eq? if drop do-call exit then
+  dup 4 eq? if drop do-quote exit then
+  dup 5 eq? if drop branch-target jump 0 40 an! exit then
+  dup 6 eq? if drop 1 0 apply 0 64 an! branch-target jump exit then
+  dup 7 eq? if drop do-recur exit then
+  dup 8 eq? if drop 0 3 apply 0 64 an! exit then
+  dup 9 eq? if drop do-call 40 an@ if do-return then exit then
+  drop 11 fail ;
+
+-- ( pass -- )
+: run-pass
+  104 an!
+  0 24 an!
+  cycle 24 an@ 16 an@ ult? while
+    0 24 an@ 1 tab! 0 24 an@ 5 tab!
+    24 an@ 1 u+ 24 an!
+  repeat
+  0 24 an! 1 40 an! 4294967296 48 an! 0 56 an! 0 64 an! 4294967296 72 an!
+  0 80 an! 0 88 an! 0 96 an!
+  cycle 24 an@ 16 an@ ult? while
+    arrive 40 an@ if step then
+    24 an@ 1 u+ 24 an!
+  repeat ;
+-- ( -- packed )
+: pass-result
+  96 an@ if 96 an@ effect-unknown exit then
+  80 an@ 0= if 7 effect-unknown exit then
+  4294967296 72 an@ u- 88 an@ 72 an@ u- effect-pack ;
+
+-- ( region length -- packed ) The effect of canonical code bytes. A word
+-- that recurs is analysed twice: once treating `recur` as a dead end, which
+-- gives its base case, then again assuming that effect for `recur`, which
+-- must reproduce it.
+: analyze
+  600 get >r
+  analysis-begin 1 run-pass pass-result
+  120 an@ if dup effect-known? if
+    dup 112 an! 2 run-pass pass-result
+    dup effect-known? if
+      over over eq? if drop else drop drop 8 effect-unknown then
+    else swap drop then
+  then then
+  600 get region-free r> 600 put ;
+
+-- ( token -- packed ) A word's effect, computed from its code on first use
+-- and remembered in the table at working offset 624.
+: effect-of
+  dup 131072 ult? 0= if drop 10 effect-unknown exit then
+  dup 8 u* 624 get swap @ dup if swap drop exit then drop
+  dup 1 680 code-cid 1 680 blob-read swap drop analyze
+  dup rot 8 u* 624 get swap ! ;
+
+-- ( token -- inputs outputs 1 | reason 0 0 )
+: stack-effect
+  effect-of dup effect-known? if dup effect-in swap effect-out 1
+  else effect-in 0 0 then ;
+-- In checked mode, `;` rejects a definition whose effect is unknown, trapping
+-- with 100 plus the reason.
+: checked 1 632 put ;
+: unchecked 0 632 put ;
+
 -- ( name-region name-offset length -- ) The name is copied at once, so a
 -- definition may continue in later input after its source buffer is gone.
 : begin 0 get if 5 trap then
@@ -257,7 +507,12 @@
   65536 region-new 24 put 0 16 put 1 0 put ;
 : colon word begin ;
 : semicolon 0 get 0= if 6 trap then
-  0 c, out 0 here seal 0 96 get 80 get 88 get install
+  0 c,
+  632 get if out here analyze dup effect-known? 0= if effect-in 100 u+ trap then
+  else 0 then
+  out 0 here seal
+  dup >r 0 96 get 80 get 88 get install
+  dup if r@ 8 u* 624 get swap ! else drop then
   out region-free 0 24 put 0 0 put ;
 
 : >xt 8 u+ get ;
@@ -302,7 +557,7 @@
 
 -- Phase 7: recovery, dictionary export and boot.
 : recover 24 get dup if region-free else drop then
-  0 24 put 0 16 put 0 0 put ;
+  0 24 put 0 16 put 0 0 put 0 600 put ;
 
 -- Dictionary export: oldest first, name length, flags, code CID, name bytes.
 : out-byte 400 get 408 get c! 408 get 1 u+ 408 put ;
@@ -311,7 +566,7 @@
   440 get 24 u+ get out-cell
   440 get 16 u+ get out-cell
   440 get >xt 400 get 408 get code-cid 408 get 32 u+ 408 put
-  1 440 get 32 u+ 400 get 408 get 440 get 24 u+ get copy
+  1 440 get 40 u+ 400 get 408 get 440 get 24 u+ get copy
   408 get 440 get 24 u+ get u+ 408 put ;
 : snapshot 1048576 region-new 400 put 0 408 put 8 get save-list 400 get 0 408 get ;
 
@@ -438,10 +693,16 @@
   ' p-resolve 28 prim-flag s" resolve" install
   ' p-publish 29 prim-flag s" publish" install
   ' p-blob-cid 30 prim-flag s" blob-cid" install
-  ' p-blob-read 31 prim-flag s" blob-read" install ;
+  ' p-blob-read 31 prim-flag s" blob-read" install
+  ' stack-effect 0 s" stack-effect" install
+  ' hash-bytes 0 s" hash-bytes" install
+  ' checked 0 s" checked" install
+  ' unchecked 0 s" unchecked" install ;
 
 -- ( data-region 0 length -- evaluate recover export )
 : boot 4096 32 put 0 8 put 0 0 put
+  1048576 region-new 624 put ' effect-of 616 put 0 632 put
+  8192 region-new 736 put
   dup if restore else drop drop drop init then
   ' evaluate ' recover ' snapshot ;
 

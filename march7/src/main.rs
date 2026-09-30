@@ -1,5 +1,24 @@
-use march7::{Driver, Image};
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+use march7::{Driver, Error, Image};
+
+/// Runs `step`, turning an exhausted step budget into advice.
+fn guard(fuel: u64, step: Result<(), Error>) -> Result<(), Box<dyn std::error::Error>> {
+    match step {
+        Err(Error::Fuel) => Err(format!(
+            "step budget of {fuel} exhausted (a runaway loop, or raise it with --fuel N)"
+        )
+        .into()),
+        other => Ok(other?),
+    }
+}
+
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let usage =
         "usage: march7 IMAGE [--fuel N] [--eval SOURCE | FILE] [--save IMAGE] [--system IMAGE]";
@@ -9,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--fuel" => d.fuel = args.next().ok_or("missing fuel")?.parse()?,
-            "--eval" => d.evaluate(&args.next().ok_or("missing source")?)?,
+            "--eval" => guard(d.fuel, d.evaluate(&args.next().ok_or("missing source")?))?,
             "--save" => std::fs::write(
                 args.next().ok_or("missing output")?,
                 d.snapshot()?.encode()?,
@@ -25,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .ok_or("--system needs an entry token")?;
                 std::fs::write(out, d.system_image(xt)?.encode()?)?;
             }
-            _ => d.evaluate(&std::fs::read_to_string(arg)?)?,
+            _ => guard(d.fuel, d.evaluate(&std::fs::read_to_string(arg)?))?,
         }
     }
     println!("{:?}", d.machine.stack);

@@ -7,6 +7,10 @@ default-run = "march7"
 [dependencies]
 sha2 = "0.10"
 
+[dev-dependencies]
+# Tests check that dictionary names hash exactly as merkle-champ places keys.
+merkle-champ = "0.1"
+
 [[bin]]
 name = "march7-seed"
 path = "tools/seed.rs"

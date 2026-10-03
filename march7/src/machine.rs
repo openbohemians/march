@@ -308,7 +308,7 @@ impl Machine {
         for op in ops {
             out.push(match op {
                 Op::Return => Instruction::Return,
-                Op::Lit(n) => Instruction::Lit(n),
+                Op::Lit(n) | Op::Float(n) => Instruction::Lit(n),
                 Op::Prim(p) => Instruction::Prim(p),
                 Op::Call(c) => Instruction::Call(self.link_inner(c, depth + 1)?),
                 Op::Quote(c) => Instruction::Quote(self.link_inner(c, depth + 1)?),
@@ -512,6 +512,33 @@ impl Machine {
                 let a = self.pop()?;
                 self.push(!a)?;
             }
+            FAdd | FSub | FMul | FDiv | FEq | FLt => {
+                let b = f64::from_bits(self.pop()?);
+                let a = f64::from_bits(self.pop()?);
+                let n = match p {
+                    FAdd => float_bits(a + b),
+                    FSub => float_bits(a - b),
+                    FMul => float_bits(a * b),
+                    FDiv => float_bits(a / b),
+                    FEq => (a == b) as u64,
+                    FLt => (a < b) as u64,
+                    _ => unreachable!(),
+                };
+                self.push(n)?;
+            }
+            IToF => {
+                let a = self.pop()? as i64;
+                self.push(float_bits(a as f64))?;
+            }
+            FToI => {
+                let a = f64::from_bits(self.pop()?);
+                // Truncate toward zero. NaN, infinities and values outside
+                // i64 are errors rather than Rust's saturating conversion.
+                if !(a > -9_223_372_036_854_777_856.0 && a < 9_223_372_036_854_775_808.0) {
+                    return Err(Error::Arithmetic);
+                }
+                self.push(a as i64 as u64)?;
+            }
             Load8 | Load64 => {
                 let (r, o) = self.address()?;
                 let n = if p == Load8 { 1 } else { 8 };
@@ -603,6 +630,15 @@ impl Machine {
             Execute | ScratchPush | ScratchPop | ScratchPeek => unreachable!(),
         }
         Ok(())
+    }
+}
+
+/// The bits of `x`, with every NaN mapped to one canonical pattern.
+fn float_bits(x: f64) -> u64 {
+    if x.is_nan() {
+        f64::NAN.to_bits()
+    } else {
+        x.to_bits()
     }
 }
 

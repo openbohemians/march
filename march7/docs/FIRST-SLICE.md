@@ -74,6 +74,7 @@ is `march7/data/v1\0`. A CID is SHA-256(domain followed by bytes).
 | 7 | Call the current definition recursively |
 | 8 | 32-byte data CID: push read-only region, offset zero, byte length |
 | 9 | 32-byte code CID: tail call |
+| 10 | Eight-byte float literal (IEEE-754 binary64 bits); runs like opcode 1 (docs/NUMBERS.md) |
 
 The literal-42-plus-return bytes and their independently calculated CID are
 pinned in a golden test, and another test pins every primitive ID. Decoding

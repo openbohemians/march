@@ -124,6 +124,7 @@ adding an operation outside this list requires review.
 |---|---|
 | Stack | `dup`, `drop`, `swap`, `over`, `rot` |
 | Integer | wrapping add/subtract/multiply; unsigned divide/remainder; equality and unsigned less-than; bitwise and/or/xor/not; logical shifts |
+| Float | IEEE-754 binary64 add/subtract/multiply/divide, equality, less-than, integer conversion both ways, with canonical NaN (added 2026-10-03; docs/NUMBERS.md) |
 | Control | full-cell literal, resolved call, return, local branch/zero-branch, quotation reference, indirect execute, local self-call, explicit tail-call forms, trap |
 | Working memory | create/release region, region size, byte/cell load/store |
 | Code | seal validated canonical bytes; obtain canonical bytes by CID; resolve/link CID to execution token; recover a token's code CID |

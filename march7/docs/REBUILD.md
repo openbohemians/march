@@ -18,9 +18,9 @@ exports an image whose entry is that word.
 | Generation | Built by | Image SHA-256 (prefix) |
 |---|---|---|
 | 0 | assembler, from `seed/system.asm` | `b9b9c609…` |
-| 1 | generation 0 compiling `system.march` | `c731a508…` |
-| 2 | generation 1 compiling `system.march` | `c731a508…` |
-| 3 | generation 2 compiling `system.march` | `c731a508…` |
+| 1 | generation 0 compiling `system.march` | `129daab3…` |
+| 2 | generation 1 compiling `system.march` | `129daab3…` |
+| 3 | generation 2 compiling `system.march` | `129daab3…` |
 
 Generations 1, 2 and 3 are byte-identical. The fixed point holds from the first
 rebuild. After generation 0, only images and March source are involved.
@@ -75,11 +75,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 18.3 million (67 ms) |
-| The same on generation 1 | 6.3 million (22 ms) |
+| Machine steps to compile `system.march` on generation 0 | 22.6 million (75 ms) |
+| The same on generation 1 | 7.6 million (27 ms) |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 56,059 bytes |
-| `system.march` | 824 lines |
+| Rebuilt image size | 62,756 bytes |
+| `system.march` | 931 lines |
 | `system.asm` listing | 1,395 lines |
 
 ## Tests
@@ -188,7 +188,7 @@ runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
 rebuild tests use an explicit budget of 40 million steps, and a named canary
 test asserts that a rebuilt system compiles the system source in under 8
-million steps (6.3 million today). When the command line exhausts the budget,
+million steps (7.6 million as of floats, so the margin is now small). When the command line exhausts the budget,
 it says so and suggests `--fuel`.
 
 Next candidates:

@@ -67,6 +67,14 @@
 : p-blob-cid [ 30 prim, ] ;
 : p-blob-read [ 31 prim, ] ;
 : p-trap [ 32 prim, ] ;
+: p-f+ [ 36 prim, ] ;
+: p-f- [ 37 prim, ] ;
+: p-f* [ 38 prim, ] ;
+: p-f/ [ 39 prim, ] ;
+: p-feq? [ 40 prim, ] ;
+: p-flt? [ 41 prim, ] ;
+: p-i>f [ 42 prim, ] ;
+: p-f>i [ 43 prim, ] ;
 
 -- Within this file each primitive name is an immediate word that emits the
 -- primitive op. So compiled code is inlined whatever system compiles this
@@ -106,6 +114,14 @@
 : blob-cid 30 prim, ; immediate
 : blob-read 31 prim, ; immediate
 : trap 32 prim, ; immediate
+: f+ 36 prim, ; immediate
+: f- 37 prim, ; immediate
+: f* 38 prim, ; immediate
+: f/ 39 prim, ; immediate
+: feq? 40 prim, ; immediate
+: flt? 41 prim, ; immediate
+: i>f 42 prim, ; immediate
+: f>i 43 prim, ; immediate
 
 -- Phase 3: clean base words.
 : get 1 swap @ ;
@@ -122,7 +138,9 @@
 : b! out swap c! ;
 : u32! over over b! over 8 rshift over 1 u+ b! over 16 rshift over 2 u+ b! swap 24 rshift swap 3 u+ b! ;
 -- Operand lengths of opcodes 0-9, six bits each: 1 9 2 33 33 5 5 1 33 33.
-: oplen 6 u* 603768572619268673 swap rshift 63 and ;
+-- Opcode 10 (a float literal) has the length of opcode 1, so it is mapped
+-- there first, without a branch.
+: oplen dup 10 eq? 9 u* u- 6 u* 603768572619268673 swap rshift 63 and ;
 
 -- Branch targets are instruction indexes, so count the instructions already
 -- emitted into the output region. This is the one hand-assembled word: its
@@ -152,6 +170,7 @@
 : prim-flag 8 lshift 2 or ;
 : , 0 360 put cycle 360 get 8 ult? while dup 360 get 8 u* rshift c, 360 get 1 u+ 360 put repeat drop ;
 : literal 1 c, , ;
+: fliteral 10 c, , ;
 
 -- From here on, `get` and `put` compile inline: a literal 1 (working region
 -- 1), a swap, and the load or store. Words above keep calling them, which the
@@ -255,7 +274,7 @@
 
 -- ( -- n 1 | 0 ) Signed decimal. A decimal that does not fit traps (2)
 -- instead of falling through to a dictionary word with that spelling.
-: number
+: int-number
   64 get 288 put 64 get 72 get u+ 296 put 0 304 put
   scan-char 45 eq? if 1 304 put scan-inc else scan-char 43 eq? if scan-inc then then
   288 get 296 get eq? if 0 exit then
@@ -270,6 +289,84 @@
     312 get 10 u* 328 get u+ 312 put scan-inc
   repeat
   312 get 304 get if 0 swap u- then 1 ;
+
+-- Float literals: [sign] digits [. digits] [e|E [sign] digits], with a dot or
+-- an exponent (so `1.` is a word, not a number). The value is correctly rounded
+-- on the exact fast path: a mantissa of at most 2^53 scaled by a power of ten
+-- up to 10^22, one multiplication or division (Clinger's fast path, extended by
+-- moving excess powers of ten into the mantissa while it stays exact). Anything else traps (21) rather
+-- than round wrongly. Zeros are deferred until a nonzero digit follows, so
+-- trailing zeros never cost precision. Working memory: 3440 negative,
+-- 3448 mantissa, 3456 decimal exponent biased by 1000, 3464 digit count,
+-- 3472 seen a dot or exponent, 3480 exponent value, 3488 exponent negative,
+-- 3496 deferred zeros.
+-- ( -- digit 1 | 0 )
+: scan-digit 288 get 296 get ult? if scan-char 48 u- dup 10 ult? if 1 exit then drop then 0 ;
+-- ( digit -- )
+: mantissa-push
+  9007199254740992 over u- 10 u/ 3448 get ult? if 21 trap then
+  3448 get 10 u* u+ 3448 put ;
+-- ( digit -- )
+: mantissa-digit
+  dup 0= if drop 3496 get 1 u+ 3496 put exit then
+  cycle 3496 get while 0 mantissa-push 3496 get 1 u- 3496 put repeat
+  mantissa-push ;
+-- ( k -- f ) 10^k as a float, exact for k <= 22.
+: pow10 1 i>f swap cycle dup while 10 i>f rot f* swap 1 u- repeat drop ;
+-- ( -- bits )
+: float-value
+  3448 get 0= if 0 else
+    -- Extended fast path: move excess powers of ten into the mantissa while
+    -- it stays at most 2^53, which is exact.
+    cycle 1022 3456 get ult? if 3448 get 900719925474100 ult? else 0 then while
+      3448 get 10 u* 3448 put 3456 get 1 u- 3456 put
+    repeat
+    3456 get 978 ult? 1022 3456 get ult? or if 21 trap then
+    3448 get i>f
+    3456 get 1000 ult? if 1000 3456 get u- pow10 f/ else 3456 get 1000 u- pow10 f* then
+  then
+  3440 get if 9223372036854775807 1 u+ xor then ;
+-- ( -- bits 2 | 0 )
+: parse-float
+  64 get 288 put 64 get 72 get u+ 296 put
+  0 3440 put 0 3448 put 1000 3456 put 0 3464 put 0 3472 put 0 3496 put
+  scan-char 45 eq? if 1 3440 put scan-inc else scan-char 43 eq? if scan-inc then then
+  cycle scan-digit while mantissa-digit 3464 get 1 u+ 3464 put scan-inc repeat
+  3464 get 0= if 0 exit then
+  288 get 296 get ult? if scan-char 46 eq? if
+    scan-inc 0 3464 put 1 3472 put
+    cycle scan-digit while
+      mantissa-digit 3456 get 1 u- 3456 put 3464 get 1 u+ 3464 put scan-inc
+    repeat
+    3464 get 0= if 0 exit then
+  then then
+  288 get 296 get ult? if scan-char 32 or 101 eq? if
+    scan-inc 1 3472 put 0 3480 put 0 3488 put 0 3464 put
+    288 get 296 get ult? if
+      scan-char 45 eq? if 1 3488 put scan-inc else scan-char 43 eq? if scan-inc then then
+    then
+    cycle scan-digit while
+      3480 get 10 u* u+ dup 400 ult? 0= if 21 trap then 3480 put
+      3464 get 1 u+ 3464 put scan-inc
+    repeat
+    3464 get 0= if 0 exit then
+    3488 get if 3456 get 3480 get u- else 3456 get 3480 get u+ then 3456 put
+  then then
+  288 get 296 get eq? 0= if 0 exit then
+  3472 get 0= if 0 exit then
+  3456 get 3496 get u+ 3456 put
+  float-value 2 ;
+
+-- ( -- flag ) Could the current word be a number? It starts with a digit, or
+-- with a sign followed by a digit. Most words fail this at once, which spares
+-- them both number parsers.
+: numeric-start?
+  40 get 64 get c@ dup 48 u- 10 ult? if drop 1 exit then
+  dup 45 eq? swap 43 eq? or 0= if 0 exit then
+  72 get 2 ult? if 0 exit then
+  40 get 64 get 1 u+ c@ 48 u- 10 ult? ;
+-- ( -- n kind | 0 ) Kind 1 is an integer, kind 2 a float.
+: number numeric-start? 0= if 0 exit then int-number dup if exit then drop parse-float ;
 
 : compile, 3 c, out here code-cid here 32 u+ 16 put ;
 : compile-quote 4 c, out here code-cid here 32 u+ 16 put ;
@@ -413,13 +510,14 @@
   else drop 1 fail then ;
 -- ( id -- )
 : do-prim
-  35 over ult? if drop 11 fail exit then
+  43 over ult? if drop 11 fail exit then
   dup 25 eq? if drop do-execute exit then
   dup 32 eq? if drop 1 0 apply 0 40 an! exit then
   dup 33 eq? if drop 1 0 apply 56 an@ 1 u+ 56 an! 0 64 an! exit then
   dup 34 eq? if drop 56 an@ 0= if 6 fail exit then
     56 an@ 1 u- 56 an! 0 1 apply 0 64 an! exit then
   dup 35 eq? if drop 56 an@ 0= if 6 fail exit then 0 1 apply 0 64 an! exit then
+  dup 36 ult? 0= if 42 ult? if 2 1 else 1 1 then apply 0 64 an! exit then
   dup 0= if drop 1 2 apply exit then
   dup prim-in swap prim-out apply 0 64 an! ;
 -- ( -- target )
@@ -445,6 +543,7 @@
   dup 7 eq? if drop do-recur exit then
   dup 8 eq? if drop 0 3 apply 0 64 an! exit then
   dup 9 eq? if drop do-call 40 an@ if do-return then exit then
+  dup 10 eq? if drop 0 1 apply 0 64 an! exit then
   drop 11 fail ;
 
 -- ( pass -- )
@@ -637,10 +736,10 @@
 -- pending quotations are materialized where they stand.
 : interpret
   cycle read-word while
-    number if
-      0 get if materialize literal then
+    number dup if
+      0 get if materialize 2 eq? if fliteral else literal then else drop then
     else
-      token find dup 0= if 1 trap then
+      drop token find dup 0= if 1 trap then
       dup 16 u+ get
       dup 1 and if
         dup 4 and 0= if 0 get if materialize then then
@@ -809,6 +908,14 @@
   ' p-publish 29 prim-flag s" publish" install
   ' p-blob-cid 30 prim-flag s" blob-cid" install
   ' p-blob-read 31 prim-flag s" blob-read" install
+  ' p-f+ 36 prim-flag s" f+" install
+  ' p-f- 37 prim-flag s" f-" install
+  ' p-f* 38 prim-flag s" f*" install
+  ' p-f/ 39 prim-flag s" f/" install
+  ' p-feq? 40 prim-flag s" feq?" install
+  ' p-flt? 41 prim-flag s" flt?" install
+  ' p-i>f 42 prim-flag s" i>f" install
+  ' p-f>i 43 prim-flag s" f>i" install
   ' stack-effect 0 s" stack-effect" install
   ' hash-bytes 0 s" hash-bytes" install
   ' checked 0 s" checked" install

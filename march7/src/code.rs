@@ -68,6 +68,16 @@ pub enum Primitive {
     ScratchPush = 33,
     ScratchPop = 34,
     ScratchPeek = 35,
+    // IEEE-754 binary64 on the cell's bits. Results that are NaN are
+    // canonicalized to one bit pattern so equal computations give equal bytes.
+    FAdd = 36,
+    FSub = 37,
+    FMul = 38,
+    FDiv = 39,
+    FEq = 40,
+    FLt = 41,
+    IToF = 42,
+    FToI = 43,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -107,6 +117,14 @@ impl Primitive {
         (Self::ScratchPush, "scratch-push"),
         (Self::ScratchPop, "scratch-pop"),
         (Self::ScratchPeek, "scratch-peek"),
+        (Self::FAdd, "f+"),
+        (Self::FSub, "f-"),
+        (Self::FMul, "f*"),
+        (Self::FDiv, "f/"),
+        (Self::FEq, "feq?"),
+        (Self::FLt, "flt?"),
+        (Self::IToF, "i>f"),
+        (Self::FToI, "f>i"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL
@@ -132,6 +150,10 @@ pub enum Op {
     Recur,
     Data(Cid),
     Tail(Cid),
+    /// A literal whose bits are an IEEE-754 binary64. It runs exactly like
+    /// `Lit`; the distinct opcode keeps the literal's type in canonical code,
+    /// where the checker reads it.
+    Float(u64),
 }
 impl Op {
     pub fn encode(&self, out: &mut Vec<u8>) {
@@ -163,6 +185,10 @@ impl Op {
                 out.extend(n.to_le_bytes());
             }
             Self::Recur => out.push(7),
+            Self::Float(n) => {
+                out.push(10);
+                out.extend(n.to_le_bytes());
+            }
         }
     }
 }
@@ -194,6 +220,7 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Op>, Error> {
             7 => Op::Recur,
             8 => Op::Data(r.array()?),
             9 => Op::Tail(r.array()?),
+            10 => Op::Float(r.u64()?),
             _ => return Err(Error::InvalidCode),
         });
     }

@@ -16,13 +16,13 @@ fn generation_zero() -> Image {
 }
 
 /// Step budget for compiling the system source in these tests. Generation 0
-/// takes about 18.3 million steps, because the frozen listing's `find` scans
+/// takes about 22.6 million steps, because the frozen listing's `find` scans
 /// the dictionary linearly. This budget is only a safety net; compile cost is
 /// tracked by `compiling_the_system_stays_under_its_step_canary`.
 const REBUILD_FUEL: u64 = 40_000_000;
 
 /// Compile-cost canary: steps for a rebuilt system (generation 1) to compile
-/// the system source. It is 6.3 million today. Exceeding it means compile cost
+/// the system source. It is 7.6 million today. Exceeding it means compile cost
 /// grew; look at why before raising it (docs/REBUILD.md).
 const COMPILE_STEP_CANARY: u64 = 8_000_000;
 

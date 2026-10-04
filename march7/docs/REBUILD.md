@@ -85,11 +85,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 63.0 million |
-| The same on generation 1 | 8.09 million |
+| Machine steps to compile `system.march` on generation 0 | 65.5 million |
+| The same on generation 1 | 8.17 million |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 95,022 bytes |
-| `system.march` | 1,959 lines |
+| Rebuilt image size | 97,291 bytes |
+| `system.march` | 2,005 lines |
 | `system.asm` listing | 1,403 lines |
 
 ## Tests
@@ -202,7 +202,8 @@ runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
 rebuild tests use an explicit budget of 80 million steps, and a named canary
 test asserts that a rebuilt system compiles the system source in under 8
-million steps. It was raised to 9 million when `each`, `fold`, `map`,
+million steps. It is 8.17 million with consumers at top level. It was
+raised to 9 million when `each`, `fold`, `map`,
 nested array types and scratch types (2026-10-04) took it to 8.09 million:
 the code grew 6.6% in tokens and the steps 6.5%, so the cost per token did
 not change. It took 7.59 million as of arrays on persistent vectors (6.65 million as of checker
@@ -215,8 +216,8 @@ inline emitters along the way. The margin is small again, and the driver's
 default budget of 10 million is getting close; the profile's biggest items
 are reading words, `find` and skipping comments, all byte loops in March.
 
-Generation 0 grows faster: 63.0 million steps as of the array consumers (55.7
-as of arrays), against the
+Generation 0 grows faster: 65.5 million steps as of consumers at top level
+(55.7 as of arrays), against the
 tests' 80 million. Its frozen compiler looks words up linearly, so each new
 definition costs it more than the last. Two remedies, both decisions for
 Thomas: re-freeze the listing from a newer generation, whose lookup is

@@ -255,8 +255,17 @@ fn each_fold_and_map_consume_arrays() {
         run(&g, "checked : w ( 1 2 3 ) [ dup ] map ;"),
         Err(Error::User(104))
     );
-    // Like `times`, they are compiled: at top level there is nothing to inline.
-    assert_eq!(run(&g, "( 1 2 ) [ 1 + ] map"), Err(Error::User(19)));
+    // At top level too, through a temporary word typed by its inputs.
+    assert_eq!(run(&g, "( 1 2 ) [ 1 + ] map 1 at").unwrap(), [3]);
+    assert_eq!(
+        run(&g, "( 1.5 2.5 ) [ 1 + ] map 1 at").unwrap(),
+        floats(&[3.5])
+    );
+    assert_eq!(run(&g, "( 1 2 3 4 ) 0 [ + ] fold").unwrap(), [10]);
+    // An element of a mixed array may be either type: a family call on it
+    // is an error, not a guess.
+    assert_eq!(run(&g, "( 1 2.5 ) [ 1 + ] map"), Err(Error::User(23)));
+    assert_eq!(run(&g, "( 1 2.5 ) [ drop 7 ] map 1 at").unwrap(), [7]);
 }
 
 #[test]
@@ -279,4 +288,27 @@ fn words_that_build_arrays_from_inputs_get_instances() {
     );
     let r = run(&g, &format!("{pair} : w 1.5 2.5 pair ; ' w stack-types")).unwrap();
     assert_eq!(&r[r.len() - 3..], [4, 1, 1]);
+}
+
+#[test]
+fn the_stack_shows_values_as_march_writes_them() {
+    let g = system();
+    let show = |src: &str| {
+        let mut d = Driver::boot(&g).unwrap();
+        d.evaluate(src).unwrap();
+        d.show()
+    };
+    assert_eq!(
+        show("1 2.5 0 7 - ( 1 2 3 ) ( ( 1.5 ) ( ) )"),
+        "<5> 1 2.5 -7 ( 1 2 3 ) ( ( 1.5 ) ( ) )"
+    );
+    assert_eq!(show("( 1 2 3 ) [ 1 + ] map"), "<1> ( 2 3 4 )");
+    assert_eq!(show(""), "<0>");
+    // Long arrays show their first sixteen elements.
+    assert_eq!(
+        show("( 20 [ i0 ] times ) 2 *"),
+        "<1> ( 0 2 4 6 8 10 12 14 16 18 20 22 24 26 28 30 … 4 more )"
+    );
+    // Types follow definitions run at top level.
+    assert_eq!(show(": h 0.5 ; h h f+"), "<1> 1.0");
 }

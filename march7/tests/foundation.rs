@@ -415,7 +415,7 @@ fn normal_binary_boots_compiles_and_reloads_without_the_assembler() {
         "{}",
         String::from_utf8_lossy(&first.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&first.stdout).trim(), "[49]");
+    assert_eq!(String::from_utf8_lossy(&first.stdout).trim(), "<1> 49");
     let next = std::process::Command::new(env!("CARGO_BIN_EXE_march7"))
         .current_dir(&dir)
         .env("PATH", "")
@@ -428,7 +428,7 @@ fn normal_binary_boots_compiles_and_reloads_without_the_assembler() {
         "{}",
         String::from_utf8_lossy(&next.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&next.stdout).trim(), "[49, 27]");
+    assert_eq!(String::from_utf8_lossy(&next.stdout).trim(), "<2> 49 27");
     std::fs::remove_file(input).unwrap();
     std::fs::remove_file(output).unwrap();
     std::fs::remove_dir(dir).unwrap();

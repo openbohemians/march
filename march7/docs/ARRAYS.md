@@ -155,8 +155,13 @@ rest:
 - **Typed results.** `map`'s result type comes from its body's result type:
   the array it builds starts empty (254), and where paths meet at the loop's
   head an empty array and an array of t make an array of t.
-- Not yet: at top level (they compile, like `times`, and trap 19 there), or on
-  a quotation that is a value, which needs typed quotation parameters.
+- At top level too: `( 1 2 3 ) [ 1 + ] map` compiles a temporary word, typed
+  by its input, and runs it (docs/QUOTATIONS.md).
+- Not yet on a quotation that is a value, which needs typed quotation
+  parameters.
+- **Mixed arrays.** An element of an array whose elements' types differ
+  (252) may be either type, so a family call on it is an error (trap 23):
+  `( 1 2.5 ) [ 1 + ] map` stops, while `( 1 2.5 ) [ drop 7 ] map` runs.
 
 ## Type errors
 
@@ -175,6 +180,18 @@ A definition is analysed for types when it has an array literal or calls a
 family or a generic word, or in checked mode. A definition with none of these
 is not analysed, so `: w mk [ 3 ] if ;` with `mk` returning an array is caught
 only in checked mode.
+
+## Showing arrays
+
+The command line prints the stack after its depth, as March source writes
+values: `<3> 1 2.5 ( ( 1 2 ) ( 3 ) )`. Integers are signed, floats have a
+point, and arrays show their elements by their element type, the first
+sixteen and then how many more. The types come from March: a rebuilt system's
+boot returns a fourth token, `describe`, which gives the host the
+interpreter's type stack, a byte per value (`Driver::types` and
+`Driver::show`). Values whose types March does not know show as integers: a
+quotation's token, an element read from a mixed array, and everything on a
+system without `describe`, such as generation 0.
 
 ## Memory
 

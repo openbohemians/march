@@ -53,6 +53,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ => guard(d.fuel, d.evaluate(&std::fs::read_to_string(arg)?))?,
         }
     }
-    println!("{:?}", d.machine.stack);
+    println!("{}", d.show());
     Ok(())
 }

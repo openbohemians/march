@@ -171,3 +171,33 @@ fn recur_and_exit_work_in_inlined_arms() {
     d.evaluate(": ok [ 1 ] call ; ok").unwrap();
     assert_eq!(d.machine.stack, [1]);
 }
+
+#[test]
+fn consumers_work_at_top_level() {
+    let g = system();
+    assert_eq!(run(&g, "1 [ 10 ] [ 20 ] if 0 [ 10 ] [ 20 ] if"), Ok(vec![10, 20]));
+    assert_eq!(run(&g, "5 [ 7 ] if 0 [ 8 ] if"), Ok(vec![7]));
+    assert_eq!(run(&g, "0 [ dup 5 lt? ] [ 1 + ] while"), Ok(vec![5]));
+    assert_eq!(run(&g, "3 [ i0 dup * ] times"), Ok(vec![0, 1, 4]));
+    assert_eq!(
+        run(&g, "2 [ 3 [ i1 10 * i0 + ] times ] times"),
+        Ok(vec![0, 1, 2, 10, 11, 12])
+    );
+    // The temporary word is resolved: float literals and clauses work.
+    assert_eq!(
+        run(&g, "1 [ 2.5 1 + ] [ 0.0 ] if"),
+        Ok(vec![3.5f64.to_bits() as i64])
+    );
+    // And checked: an array is not a condition.
+    assert_eq!(run(&g, "( 1 2 ) [ 3 ] if"), Err(Error::User(26)));
+    // FORTH's form needs a definition.
+    assert_eq!(run(&g, "1 if 2 then"), Err(Error::User(19)));
+    // A quotation that no consumer takes becomes a value where it stands,
+    // before the next token or at the end of the input.
+    assert_eq!(run(&g, "[ 1 2 ] call 3"), Ok(vec![1, 2, 3]));
+    assert_eq!(run(&g, "[ 4 ] dup call swap call"), Ok(vec![4, 4]));
+    let mut d = Driver::boot(&g).unwrap();
+    d.evaluate("[ 6 ]").unwrap();
+    d.evaluate("call").unwrap();
+    assert_eq!(d.machine.stack, [6]);
+}

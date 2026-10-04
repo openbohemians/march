@@ -599,10 +599,16 @@
 -- Element summaries: what the elements of an array being built have in
 -- common. Bits 0-7 a known type, 8 one is known, 9 one is unknown, 10 two
 -- known types differ.
--- ( s t -- s' ) Add an element of type t.
+-- ( s t -- s' ) Add an element of type t. An empty array (254) agrees with
+-- any array type.
 : ty-join
   dup 0= over 255 eq? or if drop 512 or exit then
-  over 256 and if over 255 and over eq? if drop else drop 1024 or then exit then
+  over 256 and if
+    over 255 and over eq? if drop exit then
+    dup 254 eq? if over 255 and array-type? if drop exit then then
+    over 255 and 254 eq? if dup array-type? if swap -256 and or exit then then
+    drop 1024 or exit
+  then
   256 or or ;
 -- ( s -- t ) The array type for a summary.
 : summary-type
@@ -923,8 +929,13 @@
   256 swap 48 an@ join-slots
   dup 512 and if 1 224 an! then
   summary-type r> 1 apply ty-set 0 64 an! ;
--- ( t -- t' ) The type of an element read from a value of type t.
-: at-type dup array-type? if element-type else drop 0 then ;
+-- ( t -- t' ) The type of an element read from a value of type t. An
+-- element of an array whose elements' types differ is lost (255): it may be
+-- either, so a family call on it is an error rather than a guess.
+: at-type
+  dup array-type? 0= if drop 0 exit then
+  dup 252 eq? if drop 255 exit then
+  element-type ;
 -- ( id -- )
 : do-prim
   51 over ult? if drop 11 fail exit then
@@ -1497,6 +1508,16 @@ _v ᵥ
     dup q-entry dup get swap 8 u+ get seal-quote compile-quote
     1 u+
   repeat drop r> 808 put ;
+-- ( -- ) At top level, push every pending quotation, oldest first, as a
+-- value: a quotation stays pending until a token other than a consumer
+-- comes, or the input ends.
+: top-materialize
+  808 get 0= if exit then
+  pending-start dup >r
+  cycle dup 808 get ult? while
+    dup entry-flow if 15 trap then
+    dup >r q-entry dup get swap 8 u+ get seal-quote 0 shadow-push r> 1 u+
+  repeat drop r> 808 put ;
 -- ( region pos -- n ) A little-endian 32-bit operand.
 : region-u32
   over over c@ >r over over 1 u+ c@ 8 lshift r> or >r
@@ -1529,17 +1550,27 @@ _v ᵥ
   872 get 800 get rshift 1 and >r
   1 800 get lshift invert 872 get and 872 put
   800 get 1 u- dup 800 put 24 u* 2560 u+ out here rot
-  dup get 24 put dup 8 u+ get 16 put 16 u+ get dup 0 put
-  if
-    808 get 64 ult? 0= if 18 trap then
-    808 get q-entry swap over 8 u+ put swap over put 800 get swap 16 u+ put
-    r> 1 880 808 get u+ c!
-    808 get 1 u+ 808 put
-  else r> if 15 trap then seal-quote then ;
+  dup get 24 put dup 8 u+ get 16 put 16 u+ get 0 put
+  808 get 64 ult? 0= if 18 trap then
+  808 get q-entry swap over 8 u+ put swap over put 800 get swap 16 u+ put
+  r> 1 880 808 get u+ c!
+  808 get 1 u+ 808 put ;
 
+-- ( xt -- ) At top level a consumer compiles its code into a temporary,
+-- anonymous word and runs it at once. It is resolved and checked as an
+-- instance for the types of the values it takes, so
+-- `( 1.5 2.5 ) [ 1 + ] map` adds floats there too, and `( 1 2 ) [ 3 ] if`
+-- is an error.
+: at-top
+  pending-here 0= if 19 trap then
+  65536 region-new 24 put 0 16 put 1 0 put
+  call 0 c, 0 0 put
+  out 0 here seal out region-free 0 24 put 0 16 put
+  dup callee-effect effect-in shadow-top instantiate 0 960 put
+  0 run-typed ;
 -- ( -- ) Quotation-aware `if`: `c [ t ] [ f ] if`, `c [ t ] if`, or, with
 -- nothing pending, FORTH's `if ... else ... then`.
-: qif
+: emit-if
   pending-here
   dup 0= if drop 6 c, here 0 u32, exit then
   dup 1 eq? if drop
@@ -1549,7 +1580,7 @@ _v ᵥ
   5 c, here 0 u32, swap ops swap u32!
   808 get 1 u- inline-quote ops swap u32! 2 consumed ;
 -- ( -- ) `[ c ] [ body ] while`, or FORTH's `cycle ... while ... repeat`.
-: qwhile
+: emit-while
   pending-here
   dup 0= if drop 6 c, here 0 u32, exit then
   2 eq? 0= if 19 trap then
@@ -1570,14 +1601,14 @@ _v ᵥ
 : loop-body 808 get 1 u- inline-quote 1 consumed ;
 -- ( -- ) `n [ body ] times` runs body n times, with the index 0..n-1 as
 -- `i0` (and the enclosing loop's as `i1`).
-: times
+: emit-times
   pending-here 1 eq? 0= if 19 trap then
   0 literal 33 prim, 33 prim, 0 literal 33 prim,
   ops loop-test 6 c, here 0 u32, loop-body
   loop-step swap 5 c, u32, ops swap u32! loop-end ;
 -- ( a -- ) `a [ body ] each` runs body once for each element of a, in order,
 -- with the element on top of the stack and its index as `i0`.
-: each
+: emit-each
   pending-here 1 eq? 0= if 19 trap then
   0 prim, 33 prim, 48 prim, 33 prim, 0 literal 33 prim,
   ops loop-test 6 c, here 0 u32,
@@ -1585,12 +1616,12 @@ _v ᵥ
   loop-body loop-step swap 5 c, u32, ops swap u32! loop-end ;
 -- ( a x -- y ) `a x [ body ] fold` runs body on an accumulator, x at first,
 -- and each element, leaving the last accumulator: `xs 0 [ + ] fold` sums.
-: fold
+: emit-fold
   pending-here 1 eq? 0= if 19 trap then
-  2 prim, each ;
+  2 prim, emit-each ;
 -- ( a -- b ) `a [ body ] map` is the array of body's results: body takes
 -- each element and leaves one value in its place.
-: map
+: emit-map
   pending-here 1 eq? 0= if 19 trap then
   46 prim, 47 prim, 33 prim, 33 prim, 0 literal 33 prim,
   ops 34 prim, 35 prim, 3 prim, 33 prim, 48 prim, 11 prim, 6 c, here 0 u32,
@@ -1600,6 +1631,14 @@ _v ᵥ
   1 literal 5 prim, 33 prim,
   swap 5 c, u32, ops swap u32!
   34 prim, 1 prim, 34 prim, 1 prim, 34 prim, ;
+-- The consumers: compiled in place in a definition, through a temporary
+-- word at top level.
+: qif 0 get if emit-if else ' emit-if at-top then ;
+: qwhile 0 get if emit-while else ' emit-while at-top then ;
+: times 0 get if emit-times else ' emit-times at-top then ;
+: each 0 get if emit-each else ' emit-each at-top then ;
+: fold 0 get if emit-fold else ' emit-fold at-top then ;
+: map 0 get if emit-map else ' emit-map at-top then ;
 : i0 compile-only 35 prim, ;
 : i1 compile-only
   34 prim, 34 prim, 34 prim, 35 prim,
@@ -1611,30 +1650,33 @@ _v ᵥ
 -- Compiling a word whose entry is flagged as an inline primitive emits the
 -- primitive op itself instead of a call to its wrapper. Before compiling
 -- anything, or running an immediate word not flagged transparent (bit 2),
--- pending quotations are materialized where they stand.
+-- pending quotations are materialized where they stand; at top level they
+-- become values on the stack, there and at the end of the input. Transparent
+-- immediate words (the consumers, `[`, `--`) run directly at top level.
 : interpret
   cycle read-word while
     number dup if
-      0 get if materialize 2 eq? if fliteral else literal then else shadow-literal then
+      0 get if materialize 2 eq? if fliteral else literal then
+      else >r >r top-materialize r> r> shadow-literal then
     else
       drop token lookup dup 0= if 1 trap then
       dup 16 u+ get
       dup 1 and if
-        dup 4 and 0= if 0 get if materialize then then
+        dup 4 and 0= if 0 get if materialize else >r >r top-materialize r> r> then then
         0 get if drop >xt call else
           dup 96 and if
             32 and if drop mark shadow-open else drop gather shadow-close then
-          else swap >xt swap run-typed then
+          else dup 4 and if drop >xt call else swap >xt swap run-typed then then
         then
       else
-        0 get 0= if swap >xt swap run-typed else
+        0 get 0= if swap >xt swap >r >r top-materialize r> r> run-typed else
           materialize
           dup 24 and if 1 960 put then
           dup 2 and if nip 8 rshift prim, else drop >xt compile, then
         then
       then
     then
-  repeat ;
+  repeat 0 get 0= if top-materialize then ;
 
 -- ( input-region length -- ) Reentrant: the caller's input is restored, so
 -- words may evaluate text while their own input is being interpreted.
@@ -1946,7 +1988,11 @@ _v ᵥ
   ' checked 0 s" checked" install
   ' unchecked 0 s" unchecked" install ;
 
--- ( data-region 0 length -- evaluate recover export )
+-- ( -- region offset n ) For the host: the types the interpreter knows for
+-- the top n values on the stack, a byte each, the deepest first.
+: describe 3576 get 0 784 get ;
+
+-- ( data-region 0 length -- evaluate recover export describe )
 : boot 4096 32 put 0 8 put 0 0 put
   1048576 region-new 624 put 1048576 region-new 712 put ' effect-of 616 put 0 632 put
   4096 region-new 728 put register-families
@@ -1954,6 +2000,6 @@ _v ᵥ
   65536 region-new 3576 put 0 784 put 0 3528 put
   8192 region-new 736 put
   dup if restore else drop drop drop init then
-  ' evaluate ' recover ' snapshot ;
+  ' evaluate ' recover ' snapshot ' describe ;
 
 ' boot

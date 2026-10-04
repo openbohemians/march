@@ -12,12 +12,17 @@ From this directory:
 ```sh
 cargo run --offline --bin march7-seed -- seed/system.asm seed.image
 cargo run --offline -- seed.image --eval ': square dup u* ; 7 square'
-# [49]
+# <1> 49
 cargo run --offline -- seed.image examples/compiler.march --save example.image
-# [49, 42]
+# <2> 49 42
 cargo run --offline -- example.image --eval 'define cube dup dup u* u* ; 3 cube'
-# [27]
+# <1> 27
 ```
+
+The command line prints the stack after its depth. A rebuilt system
+(docs/REBUILD.md) tells it the values' types, so floats and arrays print as
+March writes them (`<1> ( 2.5 3.5 )`); generation 0 does not, so it prints
+integers.
 
 The first command is the separate generation-zero build tool. Normal execution
 loads an image; it does not invoke the assembler or contain a source compiler.

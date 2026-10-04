@@ -92,12 +92,19 @@ since it may still be sealed.
 - **`[`** saves the outer builder and opens a new one. It is flagged
   *transparent* (dictionary flag bit 2), meaning it does not materialize
   pending quotations. That lets two literals stand side by side for `if`.
-- **`]`** restores the outer builder. Compiling, it leaves the body pending.
-  Interpreting (`[ 1 2 u+ ] call` at top level), it seals the body at once and
-  leaves its token.
+- **`]`** restores the outer builder and leaves the body pending, at top
+  level too.
 - **`interpret`** materializes pending quotations before compiling a number or
   word, or before running an immediate word that is not transparent. The
-  consumers and `--` are transparent.
+  consumers and `--` are transparent. At top level, materializing pushes each
+  quotation's token where it stood (`[ 1 2 u+ ] call`), and so does the end
+  of the input.
+- **Consumers at top level** compile their code, with the pending bodies
+  inlined, into a temporary anonymous word and run it at once. The word is
+  resolved and checked as an instance for the types of the values it takes,
+  so `1 [ 2.5 1 + ] [ 0.0 ] if` adds floats and `( 1 2 ) [ 3 ] if` traps 26.
+  FORTH's `if … then` still needs a definition (trap 19 at top level), and
+  so do `i0` and `i1` outside a consumer's body.
 - **Inlining** copies the body's instructions and shifts its branch targets by
   the instruction index where the body lands.
 
@@ -120,7 +127,7 @@ names, so compiling the system never depends on them.
 
 ## Next
 
-- `each`, `fold` and `map` at top level, and on a quotation that is a value
-  rather than pending, which needs typed quotation parameters.
+- Consumers on a quotation that is a value rather than pending, which needs
+  typed quotation parameters.
 - Typed quotation parameters, so a word that calls a quotation it was given
   stops being a dynamic call (checker slice 3).

@@ -226,7 +226,8 @@ impl Machine {
         self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(self.live_bytes);
         Ok(r)
     }
-    fn vector(&self, r: u64) -> Result<&merkle_champ::Vector<u64>, Error> {
+    /// The vector an array handle holds.
+    pub fn vector(&self, r: u64) -> Result<&merkle_champ::Vector<u64>, Error> {
         self.region(r)?.vector.as_ref().ok_or(Error::Memory)
     }
     fn region(&self, r: u64) -> Result<&Region, Error> {

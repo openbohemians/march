@@ -1,0 +1,28 @@
+-- Descriptive statistics over arrays of floats: the array types, type
+-- variables, the lifting rule, literals typed by context, and comprehensions.
+-- Notes marked F1, F2 and so on point to the findings in README.md.
+
+# stats
+
+-- From the core library, for reference: fold and map with type variables.
+--   = ( a'* ) b' [ b' a' -> b' ] -> b' ;     fold : … ;
+--   = ( a'* ) [ a' -> b' ] -> ( b'* ) ;      map  : … ;
+
+= ( f64* ) ;
+sum      : 0.0 [ + ] fold ;
+mean     : dup sum  swap length !  / ;      -- ! makes the int length an f64
+variance : dup mean - dup * mean ;          -- lifting: array - number, array * array
+stddev   : variance sqrt ;
+zscores  : dup dup mean -  swap stddev / ;
+double   : 2 * ;                            -- the literal 2 is an f64 here
+
+-- A comprehension gathers whatever its body leaves. _ takes the array from
+-- below the opening bracket, and each element is either kept or dropped. The
+-- arms of this if leave different counts, which the counting checker rejects
+-- today (F15).
+positives : ( _ [ dup 0.0 lte? [ drop ] if ] each ) ;
+
+-- Squares of 0 to 9, as floats: the loop leaves ten values to gather. The int
+-- index needs converting, and ! has no form that names a target type (F2).
+= ;
+squares : ( 10 [ i0 i>f dup * ] times ) ;

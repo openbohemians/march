@@ -1,0 +1,75 @@
+-- An evaluator for integer expressions with + - * / and parentheses,
+-- such as "1+2*(3+4)". Written without locals, on purpose (F11).
+-- Notes marked F1, F2 and so on point to the findings in README.md.
+
+# calc
+
+-- Every parsing word takes the text and a position and leaves them, advanced,
+-- with its result on top:   str int -> str int int
+
+= str int -> str int str ;
+peek : 2dup char-at ;                 -- the character there, or "" (F17)
+= str int -> str int ;
+skip : 1 + ;
+
+= str ;
+digit? : dup "0" gte? swap "9" lte? and ;
+mulop? : dup "*" eq? swap "/" eq? or ;
+addop? : dup "+" eq? swap "-" eq? or ;
+
+-- One clause per operator, chosen by a literal pattern: the third input equals
+-- "*", and so on. The body still sees the operator, hence the drop (F4).
+= int int "*" ;
+apply : drop * ;
+= int int "/" ;
+apply : drop / ;
+= int int "+" ;
+apply : drop + ;
+= int int "-" ;
+apply : drop - ;
+= ;                                   -- the words below have no context (F19)
+
+-- A run of digits. The accumulator goes under the text and position, and the
+-- scratch stack holds each digit while the accumulator comes up (F11).
+number : 0 -rot
+  [ peek digit? ]
+  [ peek digit-value >r  rot 10 * r> +  -rot  skip ]
+  while rot ;
+
+-- A number, or an expression in parentheses. factor calls expr, which is
+-- defined below and calls back down to factor (F8).
+factor : peek "(" eq?
+  [ skip expr  >r skip r> ]           -- past "(", the expression, past ")"
+  [ number ]
+  if ;
+
+-- Factors joined by * and /. The loop keeps the text, the position and the
+-- value so far; the operator waits on the scratch stack (F11).
+term : factor
+  [ >r peek mulop? r> swap ]
+  [ >r peek >r skip factor r> r> -rot apply ]
+  while ;
+
+-- Terms joined by + and -: the same loop as term (F18).
+expr : term
+  [ >r peek addop? r> swap ]
+  [ >r peek >r skip term r> r> -rot apply ]
+  while ;
+
+calc : 0 expr nip nip ;               -- "1+2*(3+4)" calc  leaves 15
+
+## tree
+
+-- The same arithmetic over a syntax tree. Expr is a variant type whose bin
+-- case refers to Expr itself (F10). The constructor names are patterns too.
+
+Expr : variant { num : int ; bin : Expr Expr str } ;
+
+-- match takes pattern and action pairs. Undoing num leaves its int; undoing
+-- bin leaves the two subtrees and the operator. The recursive calls to eval sit
+-- inside inlined arms (F9). Keeping the recursion inside one word, rather than
+-- one clause per case, avoids recursion between clauses (F8).
+= Expr -> int ;
+eval : [ num ] [ ]
+       [ bin ] [ >r eval swap eval swap r> apply ]
+       match ;

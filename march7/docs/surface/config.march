@@ -1,0 +1,48 @@
+-- Configuration data: maps, constants, dotted access and map types.
+-- Notes marked F1, F2 and so on point to the findings in README.md.
+--
+-- Words with no context come first, then the words of each context, so the
+-- file needs no `= ;` resets (F19).
+
+# server
+
+-- A map value. Each entry is a word with no inputs, so it can be evaluated
+-- once, when the map is built (F12).
+config : {
+  host    : "example.org" ;
+  port    : 8080 ;
+  timeout : 30 ;                          -- seconds
+  paths   : ( "/" "/about" "/blog" ) ;
+  tls     : { cert : "server.pem" ; key : "server.key" } ;
+} ;
+
+-- A map type is written like a map value, with types in place of values
+-- (F12).
+Config : {
+  host    : str ;
+  port    : int ;
+  timeout : int ;
+  paths   : ( str* ) ;
+  tls     : { cert : str ; key : str } ;
+} ;
+
+-- Dotted names reach inside: config.port runs the entry and leaves 8080.
+url : "https://" config.host concat  ":" concat  config.port >str concat ;
+
+-- Changing a map makes a new one. merge takes entries from the map on top.
+staging : config { host : "staging.example.org" ; port : 8081 } merge ;
+
+-- With print retired from ".", a word that starts with "." reads an entry of
+-- the map on top of the stack. config.port is config .port (F13).
+= Config ;
+describe : dup .host print  " on port " print  .port print ;
+
+-- Built at run time from values on the stack: _ takes values from below the
+-- map, in reading order, so host gets the string and port the int (F12).
+= str int ;
+endpoint : { host : _ ; port : _ } ;
+
+-- Keys that are not names, or are computed, come from pairs instead of new
+-- syntax inside the braces (F16).
+= ( ( str int )* ) ;
+counts : >map ;                           -- ( ( "a" 1 ) ( "b" 2 ) ) counts

@@ -80,5 +80,6 @@ It is a tiny unpinned measurement, not a language-wide performance comparison.
 - Quoted code is supported; source string-literal syntax and general I/O words
   are not yet supplied, although immutable data operands and host file I/O work.
 
-See [Foundation contract](docs/FOUNDATION.md) and
-[first-slice interfaces and reuse](docs/FIRST-SLICE.md).
+See [Foundation contract](docs/FOUNDATION.md),
+[first-slice interfaces and reuse](docs/FIRST-SLICE.md), and the
+[surface language design](docs/SURFACE.md).

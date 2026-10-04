@@ -75,11 +75,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 24.4 million (80 ms) |
-| The same on generation 1 | 5.5 million (18 ms) |
+| Machine steps to compile `system.march` on generation 0 | 26.0 million (88 ms) |
+| The same on generation 1 | 3.8 million (13 ms) |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 61,724 bytes |
-| `system.march` | 1,147 lines |
+| Rebuilt image size | 59,858 bytes |
+| `system.march` | 1,192 lines |
 | `system.asm` listing | 1,403 lines |
 
 ## Tests
@@ -145,10 +145,13 @@ compiling it, and generation 0 has none. So the file inlines by itself:
   `dup`, flagged inline, so `' dup` and `call` work in a booted system. Then an
   immediate word named `dup` emits the primitive op. Within the file every use
   of a primitive therefore compiles inline, whatever system compiles it.
-- **`get` and `put` are emitters too,** from the compiler words onward: a
-  literal 1 (working region 1), a swap, and the load or store. The words above
-  them keep calling `get` and `put`. The hand-counted `ops` depends on that, and
-  those words only run at compile time.
+- **`get` and `put` are emitters too,** from the compiler words onward: one
+  primitive each, a load or store in working region 1 (44, 45). So are `0=`,
+  `out` and `here`. The words above them keep calling them. The hand-counted
+  `ops` depends on that, and those words only run at compile time; a faster,
+  incremental `ops` and the control words that use it are defined again below
+  the emitters, as are `c,`, `prim,`, `,` and `literal`. `0=` is exported as
+  `p-0=`, a function with the same code.
 - These emitters are compile-time devices. Nothing exported refers to them, and
   the file never uses a primitive name outside a definition.
 
@@ -187,7 +190,7 @@ The driver's step budget (10 million by default) is a safety net against
 runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
 rebuild tests use an explicit budget of 40 million steps, and a named canary
-test asserts that a rebuilt system compiles the system source in under 6.5
+test asserts that a rebuilt system compiles the system source in under 4.5
 million steps. When the command line exhausts the budget, it says so and
 suggests `--fuel`.
 
@@ -199,8 +202,29 @@ reading characters, and that the common cost was working memory: each `get` or
 `put` ran as four instructions (the offset, region 1, a swap, the load or
 store). Primitives 44 and 45 load and store a cell in region 1 directly, so
 `get` and `put` compile to two instructions. Compiling the system on
-generation 1 fell to 5.5 million steps, and a token to about 620. The canary
-was lowered to 6.5 million so it still catches growth.
+generation 1 fell to 5.5 million steps, and a token to about 620.
+
+**Less work per token (2026-10-04).** A second profile drove five changes,
+all in March, which took compiling the system on generation 1 from 5.5 to 3.8
+million steps, and a token to about 460:
+
+- **Counting instructions incrementally.** `then`, `else`, `cycle` and
+  `repeat` need the instruction index where they stand, and `ops` counted it
+  from the start of the definition each time, so long definitions cost
+  quadratic time. `ops` now remembers the region and offset it reached
+  (working memory 848-864) and continues from there; a different region, or
+  an offset behind it, counts again.
+- **Hashing while reading.** `read-word` computes FNV-1a over the word as it
+  reads it and keeps that with the word's position (816-840); `find` finishes
+  the hash for the word just read instead of reading its bytes again. Any
+  other name is hashed in full, so a stale hash cannot be used for a different
+  word.
+- **Inline `0=`, `out` and `here`,** as emitters like `get` and `put`.
+- **The stack instead of working memory** for the read position in
+  `read-word` and `line-comment`, and for the offsets in `find`'s comparison.
+- **An unrolled `,`**, eight byte stores with no loop counter.
+
+The canary was lowered to 4.5 million so it still catches growth.
 
 Next candidates:
 
@@ -208,10 +232,10 @@ Next candidates:
   still use fixed temporary offsets. That is safe now, because `evaluate` is
   reentrant and those words do not call back into user code, but the stack is
   the cleaner convention for new code.
-- **Read and hash in one pass.** `read-word` walks a word's characters and
-  `hash-bytes` walks them again; folding the hash into the read would save the
-  second walk on every token. The profile puts reading at about a fifth of
-  compile time and hashing at a tenth.
+- **The remaining profile.** Reading words is about a quarter of compile time
+  and `find` (mostly comparing a name's bytes) about a sixth, then number
+  parsing. Bigger gains there would need bulk byte primitives (compare, scan),
+  which would widen the host's inventory.
 - **The listing is frozen** (2026-09-30). `system.asm` only reproduces
   generation 0, and a test pins the SHA-256 of its assembled image.
 

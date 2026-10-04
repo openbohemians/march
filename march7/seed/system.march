@@ -168,15 +168,43 @@
 -- bit 2 transparent (an immediate word that leaves pending quotations alone).
 : immediate 8 get dup 0= if 7 trap then 16 u+ dup get 1 or swap put ;
 : prim-flag 8 lshift 2 or ;
-: , 0 360 put cycle 360 get 8 ult? while dup 360 get 8 u* rshift c, 360 get 1 u+ 360 put repeat drop ;
-: literal 1 c, , ;
-: fliteral 10 c, , ;
 
 -- From here on, `get` and `put` compile inline, as one primitive each: a
 -- load or store in working region 1 (44, 45). Words above keep calling them,
 -- which the hand-counted `ops` relies on; they only run at compile time.
 : get 44 prim, ; immediate
 : put 45 prim, ; immediate
+
+-- The byte emitters again, now with `get` and `put` inline; words above keep
+-- the first `c,` and `prim,`. Then `0=`, `out` and `here` compile inline too.
+-- `0=` is exported as `p-0=`, a function with the same code.
+: c, 24 get 16 get c! 16 get 1 u+ 16 put ;
+: prim, 2 c, c, ;
+-- A cell, little endian: eight bytes, unrolled.
+: , dup c, 8 rshift dup c, 8 rshift dup c, 8 rshift dup c, 8 rshift
+  dup c, 8 rshift dup c, 8 rshift dup c, 8 rshift c, ;
+: literal 1 c, , ;
+: fliteral 10 c, , ;
+: p-0= 0 eq? ;
+: 0= 0 literal 10 prim, ; immediate
+: out 24 literal 44 prim, ; immediate
+: here 16 literal 44 prim, ; immediate
+
+-- Instruction counts, kept incrementally so a control word does not recount
+-- the whole definition: 848 is the output region counted, 856 the byte offset
+-- reached, 864 the instructions before it. A different region, or an offset
+-- behind the one reached, counts again from the start. The control words
+-- that need a count are redefined to use it.
+: ops
+  out 848 get eq? 0= here 856 get ult? or if out 848 put 0 856 put 0 864 put then
+  cycle 856 get here ult? while
+    out 856 get c@ oplen 856 get u+ 856 put
+    864 get 1 u+ 864 put
+  repeat 864 get ;
+: then ops swap u32! ; immediate
+: else 5 c, here 0 u32, swap ops swap u32! ; immediate
+: cycle ops ; immediate
+: repeat swap 5 c, u32, ops swap u32! ; immediate
 
 -- Phase 5: the scratch stack, for temporaries that must survive calls.
 -- It belongs to the machine, not region 1. Every call gets its own scratch
@@ -220,8 +248,19 @@
 -- links, newest first, so the newest definition of a name is found first.
 -- An entry is: previous entry (LATEST chain), token, flags, name length, next
 -- entry in its bucket, then the name bytes from offset 40.
+-- `read-word` hashes each word as it reads it (FNV-1a) and keeps that at 816
+-- with the word's region, offset and length (824-840), so finding the word
+-- just read needs no second pass over its bytes; only the length and mix64
+-- remain. Any other name is hashed here in full.
+-- ( region offset length -- region offset length flag )
+: cached-hash?
+  dup 840 get eq? 0= if 0 exit then
+  over 832 get eq? 0= if 0 exit then
+  rot dup 824 get eq? >r rot rot r> ;
+-- ( region offset length -- hash )
+: name-hash cached-hash? if drop drop drop 816 get 840 get xor mix64 else hash-bytes then ;
 -- ( region offset length -- bucket-offset )
-: name-bucket hash-bytes 1023 and 8 u* ;
+: name-bucket name-hash 1023 and 8 u* ;
 
 -- ( xt flags name-region name-offset length -- )
 -- The entry is complete before LATEST or its bucket points at it.
@@ -245,27 +284,30 @@
   736 get 240 get 248 get 256 get name-bucket @ 264 put
   cycle 264 get while
     264 get 24 u+ get 256 get eq? if
-      0 272 put
-      cycle
-        272 get 256 get ult? if
-          240 get 248 get 272 get u+ c@
-          1 264 get 40 u+ 272 get u+ c@ eq?
-        else 0 then
-      while 272 get 1 u+ 272 put repeat
-      272 get 256 get eq? if 264 get exit then
+      -- Compare the bytes: the word's offset and the entry's name offset on
+      -- the stack, the word's end on the scratch stack.
+      248 get dup 256 get u+ >r 264 get 40 u+
+      cycle over r@ ult? if over 240 get swap c@ over 1 swap c@ eq? else 0 then
+      while 1 u+ swap 1 u+ swap repeat
+      drop r> eq? if 264 get exit then
     then
     264 get 32 u+ get 264 put
   repeat 0 ;
 
 : token 40 get 64 get 72 get ;
 
--- ( -- flag ) Skip whitespace, then take the next whitespace-delimited word.
+-- ( -- flag ) Skip whitespace, then take the next whitespace-delimited word,
+-- hashing its bytes on the way (FNV-1a, as `hash-bytes` begins) for `find`.
 : read-word
-  cycle 56 get 48 get ult? if input-char 33 ult? else 0 then while inc-pos repeat
-  56 get 48 get ult? 0= if 0 72 put 0 exit then
-  56 get 64 put
-  cycle 56 get 48 get ult? if input-char 33 ult? 0= else 0 then while inc-pos repeat
-  56 get 64 get u- 72 put 1 ;
+  56 get
+  cycle dup 48 get ult? if 40 get over c@ 33 ult? else 0 then while 1 u+ repeat
+  dup 56 put dup 64 put
+  48 get ult? 0= if 0 72 put 0 exit then
+  -3750763034362895579 56 get
+  cycle dup 48 get ult? if 40 get over c@ 32 over ult? else 0 0 then
+  while rot xor 1099511628211 u* swap 1 u+ repeat
+  drop dup 56 put 64 get u- 72 put 816 put
+  40 get 824 put 64 get 832 put 72 get 840 put 1 ;
 
 : word read-word 0= if 4 trap then token ;
 
@@ -619,7 +661,10 @@
 
 : >xt 8 u+ get ;
 : emit-recur 7 c, ;
-: line-comment cycle 56 get 48 get ult? while input-char inc-pos 10 eq? if exit then repeat ;
+-- Skip to the end of the line, past its newline.
+: line-comment 56 get
+  cycle dup 48 get ult? if 40 get over c@ 10 eq? 0= else 0 then while 1 u+ repeat
+  dup 48 get ult? if 1 u+ then 56 put ;
 
 -- ( -- region 0 length ) or, compiling, emit a data operand.
 -- Reads to the next double quote.
@@ -1087,7 +1132,7 @@ _v ᵥ
   ' quote-open 5 s" [" install
   ' quote-close 1 s" ]" install
   ' prim, 0 s" prim," install
-  ' 0= 0 s" 0=" install
+  ' p-0= 0 s" 0=" install
   ' nip 0 s" nip" install
   ' qif 5 s" if" install
   ' then 1 s" then" install

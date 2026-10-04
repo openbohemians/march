@@ -10,5 +10,5 @@ repository = "https://github.com/openbohemians/march"
 # Zed builds it from a commit, so rev must name one that contains it.
 [grammars.march]
 repository = "file:///home/trans/my/com/tabcomputing/march"
-rev = "COMMIT"
+rev = "c2c401a00ca1c99616a392bab46b3905b7ce23d1"
 path = "editors/tree-sitter-march"

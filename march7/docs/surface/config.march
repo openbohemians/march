@@ -1,8 +1,8 @@
 -- Configuration data: maps, constants, dotted access and map types.
 -- Notes marked F1, F2 and so on point to the findings in README.md.
+-- = is dup and ~ is swap.
 --
--- Words with no context come first, then the words of each context, so the
--- file needs no `= ;` resets (F19).
+-- Words with no context come first, then a section for each context (F19).
 
 # server
 
@@ -20,8 +20,8 @@ config : {
 -- (F12).
 Config : {
   host    : str ;
-  port    : int ;
-  timeout : int ;
+  port    : i64 ;
+  timeout : i64 ;
   paths   : ( str* ) ;
   tls     : { cert : str ; key : str } ;
 } ;
@@ -34,15 +34,15 @@ staging : config { host : "staging.example.org" ; port : 8081 } merge ;
 
 -- With print retired from ".", a word that starts with "." reads an entry of
 -- the map on top of the stack. config.port is config .port (F13).
-= Config ;
-describe : dup .host print  " on port " print  .port print ;
+## < Config >
+describe : = .host print  " on port " print  .port print ;
 
 -- Built at run time from values on the stack: _ takes values from below the
--- map, in reading order, so host gets the string and port the int (F12).
-= str int ;
+-- map, in reading order, so host gets the string and port the i64 (F12).
+## < str i64 >
 endpoint : { host : _ ; port : _ } ;
 
 -- Keys that are not names, or are computed, come from pairs instead of new
 -- syntax inside the braces (F16).
-= ( ( str int )* ) ;
+## < ( ( str i64 )* ) >
 counts : >map ;                           -- ( ( "a" 1 ) ( "b" 2 ) ) counts

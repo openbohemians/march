@@ -1,51 +1,5 @@
 [
   {
-    "type": "context",
-    "named": true,
-    "fields": {
-      "marker": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "context_marker",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "map",
-          "named": true
-        },
-        {
-          "type": "number",
-          "named": true
-        },
-        {
-          "type": "quotation",
-          "named": true
-        },
-        {
-          "type": "sequence",
-          "named": true
-        },
-        {
-          "type": "string",
-          "named": true
-        },
-        {
-          "type": "word",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "definition",
     "named": true,
     "fields": {
@@ -70,6 +24,10 @@
         },
         {
           "type": "number",
+          "named": true
+        },
+        {
+          "type": "pattern",
           "named": true
         },
         {
@@ -119,6 +77,10 @@
           "named": true
         },
         {
+          "type": "pattern",
+          "named": true
+        },
+        {
           "type": "quotation",
           "named": true
         },
@@ -153,10 +115,20 @@
       },
       "name": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "word",
+            "named": true
+          }
+        ]
+      },
+      "pattern": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "pattern",
             "named": true
           }
         ]
@@ -179,6 +151,45 @@
     }
   },
   {
+    "type": "pattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "map",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "pattern",
+          "named": true
+        },
+        {
+          "type": "quotation",
+          "named": true
+        },
+        {
+          "type": "sequence",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "word",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "quotation",
     "named": true,
     "fields": {},
@@ -192,6 +203,10 @@
         },
         {
           "type": "number",
+          "named": true
+        },
+        {
+          "type": "pattern",
           "named": true
         },
         {
@@ -230,6 +245,10 @@
           "named": true
         },
         {
+          "type": "pattern",
+          "named": true
+        },
+        {
           "type": "quotation",
           "named": true
         },
@@ -258,10 +277,6 @@
       "required": false,
       "types": [
         {
-          "type": "context",
-          "named": true
-        },
-        {
           "type": "definition",
           "named": true
         },
@@ -275,6 +290,10 @@
         },
         {
           "type": "number",
+          "named": true
+        },
+        {
+          "type": "pattern",
           "named": true
         },
         {
@@ -328,6 +347,10 @@
           "named": true
         },
         {
+          "type": "pattern",
+          "named": true
+        },
+        {
           "type": "quotation",
           "named": true
         },
@@ -363,6 +386,14 @@
     "named": false
   },
   {
+    "type": "<",
+    "named": false
+  },
+  {
+    "type": ">",
+    "named": false
+  },
+  {
     "type": "[",
     "named": false
   },
@@ -374,10 +405,6 @@
     "type": "comment",
     "named": true,
     "extra": true
-  },
-  {
-    "type": "context_marker",
-    "named": true
   },
   {
     "type": "heading_marker",

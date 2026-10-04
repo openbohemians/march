@@ -2,7 +2,7 @@
  * Tree-sitter grammar for March, surface and system tracks
  * (march7/docs/SURFACE.md). March is a sequence of whitespace-separated
  * words, so the grammar is shallow: it finds comments, strings, numbers,
- * brackets, definitions, context lines and headings.
+ * brackets, patterns, definitions and headings.
  */
 
 // A word is any run of characters other than whitespace, brackets and quotes.
@@ -23,24 +23,21 @@ module.exports = grammar({
 
     _item: $ => choice(
       $.heading,
-      $.context,
       $.definition,
       $.system_definition,
       $._expression,
     ),
 
-    // `# math`, `## trig`: a namespace heading.
-    heading: $ => seq(
+    // `# math` opens a namespace; `## < i64 > < f64 >` opens a context, its
+    // patterns being alternatives, which may continue on the next lines.
+    // A `<` after a context heading always continues it.
+    heading: $ => prec.right(seq(
       field('marker', alias(token(prec(2, /#{1,6}/)), $.heading_marker)),
-      field('name', $.word),
-    ),
-
-    // `= int str ;`: a context line. `==` nests.
-    context: $ => seq(
-      field('marker', alias(token(prec(2, /={1,6}/)), $.context_marker)),
-      repeat($._expression),
-      ';',
-    ),
+      choice(
+        field('name', $.word),
+        repeat1(field('pattern', $.pattern)),
+      ),
+    )),
 
     // `name : body ;`, the surface form. A word followed by `:` is always a
     // name being defined, never a call before a system-track definition.
@@ -69,9 +66,12 @@ module.exports = grammar({
       $.quotation,
       $.sequence,
       $.map,
+      $.pattern,
     ),
 
     quotation: $ => seq('[', repeat($._expression), ']'),
+    // `< i64 positive? -> i64 >`: a pattern or signature.
+    pattern: $ => seq('<', repeat($._expression), '>'),
     sequence: $ => seq('(', repeat($._expression), ')'),
 
     // `{ name : body ; … }`: the last entry's `;` is optional.

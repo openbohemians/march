@@ -5,7 +5,8 @@
 A Tree-sitter grammar for March, the surface track and the system track
 (march7/docs/SURFACE.md). It is shallow on purpose: March is a sequence of
 words, so the grammar finds comments, strings, numbers, brackets,
-definitions, maps, `=` context lines and `#` headings.
+definitions, maps, `< … >` patterns, and `#` headings, which open a namespace
+(`# math`) or a context (`## < i64 > < f64 >`).
 
 One rule needs the external scanner in `src/scanner.c`: a `:` that starts a
 line begins a system-track definition (`: name … ;`). Elsewhere, a word

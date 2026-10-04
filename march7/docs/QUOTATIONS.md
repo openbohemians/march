@@ -33,13 +33,19 @@ depth, so quotations cannot drift.
 | `[ c ] [ body ] while` | Loop while `c` leaves true |
 | `cycle … while … repeat` | FORTH's form, used when nothing is pending |
 | `n [ body ] times` | Run `body` n times with the index 0..n-1 as `i0` |
+| `a [ body ] each` | Run `body` on each element of array `a`, index as `i0` |
+| `a x [ body ] fold` | `body` on an accumulator (x at first) and each element |
+| `a [ body ] map` | The array of `body`'s result for each element |
 | `i0`, `i1` | The innermost and next loop index (compile-only) |
 | `[[ … ]]` | FORTH's compile-time brackets, renamed from `[ ]` |
 
 `if` and `while` choose their form by how many quotations are pending, as
-march4's `times` did. `times` keeps its limit and index on the scratch stack,
-so the body may use the scratch stack too, and `i0`/`i1` read the indices
-without disturbing it.
+march4's `times` did. Counted loops keep three cells on the scratch stack,
+the index on top, so the body may use the scratch stack too, and `i0`/`i1`
+read the indices without disturbing it: `times` keeps 0, the count and the
+index; `each` (and `fold`, which is `swap` then `each`) the array, its
+length and the index; `map` the array it is building, the array and the
+index. `each`, `fold` and `map` are described with arrays (docs/ARRAYS.md).
 
 ## Rules and errors
 
@@ -114,6 +120,7 @@ names, so compiling the system never depends on them.
 
 ## Next
 
-- `map` and `each` over arrays, when arrays exist.
+- `each`, `fold` and `map` at top level, and on a quotation that is a value
+  rather than pending, which needs typed quotation parameters.
 - Typed quotation parameters, so a word that calls a quotation it was given
   stops being a dynamic call (checker slice 3).

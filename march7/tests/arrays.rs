@@ -56,7 +56,12 @@ fn arrays_have_types() {
     };
     assert_eq!(ty(": a ( 1 2 3 ) ;"), (3, 1));
     assert_eq!(ty(": a ( 1.5 2.5 ) ;"), (4, 1));
-    assert_eq!(ty(": a ( 1 2.5 ) ;"), (5, 1));
+    // Elements whose known types differ: 252. An empty array: 254.
+    assert_eq!(ty(": a ( 1 2.5 ) ;"), (252, 1));
+    assert_eq!(ty(": a ( ) ;"), (254, 1));
+    // Arrays of arrays: each rank adds 3.
+    assert_eq!(ty(": a ( ( 1 2 ) ( 3 ) ) ;"), (6, 1));
+    assert_eq!(ty(": a ( ( 1.5 ) ( 2.5 ) ) ;"), (7, 1));
     // `at` gives the element type, so families resolve on elements.
     assert_eq!(
         run(&g, ": f ( 1.5 2.5 ) 1 at 1.0 + ; f").unwrap(),
@@ -122,9 +127,12 @@ fn literals_whose_count_varies_still_check() {
     let g = system();
     let effect = |src: &str| run(&g, &format!("{src} ' w stack-types")).unwrap();
     // A loop that pushes per iteration, and a branch that drops in one arm:
-    // the literal still leaves one array, of unknown element types (5).
-    assert_eq!(effect(": w ( 5 [ i0 ] times ) ;"), [5, 1, 1]);
-    assert_eq!(effect(": w ( 1 2 3 0 [ drop ] if ) ;"), [5, 1, 1]);
+    // the literal still leaves one array, whose type covers every element
+    // either path leaves.
+    assert_eq!(effect(": w ( 5 [ i0 ] times ) ;"), [3, 1, 1]);
+    assert_eq!(effect(": w ( 1 2 3 0 [ drop ] if ) ;"), [3, 1, 1]);
+    assert_eq!(effect(": w ( 1 2 3.5 0 [ drop ] if ) ;"), [252, 1, 1]);
+    assert_eq!(effect(": w ( 3 [ i0 i>f ] times ) ;"), [4, 1, 1]);
     assert_eq!(
         run(&g, ": w ( 1 2 3 0 [ drop ] if ) ; w length").unwrap(),
         [3]
@@ -143,4 +151,132 @@ fn literals_whose_count_varies_still_check() {
         run(&g, "checked : w 4 [ i0 ] times ;"),
         Err(Error::User(104))
     );
+}
+
+#[test]
+fn lifting_goes_all_the_way_down_nested_arrays() {
+    let g = system();
+    let nested = |src: &str, i: usize, j: usize| {
+        run(&g, &format!(": a {src} ; a {i} at {j} at")).unwrap()[0]
+    };
+    assert_eq!(nested("( ( 1 2 ) ( 3 ) ) 10 +", 0, 1), 12);
+    assert_eq!(nested("( ( 1 2 ) ( 3 ) ) 10 +", 1, 0), 13);
+    assert_eq!(nested("( ( 1 2 ) ( 3 4 ) ) ( 10 20 ) +", 1, 1), 24);
+    // The integer literal becomes a float for arrays of arrays of floats.
+    assert_eq!(nested("( ( 1.5 ) ( 2.5 ) ) 1 +", 1, 0), 3.5f64.to_bits());
+    let r = run(&g, ": a ( ( 1.5 ) ( 2.5 ) ) 1 + ; ' a stack-types").unwrap();
+    assert_eq!(&r[r.len() - 3..], [7, 1, 1]);
+    // At top level too.
+    assert_eq!(run(&g, "( ( 1 2 ) ( 3 ) ) 10 + 0 at 1 at").unwrap(), [12]);
+}
+
+#[test]
+fn known_type_errors_stop_the_definition() {
+    let g = system();
+    // Elements whose known types differ do not lift: the i64 version would be
+    // wrong for some of them.
+    assert_eq!(run(&g, ": w ( 1 2.5 ) 1 + ;"), Err(Error::User(23)));
+    assert_eq!(run(&g, "( 1 2.5 ) 1 +"), Err(Error::User(23)));
+    // An array is not a condition (trap 26), directly, through a generic
+    // word's instance, or in a loop's test.
+    assert_eq!(run(&g, ": w ( 1 2 ) [ 3 ] if ;"), Err(Error::User(26)));
+    assert_eq!(
+        run(&g, ": mag dup 0 lt? [ 0 swap - ] if ; : w ( 0 5 - 7 ) mag ;"),
+        Err(Error::User(26))
+    );
+    assert_eq!(run(&g, ": w [ ( 1 ) ] [ ] while ;"), Err(Error::User(26)));
+    // Without a literal or a family call a definition is only analysed in
+    // checked mode.
+    assert_eq!(
+        run(&g, ": mk ( 1 2 ) ; checked : w mk [ 3 ] if ;"),
+        Err(Error::User(26))
+    );
+    // The definition was not installed.
+    assert_eq!(run(&g, ": w ( 1 2 ) [ 3 ] if ; w"), Err(Error::User(26)));
+}
+
+#[test]
+fn each_fold_and_map_consume_arrays() {
+    let g = system();
+    assert_eq!(run(&g, ": s ( 1 2 3 4 ) 0 [ + ] fold ; s").unwrap(), [10]);
+    assert_eq!(run(&g, ": s 0 ( 1 2 3 ) [ + ] each ; s").unwrap(), [6]);
+    assert_eq!(
+        run(&g, ": s ( 1.5 2.5 ) 0.0 [ + ] fold ; s").unwrap(),
+        floats(&[4.0])
+    );
+    assert_eq!(elements(&g, "( 1 2 3 ) [ 1 + ] map", 3), [2, 3, 4]);
+    // Element types reach the body: the literal becomes a float.
+    assert_eq!(
+        elements(&g, "( 1.5 2.5 ) [ 1 + ] map", 2),
+        floats(&[2.5, 3.5])
+    );
+    // What lifting cannot do: a branch for each element, and choosing the
+    // level in nested arrays.
+    assert_eq!(
+        elements(&g, "( 0 5 - 7 ) [ dup 0 lt? [ 0 swap - ] if ] map", 2),
+        [5, 7]
+    );
+    assert_eq!(elements(&g, "( ( 1 2 ) ( 3 ) ) [ length ] map", 2), [2, 1]);
+    // The body sees the values beneath the array, and the index as `i0`.
+    assert_eq!(
+        run(&g, ": m 10 ( 1 2 3 ) [ over + ] map ; m 2 at").unwrap(),
+        [10, 13]
+    );
+    assert_eq!(elements(&g, "( 10 20 30 ) [ i0 + ] map", 3), [10, 21, 32]);
+    assert_eq!(
+        run(&g, ": m 2 [ ( 10 20 ) [ i1 + ] map ] times ; m 1 at").unwrap()[1],
+        21
+    );
+    // `each` inside a literal is a comprehension: it may keep, drop or repeat.
+    assert_eq!(
+        elements(&g, "( ( 1 5 2 7 ) [ dup 3 lt? [ drop ] if ] each )", 2),
+        [5, 7]
+    );
+    assert_eq!(run(&g, ": e ( ( 1 2 3 ) [ dup ] each ) ; e length").unwrap(), [6]);
+    // Results are typed, so families resolve on them.
+    let ty = |src: &str| {
+        let r = run(&g, &format!(": w {src} ; ' w stack-types")).unwrap();
+        r[r.len() - 3]
+    };
+    assert_eq!(ty("( 1 2 ) [ i>f ] map"), 4);
+    assert_eq!(ty("( ( 1 2 ) ( 3 ) ) [ length ] map"), 3);
+    assert_eq!(ty("( 1.5 2.5 ) 0.0 [ + ] fold"), 2);
+    // A map builds its result directly, not on the data stack.
+    assert_eq!(
+        run(&g, ": m ( 50000 [ i0 ] times ) [ 2 * ] map ; m 49999 at").unwrap(),
+        [99_998]
+    );
+    // Checked mode accepts them; a map body must leave one value per element.
+    assert_eq!(
+        run(&g, "checked : w ( 1 2 3 ) [ 1 + ] map ; w 2 at").unwrap(),
+        [4]
+    );
+    assert_eq!(
+        run(&g, "checked : w ( 1 2 3 ) [ dup ] map ;"),
+        Err(Error::User(104))
+    );
+    // Like `times`, they are compiled: at top level there is nothing to inline.
+    assert_eq!(run(&g, "( 1 2 ) [ 1 + ] map"), Err(Error::User(19)));
+}
+
+#[test]
+fn literals_inside_loop_bodies_keep_the_index() {
+    let g = system();
+    // Marks have their own stack, so `i0` inside a literal is the loop's index.
+    let r = run(&g, ": r 3 [ ( i0 i0 1 + ) ] times ; r 1 at").unwrap();
+    assert_eq!(r[r.len() - 1], 3);
+}
+
+#[test]
+fn words_that_build_arrays_from_inputs_get_instances() {
+    let g = system();
+    // `pair`'s elements are its inputs, of unknown type, so it is generic: a
+    // call with arrays gets an instance whose result is an array of arrays.
+    let pair = ": pair >r >r ( r> r> ) ;";
+    assert_eq!(
+        run(&g, &format!("{pair} : w ( 1 2 ) ( 3 4 ) pair 1 + ; w 0 at 1 at")).unwrap(),
+        [3]
+    );
+    let r = run(&g, &format!("{pair} : w 1.5 2.5 pair ; ' w stack-types")).unwrap();
+    assert_eq!(&r[r.len() - 3..], [4, 1, 1]);
 }

@@ -78,6 +78,10 @@ pub struct Machine {
     /// returning (or tail-calling) discards them, so a word can neither leave
     /// hidden outputs nor read its caller's scratch values.
     scratch: Vec<u64>,
+    /// Depths marked by `mark` for array literals, per call frame in the same
+    /// way, apart from the scratch stack so that a literal inside a loop body
+    /// does not hide the loop's index.
+    marks: Vec<u64>,
     pub stats: Stats,
     pub(crate) blobs: BTreeMap<Cid, Blob>,
     words: Vec<Executable>,
@@ -95,6 +99,7 @@ impl Machine {
         let mut m = Self {
             stack: Vec::new(),
             scratch: Vec::new(),
+            marks: Vec::new(),
             stats: Stats::default(),
             blobs: image.blobs.clone(),
             words: Vec::new(),
@@ -116,6 +121,7 @@ impl Machine {
         let mut m = Self {
             stack: Vec::new(),
             scratch: Vec::new(),
+            marks: Vec::new(),
             stats: Stats::default(),
             blobs: BTreeMap::new(),
             words: Vec::new(),
@@ -390,10 +396,12 @@ impl Machine {
     pub fn run(&mut self, xt: u64, mut fuel: u64) -> Result<(), Error> {
         let mut word = self.token(xt)?;
         let mut ip = 0usize;
-        // Each return frame also records its caller's scratch-frame base.
-        let mut returns: Vec<(usize, usize, usize)> = Vec::new();
+        // Each return frame also records its caller's scratch and mark bases.
+        let mut returns: Vec<(usize, usize, usize, usize)> = Vec::new();
         let mut base = 0usize;
+        let mut mbase = 0usize;
         self.scratch.clear();
+        self.marks.clear();
         loop {
             if fuel == 0 {
                 return Err(Error::Fuel);
@@ -405,11 +413,13 @@ impl Machine {
             match op {
                 Instruction::Return => {
                     self.scratch.truncate(base);
+                    self.marks.truncate(mbase);
                     match returns.pop() {
-                        Some((w, i, b)) => {
+                        Some((w, i, b, m)) => {
                             word = w;
                             ip = i;
                             base = b;
+                            mbase = m;
                         }
                         None => return Ok(()),
                     }
@@ -432,8 +442,9 @@ impl Machine {
                     if returns.len() >= 16384 {
                         return Err(Error::Stack);
                     }
-                    returns.push((word, ip, base));
+                    returns.push((word, ip, base, mbase));
                     base = self.scratch.len();
+                    mbase = self.marks.len();
                     word = w;
                     ip = 0;
                 }
@@ -441,18 +452,21 @@ impl Machine {
                     if returns.len() >= 16384 {
                         return Err(Error::Stack);
                     }
-                    returns.push((word, ip, base));
+                    returns.push((word, ip, base, mbase));
                     base = self.scratch.len();
+                    mbase = self.marks.len();
                     ip = 0;
                 }
                 Instruction::TailRecur => {
-                    // As a tail call to itself: its scratch values go.
+                    // As a tail call to itself: its scratch values and marks go.
                     self.scratch.truncate(base);
+                    self.marks.truncate(mbase);
                     ip = 0;
                 }
                 Instruction::Tail(w) => {
-                    // The current word is finished: its scratch values go.
+                    // The current word is finished: its scratch values and marks go.
                     self.scratch.truncate(base);
+                    self.marks.truncate(mbase);
                     word = w;
                     ip = 0;
                 }
@@ -462,8 +476,9 @@ impl Machine {
                     if returns.len() >= 16384 {
                         return Err(Error::Stack);
                     }
-                    returns.push((word, ip, base));
+                    returns.push((word, ip, base, mbase));
                     base = self.scratch.len();
+                    mbase = self.marks.len();
                     word = w;
                     ip = 0;
                 }
@@ -489,16 +504,16 @@ impl Machine {
                     self.push(v)?;
                 }
                 Instruction::Prim(Primitive::Mark) => {
-                    if self.scratch.len() >= 65536 {
+                    if self.marks.len() >= 65536 {
                         return Err(Error::Stack);
                     }
-                    self.scratch.push(self.stack.len() as u64);
+                    self.marks.push(self.stack.len() as u64);
                 }
                 Instruction::Prim(Primitive::Gather) => {
-                    if self.scratch.len() <= base {
+                    if self.marks.len() <= mbase {
                         return Err(Error::Stack);
                     }
-                    let mark = self.scratch.pop().ok_or(Error::Stack)? as usize;
+                    let mark = self.marks.pop().ok_or(Error::Stack)? as usize;
                     if mark > self.stack.len() {
                         return Err(Error::Stack);
                     }

@@ -26,8 +26,8 @@
 ; Definitions: capitalized names are types (Money, Config), others are words.
 (definition name: (word) @type (#match? @type "^[A-Z]"))
 ; Definitions of the control words themselves keep the keyword color.
-(definition name: (word) @function (#not-match? @function "^[A-Z]") (#not-match? @function "^(if|else|then|while|times|match|undo|recur|exit|cycle|repeat|again|until|immediate)$"))
-(system_definition name: (word) @function (#not-match? @function "^(if|else|then|while|times|match|undo|recur|exit|cycle|repeat|again|until|immediate)$"))
+(definition name: (word) @function (#not-match? @function "^[A-Z]") (#not-match? @function "^(if|else|then|while|times|each|fold|map|match|undo|recur|exit|cycle|repeat|again|until|immediate)$"))
+(system_definition name: (word) @function (#not-match? @function "^(if|else|then|while|times|each|fold|map|match|undo|recur|exit|cycle|repeat|again|until|immediate)$"))
 (entry name: (word) @property)
 
 ; Patterns, in context headings and named signatures: types, guards (ending
@@ -46,7 +46,7 @@
 
 ; Control words.
 ((word) @keyword
-  (#match? @keyword "^(if|else|then|while|times|match|undo|recur|exit|cycle|repeat|again|until|immediate)$"))
+  (#match? @keyword "^(if|else|then|while|times|each|fold|map|match|undo|recur|exit|cycle|repeat|again|until|immediate)$"))
 
 ; .name reads an entry of the map on top; _ takes a value from below a
 ; bracket; i0 and i1 are loop indices; :x binds a local.

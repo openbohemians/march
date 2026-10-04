@@ -83,8 +83,8 @@ pub enum Primitive {
     WorkLoad = 44,
     WorkStore = 45,
     // Array literals (docs/ARRAYS.md): `mark` pushes the data stack's depth
-    // onto the scratch stack; `gather` pops it and moves every cell above
-    // that depth into a new region, leaving the region.
+    // onto the mark stack, kept per call frame like the scratch stack; `gather`
+    // pops it and moves every cell above that depth into a new vector.
     Mark = 46,
     Gather = 47,
     // Persistent vectors of cells (docs/ARRAYS.md), held in regions:

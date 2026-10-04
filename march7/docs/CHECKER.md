@@ -196,9 +196,29 @@ Words run at top level are analysed the first time they run there, which
 costs the system's own rebuild about a million steps once per session (the
 analysis of `:` covers much of the compiler).
 
-**Arrays** (docs/ARRAYS.md) add types 3 (array of i64), 4 (array of f64)
-and 5 (any other array). The checker models `mark` and `gather`, so an array
-literal's element count and type are exact, and families lift over arrays.
+**Arrays** (docs/ARRAYS.md) add types by element type and rank: 3, 4 and 5
+for arrays of i64, f64 and unknown elements, 3 more per rank, 252 for mixed
+elements and 254 for the empty array. The checker models `mark` and `gather`,
+so an array literal's element count and type are exact, even when its count
+varies, and families lift over arrays, all the way down nested ones.
+
+**Scratch types.** The types of the first eight scratch-stack slots are kept
+too (field 128, a byte each), and merged where paths meet like the data
+stack's (per-op tables 9 and 10), except that an empty array meeting an array
+of t becomes an array of t. So `i0` is an i64, and `each` and `map` know
+their array's element type.
+
+**Type errors.** Known types that cannot work are errors, recorded as a trap
+number (field 208) and raised at `;`: 23 for a family call whose inputs match
+no clause and do not lift, 26 for an array used as a condition. Resolving
+mode raises them for every definition it analyses, which is any definition
+with an array literal or a call to a family or generic word; checked mode
+raises them for the rest.
+
+**Instances keep their types.** An instance's effect and output types are
+remembered from the analysis that made it, with the call's input types; its
+code alone does not say what, for example, an array built from its inputs
+holds.
 
 ## Next slices
 

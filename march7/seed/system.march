@@ -470,17 +470,19 @@
 -- 8 code length, 16 op count, 24 current op, 32 its byte offset, 40 live,
 -- 48 depth, 56 scratch depth, 64 effect of a quotation on top (or 0),
 -- 72 lowest depth, 80 returned?, 88 return depth, 96 unknown reason,
--- 104 pass, 112 assumed own effect, 120 recurs?, 136 a loop header's types
--- were widened, 152-200 and 232-248 temporaries, 208 a family call's known
--- types matched no clause, 216 the types the inputs start with (from working
--- offset 3520), 224 the code calls a family word or a generic word. Type
--- blocks of 64 bytes: live types at 256, types at return at 320, a scratch
--- block at 384.
+-- 104 pass, 112 assumed own effect, 120 recurs?, 128 the types of the first
+-- eight scratch slots, a byte each, 136 a loop header's types were widened,
+-- 144-200 and 232-248 temporaries, 208 a type error's trap (23 a family
+-- call's known types matched no clause, 26 an array used as a condition),
+-- 216 the types the inputs start with (from working offset 3520), 224 the
+-- code calls a family word or a generic word. Type blocks of 64 bytes: live
+-- types at 256, types at return at 320, a scratch block at 384.
 -- Depths are biased by 2^32 so that unsigned comparison works. Per-op tables
 -- start at 512: 0 byte offset; 1-4 state from forward branches (set?, depth,
 -- scratch, quotation); 5-7 state on arrival (set?, depth, scratch); 8 loop
--- header?; 11 a loop header's types recorded?; 12 the clause chosen for a
--- family call; 13 the literal before it is to become a float. Per-op type
+-- header?; 9 scratch types from forward branches; 10 a loop header's
+-- scratch types; 11 a loop header's types recorded?; 12 the clause chosen
+-- for a family call; 13 the literal before it is to become a float. Per-op type
 -- blocks follow: types from forward branches, then types on arrival.
 -- ( field -- v )
 : an@ 600 literal 44 prim, 2 prim, 20 prim, ; immediate
@@ -572,6 +574,70 @@
 : ty-merge over xor
   dup 4 rshift or dup 2 rshift or dup 1 rshift or 72340172838076673 and 255 u*
   invert and ;
+
+-- Arrays (docs/ARRAYS.md) have types by element type and rank: 3, 4 and 5
+-- are arrays of i64, of f64 and of unknown elements; each rank adds 3, so 6
+-- is an array of arrays of i64. 252 is an array whose elements' known types
+-- differ, 254 an empty array, whose elements have no type yet.
+-- ( t -- flag )
+: array-type? dup 3 ult? 0= swap 255 ult? and ;
+-- ( t -- t' ) The type of an array of elements of type t.
+: array-of
+  dup 0= if drop 5 exit then
+  dup 3 ult? if 2 u+ exit then
+  dup 249 ult? if 3 u+ else drop 5 then ;
+-- ( t -- t' ) The type of an array's elements: one rank less, unknown for
+-- mixed elements, i64 for an empty array (as for an integer literal). A value
+-- that is not an array is its own element, for lifting it against an array.
+: element-type
+  dup array-type? 0= if exit then
+  dup 6 ult? if 2 u- dup 3 eq? if drop 0 then exit then
+  dup 252 ult? if 3 u- exit then
+  254 eq? if 1 else 0 then ;
+-- ( t -- t' ) The type at the bottom of nested arrays.
+: base-type cycle dup array-type? while element-type repeat ;
+-- Element summaries: what the elements of an array being built have in
+-- common. Bits 0-7 a known type, 8 one is known, 9 one is unknown, 10 two
+-- known types differ.
+-- ( s t -- s' ) Add an element of type t.
+: ty-join
+  dup 0= over 255 eq? or if drop 512 or exit then
+  over 256 and if over 255 and over eq? if drop else drop 1024 or then exit then
+  256 or or ;
+-- ( s -- t ) The array type for a summary.
+: summary-type
+  dup 1024 and if drop 252 exit then
+  dup 512 and if drop 5 exit then
+  dup 256 and if 255 and array-of exit then
+  drop 254 ;
+-- ( ta tx -- t ) An array's type after a value of type tx is pushed onto it
+-- or set in it.
+: push-type
+  over array-type? 0= if drop exit then
+  over 254 eq? if nip array-of exit then
+  over 252 eq? if drop exit then
+  swap element-type 0 swap ty-join swap ty-join summary-type ;
+-- ( x y -- z ) Where paths meet, a scratch slot's types: an empty array
+-- meeting an array becomes that array's type, so a result built in a loop
+-- keeps its element type; other types that differ become unknown.
+: join1
+  over over eq? if drop exit then
+  over 254 eq? if dup array-type? if nip exit then then
+  dup 254 eq? if over array-type? if drop exit then then
+  drop drop 0 ;
+-- ( a b -- c ) join1 for each byte of two cells of scratch types.
+: sc-join
+  over over eq? if drop exit then
+  0 144 an! 0
+  cycle dup 64 ult? while
+    >r over r@ rshift 255 and over r@ rshift 255 and join1
+    r@ lshift 144 an@ or 144 an! r> 8 u+
+  repeat drop drop drop 144 an@ ;
+-- ( t -- ) Set the type of the scratch slot about to be pushed; slots past
+-- the eighth are not kept.
+: sc! 56 an@ dup 8 ult? if 128 u+ 600 get swap c! else drop drop then ;
+-- ( -- t ) The type of the top scratch slot.
+: sc@ 56 an@ 1 u- dup 8 ult? if 128 u+ 600 get swap c@ else drop 0 then ;
 -- ( k b -- offset ) Op k's type block b: 0 from forward branches, 1 on arrival.
 : blk 16 an@ 64 u* u* 16 an@ 112 u* 512 u+ u+ swap 64 u* u+ ;
 -- ( from to -- ) Copy a type block.
@@ -609,24 +675,51 @@
 -- ( in out -- )
 : apply over over ty-clear
   swap 48 an@ swap u- dup 72 an@ ult? if dup 72 an! then u+ 48 an! ;
+-- An open mark (fields 456-504) holds the depth at `mark` in bits 0-47, the
+-- summary of the elements seen where paths met in bits 48-58, and whether
+-- the count varies in bit 63.
 -- ( depth -- flag ) Inside an array literal, a count that varies (a loop or
 -- branch that changes the depth) is fine: `gather` takes whatever is above
 -- its mark. So if a mark is open and both this depth and the current one are
 -- at or above it, mark the literal as varying (bit 63 of its mark) and go on.
 : vary?
   448 an@ 0= if drop 0 exit then
-  448 an@ 1 u- 8 u* 456 u+ dup an@ 9223372036854775807 and
+  448 an@ 1 u- 8 u* 456 u+ dup an@ 281474976710655 and
   rot over ult? 0= swap 48 an@ swap ult? 0= and
   dup if over an@ -9223372036854775808 or rot an! else nip then ;
+-- ( block depth -- t ) The type of the slot at a depth, in a type block.
+: slot-type
+  4294967264 u- dup 64 ult? if u+ 600 get swap c@ else drop drop 255 then ;
+-- ( s block from to -- s' ) Add the slots from depth from up to to, in a
+-- type block, to an element summary.
+: join-slots
+  >r
+  cycle dup r@ ult? while
+    over over slot-type >r rot r> ty-join rot rot 1 u+
+  repeat r> drop drop drop ;
+-- ( block depth -- ) Where paths meet at different depths inside a literal,
+-- add both paths' slots above its mark to its summary: the current ones and
+-- the other path's, in block up to depth. So the literal's type covers every
+-- element either path leaves.
+: vary-join
+  448 an@ 1 u- 8 u* 456 u+ 152 an!
+  152 an@ an@ 281474976710655 and 160 an!
+  152 an@ an@ 48 rshift 2047 and
+  256 160 an@ 48 an@ join-slots
+  rot rot 160 an@ swap join-slots
+  48 lshift 152 an@ an@ dup 48 rshift 2047 and 48 lshift xor or 152 an@ an! ;
 -- ( target -- )
 : pend
   dup 1 tab@ if
     dup 3 tab@ 56 an@ eq? 0= if drop 3 fail exit then
-    dup 2 tab@ 48 an@ eq? 0= if dup 2 tab@ vary? 0= if drop 3 fail exit then then
+    dup 2 tab@ 48 an@ eq? 0= if dup 2 tab@ vary? 0= if drop 3 fail exit then
+      dup 0 blk over 2 tab@ vary-join then
     dup 4 tab@ 64 an@ eq? 0= if 0 over 4 tab! then
+    dup 9 tab@ 128 an@ sc-join over 9 tab!
     256 over 0 blk blk-merge drop
   else
     1 over 1 tab! 48 an@ over 2 tab! 56 an@ over 3 tab! 64 an@ over 4 tab!
+    128 an@ over 9 tab!
     256 swap 0 blk blk-copy
   then ;
 -- ( target -- )
@@ -635,26 +728,34 @@
 : back
   dup 1 blk 384 blk-copy 256 384 blk-merge
   dup 1 blk 384 blk-eq? 0= if 384 over 1 blk blk-copy 1 136 an! then
+  dup 10 tab@ dup 128 an@ sc-join dup rot eq? if drop else over 10 tab! 1 136 an! then
   dup 7 tab@ 56 an@ eq? 0= if drop 4 fail exit then
   dup 6 tab@ 48 an@ eq? if drop exit then
-  6 tab@ vary? 0= if 4 fail then ;
+  dup 6 tab@ vary? 0= if drop 4 fail exit then
+  dup 1 blk swap 6 tab@ vary-join ;
 -- ( -- )
 : arrive
   24 an@ 1 tab@ if
     40 an@ if
       24 an@ 3 tab@ 56 an@ eq? 0= if 3 fail exit then
-      24 an@ 2 tab@ 48 an@ eq? 0= if 24 an@ 2 tab@ vary? 0= if 3 fail exit then then
+      24 an@ 2 tab@ 48 an@ eq? 0= if 24 an@ 2 tab@ vary? 0= if 3 fail exit then
+        24 an@ 0 blk 24 an@ 2 tab@ vary-join then
       24 an@ 4 tab@ 64 an@ eq? 0= if 0 64 an! then
       24 an@ 0 blk 256 blk-merge
+      24 an@ 9 tab@ 128 an@ sc-join 128 an!
     else
       24 an@ 2 tab@ 48 an! 24 an@ 3 tab@ 56 an! 24 an@ 4 tab@ 64 an! 1 40 an!
       24 an@ 0 blk 256 blk-copy
+      24 an@ 9 tab@ 128 an!
     then
   then
   40 an@ if
     24 an@ 8 tab@ if
       0 64 an!
-      24 an@ 11 tab@ if 24 an@ 1 blk 256 blk-merge else 1 24 an@ 11 tab! then
+      24 an@ 11 tab@ if
+        24 an@ 1 blk 256 blk-merge 24 an@ 10 tab@ 128 an@ sc-join 128 an!
+      else 1 24 an@ 11 tab! then
+      128 an@ 24 an@ 10 tab!
     then
     1 24 an@ 5 tab! 48 an@ 24 an@ 6 tab! 56 an@ 24 an@ 7 tab!
     256 24 an@ 1 blk blk-copy
@@ -725,19 +826,13 @@
   dup dup 4 rshift or dup 2 rshift or dup 1 rshift or 72340172838076673 and
   72340172838076673 r@ and eq?
   swap 72340172838076673 r> and eq? 0= and ;
--- Arrays (docs/ARRAYS.md) have types 3 (of i64), 4 (of f64) and 5 (any other).
--- ( t -- flag )
-: array-type? dup 3 ult? 0= swap 6 ult? and ;
--- ( t -- t' ) An element's type for an input's type: i64 or f64 for arrays of
--- them, unknown for other arrays, the input's own type otherwise.
-: element-type dup 5 eq? if drop 0 exit then dup array-type? if 2 u- then ;
 -- ( token -- token 0 | 1 ) A family call with an array input and no clause
 -- of its own: the lifted word for it (from `lift-for`, through the token at
 -- working offset 3392), which applies the element operation to each element.
 : lift-step
   dup 1 ty@ 0 ty@ 3392 get call dup if >r nip 24 an@ 12 tab! 2 1 apply r> ty-set 0 64 an! 1 exit then drop
-  retype-ok? 1 ty@ 4 eq? and 0= if 0 exit then
-  dup 4 2 3392 get call dup 0= if exit then
+  retype-ok? 1 ty@ dup array-type? swap base-type 2 eq? and and 0= if 0 exit then
+  dup 1 ty@ 2 3392 get call dup 0= if exit then
   >r nip 1 24 an@ 13 tab! 24 an@ 12 tab! 2 1 apply r> ty-set 0 64 an! 1 ;
 -- ( token -- token 0 | 1 ) A family call in the definition being resolved:
 -- the clause for its input types, or one for a float in place of the integer
@@ -754,7 +849,7 @@
     then drop
   then
   lift-step if 1 exit then
-  dup 8 ty-top types-mismatch? if 1 208 an! then 0 ;
+  dup 8 ty-top types-mismatch? if 23 208 an! then 0 ;
 
 -- Generic words: a word whose code still calls a family word, or another
 -- generic word, has bit 40 set in its effect. A call to one with an f64 among
@@ -766,7 +861,7 @@
 -- instance would treat differently from the i64 version.
 : wants-instance?
   0 swap cycle dup while
-    dup 255 and dup 2 ult? 0= swap 6 ult? and rot or swap 8 rshift
+    dup 255 and dup 2 ult? 0= swap 255 ult? and rot or swap 8 rshift
   repeat drop ;
 -- ( token -- token 0 | 1 )
 : instance-step
@@ -810,50 +905,43 @@
   dup 3 eq? if drop 160 an@ 0 ty! 152 an@ 1 ty! 160 an@ 2 ty! exit then
   4 eq? if 168 an@ 0 ty! 152 an@ 1 ty! 160 an@ 2 ty! then ;
 -- `mark` and `gather`: the analysis keeps the depth at each open `mark`
--- (field 448 a count, 456-504 the depths), so `gather` knows how many cells
--- it takes, and the array's type from theirs.
+-- (field 448 a count, 456-504 the marks), so `gather` knows how many cells
+-- it takes, and the array's type from theirs and from those seen where paths
+-- met at different depths. An element of unknown type makes the word
+-- generic, so a call with known types gets an instance that knows it.
 -- ( -- )
 : do-mark
   448 an@ 7 ult? 0= if 10 fail exit then
-  56 an@ 1 u+ 56 an!
   48 an@ 448 an@ 8 u* 456 u+ an! 448 an@ 1 u+ 448 an! 0 64 an! ;
--- ( n -- t ) The type of an array of the top n cells: 3 or 4 if they are
--- all i64 or all f64, otherwise 5.
-: elem-type
-  dup 0= if drop 5 exit then
-  240 an! 0 ty@ 232 an!
-  232 an@ 1 eq? 232 an@ 2 eq? or 0= if 5 exit then
-  1 248 an!
-  cycle 248 an@ 240 an@ ult? while
-    248 an@ ty@ 232 an@ eq? 0= if 5 exit then
-    248 an@ 1 u+ 248 an!
-  repeat 232 an@ 2 u+ ;
 -- ( -- )
--- A varying literal's elements have unknown types: type 5.
 : do-gather
-  56 an@ 0= 448 an@ 0= or if 6 fail exit then
-  56 an@ 1 u- 56 an!
+  448 an@ 0= if 6 fail exit then
   448 an@ 1 u- dup 448 an! 8 u* 456 u+ an@
-  dup 63 rshift >r 9223372036854775807 and
-  48 an@ over ult? if drop r> drop 6 fail exit then
-  48 an@ swap u-
-  r> if 5 >r else dup elem-type >r then 1 apply r> ty-set 0 64 an! ;
+  dup 48 rshift 2047 and swap 281474976710655 and
+  48 an@ over ult? if drop drop 6 fail exit then
+  48 an@ over u- >r
+  256 swap 48 an@ join-slots
+  dup 512 and if 1 224 an! then
+  summary-type r> 1 apply ty-set 0 64 an! ;
+-- ( t -- t' ) The type of an element read from a value of type t.
+: at-type dup array-type? if element-type else drop 0 then ;
 -- ( id -- )
 : do-prim
   51 over ult? if drop 11 fail exit then
   dup 48 eq? if drop 1 1 apply 1 ty-set 0 64 an! exit then
-  dup 49 eq? if drop 2 1 apply 0 64 an! exit then
-  dup 50 eq? if drop 1 ty@ >r 2 1 apply r> ty-set 0 64 an! exit then
-  dup 51 eq? if drop 2 ty@ >r 3 1 apply r> ty-set 0 64 an! exit then
+  dup 49 eq? if drop 1 ty@ at-type >r 2 1 apply r> ty-set 0 64 an! exit then
+  dup 50 eq? if drop 1 ty@ 0 ty@ push-type >r 2 1 apply r> ty-set 0 64 an! exit then
+  dup 51 eq? if drop 2 ty@ 0 ty@ push-type >r 3 1 apply r> ty-set 0 64 an! exit then
   dup 46 eq? if drop do-mark exit then
   dup 47 eq? if drop do-gather exit then
   dup 45 eq? if drop 2 0 apply 0 64 an! exit then
   dup 25 eq? if drop do-execute exit then
   dup 32 eq? if drop 1 0 apply 0 40 an! exit then
-  dup 33 eq? if drop 1 0 apply 56 an@ 1 u+ 56 an! 0 64 an! exit then
+  dup 33 eq? if drop 0 ty@ sc! 1 0 apply 56 an@ 1 u+ 56 an! 0 64 an! exit then
   dup 34 eq? if drop 56 an@ 0= if 6 fail exit then
-    56 an@ 1 u- 56 an! 0 1 apply 0 64 an! exit then
-  dup 35 eq? if drop 56 an@ 0= if 6 fail exit then 0 1 apply 0 64 an! exit then
+    sc@ >r 56 an@ 1 u- 56 an! 0 sc! 0 1 apply r> ty-set 0 64 an! exit then
+  dup 35 eq? if drop 56 an@ 0= if 6 fail exit then
+    sc@ >r 0 1 apply r> ty-set 0 64 an! exit then
   -- 36-41 take two and leave one (float arithmetic and comparison); 42-44
   -- take one and leave one (conversions, and the working-region load).
   dup 36 ult? 0= if dup 42 ult? if 2 1 else 1 1 then apply prim-type 0 64 an! exit then
@@ -882,7 +970,8 @@
   dup 3 eq? if drop do-call exit then
   dup 4 eq? if drop do-quote exit then
   dup 5 eq? if drop branch-target jump 0 40 an! exit then
-  dup 6 eq? if drop 1 0 apply 0 64 an! branch-target jump exit then
+  dup 6 eq? if drop 0 ty@ array-type? if 26 208 an! then
+    1 0 apply 0 64 an! branch-target jump exit then
   dup 7 eq? if drop do-recur exit then
   dup 8 eq? if drop 0 3 apply 0 64 an! exit then
   dup 9 eq? if drop do-call 40 an@ if do-return then exit then
@@ -899,7 +988,7 @@
     24 an@ 1 u+ 24 an!
   repeat
   0 24 an! 1 40 an! 4294967296 48 an! 0 56 an! 0 64 an! 4294967296 72 an!
-  0 80 an! 0 88 an! 0 96 an! ty-seed 0 208 an! 0 448 an!
+  0 80 an! 0 88 an! 0 96 an! ty-seed 0 208 an! 0 448 an! 0 128 an!
   cycle 24 an@ 16 an@ ult? while
     arrive 40 an@ if step then
     24 an@ 1 u+ 24 an!
@@ -956,7 +1045,8 @@
   then then
   dup effect-known? 224 an@ and if 1099511627776 or then
   ret-types 720 put
-  968 get 600 get eq? if 208 an@ dup 1008 put 0= if apply-resolutions then 0 968 put then
+  208 an@ 1008 put
+  968 get 600 get eq? if 1008 get 0= if apply-resolutions then 0 968 put then
   600 get region-free r> 600 put ;
 
 -- ( token -- packed ) A word's effect, computed from its code on first use
@@ -992,12 +1082,13 @@
   1 96 put 3840 80 put
   65536 region-new 24 put 0 16 put 1 0 put ;
 -- ( -- ) Resolve the family calls in the definition being finished; trap 23
--- if a call's known input types match no clause. 1016 says whether the
+-- if a call's known input types match no clause, 26 if an array is used as a
+-- condition. 1016 says whether the
 -- definition is generic, so `;` can flag it (dictionary flag bit 4).
 : resolve-families
   0 960 put 0 1008 put 1 968 put
   out here analyze 40 rshift 1 and 1016 put 0 968 put
-  1008 get if 23 trap then ;
+  1008 get dup if trap then drop ;
 
 -- Instances, remembered by word and input types in the region whose handle
 -- is at 3512: a count, then entries of three cells (word, types, instance).
@@ -1023,7 +1114,10 @@
 -- ( token types -- instance ) A generic word compiled again for inputs of
 -- the given types: its code is copied, resolved starting from those types,
 -- and sealed. A known type that matches no clause in the copy is an error
--- of the call (trap 23 at the caller's `;`, or at once at top level).
+-- of the call (trap 23 at the caller's `;`, or at once at top level). The
+-- instance's effect and output types are those found from the input types,
+-- and remembered: its code alone does not say, for example, what the
+-- elements of an array built from its inputs are.
 : instantiate
   over over find-instance dup if nip nip exit then drop
   over 1 680 code-cid 1 680 blob-read swap drop
@@ -1031,10 +1125,11 @@
   3560 get 3568 get
   >r >r dup 3520 put r> r>
   968 get >r 1008 get >r 1 968 put 0 1008 put
-  over over analyze drop
+  over over analyze 720 get
   1008 get r> 1008 put r> 968 put
-  if 600 get if 1 208 an! else 23 trap then then
-  over >r >r 0 r> seal r> region-free
+  dup if 600 get if 208 an! else trap then else drop then
+  >r >r over >r >r 0 r> seal r> region-free
+  r> over 8 u* 624 get swap ! r> over 8 u* 712 get swap !
   dup >r add-instance r> ;
 -- ( xt types -- outtypes ) The output types of a word run on inputs of the
 -- given types: an analysis of its code starting from them, remembered.
@@ -1070,13 +1165,10 @@
   cycle dup while
     1 u- dup 8 ult? if r@ over 8 u* rshift 255 and else 255 then shadow-push
   repeat drop r> drop ;
--- ( n -- t ) The type of an array of the top n values, as `elem-type`.
+-- ( n -- t ) The type of an array of the top n values, as `do-gather`.
 : shadow-elem
-  dup 0= if drop 5 exit then
-  0 shadow@ dup 1 eq? over 2 eq? or 0= if drop drop 5 exit then
-  >r 1 cycle over over ult? while
-    dup shadow@ r@ eq? 0= if drop drop r> drop 5 exit then 1 u+
-  repeat drop drop r> 2 u+ ;
+  0 swap cycle dup while 1 u- dup shadow@ >r swap r> ty-join swap repeat
+  drop summary-type ;
 -- `(` and `)` at top level also keep the type stack's top at each `(`
 -- (3328 a count, 3336-3384 the tops), so `)` can type the array.
 : shadow-open
@@ -1098,9 +1190,9 @@
     then drop
   then
   dup 1 shadow@ 0 shadow@ 3392 get call dup if >r nip r> 792 put exit then drop
-  3528 get 0 shadow@ 1 eq? and 1 shadow@ 4 eq? and if
+  3528 get 0 shadow@ 1 eq? and 1 shadow@ dup array-type? swap base-type 2 eq? and and if
     >r i>f r> 1 shadow-pop 2 shadow-push
-    dup 4 2 3392 get call dup if >r nip r> 792 put exit then drop
+    dup 1 shadow@ 2 3392 get call dup if >r nip r> 792 put exit then drop
   then
   dup 8 shadow-top types-mismatch? if 23 trap then ;
 -- ( xt -- ) The types of the stack after running xt.
@@ -1126,7 +1218,8 @@
 : semicolon 0 get 0= if 6 trap then 800 get if 20 trap then
   tailify 0 c,
   0 1016 put 960 get if resolve-families then
-  632 get if out here analyze dup effect-known? 0= if effect-in 100 u+ trap then
+  632 get if out here analyze 1008 get dup if trap then drop
+    dup effect-known? 0= if effect-in 100 u+ trap then
   else 0 then
   out 0 here seal
   dup >r 0 96 get 80 get 88 get install
@@ -1463,19 +1556,54 @@ _v ᵥ
   ops 808 get 2 u- inline-quote
   6 c, here 0 u32, 808 get 1 u- inline-quote
   swap 5 c, u32, ops swap u32! 2 consumed ;
+-- Counted loops keep three cells on the scratch stack, the index on top, so
+-- `i0` and `i1` find the index of the loop and of the one enclosing it:
+-- `times` keeps 0, the count and the index; `each` the array, its length and
+-- the index; `map` the array being built, the array and the index.
+-- ( -- ) Whether the index is below the cell under it.
+: loop-test 34 prim, 35 prim, 3 prim, 33 prim, 11 prim, ;
+-- ( -- ) The index's increment.
+: loop-step 34 prim, 1 literal 5 prim, 33 prim, ;
+-- ( -- ) Drop the loop's cells.
+: loop-end 34 prim, 1 prim, 34 prim, 1 prim, 34 prim, 1 prim, ;
+-- ( -- ) The newest pending quotation, as the loop's body.
+: loop-body 808 get 1 u- inline-quote 1 consumed ;
 -- ( -- ) `n [ body ] times` runs body n times, with the index 0..n-1 as
--- `i0` (and the enclosing loop's as `i1`). The limit and index live on the
--- scratch stack.
+-- `i0` (and the enclosing loop's as `i1`).
 : times
   pending-here 1 eq? 0= if 19 trap then
-  33 prim, 0 literal 33 prim,
-  ops 34 prim, 35 prim, 3 prim, 33 prim, 11 prim,
-  6 c, here 0 u32, 808 get 1 u- inline-quote 1 consumed
-  34 prim, 1 literal 5 prim, 33 prim,
+  0 literal 33 prim, 33 prim, 0 literal 33 prim,
+  ops loop-test 6 c, here 0 u32, loop-body
+  loop-step swap 5 c, u32, ops swap u32! loop-end ;
+-- ( a -- ) `a [ body ] each` runs body once for each element of a, in order,
+-- with the element on top of the stack and its index as `i0`.
+: each
+  pending-here 1 eq? 0= if 19 trap then
+  0 prim, 33 prim, 48 prim, 33 prim, 0 literal 33 prim,
+  ops loop-test 6 c, here 0 u32,
+  34 prim, 34 prim, 35 prim, 4 prim, 4 prim, 33 prim, 0 prim, 33 prim, 49 prim,
+  loop-body loop-step swap 5 c, u32, ops swap u32! loop-end ;
+-- ( a x -- y ) `a x [ body ] fold` runs body on an accumulator, x at first,
+-- and each element, leaving the last accumulator: `xs 0 [ + ] fold` sums.
+: fold
+  pending-here 1 eq? 0= if 19 trap then
+  2 prim, each ;
+-- ( a -- b ) `a [ body ] map` is the array of body's results: body takes
+-- each element and leaves one value in its place.
+: map
+  pending-here 1 eq? 0= if 19 trap then
+  46 prim, 47 prim, 33 prim, 33 prim, 0 literal 33 prim,
+  ops 34 prim, 35 prim, 3 prim, 33 prim, 48 prim, 11 prim, 6 c, here 0 u32,
+  34 prim, 35 prim, 3 prim, 33 prim, 2 prim, 49 prim,
+  loop-body
+  34 prim, 34 prim, 4 prim, 34 prim, 2 prim, 50 prim, 33 prim, 33 prim,
+  1 literal 5 prim, 33 prim,
   swap 5 c, u32, ops swap u32!
-  34 prim, 1 prim, 34 prim, 1 prim, ;
+  34 prim, 1 prim, 34 prim, 1 prim, 34 prim, ;
 : i0 compile-only 35 prim, ;
-: i1 compile-only 34 prim, 34 prim, 35 prim, 4 prim, 4 prim, 33 prim, 33 prim, ;
+: i1 compile-only
+  34 prim, 34 prim, 34 prim, 35 prim,
+  2 prim, 33 prim, 2 prim, 33 prim, 2 prim, 33 prim, ;
 : qexit 800 get if mark-flow then tailify 0 c, ;
 : qrecur 800 get if mark-flow then mark-call 7 c, ;
 
@@ -1576,9 +1704,11 @@ _v ᵥ
 : f-gte? swap f-lte? ;
 
 -- Arrays (docs/ARRAYS.md): `( … )` gathers what its body leaves into a
--- persistent vector of cells, held by the machine. `at` is a family whose
--- clauses only give its result the element type.
-: qopen 46 prim, ;
+-- persistent vector of cells, held by the machine. `length` and `at` compile
+-- to their primitives; the checker gives `at`'s result the element type.
+-- A definition with a literal is resolved at `;` (960), so the types of its
+-- arrays are checked, and lifting applies inside it.
+: qopen 46 prim, 1 960 put ;
 : qclose 47 prim, ;
 -- ( a -- n )
 : length vector-length ;
@@ -1654,10 +1784,14 @@ _v ᵥ
   3560 get 0 3568 get seal 3560 get region-free
   >r 2305843009213693952 or swap r@ add-instance r> ;
 -- ( family b t -- op | 0 ) The operation on elements of types b and t, t on
--- top: the family's clause for them, or the family itself, the i64 version,
--- if both are i64 or unknown.
+-- top: if either is itself an array, the lifted word for them, since lifting
+-- goes all the way down, as in APL; otherwise the family's clause for them,
+-- or the family itself, the i64 version, if both are i64 or unknown.
 : element-op
   0 792 put
+  over array-type? over array-type? or if
+    3392 get call dup if 792 put then exit
+  then
   over 2 ult? over 2 ult? and >r
   swap 8 lshift or
   over swap find-clause
@@ -1669,21 +1803,23 @@ _v ᵥ
   dup family? if drop 1 exit then
   dup callee-effect drop 8 u* 712 get swap @ 255 and ;
 -- ( token b t -- lifted arraytype | 0 ) For a family call whose two inputs
--- have types b and t, t on top: the lifted word, if either is an array. Its
--- remembered output type is set to the array type, which its own analysis,
--- seeing only a region, cannot find.
+-- have types b and t, t on top: the lifted word, if either is an array. An
+-- array whose elements' known types differ (252) does not lift: the i64
+-- version would be wrong for some of them. The lifted word's remembered
+-- output type is set to the array type, which its own analysis, seeing only
+-- a region, cannot find.
 : lift-for
   over array-type? over array-type? or 0= if drop drop drop 0 exit then
+  over 252 eq? over 252 eq? or if drop drop drop 0 exit then
   over array-type? if dup array-type? if ' lift-aa else ' lift-ax then else ' lift-xa then >r
   element-type swap element-type swap
   element-op
   dup 0= if r> drop exit then
-  dup op-out dup 1 eq? if drop 3 else 2 eq? if 4 else 5 then then
+  dup op-out array-of
   swap r> make-lifted swap
   over callee-effect drop over 8 u* >r dup 712 get r> ! ;
 -- The families and their clauses: f64 arithmetic and comparisons (types 514
--- are f64 f64), and `at` on arrays of i64, of f64 (results typed) and of
--- anything else (types 769, 1025 and 1281: an i64 index over an array).
+-- are f64 f64).
 : register-families
   0 728 get 0 !
   ' + ' p.f+ 514 2 0 add-clause
@@ -1693,10 +1829,7 @@ _v ᵥ
   ' lt? ' p.flt? 514 2 0 add-clause
   ' gt? ' f-gt? 514 2 0 add-clause
   ' lte? ' f-lte? 514 2 0 add-clause
-  ' gte? ' f-gte? 514 2 0 add-clause
-  ' at ' at 769 2 1 add-clause
-  ' at ' at 1025 2 2 add-clause
-  ' at ' at 1281 2 0 add-clause ;
+  ' gte? ' f-gte? 514 2 0 add-clause ;
 
 : STATE 1 0 ;
 : HERE 1 16 ;
@@ -1767,6 +1900,9 @@ _v ᵥ
   ' repeat 1 s" repeat" install
   ' qexit 1 s" exit" install
   ' times 5 s" times" install
+  ' each 5 s" each" install
+  ' fold 5 s" fold" install
+  ' map 5 s" map" install
   ' i0 1 s" i0" install
   ' i1 1 s" i1" install
   ' s" 1 sq-name install
@@ -1804,8 +1940,8 @@ _v ᵥ
   ' stack-types 0 s" stack-types" install
   ' qopen 33 s" (" install
   ' qclose 65 s" )" install
-  ' length 0 s" length" install
-  ' at 8 s" at" install
+  ' length 48 prim-flag s" length" install
+  ' at 49 prim-flag s" at" install
   ' hash-bytes 0 s" hash-bytes" install
   ' checked 0 s" checked" install
   ' unchecked 0 s" unchecked" install ;

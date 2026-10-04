@@ -120,3 +120,43 @@ fn compile_time_brackets_are_now_double() {
         Ok(vec![1, 2, 12])
     );
 }
+
+#[test]
+fn recur_and_exit_work_in_inlined_arms() {
+    let g = system();
+    // Recursion from inside an if arm: factorial.
+    assert_eq!(
+        run(&g, ": f dup 0 eq? [ drop 1 ] [ dup 1 - recur * ] if ; 5 f").unwrap(),
+        [120]
+    );
+    // An early exit from inside an arm.
+    assert_eq!(
+        run(&g, ": g dup 0 lt? [ drop 0 exit ] if 10 + ; -5 g 5 g").unwrap(),
+        [0, 15]
+    );
+    // An arm inlined into an arm that is itself inlined.
+    assert_eq!(
+        run(&g, ": m dup 0 gt? [ dup 1 gt? [ 1 - recur ] [ ] if ] if ; 5 m").unwrap(),
+        [1]
+    );
+    // Inside a loop body: exit leaves the word, and its loop with it.
+    assert_eq!(
+        run(&g, ": t 10 [ i0 3 eq? [ i0 exit ] if ] times 99 ; t").unwrap(),
+        [3]
+    );
+    // The checker solves the recursion from its base case, as before.
+    assert_eq!(
+        run(&g, ": f dup 0 eq? [ drop 1 ] [ dup 1 - recur * ] if ; ' f stack-effect").unwrap(),
+        [1, 1, 1]
+    );
+    // Sealed as its own word, recur and exit would change meaning: trap.
+    assert_eq!(run(&g, ": k [ recur ] call ;"), Err(Error::User(15)));
+    assert_eq!(run(&g, ": k [ [ exit ] [ ] if ] call ;"), Err(Error::User(15)));
+    assert_eq!(run(&g, "[ recur ]"), Err(Error::User(15)));
+    // After a trap, the next definition starts clean.
+    assert_eq!(run(&g, ": k [ recur ] call ;"), Err(Error::User(15)));
+    let mut d = march7::Driver::boot(&g).unwrap();
+    assert!(d.evaluate(": k [ recur ] call ;").is_err());
+    d.evaluate(": ok [ 1 ] call ; ok").unwrap();
+    assert_eq!(d.machine.stack, [1]);
+}

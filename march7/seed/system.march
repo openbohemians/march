@@ -899,10 +899,18 @@ _v ᵥ
 -- Working memory: 800 nesting depth; 808 pending count; pending entries at
 -- 1024 + 24i (region, length, depth); saved outer builders at 2560 + 24d
 -- (region, offset, STATE); 3400-3432 temporaries for inlining.
--- Traps: 15 exit or recur inside a quotation, 16 nesting too deep, 17 `]`
--- without `[`, 18 too many pending quotations, 19 wrong quotations for a
--- consumer, 20 `;` inside an open quotation.
+-- Traps: 15 exit or recur inside a quotation sealed as its own word, 16
+-- nesting too deep, 17 `]` without `[`, 18 too many pending quotations, 19
+-- wrong quotations for a consumer, 20 `;` inside an open quotation.
 : q-entry 24 u* 1024 u+ ;
+-- `exit` and `recur` mean the definition they are written in, so inside a
+-- quotation they are allowed only if a consumer inlines it. 872 holds a bit
+-- for each open quotation level that contains one; at `]` it moves to a flag
+-- byte for the pending entry, at 880 + i. Sealing a flagged quotation traps
+-- (15); inlining one into an enclosing quotation marks that one in turn.
+: mark-flow 1 800 get lshift 872 get or 872 put ;
+-- ( i -- flag )
+: entry-flow 880 u+ 1 swap c@ ;
 -- ( -- k ) Index of the first pending entry at the current depth.
 : pending-start
   808 get cycle dup if dup 1 u- q-entry 16 u+ get 800 get eq? else 0 then
@@ -918,6 +926,7 @@ _v ᵥ
 : materialize
   pending-start dup >r
   cycle dup 808 get ult? while
+    dup entry-flow if 15 trap then
     dup q-entry dup get swap 8 u+ get seal-quote compile-quote
     1 u+
   repeat drop r> 808 put ;
@@ -928,6 +937,7 @@ _v ᵥ
 -- ( i -- ) Copy pending body i into the definition, shifting its branch
 -- targets by the instruction index where it lands. Free its buffer.
 : inline-quote
+  dup entry-flow 800 get 0= 0= and if mark-flow then
   q-entry dup get 3400 put 8 u+ get 3408 put ops 3416 put 0 3424 put
   cycle 3424 get 3408 get ult? while
     3400 get 3424 get c@ dup oplen 3432 put
@@ -948,13 +958,16 @@ _v ᵥ
   800 get 1 u+ 800 put ;
 : quote-close
   800 get 0= if 17 trap then
+  872 get 800 get rshift 1 and >r
+  1 800 get lshift invert 872 get and 872 put
   800 get 1 u- dup 800 put 24 u* 2560 u+ out here rot
   dup get 24 put dup 8 u+ get 16 put 16 u+ get dup 0 put
   if
     808 get 64 ult? 0= if 18 trap then
     808 get q-entry swap over 8 u+ put swap over put 800 get swap 16 u+ put
+    r> 1 880 808 get u+ c!
     808 get 1 u+ 808 put
-  else seal-quote then ;
+  else r> if 15 trap then seal-quote then ;
 
 -- ( -- ) Quotation-aware `if`: `c [ t ] [ f ] if`, `c [ t ] if`, or, with
 -- nothing pending, FORTH's `if ... else ... then`.
@@ -988,8 +1001,8 @@ _v ᵥ
   34 prim, 1 prim, 34 prim, 1 prim, ;
 : i0 compile-only 35 prim, ;
 : i1 compile-only 34 prim, 34 prim, 35 prim, 4 prim, 4 prim, 33 prim, 33 prim, ;
-: qexit 800 get if 15 trap then 0 c, ;
-: qrecur 800 get if 15 trap then 7 c, ;
+: qexit 800 get if mark-flow then 0 c, ;
+: qrecur 800 get if mark-flow then 7 c, ;
 
 -- The outer interpreter over the current input: numbers before lookup.
 -- Compiling a word whose entry is flagged as an inline primitive emits the
@@ -1028,7 +1041,7 @@ _v ᵥ
     800 get 1 u- dup 800 put 24 u* 2560 u+ get dup if region-free else drop then
   repeat
   cycle 808 get while 808 get 1 u- dup 808 put q-entry get region-free repeat
-  0 24 put 0 16 put 0 0 put 0 600 put ;
+  0 24 put 0 16 put 0 0 put 0 600 put 0 872 put ;
 
 -- Dictionary export: oldest first, name length, flags, code CID, name bytes.
 : out-byte 400 get 408 get c! 408 get 1 u+ 408 put ;

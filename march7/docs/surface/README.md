@@ -22,9 +22,8 @@ They assume a library that does not exist yet: `2dup`, `-rot`, `/mod`,
 1. **Mutual recursion (F8, F10).** A parser's `expr`, `term` and `factor` call
    one another, and `Expr` refers to itself. Code identities cannot form
    cycles, so March cannot express either today. This is the biggest gap.
-2. **Recursion inside an inlined arm (F9).** Calling a word from inside its own
-   `if` or `match` arm is how most recursive code is written. It traps today
-   (trap 15).
+2. **Recursion inside an inlined arm (F9). Resolved 2026-10-04:** `recur` and
+   `exit` now work in arms that are inlined (docs/QUOTATIONS.md).
 3. **Comprehensions that keep or drop (F15).** A comprehension body with a
    one-armed `if` leaves a varying number of values, which the counting
    checker rejects.
@@ -91,6 +90,7 @@ arms, and recursive words in general call themselves inside `if` arms. Trap
 15 forbids `recur` in a quotation because a materialized quotation is its own
 word. An arm that is inlined runs in the word itself, so recursion there is
 safe. The rule should be: allowed when inlined, an error when materialized.
+Resolved 2026-10-04 with exactly that rule (docs/QUOTATIONS.md).
 
 **F10. Recursive types.** `Expr : variant { … bin : Expr Expr str } ;` refers
 to itself, the same cycle problem as F8 at the type level. Group identities

@@ -51,7 +51,7 @@ The checker applies its usual rules to the inlined code:
 
 | Trap | Meaning |
 |---|---|
-| 15 | `exit` or `recur` inside a quotation: its meaning would change with the consumer, so it is not allowed |
+| 15 | `exit` or `recur` inside a quotation that is sealed as its own word, where they would mean that word rather than the definition |
 | 16 | Quotations nested more than 32 deep |
 | 17 | `]` without `[` |
 | 18 | More than 64 quotations pending |
@@ -60,6 +60,21 @@ The checker applies its usual rules to the inlined code:
 
 An error inside a quotation abandons it: `recover` frees every open and pending
 quotation buffer along with the definition.
+
+**`exit` and `recur` in arms** (2026-10-04). They mean the definition they are
+written in, so a quotation may contain them when a consumer inlines it, which
+is how recursive words are usually written:
+
+```
+: f dup 0 eq? [ drop 1 ] [ dup 1 - recur * ] if ;
+```
+
+Compiling one inside an open quotation sets a bit for its nesting level
+(working memory 872). At `]` the bit becomes a flag on the pending entry (a
+byte at 880 + i). Sealing a flagged quotation as its own word traps 15, as
+does `[ recur ]` outside a definition. Inlining a flagged quotation into the
+definition is fine; inlining it into an enclosing quotation flags that one,
+since it may still be sealed.
 
 ## Mechanics
 
@@ -86,14 +101,16 @@ names, so compiling the system never depends on them.
 
 ## Tests
 
-`tests/quotations.rs` has six tests:
+`tests/quotations.rs` has seven tests:
 
 - one- and two-armed `if`, and the FORTH form;
 - `times` with nested indices, and `while`;
 - first-class quotations, their anchoring and nesting;
 - the checker on inlined branches;
 - every error, and recovery after one;
-- the renamed compile-time brackets.
+- the renamed compile-time brackets;
+- `recur` and `exit` in inlined arms, nested arms and loop bodies, and the
+  trap when such a quotation is sealed.
 
 ## Next
 

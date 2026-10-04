@@ -127,19 +127,55 @@ run during a rebuild. The cost was the dictionary's linear lookup, now replaced
 by a hashed dictionary (docs/REBUILD.md). Generation 1 compiles the system in
 5.3 million steps (6.3 million after quotations were added).
 
+## Slice 2: value types and families (2026-10-04)
+
+**Types.** The same analysis now tracks value types: 0 unknown, 1 i64, 2 f64,
+a byte each, for the top eight stack slots (analysis field 128). Deeper
+slots, and a word's inputs, are unknown.
+
+- Literals give i64 (opcode 1) or f64 (opcode 10). Integer arithmetic, logic
+  and comparisons give i64; float arithmetic and `i>f` give f64; float
+  comparisons and `f>i` give i64. `dup`, `swap`, `over` and `rot` carry types
+  with their values.
+- A word's output types are computed with its effect and remembered beside it
+  (the table at working offset 712), so a call gives its outputs the callee's
+  types.
+- Where branches meet, types merge: a slot whose types disagree becomes
+  unknown. A loop header's types are widened from its back edges, and the pass
+  runs again until they are stable.
+- `stack-types` reports a word's output types: `( token -- types outputs 1 )`
+  or `( token -- reason 0 0 )`, types packed a byte each, the top first.
+
+**Families.** `+ - * /` and `lt? gt? lte? gte?` are families (dictionary flag
+bit 3). Each is the i64 version; a registry (working offset 728) holds their
+f64 clauses: `f+`, `f-`, `f*`, `f/`, `flt?` and float `gt?`, `lte?`, `gte?`
+that are false with a NaN. When a definition has compiled a family call, `;`
+runs the typed analysis in resolving mode:
+
+- At each family call it picks the clause whose input types match, applies
+  that clause's effect and types, and records the choice. After the analysis
+  the call is patched in place to the clause: a call's operand is a 32-byte
+  identity either way.
+- An integer literal just before the call takes its type from context:
+  `x 1 +` with x an f64 becomes `x 1.0 +`, if nothing branches to the call.
+- Inputs whose types are unknown keep the i64 version, as before families.
+  Inputs that are all known but match no clause (`1 2.5 +`, where the 1 is not
+  just before the call) trap 23, and the definition is not installed.
+
+Unresolved calls are still i64 when the types are only known at the call
+sites: `: double dup + ;` on a float is integer addition on its bits. The
+remedy is the next step, instantiating such words per call site's types.
+
 ## Next slices
 
-1. **Types.** Add value types (i64, f64, arrays, quotations) to the same
-   analysis. Literal and primitive types come from the code, and word types
-   from signatures or inference. Families need the types *during* compilation,
-   to pick a clause for `+`. The analysis can report the live state at the end
-   of a partial definition, so the compiler can ask for the types at the
-   current point. Forward branches that are not yet patched need care there.
+1. **Generic words.** A word whose family calls depend on its input types is
+   compiled per set of input types at its call sites, so `double` on an f64
+   gets the f64 clause. Then arrays, quotation types and strings.
 2. **Consumer-completed control flow.** Done (docs/QUOTATIONS.md): `if`,
    `while` and `times` inline pending quotations, so the checker sees plain
    branches. `map` waits for arrays.
 3. **Typed quotation parameters.** A word that calls a quotation it was given
    declares or infers that quotation's effect, so it stops being a dynamic
    call.
-4. **Families** resolved by type at compile time, falling back to runtime
-   dispatch only when a type is unknown.
+4. **Families** resolved by type at compile time: done for numbers (slice 2
+   above); runtime dispatch on unknown types waits for tagged values.

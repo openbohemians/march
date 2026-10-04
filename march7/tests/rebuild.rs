@@ -19,12 +19,13 @@ fn generation_zero() -> Image {
 /// takes about 22.6 million steps, because the frozen listing's `find` scans
 /// the dictionary linearly. This budget is only a safety net; compile cost is
 /// tracked by `compiling_the_system_stays_under_its_step_canary`.
-const REBUILD_FUEL: u64 = 40_000_000;
+const REBUILD_FUEL: u64 = 60_000_000;
 
 /// Compile-cost canary: steps for a rebuilt system (generation 1) to compile
-/// the system source. It is 3.8 million today. Exceeding it means compile cost
-/// grew; look at why before raising it (docs/REBUILD.md).
-const COMPILE_STEP_CANARY: u64 = 4_500_000;
+/// the system source. It is 4.6 million today (3.8 before the ~190 lines of
+/// checker slice 2). Exceeding it means compile cost grew; look at why before
+/// raising it (docs/REBUILD.md).
+const COMPILE_STEP_CANARY: u64 = 5_500_000;
 
 /// Boot `image`, compile the system source, and export the image it defines.
 fn rebuild(image: &Image) -> Image {

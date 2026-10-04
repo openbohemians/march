@@ -166,7 +166,8 @@
 : repeat swap 5 c, u32, ops swap u32! ; immediate
 : exit 0 c, ; immediate
 -- Dictionary flags: bit 0 immediate; bit 1 inline primitive, id in bits 8-15;
--- bit 2 transparent (an immediate word that leaves pending quotations alone).
+-- bit 2 transparent (an immediate word that leaves pending quotations alone);
+-- bit 3 a family word, whose calls `;` resolves by type.
 : immediate 8 get dup 0= if 7 trap then 16 u+ dup get 1 or swap put ;
 : prim-flag 8 lshift 2 or ;
 
@@ -461,10 +462,15 @@
 -- 8 code length, 16 op count, 24 current op, 32 its byte offset, 40 live,
 -- 48 depth, 56 scratch depth, 64 effect of a quotation on top (or 0),
 -- 72 lowest depth, 80 returned?, 88 return depth, 96 unknown reason,
--- 104 pass, 112 assumed own effect, 120 recurs?. Depths are biased by 2^32
--- so that unsigned comparison works. Per-op tables start at 256: 0 byte
--- offset; 1-4 state from forward branches (set?, depth, scratch, quotation);
--- 5-7 state on arrival (set?, depth, scratch); 8 loop header?.
+-- 104 pass, 112 assumed own effect, 120 recurs?, 128 types, 136 a loop
+-- header's types were widened, 144 types at return, 152-168 and 176-200
+-- temporaries, 208 a family call's known types matched no clause.
+-- Depths are biased by 2^32 so that unsigned comparison works. Per-op tables
+-- start at 256: 0 byte offset; 1-4 state from forward branches (set?, depth,
+-- scratch, quotation); 5-7 state on arrival (set?, depth, scratch); 8 loop
+-- header?; 9 types from forward branches; 10 types on arrival; 11 a loop
+-- header's types recorded?; 12 the clause chosen for a family call; 13 the
+-- literal before it is to become a float.
 -- ( field -- v )
 : an@ 600 get swap @ ;
 -- ( v field -- )
@@ -492,7 +498,8 @@
 
 -- ( region length -- )
 : analysis-begin
-  over over count-ops dup 72 u* 256 u+ region-new 600 put
+  over over count-ops dup 112 u* 256 u+ region-new 600 put
+  968 get 1 eq? if 600 get 968 put then
   16 an! 8 an! 0 an!
   0 32 an! 0 24 an!
   cycle 24 an@ 16 an@ ult? while
@@ -509,21 +516,44 @@
     24 an@ 1 u+ 24 an!
   repeat ;
 
+-- Value types (checker slice 2): 0 unknown, 1 i64, 2 f64, a byte each.
+-- Field 128 holds the types of the top eight stack slots, the top in the low
+-- byte; deeper slots, and a word's inputs, are unknown.
+-- ( n -- mask ) The bytes of the top n slots.
+: ty-mask dup 8 ult? if 8 u* 1 swap lshift 1 u- else drop -1 then ;
+-- ( n -- ) Pop n slots' types.
+: ty-drop dup 8 ult? if 8 u* 128 an@ swap rshift else drop 0 then 128 an! ;
+-- ( n -- ) Push n unknown slots.
+: ty-unknowns dup 8 ult? if 8 u* 128 an@ swap lshift else drop 0 then 128 an! ;
+-- ( t -- ) Set the top slot's type.
+: ty-set 128 an@ -256 and or 128 an! ;
+-- ( bytes -- ) Set types in slots the last step left unknown.
+: ty-or 128 an@ or 128 an! ;
+-- ( a b -- c ) Keep the slots where a and b agree; the rest become unknown.
+: ty-merge over xor
+  dup 4 rshift or dup 2 rshift or dup 1 rshift or 72340172838076673 and 255 u*
+  invert and ;
+
 -- ( reason -- )
 : fail 96 an@ 0= if 96 an! else drop then 16 an@ 24 an! 0 40 an! ;
 -- ( in out -- )
-: apply
+: apply over ty-drop dup ty-unknowns
   swap 48 an@ swap u- dup 72 an@ ult? if dup 72 an! then u+ 48 an! ;
 -- ( target -- )
 : pend
   dup 1 tab@ if
     dup 2 tab@ 48 an@ eq? over 3 tab@ 56 an@ eq? and 0= if drop 3 fail exit then
-    dup 4 tab@ 64 an@ eq? 0= if 0 over 4 tab! then drop
+    dup 4 tab@ 64 an@ eq? 0= if 0 over 4 tab! then
+    dup 9 tab@ 128 an@ ty-merge over 9 tab! drop
   else
-    1 over 1 tab! 48 an@ over 2 tab! 56 an@ over 3 tab! 64 an@ swap 4 tab!
+    1 over 1 tab! 48 an@ over 2 tab! 56 an@ over 3 tab! 64 an@ over 4 tab!
+    128 an@ swap 9 tab!
   then ;
 -- ( target -- )
+-- A back edge whose types differ from the loop header's widens them, and the
+-- pass runs again until they are stable.
 : back
+  dup 10 tab@ 128 an@ ty-merge over 10 tab@ over eq? 0= if over 10 tab! 1 136 an! else drop then
   dup 6 tab@ 48 an@ eq? swap 7 tab@ 56 an@ eq? and 0= if 4 fail then ;
 -- ( -- )
 : arrive
@@ -531,30 +561,110 @@
     40 an@ if
       24 an@ 2 tab@ 48 an@ eq? 24 an@ 3 tab@ 56 an@ eq? and 0= if 3 fail exit then
       24 an@ 4 tab@ 64 an@ eq? 0= if 0 64 an! then
+      24 an@ 9 tab@ 128 an@ ty-merge 128 an!
     else
       24 an@ 2 tab@ 48 an! 24 an@ 3 tab@ 56 an! 24 an@ 4 tab@ 64 an! 1 40 an!
+      24 an@ 9 tab@ 128 an!
     then
   then
   40 an@ if
-    24 an@ 8 tab@ if 0 64 an! then
+    24 an@ 8 tab@ if
+      0 64 an!
+      24 an@ 11 tab@ if 24 an@ 10 tab@ 128 an@ ty-merge 128 an! else 1 24 an@ 11 tab! then
+    then
     1 24 an@ 5 tab! 48 an@ 24 an@ 6 tab! 56 an@ 24 an@ 7 tab!
+    128 an@ 24 an@ 10 tab!
   then ;
 
 -- The effect of a callee, through the word stored at working offset 616
 -- (`effect-of`, defined below).
 -- ( token -- packed )
 : callee-effect 616 get call ;
+-- ( -- token )
+: callee-token 0 an@ 32 an@ 1 u+ resolve ;
 -- ( -- packed )
-: callee 0 an@ 32 an@ 1 u+ resolve callee-effect ;
+: callee callee-token callee-effect ;
+-- ( outs token -- ) Give a call's outputs its callee's output types, which
+-- `effect-of` keeps in the table at working offset 712.
+: callee-types
+  8 u* 712 get swap @ over ty-mask and
+  swap ty-mask invert 128 an@ and or 128 an! ;
+-- ( token -- )
+: call-effect
+  dup callee-effect dup effect-known? if
+    dup effect-in swap effect-out dup >r apply r> swap callee-types 0 64 an!
+  else drop drop 2 fail then ;
+
+-- Families (checker slice 2). A family word, such as `+`, is the i64
+-- version; its clauses for other input types are in a registry, a region
+-- whose handle is at 728: a count, then entries of four cells: family token,
+-- clause token, input types (a byte each, the top first) and their count.
+-- When a definition has compiled a call to a family (960), `;` resolves it:
+-- the typed analysis picks the clause matching each call's input types, and
+-- the call is patched to it (968 marks that analysis). Working memory 976-1000
+-- is for lookups.
+-- ( family clause types count -- )
+: add-clause
+  728 get 0 @ dup 64 ult? 0= if 22 trap then
+  32 u* 8 u+ >r
+  728 get r@ 24 u+ ! 728 get r@ 16 u+ ! 728 get r@ 8 u+ ! 728 get r> !
+  728 get 0 @ 1 u+ 728 get 0 ! ;
+-- ( token types -- clause | 0 )
+: find-clause
+  976 put 984 put 0 992 put
+  cycle 992 get 728 get 0 @ ult? while
+    992 get 32 u* 8 u+ 1000 put
+    728 get 1000 get @ 984 get eq? if
+      976 get 728 get 1000 get 24 u+ @ ty-mask and 728 get 1000 get 16 u+ @ eq? if
+        728 get 1000 get 8 u+ @ exit
+      then
+    then
+    992 get 1 u+ 992 put
+  repeat 0 ;
+-- ( token -- flag )
+: family?
+  0 992 put
+  cycle 992 get 728 get 0 @ ult? while
+    728 get 992 get 32 u* 8 u+ @ over eq? if drop 1 exit then
+    992 get 1 u+ 992 put
+  repeat drop 0 ;
+-- ( -- flag ) Whether the top slot is an integer literal just emitted: the
+-- previous op is opcode 1 and nothing branches to this one.
+: retype-ok?
+  24 an@ dup 0= if exit then
+  dup 1 tab@ over 8 tab@ or if drop 0 exit then
+  1 u- 0 tab@ code@ 1 eq? 128 an@ 255 and 1 eq? and ;
+-- ( token -- flag ) Whether a family call's inputs are all known and not all
+-- i64, so that falling back to the i64 version would be wrong.
+: typed-mismatch?
+  callee-effect effect-in ty-mask >r
+  128 an@ r@ and
+  dup dup 4 rshift or dup 2 rshift or dup 1 rshift or 72340172838076673 and
+  72340172838076673 r@ and eq?
+  swap 72340172838076673 r> and eq? 0= and ;
+-- ( token -- token 0 | 1 ) A family call in the definition being resolved:
+-- the clause for its input types, or one for a float in place of the integer
+-- literal just before it (`x 1 +` with x an f64). With neither, it stays a
+-- call to the family word, an error if its inputs are known and not i64.
+: family-step
+  dup 128 an@ find-clause dup if nip dup 24 an@ 12 tab! call-effect 1 exit then drop
+  retype-ok? if
+    dup 128 an@ -256 and 2 or find-clause dup if
+      nip 1 24 an@ 13 tab! dup 24 an@ 12 tab! 2 ty-set call-effect 1 exit
+    then drop
+  then
+  dup typed-mismatch? if 1 208 an! then 0 ;
 
 -- ( -- )
 : do-return
-  80 an@ if 88 an@ 48 an@ eq? 0= if 5 fail exit then
-  else 1 80 an! 48 an@ 88 an! then 0 40 an! ;
+  80 an@ if 88 an@ 48 an@ eq? 0= if 5 fail exit then 144 an@ 128 an@ ty-merge 144 an!
+  else 1 80 an! 48 an@ 88 an! 128 an@ 144 an! then 0 40 an! ;
 -- ( -- )
+-- A call to a family word that stays unresolved is the i64 version.
 : do-call
-  callee dup effect-known? if dup effect-in swap effect-out apply 0 64 an!
-  else drop 2 fail then ;
+  callee-token
+  968 get 600 get eq? if family-step if exit then then
+  dup family? swap call-effect if 1 ty-set then ;
 -- ( -- )
 : do-quote
   callee 0 1 apply dup effect-known? if 64 an! else drop 0 64 an! then ;
@@ -562,6 +672,21 @@
 : do-execute
   64 an@ dup if 1 0 apply dup effect-in swap effect-out apply 0 64 an!
   else drop 1 fail then ;
+-- ( id -- ) The type of a primitive's one result: integer arithmetic, logic
+-- and comparisons (5-17), byte loads (18) and region sizes (24) give i64;
+-- float arithmetic (36-39) and i>f (42) give f64; float comparisons (40, 41)
+-- and f>i (43) give i64. Anything else stays unknown.
+: prim-type
+  dup 5 ult? 0= over 18 ult? and over 18 eq? or over 24 eq? or if drop 1 ty-set exit then
+  dup 36 ult? 0= over 40 ult? and over 42 eq? or if drop 2 ty-set exit then
+  dup 40 eq? over 41 eq? or swap 43 eq? or if 1 ty-set then ;
+-- ( types-before id -- ) Shuffles move types with their values: swap leaves
+-- b a, over a b a, rot b c a.
+: shuffle-types
+  swap dup 255 and 152 an! dup 8 rshift 255 and 160 an! 16 rshift 255 and 168 an!
+  dup 2 eq? if drop 160 an@ 152 an@ 8 lshift or ty-or exit then
+  dup 3 eq? if drop 160 an@ 152 an@ 8 lshift or 160 an@ 16 lshift or ty-or exit then
+  4 eq? if 168 an@ 152 an@ 8 lshift or 160 an@ 16 lshift or ty-or then ;
 -- ( id -- )
 : do-prim
   45 over ult? if drop 11 fail exit then
@@ -574,9 +699,13 @@
   dup 35 eq? if drop 56 an@ 0= if 6 fail exit then 0 1 apply 0 64 an! exit then
   -- 36-41 take two and leave one (float arithmetic and comparison); 42-44
   -- take one and leave one (conversions, and the working-region load).
-  dup 36 ult? 0= if 42 ult? if 2 1 else 1 1 then apply 0 64 an! exit then
-  dup 0= if drop 1 2 apply exit then
-  dup prim-in swap prim-out apply 0 64 an! ;
+  dup 36 ult? 0= if dup 42 ult? if 2 1 else 1 1 then apply prim-type 0 64 an! exit then
+  dup 5 ult? if
+    128 an@ >r
+    dup 0= if drop 1 2 apply r> 255 and dup 8 lshift or ty-or exit then
+    dup prim-in over prim-out apply 0 64 an! r> swap shuffle-types exit
+  then
+  dup prim-in over prim-out apply prim-type 0 64 an! ;
 -- ( -- target )
 : branch-target 32 an@ 1 u+ code-u32 ;
 -- ( target -- )
@@ -591,7 +720,7 @@
   24 an@ 0 tab@ 32 an!
   32 an@ code@
   dup 0= if drop do-return exit then
-  dup 1 eq? if drop 0 1 apply 0 64 an! exit then
+  dup 1 eq? if drop 0 1 apply 1 ty-set 0 64 an! exit then
   dup 2 eq? if drop 32 an@ 1 u+ code@ do-prim exit then
   dup 3 eq? if drop do-call exit then
   dup 4 eq? if drop do-quote exit then
@@ -600,7 +729,7 @@
   dup 7 eq? if drop do-recur exit then
   dup 8 eq? if drop 0 3 apply 0 64 an! exit then
   dup 9 eq? if drop do-call 40 an@ if do-return then exit then
-  dup 10 eq? if drop 0 1 apply 0 64 an! exit then
+  dup 10 eq? if drop 0 1 apply 2 ty-set 0 64 an! exit then
   dup 11 eq? if drop do-recur 40 an@ if do-return then exit then
   drop 11 fail ;
 
@@ -609,11 +738,11 @@
   104 an!
   0 24 an!
   cycle 24 an@ 16 an@ ult? while
-    0 24 an@ 1 tab! 0 24 an@ 5 tab!
+    0 24 an@ 1 tab! 0 24 an@ 5 tab! 0 24 an@ 12 tab! 0 24 an@ 13 tab!
     24 an@ 1 u+ 24 an!
   repeat
   0 24 an! 1 40 an! 4294967296 48 an! 0 56 an! 0 64 an! 4294967296 72 an!
-  0 80 an! 0 88 an! 0 96 an!
+  0 80 an! 0 88 an! 0 96 an! 0 128 an! 0 144 an! 0 208 an!
   cycle 24 an@ 16 an@ ult? while
     arrive 40 an@ if step then
     24 an@ 1 u+ 24 an!
@@ -628,29 +757,64 @@
 -- that recurs is analysed twice: once treating `recur` as a dead end, which
 -- gives its base case, then again assuming that effect for `recur`, which
 -- must reproduce it.
+-- ( pos -- v ) A little-endian cell in the code being analysed.
+: code-cell
+  0 184 an! 8 176 an!
+  cycle 176 an@ while
+    176 an@ 1 u- 176 an!
+    184 an@ 8 lshift over 176 an@ u+ code@ or 184 an!
+  repeat drop 184 an@ ;
+-- ( k -- ) Make the integer literal at op k a float literal of its value.
+: retype-literal
+  0 tab@ 192 an!
+  192 an@ 1 u+ code-cell i>f 200 an!
+  10 192 an@ b!
+  200 an@ 192 an@ 1 u+ u32!
+  200 an@ 32 rshift 192 an@ 5 u+ u32! ;
+-- ( -- ) Patch each resolved family call to its clause.
+: apply-resolutions
+  0 24 an!
+  cycle 24 an@ 16 an@ ult? while
+    24 an@ 12 tab@ dup if 0 an@ 24 an@ 0 tab@ 1 u+ code-cid else drop then
+    24 an@ 13 tab@ if 24 an@ 1 u- retype-literal then
+    24 an@ 1 u+ 24 an!
+  repeat ;
+
+-- ( pass -- ) Run a pass until no loop header's types are widened.
+: run-pass* cycle 0 136 an! dup run-pass 136 an@ while repeat drop ;
 : analyze
   600 get >r
-  analysis-begin 1 run-pass pass-result
+  analysis-begin 1 run-pass* pass-result
   120 an@ if dup effect-known? if
-    dup 112 an! 2 run-pass pass-result
+    dup 112 an! 2 run-pass* pass-result
     dup effect-known? if
       over over eq? if drop else drop drop 8 effect-unknown then
     else swap drop then
   then then
+  144 an@ 720 put
+  968 get 600 get eq? if 208 an@ dup 1008 put 0= if apply-resolutions then 0 968 put then
   600 get region-free r> 600 put ;
 
 -- ( token -- packed ) A word's effect, computed from its code on first use
 -- and remembered in the table at working offset 624.
+-- Output types go to the table at 712, the same way.
 : effect-of
   dup 131072 ult? 0= if drop 10 effect-unknown exit then
   dup 8 u* 624 get swap @ dup if swap drop exit then drop
-  dup 1 680 code-cid 1 680 blob-read swap drop analyze
-  dup rot 8 u* 624 get swap ! ;
+  dup >r 1 680 code-cid 1 680 blob-read swap drop analyze
+  720 get 712 get r@ 8 u* !
+  dup 624 get r> 8 u* ! ;
 
 -- ( token -- inputs outputs 1 | reason 0 0 )
 : stack-effect
   effect-of dup effect-known? if dup effect-in swap effect-out 1
   else effect-in 0 0 then ;
+-- ( token -- types outputs 1 | reason 0 0 ) The types of a word's outputs, a
+-- byte each, the top first: 0 unknown, 1 i64, 2 f64.
+: stack-types
+  dup effect-of dup effect-known? if
+    effect-out swap 8 u* 712 get swap @ over ty-mask and swap 1
+  else nip effect-in 0 0 then ;
 -- In checked mode, `;` rejects a definition whose effect is unknown, trapping
 -- with 100 plus the reason.
 : checked 1 632 put ;
@@ -663,13 +827,20 @@
   dup 88 put 1 swap 3840 swap copy
   1 96 put 3840 80 put
   65536 region-new 24 put 0 16 put 1 0 put ;
+-- ( -- ) Resolve the family calls in the definition being finished; trap 23
+-- if a call's known input types match no clause.
+: resolve-families
+  0 960 put 0 1008 put 1 968 put
+  out here analyze drop 0 968 put
+  1008 get if 23 trap then ;
 : semicolon 0 get 0= if 6 trap then 800 get if 20 trap then
   tailify 0 c,
+  960 get if resolve-families then
   632 get if out here analyze dup effect-known? 0= if effect-in 100 u+ trap then
   else 0 then
   out 0 here seal
   dup >r 0 96 get 80 get 88 get install
-  dup if r@ 8 u* 624 get swap ! else drop then
+  dup if r@ 8 u* 624 get swap ! 720 get 712 get r@ 8 u* ! else drop then
   out region-free 0 24 put 0 0 put ;
 
 : >xt 8 u+ get ;
@@ -1035,6 +1206,7 @@ _v ᵥ
       else
         0 get 0= if drop >xt call else
           materialize
+          dup 8 and if 1 960 put then
           dup 2 and if nip 8 rshift prim, else drop >xt compile, then
         then
       then
@@ -1054,7 +1226,7 @@ _v ᵥ
     800 get 1 u- dup 800 put 24 u* 2560 u+ get dup if region-free else drop then
   repeat
   cycle 808 get while 808 get 1 u- dup 808 put q-entry get region-free repeat
-  0 24 put 0 16 put 0 0 put 0 600 put 0 872 put ;
+  0 24 put 0 16 put 0 0 put 0 600 put 0 872 put 0 960 put 0 968 put ;
 
 -- Dictionary export: oldest first, name length, flags, code CID, name bytes.
 : out-byte 400 get 408 get c! 408 get 1 u+ 408 put ;
@@ -1101,6 +1273,22 @@ _v ᵥ
 : mod over over / u* u- ;
 : * over 0= if drop exit then
   over over u* >r swap r@ swap / eq? 0= if 10 trap then r> ;
+-- Float clauses of the comparison families. IEEE comparisons with a NaN are
+-- false, so `lte?` is less-than or equal, not the negation of greater-than.
+: f-gt? swap flt? ;
+: f-lte? over over flt? >r feq? r> or ;
+: f-gte? swap f-lte? ;
+-- The families and their f64 clauses (types 514 are f64 f64).
+: register-families
+  0 728 get 0 !
+  ' + ' p.f+ 514 2 add-clause
+  ' - ' p.f- 514 2 add-clause
+  ' * ' p.f* 514 2 add-clause
+  ' / ' p.f/ 514 2 add-clause
+  ' lt? ' p.flt? 514 2 add-clause
+  ' gt? ' f-gt? 514 2 add-clause
+  ' lte? ' f-lte? 514 2 add-clause
+  ' gte? ' f-gte? 514 2 add-clause ;
 
 : STATE 1 0 ;
 : HERE 1 16 ;
@@ -1180,14 +1368,14 @@ _v ᵥ
   ' evaluate 0 s" evaluate" install
   ' negate 0 s" negate" install
   ' abs 0 s" abs" install
-  ' lt? 0 s" lt?" install
-  ' gt? 0 s" gt?" install
-  ' lte? 0 s" lte?" install
-  ' gte? 0 s" gte?" install
-  ' + 0 s" +" install
-  ' - 0 s" -" install
-  ' * 0 s" *" install
-  ' / 0 s" /" install
+  ' lt? 8 s" lt?" install
+  ' gt? 8 s" gt?" install
+  ' lte? 8 s" lte?" install
+  ' gte? 8 s" gte?" install
+  ' + 8 s" +" install
+  ' - 8 s" -" install
+  ' * 8 s" *" install
+  ' / 8 s" /" install
   ' mod 0 s" mod" install
   ' p.trap 32 prim-flag s" trap" install
   ' p.seal 26 prim-flag s" seal" install
@@ -1205,13 +1393,15 @@ _v ᵥ
   ' p.i>f 42 prim-flag s" i>f" install
   ' p.f>i 43 prim-flag s" f>i" install
   ' stack-effect 0 s" stack-effect" install
+  ' stack-types 0 s" stack-types" install
   ' hash-bytes 0 s" hash-bytes" install
   ' checked 0 s" checked" install
   ' unchecked 0 s" unchecked" install ;
 
 -- ( data-region 0 length -- evaluate recover export )
 : boot 4096 32 put 0 8 put 0 0 put
-  1048576 region-new 624 put ' effect-of 616 put 0 632 put
+  1048576 region-new 624 put 1048576 region-new 712 put ' effect-of 616 put 0 632 put
+  4096 region-new 728 put register-families
   8192 region-new 736 put
   dup if restore else drop drop drop init then
   ' evaluate ' recover ' snapshot ;

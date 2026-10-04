@@ -28,7 +28,7 @@ below. After generation 0, only images and March source are involved.
 
 ```sh
 cargo run --offline --bin march7-seed -- seed/system.asm gen0.image
-cargo run --offline -- gen0.image --fuel 40000000 seed/system.march --system gen1.image
+cargo run --offline -- gen0.image --fuel 60000000 seed/system.march --system gen1.image
 cargo run --offline -- gen1.image seed/system.march --system gen2.image
 cargo run --offline -- gen2.image seed/system.march --system gen3.image
 cmp gen2.image gen3.image
@@ -85,11 +85,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 26.0 million (88 ms) |
-| The same on generation 1 | 3.8 million (13 ms) |
+| Machine steps to compile `system.march` on generation 0 | 34.8 million (115 ms) |
+| The same on generation 1 | 4.6 million (16 ms) |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 59,858 bytes |
-| `system.march` | 1,192 lines |
+| Rebuilt image size | 72,874 bytes |
+| `system.march` | 1,409 lines |
 | `system.asm` listing | 1,403 lines |
 
 ## Tests
@@ -192,16 +192,18 @@ newest first so shadowing still finds the newest definition. Names hash with
 hashes the same in the working dictionary and in a store. A test checks it
 against the crate itself. Compiling the system on generation 1 dropped from
 12.5 to 5.3 million steps, and later generations rebuild within the default
-budget again. Generation 0's frozen compiler still scans linearly (18.3
-million steps as of the quotation work), so a rebuild from generation 0 on the
-command line needs `--fuel`.
+budget again. Generation 0's frozen compiler still scans linearly, so its
+cost grows faster than the source: 18.3 million steps as of the quotation
+work, 34.8 million as of checker slice 2. A rebuild from generation 0 on the
+command line needs `--fuel`, and the tests give it 60 million.
 
 The driver's step budget (10 million by default) is a safety net against
 runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
-rebuild tests use an explicit budget of 40 million steps, and a named canary
-test asserts that a rebuilt system compiles the system source in under 4.5
-million steps. When the command line exhausts the budget, it says so and
+rebuild tests use an explicit budget of 60 million steps, and a named canary
+test asserts that a rebuilt system compiles the system source in under 5.5
+million steps (4.6 million as of checker slice 2, whose ~190 lines account for
+the growth from 3.8). When the command line exhausts the budget, it says so and
 suggests `--fuel`.
 
 **Working-memory primitives (2026-10-04).** Adding symbol names

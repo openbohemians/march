@@ -84,9 +84,13 @@ fn system_source_reaches_a_byte_identical_fixed_point() {
         g3.encode().unwrap(),
     );
     assert_ne!(b0, b1, "generation 1 comes from source, not the listing");
-    assert_eq!(b1, b2);
+    // Generation 1 is compiled by the frozen generation 0, which emits no
+    // tail calls; generation 2 is compiled by the source's own compiler,
+    // which does. So the fixed point is reached from generation 2 on, as a
+    // bootstrapping compiler compares its second and third stages.
+    assert_ne!(b1, b2, "generation 2 is the first compiled by the source");
     assert_eq!(b2, b3);
-    assert_eq!(g1.entry, g3.entry);
+    assert_eq!(g2.entry, g3.entry);
 }
 
 #[test]

@@ -472,3 +472,15 @@ fn canonical_bytes_and_cid_are_pinned_independently_of_rust_layout() {
         Err(Error::Limit)
     );
 }
+
+#[test]
+fn tail_recur_is_opcode_eleven_and_twelve_is_unknown() {
+    assert_eq!(march7::code::encode(&[Op::TailRecur, Op::Return]), [11, 0]);
+    assert_eq!(
+        march7::code::decode(&[11, 0]).unwrap(),
+        [Op::TailRecur, Op::Return]
+    );
+    for op in 12..=255u8 {
+        assert_eq!(march7::code::decode(&[op, 0]), Err(Error::InvalidCode));
+    }
+}

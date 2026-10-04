@@ -160,6 +160,9 @@ pub enum Op {
     /// `Lit`; the distinct opcode keeps the literal's type in canonical code,
     /// where the checker reads it.
     Float(u64),
+    /// `Recur` in tail position: the current word starts again in its own
+    /// frame, so a loop written as recursion runs in constant space.
+    TailRecur,
 }
 impl Op {
     pub fn encode(&self, out: &mut Vec<u8>) {
@@ -191,6 +194,7 @@ impl Op {
                 out.extend(n.to_le_bytes());
             }
             Self::Recur => out.push(7),
+            Self::TailRecur => out.push(11),
             Self::Float(n) => {
                 out.push(10);
                 out.extend(n.to_le_bytes());
@@ -227,6 +231,7 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Op>, Error> {
             8 => Op::Data(r.array()?),
             9 => Op::Tail(r.array()?),
             10 => Op::Float(r.u64()?),
+            11 => Op::TailRecur,
             _ => return Err(Error::InvalidCode),
         });
     }

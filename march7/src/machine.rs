@@ -34,6 +34,7 @@ enum Instruction {
     Branch(usize),
     ZeroBranch(usize),
     Recur,
+    TailRecur,
     Data(u64, usize),
     Tail(usize),
 }
@@ -319,6 +320,7 @@ impl Machine {
                 Op::Branch(n) => Instruction::Branch(n as usize),
                 Op::ZeroBranch(n) => Instruction::ZeroBranch(n as usize),
                 Op::Recur => Instruction::Recur,
+                Op::TailRecur => Instruction::TailRecur,
                 Op::Data(c) => {
                     if !matches!(self.blobs.get(&c), Some(Blob::Data(_))) {
                         return Err(Error::InvalidCode);
@@ -414,6 +416,11 @@ impl Machine {
                     }
                     returns.push((word, ip, base));
                     base = self.scratch.len();
+                    ip = 0;
+                }
+                Instruction::TailRecur => {
+                    // As a tail call to itself: its scratch values go.
+                    self.scratch.truncate(base);
                     ip = 0;
                 }
                 Instruction::Tail(w) => {

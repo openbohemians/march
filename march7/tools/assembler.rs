@@ -103,6 +103,7 @@ pub fn assemble(source: &str) -> Result<Image, String> {
             let op = match l[0].as_str() {
                 "ret" if l.len() == 1 => Op::Return,
                 "recur" if l.len() == 1 => Op::Recur,
+                "tail-recur" if l.len() == 1 => Op::TailRecur,
                 "lit" if l.len() == 2 => Op::Lit(
                     arg()?
                         .parse::<u64>()

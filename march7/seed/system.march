@@ -138,9 +138,10 @@
 : b! out swap c! ;
 : u32! over over b! over 8 rshift over 1 u+ b! over 16 rshift over 2 u+ b! swap 24 rshift swap 3 u+ b! ;
 -- Operand lengths of opcodes 0-9, six bits each: 1 9 2 33 33 5 5 1 33 33.
--- Opcode 10 (a float literal) has the length of opcode 1, so it is mapped
--- there first, without a branch.
-: oplen dup 10 eq? 9 u* u- 6 u* 603768572619268673 swap rshift 63 and ;
+-- Opcode 10 (a float literal) has the length of opcode 1, and opcode 11 (a
+-- tail recur) that of opcode 7, so they are mapped there first, without a
+-- branch.
+: oplen dup 10 eq? 9 u* u- dup 11 eq? 4 u* u- 6 u* 603768572619268673 swap rshift 63 and ;
 
 -- Branch targets are instruction indexes, so count the instructions already
 -- emitted into the output region. This is the one hand-assembled word: its
@@ -411,7 +412,17 @@
 -- ( -- n kind | 0 ) Kind 1 is an integer, kind 2 a float.
 : number numeric-start? 0= if 0 exit then int-number dup if exit then drop parse-float ;
 
-: compile, 3 c, out here code-cid here 32 u+ 16 put ;
+-- Tail calls: a call or `recur` emitted just before a return becomes a tail
+-- call (9) or a tail recur (11), so recursion in tail position runs in
+-- constant space. The return stays, for branches that target it. 944 holds
+-- where the last call or recur was emitted, 952 the region it went to.
+: mark-call here 944 put out 952 put ;
+: tailify
+  952 get out eq? 0= if exit then
+  out 944 get c@
+  dup 3 eq? if drop 944 get 33 u+ here eq? if 9 out 944 get c! then exit then
+  7 eq? if 944 get 1 u+ here eq? if 11 out 944 get c! then then ;
+: compile, mark-call 3 c, out here code-cid here 32 u+ 16 put ;
 : compile-quote 4 c, out here code-cid here 32 u+ 16 put ;
 
 -- Stack effects (checker, slice 1). A word's effect is how many cells it
@@ -590,6 +601,7 @@
   dup 8 eq? if drop 0 3 apply 0 64 an! exit then
   dup 9 eq? if drop do-call 40 an@ if do-return then exit then
   dup 10 eq? if drop 0 1 apply 0 64 an! exit then
+  dup 11 eq? if drop do-recur 40 an@ if do-return then exit then
   drop 11 fail ;
 
 -- ( pass -- )
@@ -652,7 +664,7 @@
   1 96 put 3840 80 put
   65536 region-new 24 put 0 16 put 1 0 put ;
 : semicolon 0 get 0= if 6 trap then 800 get if 20 trap then
-  0 c,
+  tailify 0 c,
   632 get if out here analyze dup effect-known? 0= if effect-in 100 u+ trap then
   else 0 then
   out 0 here seal
@@ -944,7 +956,8 @@ _v ᵥ
     dup 5 eq? over 6 eq? or if
       c, 3400 get 3424 get 1 u+ region-u32 3416 get u+ u32,
     else
-      drop 3400 get 3424 get out here 3432 get copy here 3432 get u+ 16 put
+      dup 3 eq? swap 7 eq? or if mark-call then
+      3400 get 3424 get out here 3432 get copy here 3432 get u+ 16 put
     then
     3424 get 3432 get u+ 3424 put
   repeat 3400 get region-free ;
@@ -1001,8 +1014,8 @@ _v ᵥ
   34 prim, 1 prim, 34 prim, 1 prim, ;
 : i0 compile-only 35 prim, ;
 : i1 compile-only 34 prim, 34 prim, 35 prim, 4 prim, 4 prim, 33 prim, 33 prim, ;
-: qexit 800 get if mark-flow then 0 c, ;
-: qrecur 800 get if mark-flow then 7 c, ;
+: qexit 800 get if mark-flow then tailify 0 c, ;
+: qrecur 800 get if mark-flow then mark-call 7 c, ;
 
 -- The outer interpreter over the current input: numbers before lookup.
 -- Compiling a word whose entry is flagged as an inline primitive emits the

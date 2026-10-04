@@ -289,7 +289,8 @@ responsibility boundary is sound.
 
 **Status: frozen (2026-09-30).** The self-rebuild milestone is met: generation 0,
 assembled from `seed/system.asm`, compiles `seed/system.march`, and generations
-1-3 are byte-identical (docs/REBUILD.md). The listing now only reproduces
+1-3 were byte-identical; since tail calls (2026-10-04), generations 2 and 3
+are, because generation 0's frozen `;` emits no tail calls (docs/REBUILD.md). The listing now only reproduces
 generation 0. `tests/rebuild.rs` pins the SHA-256 of the assembled image
 (`b9b9c609…`), so any change to the listing or the assembler that alters it
 fails until the pinned value is changed on purpose. The system source depends

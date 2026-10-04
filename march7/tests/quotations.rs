@@ -136,7 +136,11 @@ fn recur_and_exit_work_in_inlined_arms() {
     );
     // An arm inlined into an arm that is itself inlined.
     assert_eq!(
-        run(&g, ": m dup 0 gt? [ dup 1 gt? [ 1 - recur ] [ ] if ] if ; 5 m").unwrap(),
+        run(
+            &g,
+            ": m dup 0 gt? [ dup 1 gt? [ 1 - recur ] [ ] if ] if ; 5 m"
+        )
+        .unwrap(),
         [1]
     );
     // Inside a loop body: exit leaves the word, and its loop with it.
@@ -146,12 +150,19 @@ fn recur_and_exit_work_in_inlined_arms() {
     );
     // The checker solves the recursion from its base case, as before.
     assert_eq!(
-        run(&g, ": f dup 0 eq? [ drop 1 ] [ dup 1 - recur * ] if ; ' f stack-effect").unwrap(),
+        run(
+            &g,
+            ": f dup 0 eq? [ drop 1 ] [ dup 1 - recur * ] if ; ' f stack-effect"
+        )
+        .unwrap(),
         [1, 1, 1]
     );
     // Sealed as its own word, recur and exit would change meaning: trap.
     assert_eq!(run(&g, ": k [ recur ] call ;"), Err(Error::User(15)));
-    assert_eq!(run(&g, ": k [ [ exit ] [ ] if ] call ;"), Err(Error::User(15)));
+    assert_eq!(
+        run(&g, ": k [ [ exit ] [ ] if ] call ;"),
+        Err(Error::User(15))
+    );
     assert_eq!(run(&g, "[ recur ]"), Err(Error::User(15)));
     // After a trap, the next definition starts clean.
     assert_eq!(run(&g, ": k [ recur ] call ;"), Err(Error::User(15)));

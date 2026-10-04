@@ -18,30 +18,40 @@ exports an image whose entry is that word.
 | Generation | Built by | Image SHA-256 (prefix) |
 |---|---|---|
 | 0 | assembler, from `seed/system.asm` | `b9b9c609…` |
-| 1 | generation 0 compiling `system.march` | `129daab3…` |
-| 2 | generation 1 compiling `system.march` | `129daab3…` |
-| 3 | generation 2 compiling `system.march` | `129daab3…` |
+| 1 | generation 0 compiling `system.march` | `22eabcf1…` |
+| 2 | generation 1 compiling `system.march` | `d84a5cd3…` |
+| 3 | generation 2 compiling `system.march` | `d84a5cd3…` |
 
-Generations 1, 2 and 3 are byte-identical. The fixed point holds from the first
-rebuild. After generation 0, only images and March source are involved.
+Generations 2 and 3 are byte-identical, so the fixed point holds from the
+second rebuild. Until tail calls (2026-10-04) it held from the first; see
+below. After generation 0, only images and March source are involved.
 
 ```sh
 cargo run --offline --bin march7-seed -- seed/system.asm gen0.image
 cargo run --offline -- gen0.image --fuel 40000000 seed/system.march --system gen1.image
 cargo run --offline -- gen1.image seed/system.march --system gen2.image
-cmp gen1.image gen2.image
-cargo run --offline -- gen1.image --eval ': square dup u* ; 7 square'
+cargo run --offline -- gen2.image seed/system.march --system gen3.image
+cmp gen2.image gen3.image
+cargo run --offline -- gen2.image --eval ': square dup u* ; 7 square'
 ```
 
-## Why the first rebuild is already the fixed point
+## Why the fixed point comes so early
 
 Every compiled call in `system.march` targets a word defined earlier in the same
 file. Words from the running dictionary are only executed at compile time
 (`:` `;` `immediate`, the phase-1 `[` `]` `prim,`). Executing a word leaves no
 reference to it in the output. Numbers, calls and quotations are encoded the same
 way by every generation, and primitives are inlined by the file itself (see
-"Inlining" below). So the compiled output does not depend on which generation
-compiled it.
+"Inlining" below). So the compiled output depends on which generation compiled
+it in one place only: what `;` does at the end of a definition.
+
+Since tail calls, it does something. A call or `recur` just before a return
+becomes a tail call (opcode 9) or a tail recur (opcode 11), and that happens
+in `;`, which belongs to the running system. Generation 0's `;` is frozen and
+emits no tail calls, so generation 1's code has none; generation 1's `;` is the
+source's own, so generations 2 and 3 have them and agree. This is the usual
+shape of a compiler bootstrap, which compares its second and third stages
+because the first is built by the old compiler.
 
 Content addressing also shares byte-identical objects across generations. These
 are the name strings and leaf words such as the one-primitive `dup` wrapper. A

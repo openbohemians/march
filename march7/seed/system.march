@@ -124,6 +124,10 @@
 : f>i 43 prim, ; immediate
 : mark 46 prim, ; immediate
 : gather 47 prim, ; immediate
+: vector-length 48 prim, ; immediate
+: vector-at 49 prim, ; immediate
+: vector-push 50 prim, ; immediate
+: vector-set 51 prim, ; immediate
 
 -- Phase 3: clean base words.
 : get [ 44 prim, ] ;
@@ -605,10 +609,20 @@
 -- ( in out -- )
 : apply over over ty-clear
   swap 48 an@ swap u- dup 72 an@ ult? if dup 72 an! then u+ 48 an! ;
+-- ( depth -- flag ) Inside an array literal, a count that varies (a loop or
+-- branch that changes the depth) is fine: `gather` takes whatever is above
+-- its mark. So if a mark is open and both this depth and the current one are
+-- at or above it, mark the literal as varying (bit 63 of its mark) and go on.
+: vary?
+  448 an@ 0= if drop 0 exit then
+  448 an@ 1 u- 8 u* 456 u+ dup an@ 9223372036854775807 and
+  rot over ult? 0= swap 48 an@ swap ult? 0= and
+  dup if over an@ -9223372036854775808 or rot an! else nip then ;
 -- ( target -- )
 : pend
   dup 1 tab@ if
-    dup 2 tab@ 48 an@ eq? over 3 tab@ 56 an@ eq? and 0= if drop 3 fail exit then
+    dup 3 tab@ 56 an@ eq? 0= if drop 3 fail exit then
+    dup 2 tab@ 48 an@ eq? 0= if dup 2 tab@ vary? 0= if drop 3 fail exit then then
     dup 4 tab@ 64 an@ eq? 0= if 0 over 4 tab! then
     256 over 0 blk blk-merge drop
   else
@@ -621,12 +635,15 @@
 : back
   dup 1 blk 384 blk-copy 256 384 blk-merge
   dup 1 blk 384 blk-eq? 0= if 384 over 1 blk blk-copy 1 136 an! then
-  dup 6 tab@ 48 an@ eq? swap 7 tab@ 56 an@ eq? and 0= if 4 fail then ;
+  dup 7 tab@ 56 an@ eq? 0= if drop 4 fail exit then
+  dup 6 tab@ 48 an@ eq? if drop exit then
+  6 tab@ vary? 0= if 4 fail then ;
 -- ( -- )
 : arrive
   24 an@ 1 tab@ if
     40 an@ if
-      24 an@ 2 tab@ 48 an@ eq? 24 an@ 3 tab@ 56 an@ eq? and 0= if 3 fail exit then
+      24 an@ 3 tab@ 56 an@ eq? 0= if 3 fail exit then
+      24 an@ 2 tab@ 48 an@ eq? 0= if 24 an@ 2 tab@ vary? 0= if 3 fail exit then then
       24 an@ 4 tab@ 64 an@ eq? 0= if 0 64 an! then
       24 an@ 0 blk 256 blk-merge
     else
@@ -710,7 +727,10 @@
   swap 72340172838076673 r> and eq? 0= and ;
 -- Arrays (docs/ARRAYS.md) have types 3 (of i64), 4 (of f64) and 5 (any other).
 -- ( t -- flag )
-: array-type? dup 3 eq? swap 4 eq? or ;
+: array-type? dup 3 ult? 0= swap 6 ult? and ;
+-- ( t -- t' ) An element's type for an input's type: i64 or f64 for arrays of
+-- them, unknown for other arrays, the input's own type otherwise.
+: element-type dup 5 eq? if drop 0 exit then dup array-type? if 2 u- then ;
 -- ( token -- token 0 | 1 ) A family call with an array input and no clause
 -- of its own: the lifted word for it (from `lift-for`, through the token at
 -- working offset 3392), which applies the element operation to each element.
@@ -809,16 +829,22 @@
     248 an@ 1 u+ 248 an!
   repeat 232 an@ 2 u+ ;
 -- ( -- )
+-- A varying literal's elements have unknown types: type 5.
 : do-gather
   56 an@ 0= 448 an@ 0= or if 6 fail exit then
   56 an@ 1 u- 56 an!
   448 an@ 1 u- dup 448 an! 8 u* 456 u+ an@
-  48 an@ over ult? if drop 6 fail exit then
+  dup 63 rshift >r 9223372036854775807 and
+  48 an@ over ult? if drop r> drop 6 fail exit then
   48 an@ swap u-
-  dup elem-type >r 1 apply r> ty-set 0 64 an! ;
+  r> if 5 >r else dup elem-type >r then 1 apply r> ty-set 0 64 an! ;
 -- ( id -- )
 : do-prim
-  47 over ult? if drop 11 fail exit then
+  51 over ult? if drop 11 fail exit then
+  dup 48 eq? if drop 1 1 apply 1 ty-set 0 64 an! exit then
+  dup 49 eq? if drop 2 1 apply 0 64 an! exit then
+  dup 50 eq? if drop 1 ty@ >r 2 1 apply r> ty-set 0 64 an! exit then
+  dup 51 eq? if drop 2 ty@ >r 3 1 apply r> ty-set 0 64 an! exit then
   dup 46 eq? if drop do-mark exit then
   dup 47 eq? if drop do-gather exit then
   dup 45 eq? if drop 2 0 apply 0 64 an! exit then
@@ -1550,40 +1576,39 @@ _v ᵥ
 : f-gte? swap f-lte? ;
 
 -- Arrays (docs/ARRAYS.md): `( … )` gathers what its body leaves into a
--- region of cells, and an array value is that region. `at` is a family whose
+-- persistent vector of cells, held by the machine. `at` is a family whose
 -- clauses only give its result the element type.
 : qopen 46 prim, ;
 : qclose 47 prim, ;
 -- ( a -- n )
-: length region-size 3 rshift ;
+: length vector-length ;
 -- ( a i -- x )
-: at 3 lshift @ ;
+: at vector-at ;
 
 -- The lifting rule. A lifted word is one of these templates with its calls to
 -- `lift-op` pointed at the element operation. Each keeps its arrays, value,
--- length, result and index in a small region of its own.
+-- length, result and index in a small region of its own, and builds its result
+-- from an empty vector (`mark gather`) with `vector-push`.
 : lift-op drop 1123581321 xor ;
 -- ( a x -- c ) Each element e of a, as e x op.
 : lift-ax 48 region-new >r
   r@ 8 ! r@ 0 !
-  r@ 0 @ region-size 3 rshift r@ 24 !
-  r@ 24 @ 3 lshift region-new r@ 32 !
+  r@ 0 @ vector-length r@ 24 !
+  mark gather r@ 32 !
   0 r@ 40 !
   cycle r@ 40 @ r@ 24 @ ult? while
-    r@ 0 @ r@ 40 @ 3 lshift @ r@ 8 @ lift-op
-    r@ 32 @ r@ 40 @ 3 lshift !
+    r@ 32 @ r@ 0 @ r@ 40 @ vector-at r@ 8 @ lift-op vector-push r@ 32 !
     r@ 40 @ 1 u+ r@ 40 !
   repeat
   r@ 32 @ r> region-free ;
 -- ( x a -- c ) Each element e of a, as x e op.
 : lift-xa 48 region-new >r
   r@ 0 ! r@ 8 !
-  r@ 0 @ region-size 3 rshift r@ 24 !
-  r@ 24 @ 3 lshift region-new r@ 32 !
+  r@ 0 @ vector-length r@ 24 !
+  mark gather r@ 32 !
   0 r@ 40 !
   cycle r@ 40 @ r@ 24 @ ult? while
-    r@ 8 @ r@ 0 @ r@ 40 @ 3 lshift @ lift-op
-    r@ 32 @ r@ 40 @ 3 lshift !
+    r@ 32 @ r@ 8 @ r@ 0 @ r@ 40 @ vector-at lift-op vector-push r@ 32 !
     r@ 40 @ 1 u+ r@ 40 !
   repeat
   r@ 32 @ r> region-free ;
@@ -1591,13 +1616,12 @@ _v ᵥ
 -- must agree (trap 25).
 : lift-aa 48 region-new >r
   r@ 8 ! r@ 0 !
-  r@ 0 @ region-size 3 rshift r@ 24 !
-  r@ 8 @ region-size 3 rshift r@ 24 @ eq? 0= if 25 trap then
-  r@ 24 @ 3 lshift region-new r@ 32 !
+  r@ 0 @ vector-length r@ 24 !
+  r@ 8 @ vector-length r@ 24 @ eq? 0= if 25 trap then
+  mark gather r@ 32 !
   0 r@ 40 !
   cycle r@ 40 @ r@ 24 @ ult? while
-    r@ 0 @ r@ 40 @ 3 lshift @ r@ 8 @ r@ 40 @ 3 lshift @ lift-op
-    r@ 32 @ r@ 40 @ 3 lshift !
+    r@ 32 @ r@ 0 @ r@ 40 @ vector-at r@ 8 @ r@ 40 @ vector-at lift-op vector-push r@ 32 !
     r@ 40 @ 1 u+ r@ 40 !
   repeat
   r@ 32 @ r> region-free ;
@@ -1630,10 +1654,11 @@ _v ᵥ
   3560 get 0 3568 get seal 3560 get region-free
   >r 2305843009213693952 or swap r@ add-instance r> ;
 -- ( family b t -- op | 0 ) The operation on elements of types b and t, t on
--- top: the family's clause for them, or the family itself if both are i64.
+-- top: the family's clause for them, or the family itself, the i64 version,
+-- if both are i64 or unknown.
 : element-op
   0 792 put
-  over 1 eq? over 1 eq? and >r
+  over 2 ult? over 2 ult? and >r
   swap 8 lshift or
   over swap find-clause
   dup if nip r> drop exit then drop
@@ -1650,7 +1675,7 @@ _v ᵥ
 : lift-for
   over array-type? over array-type? or 0= if drop drop drop 0 exit then
   over array-type? if dup array-type? if ' lift-aa else ' lift-ax then else ' lift-xa then >r
-  dup array-type? if 2 u- then swap dup array-type? if 2 u- then swap
+  element-type swap element-type swap
   element-op
   dup 0= if r> drop exit then
   dup op-out dup 1 eq? if drop 3 else 2 eq? if 4 else 5 then then

@@ -7,9 +7,10 @@ default-run = "march7"
 [dependencies]
 sha2 = "0.10"
 
-[dev-dependencies]
-# Tests check that dictionary names hash exactly as merkle-champ places keys.
-merkle-champ = "0.1"
+# Persistent vectors for March's arrays (docs/ARRAYS.md); tests also check
+# that dictionary names hash exactly as merkle-champ places keys. From the
+# sibling checkout until merkle-champ 0.2 is published.
+merkle-champ = { path = "../../merkle-champ" }
 
 [[bin]]
 name = "march7-seed"

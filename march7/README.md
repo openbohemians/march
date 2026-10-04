@@ -3,6 +3,10 @@
 A small cell machine running a March-written input reader and compiler. The
 first slice works; this is **not yet the complete bootstrap or Checked March**.
 
+It depends on merkle-champ (github.com/tabcomputing/merkle-champ) by path
+until its version 0.2 is published, so check it out next to this repository:
+`../../merkle-champ` from here.
+
 From this directory:
 
 ```sh

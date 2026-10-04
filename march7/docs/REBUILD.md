@@ -85,8 +85,8 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 54.2 million (175 ms) |
-| The same on generation 1 | 7.46 million (27 ms) |
+| Machine steps to compile `system.march` on generation 0 | 55.7 million |
+| The same on generation 1 | 7.59 million |
 | Driver's default budget | 10 million steps |
 | Rebuilt image size | 85,405 bytes |
 | `system.march` | 1,798 lines |
@@ -202,7 +202,7 @@ runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
 rebuild tests use an explicit budget of 80 million steps, and a named canary
 test asserts that a rebuilt system compiles the system source in under 8
-million steps. It takes 7.46 million as of arrays (6.65 million as of checker
+million steps. It takes 7.59 million as of arrays on persistent vectors (6.65 million as of checker
 slice 2: its code added
 1.3 million to the 3.8 before it, typing at top level about a million more,
 mostly analysing the words the source runs at top level once per session,
@@ -212,7 +212,7 @@ inline emitters along the way. The margin is small again, and the driver's
 default budget of 10 million is getting close; the profile's biggest items
 are reading words, `find` and skipping comments, all byte loops in March.
 
-Generation 0 grows faster: 54.2 million steps as of arrays, against the
+Generation 0 grows faster: 55.7 million steps as of arrays, against the
 tests' 80 million. Its frozen compiler looks words up linearly, so each new
 definition costs it more than the last. Two remedies, both decisions for
 Thomas: re-freeze the listing from a newer generation, whose lookup is

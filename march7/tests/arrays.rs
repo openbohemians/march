@@ -96,3 +96,51 @@ fn lifted_words_are_ordinary_checked_words() {
     let g = system();
     assert_eq!(run(&g, "checked : l ( 1 2 3 ) 1 + ; l 1 at").unwrap(), [3]);
 }
+
+#[test]
+fn arrays_are_persistent_vectors() {
+    let g = system();
+    // Fifty thousand elements, built and lifted. A literal gathers from the
+    // data stack, so it holds at most the stack's 65,536 cells.
+    assert_eq!(
+        run(&g, ": big ( 50000 [ i0 ] times ) ; big 1 + 49999 at").unwrap(),
+        [50_000]
+    );
+    assert_eq!(
+        run(&g, ": big ( 70000 [ i0 ] times ) ; big"),
+        Err(Error::Stack)
+    );
+    // Lifting leaves its input as it was.
+    assert_eq!(
+        run(&g, ": a ( 1 2 3 ) ; a dup 10 + drop 0 at").unwrap(),
+        [1]
+    );
+}
+
+#[test]
+fn literals_whose_count_varies_still_check() {
+    let g = system();
+    let effect = |src: &str| run(&g, &format!("{src} ' w stack-types")).unwrap();
+    // A loop that pushes per iteration, and a branch that drops in one arm:
+    // the literal still leaves one array, of unknown element types (5).
+    assert_eq!(effect(": w ( 5 [ i0 ] times ) ;"), [5, 1, 1]);
+    assert_eq!(effect(": w ( 1 2 3 0 [ drop ] if ) ;"), [5, 1, 1]);
+    assert_eq!(
+        run(&g, ": w ( 1 2 3 0 [ drop ] if ) ; w length").unwrap(),
+        [3]
+    );
+    assert_eq!(
+        run(&g, ": w ( 1 2 3 1 [ drop ] if ) ; w length").unwrap(),
+        [2]
+    );
+    // Checked mode accepts such words, and lifting works on their arrays.
+    assert_eq!(
+        run(&g, "checked : w ( 4 [ i0 ] times ) 10 * ; w 3 at").unwrap(),
+        [30]
+    );
+    // Outside a literal, a loop that changes the depth is still an error.
+    assert_eq!(
+        run(&g, "checked : w 4 [ i0 ] times ;"),
+        Err(Error::User(104))
+    );
+}

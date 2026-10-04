@@ -1,9 +1,10 @@
 # Arrays and the lifting rule
 
-Status: strict arrays, built 2026-10-04 (Thomas: "you can do strict first").
-Laziness for collections, arrays and maps alike, comes next on the same
-representation. Everything except two primitives is March code in
-`seed/system.march`.
+Status: strict arrays, built 2026-10-04 (Thomas: "you can do strict first"),
+as persistent vectors from merkle-champ, our in-house persistent collections
+crate. Laziness for
+collections, arrays and maps alike, comes next on the same representation.
+Apart from six primitives, everything is March code in `seed/system.march`.
 
 ## Literals
 
@@ -16,18 +17,30 @@ representation. Everything except two primitives is March code in
 ( 5 [ i0 ] times )   -- 0 1 2 3 4: the body may loop
 ```
 
+A literal gathers from the data stack, so it holds at most the stack's
+65,536 cells; larger arrays are built by operations on arrays, such as
+lifting, which append to their result directly.
+
 `(` marks the data stack's depth and `)` gathers the cells above the mark,
 both at run time, so loops and conditionals inside work (the lineage
 research's "runtime depth marker"). Two primitives do it: `mark` (46) pushes
 the depth onto the scratch stack, which is per call frame, so marks nest and
 cannot leak; `gather` (47) pops it and moves the cells above it into a new
-region. While compiling, `(` and `)` emit them; at top level, `interpret` runs
-them itself, in its own frame (dictionary flag bits 5 and 6).
+persistent vector. While compiling, `(` and `)` emit them; at top level,
+`interpret` runs them itself, in its own frame (dictionary flag bits 5 and 6).
 
-An array is one cell: a region holding its elements, a cell each.
-`length ( a -- n )` and `at ( a i -- x )` read it; reading past the end traps
-with a memory error. Arrays are immutable by convention: no surface word
-writes into one.
+An array is one cell: a handle to a persistent vector of cells
+(`merkle_champ::Vector`), which the machine keeps in a region
+slot, so handles, generations and `region-free` work as for regions. The
+vector is a 32-way trie of canonical shape with cached SHA-256 identities, the
+companion of merkle-champ's map, in the same crate. Primitives: `vector-length` (48),
+`vector-at` (49), `vector-push` (50, appends in place, for building) and
+`vector-set` (51, a new version with one element replaced). Surface words:
+`length ( a -- n )` and `at ( a i -- x )`; reading past the end traps with a
+memory error. Byte access to a vector fails.
+
+Regions stay what they were: the system track's mutable arrays of bytes and
+cells (`region-new`, `@`, `!`, `c@`, `c!`).
 
 ## Types
 
@@ -39,10 +52,14 @@ the array from its elements. `at` is a family whose clauses give its result
 the element type, so `( 1.5 2.5 ) 1 at 1.0 +` adds floats. At top level the
 interpreter's type stack does the same.
 
-A body whose element count changes per iteration, such as
-`( 5 [ i0 ] times )`, still runs, but the checker cannot give it an effect
-yet (a loop that changes the depth); typing it needs effects with a varying
-count, `[ i64 -> i64* ]`.
+**A count that varies is fine inside a literal.** `gather` takes whatever is
+above its mark, so a loop or a branch that changes the depth inside `( … )`,
+as in `( 5 [ i0 ] times )` or `( 1 2 3 flag [ drop ] if )`, does not stop the
+checker: it marks the literal as varying, and `gather` still leaves exactly
+one array, of type 5 since its elements' types are not tracked through the
+variation. Outside a literal such a loop is still an error. This settles the
+surface examples' finding F15 for literals; typing the elements of a varying
+literal would need effects with a varying count, `[ i64 -> i64* ]`.
 
 ## The lifting rule
 
@@ -70,15 +87,18 @@ element operation to every element:
   recorded when they are made, since their own analysis sees only a region.
 - **Lifting chains:** `( 1 2 3 ) 1 + 2 *` lifts twice, making an intermediate
   array. Fusing the two passes is what laziness will add.
+- **Arrays of unknown element types (5) lift too,** with the i64 version for
+  the elements, the same rule as for scalars of unknown type.
 - **Generic words lift inside their instances:** `: double dup + ;` on
   `( 1.5 2.5 )` gets an instance whose `+` is lifted.
 - **At top level too:** `( 1 2 3 ) 1 + 2 at` is 4.
 
 ## Memory
 
-Every array is a new region, and nothing frees them yet; memory management is
-the 2.0 work. The machine's limits on live bytes and regions bound how many a
-session can make.
+Every array takes a region slot, charged 8 bytes per element against the
+machine's live-byte limit, and nothing frees them yet; memory management is
+the 2.0 work. Versions share structure inside the vector, so an array made
+with `vector-set` from another costs a path, not a copy.
 
 ## Next
 

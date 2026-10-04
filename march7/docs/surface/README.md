@@ -24,9 +24,9 @@ They assume a library that does not exist yet: `2dup`, `-rot`, `/mod`,
    cycles, so March cannot express either today. This is the biggest gap.
 2. **Recursion inside an inlined arm (F9). Resolved 2026-10-04:** `recur` and
    `exit` now work in arms that are inlined (docs/QUOTATIONS.md).
-3. **Comprehensions that keep or drop (F15).** A comprehension body with a
-   one-armed `if` leaves a varying number of values, which the counting
-   checker rejects.
+3. **Comprehensions that keep or drop (F15). Resolved for literals
+   2026-10-04:** the checker accepts a varying count inside `( … )`
+   (docs/ARRAYS.md); the elements' types are not tracked through it.
 4. **Whether contexts take values apart (F4).** The examples keep running into
    it.
 

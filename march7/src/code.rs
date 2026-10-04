@@ -87,6 +87,13 @@ pub enum Primitive {
     // that depth into a new region, leaving the region.
     Mark = 46,
     Gather = 47,
+    // Persistent vectors of cells (docs/ARRAYS.md), held in regions:
+    // length, element, append in place (for building), and a new version
+    // with one element replaced.
+    VecLen = 48,
+    VecAt = 49,
+    VecPush = 50,
+    VecSet = 51,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -138,6 +145,10 @@ impl Primitive {
         (Self::WorkStore, "work-store"),
         (Self::Mark, "mark"),
         (Self::Gather, "gather"),
+        (Self::VecLen, "vector-length"),
+        (Self::VecAt, "vector-at"),
+        (Self::VecPush, "vector-push"),
+        (Self::VecSet, "vector-set"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

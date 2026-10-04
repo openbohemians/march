@@ -46,6 +46,12 @@ struct Region {
     bytes: Vec<u8>,
     cid: Option<Cid>,
     read_only: bool,
+    /// A persistent vector of cells, for an array (docs/ARRAYS.md); its
+    /// bytes are empty, so byte access fails.
+    vector: Option<merkle_champ::Vector<u64>>,
+    /// Bytes counted against the live limit: the byte length, or 8 per
+    /// element of a vector.
+    charged: usize,
 }
 struct RegionSlot {
     generation: u32,
@@ -151,6 +157,8 @@ impl Machine {
             bytes,
             cid,
             read_only: cid.is_some(),
+            vector: None,
+            charged: size,
         });
         self.live_bytes += size;
         self.stats.allocated_bytes += size as u64;
@@ -180,7 +188,7 @@ impl Machine {
         if let Some(c) = region.cid {
             self.read_only.remove(&c);
         }
-        self.live_bytes -= region.bytes.len();
+        self.live_bytes -= region.charged;
         // Never wrap a generation. Retire an exhausted slot permanently.
         if let Some(next) = self.regions[slot].generation.checked_add(1) {
             self.regions[slot].generation = next;
@@ -195,6 +203,25 @@ impl Machine {
             return Err(Error::Memory);
         }
         Ok(index)
+    }
+    /// A new region holding a vector, charged 8 bytes per element.
+    fn allocate_vector(&mut self, v: merkle_champ::Vector<u64>) -> Result<u64, Error> {
+        let size = v.len().checked_mul(8).ok_or(Error::Limit)?;
+        if size > MAX_BYTES || self.live_bytes.checked_add(size).ok_or(Error::Limit)? > MAX_BYTES {
+            return Err(Error::Limit);
+        }
+        let r = self.allocate(Vec::new(), None)?;
+        let slot = self.region_slot(r)?;
+        let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+        region.vector = Some(v);
+        region.charged = size;
+        self.live_bytes += size;
+        self.stats.allocated_bytes += size as u64;
+        self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(self.live_bytes);
+        Ok(r)
+    }
+    fn vector(&self, r: u64) -> Result<&merkle_champ::Vector<u64>, Error> {
+        self.region(r)?.vector.as_ref().ok_or(Error::Memory)
     }
     fn region(&self, r: u64) -> Result<&Region, Error> {
         self.regions[self.region_slot(r)?]
@@ -476,8 +503,7 @@ impl Machine {
                         return Err(Error::Stack);
                     }
                     let cells = self.stack.split_off(mark);
-                    let bytes = cells.iter().flat_map(|c| c.to_le_bytes()).collect();
-                    let r = self.allocate(bytes, None)?;
+                    let r = self.allocate_vector(cells.into_iter().collect())?;
                     self.push(r)?;
                 }
                 Instruction::Prim(p) => self.primitive(p)?,
@@ -664,6 +690,40 @@ impl Machine {
                 self.push(n as u64)?;
             }
             Trap => return Err(Error::User(self.pop()?)),
+            VecLen => {
+                let r = self.pop()?;
+                self.push(self.vector(r)?.len() as u64)?;
+            }
+            VecAt => {
+                let i = self.pop()?;
+                let r = self.pop()?;
+                let i = usize::try_from(i).map_err(|_| Error::Memory)?;
+                let x = *self.vector(r)?.get(i).ok_or(Error::Memory)?;
+                self.push(x)?;
+            }
+            VecPush => {
+                let x = self.pop()?;
+                let r = self.pop()?;
+                if self.live_bytes + 8 > MAX_BYTES {
+                    return Err(Error::Limit);
+                }
+                let slot = self.region_slot(r)?;
+                let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+                region.vector.as_mut().ok_or(Error::Memory)?.push(x);
+                region.charged += 8;
+                self.live_bytes += 8;
+                self.push(r)?;
+            }
+            VecSet => {
+                let x = self.pop()?;
+                let i = self.pop()?;
+                let r = self.pop()?;
+                let i = usize::try_from(i).map_err(|_| Error::Memory)?;
+                let mut v = self.vector(r)?.clone();
+                v.set(i, x).map_err(|_| Error::Memory)?;
+                let r = self.allocate_vector(v)?;
+                self.push(r)?;
+            }
             Execute | ScratchPush | ScratchPop | ScratchPeek | Mark | Gather => unreachable!(),
         }
         Ok(())

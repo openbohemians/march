@@ -32,49 +32,49 @@
 : prim, 2 c, c, ;
 
 -- Phase 2: primitives. The wrappers, one primitive op and a return each, are
--- what the exported dictionary binds (`dup` is `p-dup`, flagged inline), so
+-- what the exported dictionary binds (`dup` is `p.dup`, flagged inline), so
 -- `' dup` and `call` work in the booted system.
-: p-dup [ 0 prim, ] ;
-: p-drop [ 1 prim, ] ;
-: p-swap [ 2 prim, ] ;
-: p-over [ 3 prim, ] ;
-: p-rot [ 4 prim, ] ;
-: p-u+ [ 5 prim, ] ;
-: p-u- [ 6 prim, ] ;
-: p-u* [ 7 prim, ] ;
-: p-u/ [ 8 prim, ] ;
-: p-umod [ 9 prim, ] ;
-: p-eq? [ 10 prim, ] ;
-: p-ult? [ 11 prim, ] ;
-: p-and [ 12 prim, ] ;
-: p-or [ 13 prim, ] ;
-: p-xor [ 14 prim, ] ;
-: p-invert [ 15 prim, ] ;
-: p-lshift [ 16 prim, ] ;
-: p-rshift [ 17 prim, ] ;
-: p-c@ [ 18 prim, ] ;
-: p-c! [ 19 prim, ] ;
-: p-@ [ 20 prim, ] ;
-: p-! [ 21 prim, ] ;
-: p-region-new [ 22 prim, ] ;
-: p-region-free [ 23 prim, ] ;
-: p-region-size [ 24 prim, ] ;
-: p-call [ 25 prim, ] ;
-: p-seal [ 26 prim, ] ;
-: p-code-cid [ 27 prim, ] ;
-: p-resolve [ 28 prim, ] ;
-: p-publish [ 29 prim, ] ;
-: p-blob-cid [ 30 prim, ] ;
-: p-blob-read [ 31 prim, ] ;
-: p-trap [ 32 prim, ] ;
-: p-f+ [ 36 prim, ] ;
-: p-f- [ 37 prim, ] ;
-: p-f* [ 38 prim, ] ;
-: p-f/ [ 39 prim, ] ;
-: p-feq? [ 40 prim, ] ;
-: p-flt? [ 41 prim, ] ;
-: p-i>f [ 42 prim, ] ;
-: p-f>i [ 43 prim, ] ;
+: p.dup [ 0 prim, ] ;
+: p.drop [ 1 prim, ] ;
+: p.swap [ 2 prim, ] ;
+: p.over [ 3 prim, ] ;
+: p.rot [ 4 prim, ] ;
+: p.u+ [ 5 prim, ] ;
+: p.u- [ 6 prim, ] ;
+: p.u* [ 7 prim, ] ;
+: p.u/ [ 8 prim, ] ;
+: p.umod [ 9 prim, ] ;
+: p.eq? [ 10 prim, ] ;
+: p.ult? [ 11 prim, ] ;
+: p.and [ 12 prim, ] ;
+: p.or [ 13 prim, ] ;
+: p.xor [ 14 prim, ] ;
+: p.invert [ 15 prim, ] ;
+: p.lshift [ 16 prim, ] ;
+: p.rshift [ 17 prim, ] ;
+: p.c@ [ 18 prim, ] ;
+: p.c! [ 19 prim, ] ;
+: p.@ [ 20 prim, ] ;
+: p.! [ 21 prim, ] ;
+: p.region-new [ 22 prim, ] ;
+: p.region-free [ 23 prim, ] ;
+: p.region-size [ 24 prim, ] ;
+: p.call [ 25 prim, ] ;
+: p.seal [ 26 prim, ] ;
+: p.code-cid [ 27 prim, ] ;
+: p.resolve [ 28 prim, ] ;
+: p.publish [ 29 prim, ] ;
+: p.blob-cid [ 30 prim, ] ;
+: p.blob-read [ 31 prim, ] ;
+: p.trap [ 32 prim, ] ;
+: p.f+ [ 36 prim, ] ;
+: p.f- [ 37 prim, ] ;
+: p.f* [ 38 prim, ] ;
+: p.f/ [ 39 prim, ] ;
+: p.feq? [ 40 prim, ] ;
+: p.flt? [ 41 prim, ] ;
+: p.i>f [ 42 prim, ] ;
+: p.f>i [ 43 prim, ] ;
 
 -- Within this file each primitive name is an immediate word that emits the
 -- primitive op. So compiled code is inlined whatever system compiles this
@@ -177,7 +177,8 @@
 
 -- The byte emitters again, now with `get` and `put` inline; words above keep
 -- the first `c,` and `prim,`. Then `0=`, `out` and `here` compile inline too.
--- `0=` is exported as `p-0=`, a function with the same code.
+-- `0=` is exported as `p.0=`, a function with the same code. The wrappers
+-- share the namespace-style prefix `p.`, for primitive.
 : c, 24 get 16 get c! 16 get 1 u+ 16 put ;
 : prim, 2 c, c, ;
 -- A cell, little endian: eight bytes, unrolled.
@@ -185,7 +186,7 @@
   dup c, 8 rshift dup c, 8 rshift dup c, 8 rshift c, ;
 : literal 1 c, , ;
 : fliteral 10 c, , ;
-: p-0= 0 eq? ;
+: p.0= 0 eq? ;
 : 0= 0 literal 10 prim, ; immediate
 : out 24 literal 44 prim, ; immediate
 : here 16 literal 44 prim, ; immediate
@@ -1083,32 +1084,32 @@ _v ᵥ
 : sq-name 2 region-new 115 over 0 c! 34 over 1 c! 0 2 ;
 
 : init
-  ' p-dup 0 prim-flag s" dup" install
-  ' p-drop 1 prim-flag s" drop" install
-  ' p-swap 2 prim-flag s" swap" install
-  ' p-over 3 prim-flag s" over" install
-  ' p-rot 4 prim-flag s" rot" install
-  ' p-u+ 5 prim-flag s" u+" install
-  ' p-u- 6 prim-flag s" u-" install
-  ' p-u* 7 prim-flag s" u*" install
-  ' p-u/ 8 prim-flag s" u/" install
-  ' p-umod 9 prim-flag s" umod" install
-  ' p-eq? 10 prim-flag s" eq?" install
-  ' p-ult? 11 prim-flag s" ult?" install
-  ' p-and 12 prim-flag s" and" install
-  ' p-or 13 prim-flag s" or" install
-  ' p-xor 14 prim-flag s" xor" install
-  ' p-invert 15 prim-flag s" invert" install
-  ' p-lshift 16 prim-flag s" lshift" install
-  ' p-rshift 17 prim-flag s" rshift" install
-  ' p-c@ 18 prim-flag s" c@" install
-  ' p-c! 19 prim-flag s" c!" install
-  ' p-@ 20 prim-flag s" @" install
-  ' p-! 21 prim-flag s" !" install
-  ' p-region-new 22 prim-flag s" region-new" install
-  ' p-region-free 23 prim-flag s" region-free" install
-  ' p-region-size 24 prim-flag s" region-size" install
-  ' p-call 25 prim-flag s" call" install
+  ' p.dup 0 prim-flag s" dup" install
+  ' p.drop 1 prim-flag s" drop" install
+  ' p.swap 2 prim-flag s" swap" install
+  ' p.over 3 prim-flag s" over" install
+  ' p.rot 4 prim-flag s" rot" install
+  ' p.u+ 5 prim-flag s" u+" install
+  ' p.u- 6 prim-flag s" u-" install
+  ' p.u* 7 prim-flag s" u*" install
+  ' p.u/ 8 prim-flag s" u/" install
+  ' p.umod 9 prim-flag s" umod" install
+  ' p.eq? 10 prim-flag s" eq?" install
+  ' p.ult? 11 prim-flag s" ult?" install
+  ' p.and 12 prim-flag s" and" install
+  ' p.or 13 prim-flag s" or" install
+  ' p.xor 14 prim-flag s" xor" install
+  ' p.invert 15 prim-flag s" invert" install
+  ' p.lshift 16 prim-flag s" lshift" install
+  ' p.rshift 17 prim-flag s" rshift" install
+  ' p.c@ 18 prim-flag s" c@" install
+  ' p.c! 19 prim-flag s" c!" install
+  ' p.@ 20 prim-flag s" @" install
+  ' p.! 21 prim-flag s" !" install
+  ' p.region-new 22 prim-flag s" region-new" install
+  ' p.region-free 23 prim-flag s" region-free" install
+  ' p.region-size 24 prim-flag s" region-size" install
+  ' p.call 25 prim-flag s" call" install
   ' word 0 s" word" install
   ' lookup 0 s" find" install
   ' >xt 0 s" >xt" install
@@ -1132,7 +1133,7 @@ _v ᵥ
   ' quote-open 5 s" [" install
   ' quote-close 1 s" ]" install
   ' prim, 0 s" prim," install
-  ' p-0= 0 s" 0=" install
+  ' p.0= 0 s" 0=" install
   ' nip 0 s" nip" install
   ' qif 5 s" if" install
   ' then 1 s" then" install
@@ -1162,21 +1163,21 @@ _v ᵥ
   ' * 0 s" *" install
   ' / 0 s" /" install
   ' mod 0 s" mod" install
-  ' p-trap 32 prim-flag s" trap" install
-  ' p-seal 26 prim-flag s" seal" install
-  ' p-code-cid 27 prim-flag s" code-cid" install
-  ' p-resolve 28 prim-flag s" resolve" install
-  ' p-publish 29 prim-flag s" publish" install
-  ' p-blob-cid 30 prim-flag s" blob-cid" install
-  ' p-blob-read 31 prim-flag s" blob-read" install
-  ' p-f+ 36 prim-flag s" f+" install
-  ' p-f- 37 prim-flag s" f-" install
-  ' p-f* 38 prim-flag s" f*" install
-  ' p-f/ 39 prim-flag s" f/" install
-  ' p-feq? 40 prim-flag s" feq?" install
-  ' p-flt? 41 prim-flag s" flt?" install
-  ' p-i>f 42 prim-flag s" i>f" install
-  ' p-f>i 43 prim-flag s" f>i" install
+  ' p.trap 32 prim-flag s" trap" install
+  ' p.seal 26 prim-flag s" seal" install
+  ' p.code-cid 27 prim-flag s" code-cid" install
+  ' p.resolve 28 prim-flag s" resolve" install
+  ' p.publish 29 prim-flag s" publish" install
+  ' p.blob-cid 30 prim-flag s" blob-cid" install
+  ' p.blob-read 31 prim-flag s" blob-read" install
+  ' p.f+ 36 prim-flag s" f+" install
+  ' p.f- 37 prim-flag s" f-" install
+  ' p.f* 38 prim-flag s" f*" install
+  ' p.f/ 39 prim-flag s" f/" install
+  ' p.feq? 40 prim-flag s" feq?" install
+  ' p.flt? 41 prim-flag s" flt?" install
+  ' p.i>f 42 prim-flag s" i>f" install
+  ' p.f>i 43 prim-flag s" f>i" install
   ' stack-effect 0 s" stack-effect" install
   ' hash-bytes 0 s" hash-bytes" install
   ' checked 0 s" checked" install

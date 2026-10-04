@@ -141,7 +141,7 @@ source cannot rely on them, because they belong to whichever system is
 compiling it, and generation 0 has none. So the file inlines by itself:
 
 - **Primitive names are emitters.** Phase 2 defines each primitive twice. The
-  wrapper (`p-dup`, one primitive op and a return) is what `init` binds as
+  wrapper (`p.dup`, one primitive op and a return) is what `init` binds as
   `dup`, flagged inline, so `' dup` and `call` work in a booted system. Then an
   immediate word named `dup` emits the primitive op. Within the file every use
   of a primitive therefore compiles inline, whatever system compiles it.
@@ -151,7 +151,7 @@ compiling it, and generation 0 has none. So the file inlines by itself:
   `ops` depends on that, and those words only run at compile time; a faster,
   incremental `ops` and the control words that use it are defined again below
   the emitters, as are `c,`, `prim,`, `,` and `literal`. `0=` is exported as
-  `p-0=`, a function with the same code.
+  `p.0=`, a function with the same code.
 - These emitters are compile-time devices. Nothing exported refers to them, and
   the file never uses a primitive name outside a definition.
 

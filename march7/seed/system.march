@@ -167,7 +167,8 @@
 : exit 0 c, ; immediate
 -- Dictionary flags: bit 0 immediate; bit 1 inline primitive, id in bits 8-15;
 -- bit 2 transparent (an immediate word that leaves pending quotations alone);
--- bit 3 a family word, whose calls `;` resolves by type.
+-- bit 3 a family word, whose calls `;` resolves by type; bit 4 a generic
+-- word, whose calls `;` may replace with an instance for their input types.
 : immediate 8 get dup 0= if 7 trap then 16 u+ dup get 1 or swap put ;
 : prim-flag 8 lshift 2 or ;
 
@@ -464,7 +465,9 @@
 -- 72 lowest depth, 80 returned?, 88 return depth, 96 unknown reason,
 -- 104 pass, 112 assumed own effect, 120 recurs?, 128 types, 136 a loop
 -- header's types were widened, 144 types at return, 152-168 and 176-200
--- temporaries, 208 a family call's known types matched no clause.
+-- temporaries, 208 a family call's known types matched no clause, 216 the
+-- types the inputs start with (from working offset 3520), 224 the code calls
+-- a family word or a generic word.
 -- Depths are biased by 2^32 so that unsigned comparison works. Per-op tables
 -- start at 256: 0 byte offset; 1-4 state from forward branches (set?, depth,
 -- scratch, quotation); 5-7 state on arrival (set?, depth, scratch); 8 loop
@@ -472,9 +475,9 @@
 -- header's types recorded?; 12 the clause chosen for a family call; 13 the
 -- literal before it is to become a float.
 -- ( field -- v )
-: an@ 600 get swap @ ;
+: an@ 600 literal 44 prim, 2 prim, 20 prim, ; immediate
 -- ( v field -- )
-: an! 600 get swap ! ;
+: an! 600 literal 44 prim, 2 prim, 21 prim, ; immediate
 -- ( k table -- field )
 : tab 16 an@ 8 u* u* 256 u+ swap 8 u* u+ ;
 -- ( k table -- v )
@@ -500,6 +503,7 @@
 : analysis-begin
   over over count-ops dup 112 u* 256 u+ region-new 600 put
   968 get 1 eq? if 600 get 968 put then
+  3520 get 216 an! 0 3520 put
   16 an! 8 an! 0 an!
   0 32 an! 0 24 an!
   cycle 24 an@ 16 an@ ult? while
@@ -634,11 +638,10 @@
   24 an@ dup 0= if exit then
   dup 1 tab@ over 8 tab@ or if drop 0 exit then
   1 u- 0 tab@ code@ 1 eq? 128 an@ 255 and 1 eq? and ;
--- ( token -- flag ) Whether a family call's inputs are all known and not all
--- i64, so that falling back to the i64 version would be wrong.
-: typed-mismatch?
-  callee-effect effect-in ty-mask >r
-  128 an@ r@ and
+-- ( token types -- flag ) Whether a family call's inputs are all known and
+-- not all i64, so that falling back to the i64 version would be wrong.
+: types-mismatch?
+  swap callee-effect effect-in ty-mask >r r@ and
   dup dup 4 rshift or dup 2 rshift or dup 1 rshift or 72340172838076673 and
   72340172838076673 r@ and eq?
   swap 72340172838076673 r> and eq? 0= and ;
@@ -647,13 +650,32 @@
 -- literal just before it (`x 1 +` with x an f64). With neither, it stays a
 -- call to the family word, an error if its inputs are known and not i64.
 : family-step
+  dup family? 0= if 0 exit then
   dup 128 an@ find-clause dup if nip dup 24 an@ 12 tab! call-effect 1 exit then drop
   retype-ok? if
     dup 128 an@ -256 and 2 or find-clause dup if
       nip 1 24 an@ 13 tab! dup 24 an@ 12 tab! 2 ty-set call-effect 1 exit
     then drop
   then
-  dup typed-mismatch? if 1 208 an! then 0 ;
+  dup 128 an@ types-mismatch? if 1 208 an! then 0 ;
+
+-- Generic words: a word whose code still calls a family word, or another
+-- generic word, has bit 40 set in its effect. A call to one with an f64 among
+-- its inputs gets an instance: its code compiled again with those input
+-- types, through `instantiate` (its token is at working offset 3504).
+-- ( token -- flag )
+: generic? callee-effect 40 rshift 1 and ;
+-- ( types -- flag ) Whether any slot is an f64.
+: has-f64?
+  144680345676153346 xor
+  dup 72340172838076673 u- swap invert and -9187201950435737472 and 0= 0= ;
+-- ( token -- token 0 | 1 )
+: instance-step
+  dup generic? 0= if 0 exit then
+  dup callee-effect effect-in ty-mask 128 an@ and
+  dup has-f64? 0= if drop 0 exit then
+  over swap 3504 get call
+  nip dup 24 an@ 12 tab! call-effect 1 ;
 
 -- ( -- )
 : do-return
@@ -663,7 +685,8 @@
 -- A call to a family word that stays unresolved is the i64 version.
 : do-call
   callee-token
-  968 get 600 get eq? if family-step if exit then then
+  968 get 600 get eq? if family-step if exit then instance-step if exit then then
+  dup family? over generic? or if 1 224 an! then
   dup family? swap call-effect if 1 ty-set then ;
 -- ( -- )
 : do-quote
@@ -742,7 +765,7 @@
     24 an@ 1 u+ 24 an!
   repeat
   0 24 an! 1 40 an! 4294967296 48 an! 0 56 an! 0 64 an! 4294967296 72 an!
-  0 80 an! 0 88 an! 0 96 an! 0 128 an! 0 144 an! 0 208 an!
+  0 80 an! 0 88 an! 0 96 an! 216 an@ 128 an! 0 144 an! 0 208 an!
   cycle 24 an@ 16 an@ ult? while
     arrive 40 an@ if step then
     24 an@ 1 u+ 24 an!
@@ -753,10 +776,6 @@
   80 an@ 0= if 7 effect-unknown exit then
   4294967296 72 an@ u- 88 an@ 72 an@ u- effect-pack ;
 
--- ( region length -- packed ) The effect of canonical code bytes. A word
--- that recurs is analysed twice: once treating `recur` as a dead end, which
--- gives its base case, then again assuming that effect for `recur`, which
--- must reproduce it.
 -- ( pos -- v ) A little-endian cell in the code being analysed.
 : code-cell
   0 184 an! 8 176 an!
@@ -764,13 +783,19 @@
     176 an@ 1 u- 176 an!
     184 an@ 8 lshift over 176 an@ u+ code@ or 184 an!
   repeat drop 184 an@ ;
+-- ( byte pos -- ) Write a byte of the code being analysed, which is the
+-- definition being finished or the copy an instance is made from.
+: code! 0 an@ swap c! ;
 -- ( k -- ) Make the integer literal at op k a float literal of its value.
 : retype-literal
   0 tab@ 192 an!
   192 an@ 1 u+ code-cell i>f 200 an!
-  10 192 an@ b!
-  200 an@ 192 an@ 1 u+ u32!
-  200 an@ 32 rshift 192 an@ 5 u+ u32! ;
+  10 192 an@ code!
+  0 176 an!
+  cycle 176 an@ 8 ult? while
+    200 an@ 176 an@ 8 u* rshift 192 an@ 1 u+ 176 an@ u+ code!
+    176 an@ 1 u+ 176 an!
+  repeat ;
 -- ( -- ) Patch each resolved family call to its clause.
 : apply-resolutions
   0 24 an!
@@ -782,6 +807,10 @@
 
 -- ( pass -- ) Run a pass until no loop header's types are widened.
 : run-pass* cycle 0 136 an! dup run-pass 136 an@ while repeat drop ;
+-- ( region length -- packed ) The effect of canonical code bytes. A word
+-- that recurs is analysed twice: once treating `recur` as a dead end, which
+-- gives its base case, then again assuming that effect for `recur`, which
+-- must reproduce it.
 : analyze
   600 get >r
   analysis-begin 1 run-pass* pass-result
@@ -791,6 +820,7 @@
       over over eq? if drop else drop drop 8 effect-unknown then
     else swap drop then
   then then
+  dup effect-known? 224 an@ and if 1099511627776 or then
   144 an@ 720 put
   968 get 600 get eq? if 208 an@ dup 1008 put 0= if apply-resolutions then 0 968 put then
   600 get region-free r> 600 put ;
@@ -828,18 +858,105 @@
   1 96 put 3840 80 put
   65536 region-new 24 put 0 16 put 1 0 put ;
 -- ( -- ) Resolve the family calls in the definition being finished; trap 23
--- if a call's known input types match no clause.
+-- if a call's known input types match no clause. 1016 says whether the
+-- definition is generic, so `;` can flag it (dictionary flag bit 4).
 : resolve-families
   0 960 put 0 1008 put 1 968 put
-  out here analyze drop 0 968 put
+  out here analyze 40 rshift 1 and 1016 put 0 968 put
   1008 get if 23 trap then ;
+
+-- Instances, remembered by word and input types in the region whose handle
+-- is at 3512: a count, then entries of three cells (word, types, instance).
+-- The same table remembers output types for top-level runs, keyed by the
+-- word with bit 62 set. Working memory 3536-3568 holds temporaries.
+-- ( key types -- value | 0 )
+: find-instance
+  3544 put 3536 put 0 3552 put
+  cycle 3552 get 3512 get 0 @ ult? while
+    3512 get 3552 get 24 u* 8 u+ @ 3536 get eq?
+    3512 get 3552 get 24 u* 16 u+ @ 3544 get eq? and if
+      3512 get 3552 get 24 u* 24 u+ @ exit
+    then
+    3552 get 1 u+ 3552 put
+  repeat 0 ;
+-- ( key types value -- ) Remember an entry, unless the table is full; the
+-- table only saves work, since an instance is the same code each time.
+: add-instance
+  3512 get 0 @ dup 4096 ult? 0= if drop drop drop drop exit then
+  24 u* 8 u+ >r
+  3512 get r@ 16 u+ ! 3512 get r@ 8 u+ ! 3512 get r> !
+  3512 get 0 @ 1 u+ 3512 get 0 ! ;
+-- ( token types -- instance ) A generic word compiled again for inputs of
+-- the given types: its code is copied, resolved starting from those types,
+-- and sealed. A known type that matches no clause in the copy is an error
+-- of the call (trap 23 at the caller's `;`, or at once at top level).
+: instantiate
+  over over find-instance dup if nip nip exit then drop
+  over 1 680 code-cid 1 680 blob-read swap drop
+  dup region-new 3560 put 3568 put 0 3560 get 0 3568 get copy
+  3560 get 3568 get
+  >r >r dup 3520 put r> r>
+  968 get >r 1008 get >r 1 968 put 0 1008 put
+  over over analyze drop
+  1008 get r> 1008 put r> 968 put
+  if 600 get if 1 208 an! else 23 trap then then
+  over >r >r 0 r> seal r> region-free
+  dup >r add-instance r> ;
+-- ( xt types -- outtypes ) The output types of a word run on inputs of the
+-- given types: an analysis of its code starting from them, remembered.
+: typed-outputs
+  over 4611686018427387904 or over find-instance dup if nip nip 9223372036854775807 and exit then drop
+  over 1 680 code-cid 1 680 blob-read swap drop
+  >r >r dup 3520 put r> r>
+  analyze drop 720 get
+  dup >r -9223372036854775808 or >r 4611686018427387904 rot or swap r> add-instance r> ;
+
+-- Top level: the interpreter keeps the types of the values it pushes, the top
+-- eight at 3576, so a family word or a generic word run there gets the clause
+-- or instance its inputs' types call for. 3528 says the top value is an
+-- integer literal just read, which a float clause may convert.
+-- ( kind -- )
+: shadow-literal dup 1 eq? 3528 put 3576 get 8 lshift or 3576 put ;
+-- ( in out outtypes -- ) Pop in slots' types, push out with these types.
+: shadow-apply
+  >r >r
+  dup 8 ult? if 8 u* 3576 get swap rshift else drop 0 then
+  r> dup 8 ult? if 8 u* lshift else drop drop 0 then
+  r> or 3576 put ;
+-- ( xt -- xt' ) A family word's clause for the values on the stack.
+: shadow-clause
+  dup 3576 get find-clause dup if nip exit then drop
+  3528 get 3576 get 255 and 1 eq? and if
+    dup 3576 get -256 and 2 or find-clause dup if
+      nip >r i>f r> 3576 get -256 and 2 or 3576 put exit
+    then drop
+  then
+  dup 3576 get types-mismatch? if 23 trap then ;
+-- ( xt -- ) The types of the stack after running xt.
+: shadow-effect
+  dup callee-effect dup effect-known? 0= if drop drop 0 3576 put exit then
+  dup effect-in ty-mask 3576 get and
+  dup if rot swap typed-outputs else drop swap 8 u* 712 get swap @ then
+  over effect-out ty-mask and
+  swap dup effect-in swap effect-out rot shadow-apply ;
+-- ( xt flags -- ) Run a word at top level. Its dictionary flags say whether
+-- it is a family word (bit 3) or a generic one (bit 4).
+: run-typed
+  dup 8 and if drop shadow-clause else
+    16 and if
+      dup callee-effect effect-in ty-mask 3576 get and
+      dup has-f64? if instantiate else drop then
+    then
+  then
+  dup shadow-effect 0 3528 put call ;
 : semicolon 0 get 0= if 6 trap then 800 get if 20 trap then
   tailify 0 c,
-  960 get if resolve-families then
+  0 1016 put 960 get if resolve-families then
   632 get if out here analyze dup effect-known? 0= if effect-in 100 u+ trap then
   else 0 then
   out 0 here seal
   dup >r 0 96 get 80 get 88 get install
+  1016 get if 8 get 16 u+ dup get 16 or swap put then
   dup if r@ 8 u* 624 get swap ! 720 get 712 get r@ 8 u* ! else drop then
   out region-free 0 24 put 0 0 put ;
 
@@ -1196,17 +1313,17 @@ _v ᵥ
 : interpret
   cycle read-word while
     number dup if
-      0 get if materialize 2 eq? if fliteral else literal then else drop then
+      0 get if materialize 2 eq? if fliteral else literal then else shadow-literal then
     else
       drop token lookup dup 0= if 1 trap then
       dup 16 u+ get
       dup 1 and if
         dup 4 and 0= if 0 get if materialize then then
-        drop >xt call
+        0 get if drop >xt call else swap >xt swap run-typed then
       else
-        0 get 0= if drop >xt call else
+        0 get 0= if swap >xt swap run-typed else
           materialize
-          dup 8 and if 1 960 put then
+          dup 24 and if 1 960 put then
           dup 2 and if nip 8 rshift prim, else drop >xt compile, then
         then
       then
@@ -1226,7 +1343,8 @@ _v ᵥ
     800 get 1 u- dup 800 put 24 u* 2560 u+ get dup if region-free else drop then
   repeat
   cycle 808 get while 808 get 1 u- dup 808 put q-entry get region-free repeat
-  0 24 put 0 16 put 0 0 put 0 600 put 0 872 put 0 960 put 0 968 put ;
+  0 24 put 0 16 put 0 0 put 0 600 put 0 872 put 0 960 put 0 968 put
+  0 3520 put 0 3528 put 0 3576 put ;
 
 -- Dictionary export: oldest first, name length, flags, code CID, name bytes.
 : out-byte 400 get 408 get c! 408 get 1 u+ 408 put ;
@@ -1376,7 +1494,7 @@ _v ᵥ
   ' - 8 s" -" install
   ' * 8 s" *" install
   ' / 8 s" /" install
-  ' mod 0 s" mod" install
+  ' mod 16 s" mod" install
   ' p.trap 32 prim-flag s" trap" install
   ' p.seal 26 prim-flag s" seal" install
   ' p.code-cid 27 prim-flag s" code-cid" install
@@ -1402,6 +1520,7 @@ _v ᵥ
 : boot 4096 32 put 0 8 put 0 0 put
   1048576 region-new 624 put 1048576 region-new 712 put ' effect-of 616 put 0 632 put
   4096 region-new 728 put register-families
+  98312 region-new 3512 put ' instantiate 3504 put 0 3576 put 0 3528 put
   8192 region-new 736 put
   dup if restore else drop drop drop init then
   ' evaluate ' recover ' snapshot ;

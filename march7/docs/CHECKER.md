@@ -162,15 +162,37 @@ runs the typed analysis in resolving mode:
   Inputs that are all known but match no clause (`1 2.5 +`, where the 1 is not
   just before the call) trap 23, and the definition is not installed.
 
-Unresolved calls are still i64 when the types are only known at the call
-sites: `: double dup + ;` on a float is integer addition on its bits. The
-remedy is the next step, instantiating such words per call site's types.
+**Generic words.** A word whose code still calls a family word, or another
+generic word, is generic: bit 40 of its effect says so, and `;` sets
+dictionary flag bit 4 on it, so that compiling a call to it also triggers
+resolution. A call to a generic word with an f64 among its inputs gets an
+instance:
+
+- The word's code is copied and resolved with the call's input types as the
+  types its inputs start with, then sealed as an anonymous word. The call is
+  patched to it.
+- Instances are remembered by word and input types (working offset 3512), so
+  the same call gets the same instance. Instances nest: `quad`, calling
+  `double` twice, gets an instance whose calls go to `double`'s instance.
+- A literal in the word takes the call's types: `: inc 1 + ;` on 2.5 adds 1.0.
+- A known type that matches no clause in the instance is the caller's error
+  (trap 23 at its `;`).
+
+**Top level.** The interpreter keeps the types of the values it pushes, the
+top eight (working offset 3576): literals give theirs, and each word run
+there gives its outputs the types an analysis from its inputs' types finds
+(remembered by word and input types). So `1.5 2.5 +`, `1.5 dup +` and
+`2.5 double` typed at top level use the f64 clause or an instance, and an
+integer literal just read converts to a float when a float clause needs it
+(`2.5 1 +`). Recovery after an error forgets the types, with the stack.
+
+Words run at top level are analysed the first time they run there, which
+costs the system's own rebuild about a million steps once per session (the
+analysis of `:` covers much of the compiler).
 
 ## Next slices
 
-1. **Generic words.** A word whose family calls depend on its input types is
-   compiled per set of input types at its call sites, so `double` on an f64
-   gets the f64 clause. Then arrays, quotation types and strings.
+1. **Arrays, quotation types and strings** as types, and `!` conversion.
 2. **Consumer-completed control flow.** Done (docs/QUOTATIONS.md): `if`,
    `while` and `times` inline pending quotations, so the checker sees plain
    branches. `map` waits for arrays.

@@ -154,3 +154,77 @@ fn unknown_types_keep_the_i64_version_and_mismatches_are_errors() {
     d.evaluate(": ok 1.0 2.5 + ; ok").unwrap();
     assert_eq!(d.machine.stack, floats(&[3.5]));
 }
+
+#[test]
+fn generic_words_get_an_instance_per_input_types() {
+    let g = system();
+    let double = ": double dup + ; ";
+    assert_eq!(
+        run(&g, &format!("{double} : t 2.5 double ; t")).unwrap(),
+        floats(&[5.0])
+    );
+    assert_eq!(run(&g, &format!("{double} : t 2 double ; t")).unwrap(), [4]);
+    // Instances within instances: quad calls double on what it was given.
+    assert_eq!(
+        run(
+            &g,
+            &format!("{double} : quad double double ; : t 1.5 quad ; t")
+        )
+        .unwrap(),
+        floats(&[6.0])
+    );
+    // A literal in the generic word takes the type of the call site's input.
+    assert_eq!(
+        run(&g, ": inc 1 + ; : t 2.5 inc ; t").unwrap(),
+        floats(&[3.5])
+    );
+    // The same word and types give the same instance.
+    let mut d = Driver::boot(&g).unwrap();
+    d.evaluate(&format!(
+        "{double} : a 2.5 double ; : b 3.5 double ; ' a ' b"
+    ))
+    .unwrap();
+    let b = d.machine.stack.pop().unwrap();
+    let a = d.machine.stack.pop().unwrap();
+    let code = |d: &mut Driver, xt| {
+        let cid = d.machine.cid(xt).unwrap();
+        let s = d.snapshot().unwrap();
+        let march7::Blob::Code(bytes) = &s.blobs[&cid] else {
+            panic!("code")
+        };
+        march7::code::decode(bytes).unwrap()
+    };
+    let calls = |ops: Vec<march7::Op>| {
+        ops.into_iter()
+            .filter_map(|o| match o {
+                march7::Op::Call(c) | march7::Op::Tail(c) => Some(c),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let (ca, cb) = (code(&mut d, a), code(&mut d, b));
+    assert_eq!(calls(ca), calls(cb));
+    // A mismatch inside the instance is the caller's error.
+    assert_eq!(run(&g, ": h 2 swap + ; : t 2.5 h ;"), Err(Error::User(23)));
+}
+
+#[test]
+fn top_level_code_is_typed_too() {
+    let g = system();
+    assert_eq!(run(&g, "1.5 2.5 +").unwrap(), floats(&[4.0]));
+    assert_eq!(run(&g, "1.5 dup +").unwrap(), floats(&[3.0]));
+    assert_eq!(run(&g, "2.5 1 +").unwrap(), floats(&[3.5]));
+    assert_eq!(run(&g, "1 2 + 3 *").unwrap(), [9]);
+    assert_eq!(run(&g, "1.5 2.5 lt?").unwrap(), [1]);
+    assert_eq!(
+        run(&g, ": double dup + ; 2.5 double").unwrap(),
+        floats(&[5.0])
+    );
+    assert_eq!(run(&g, ": double dup + ; 21 double").unwrap(), [42]);
+    assert_eq!(run(&g, "1 2.5 +"), Err(Error::User(23)));
+    // After an error the types start afresh, with the stack.
+    let mut d = Driver::boot(&g).unwrap();
+    assert!(d.evaluate("1 2.5 +").is_err());
+    d.evaluate("1.5 2.5 +").unwrap();
+    assert_eq!(d.machine.stack, floats(&[4.0]));
+}

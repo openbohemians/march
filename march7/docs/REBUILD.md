@@ -85,11 +85,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 34.8 million (115 ms) |
-| The same on generation 1 | 4.6 million (16 ms) |
+| Machine steps to compile `system.march` on generation 0 | 39.8 million (133 ms) |
+| The same on generation 1 | 6.1 million (21 ms) |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 72,874 bytes |
-| `system.march` | 1,409 lines |
+| Rebuilt image size | 73,288 bytes |
+| `system.march` | 1,528 lines |
 | `system.asm` listing | 1,403 lines |
 
 ## Tests
@@ -201,9 +201,11 @@ The driver's step budget (10 million by default) is a safety net against
 runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
 rebuild tests use an explicit budget of 60 million steps, and a named canary
-test asserts that a rebuilt system compiles the system source in under 5.5
-million steps (4.6 million as of checker slice 2, whose ~190 lines account for
-the growth from 3.8). When the command line exhausts the budget, it says so and
+test asserts that a rebuilt system compiles the system source in under 7
+million steps. It takes 6.1 million as of checker slice 2: its code added 1.3
+million to the 3.8 before it, and typing at top level about a million more,
+mostly analysing the words the source runs at top level once per session.
+`an@` and `an!` became inline emitters along the way. When the command line exhausts the budget, it says so and
 suggests `--fuel`.
 
 **Working-memory primitives (2026-10-04).** Adding symbol names

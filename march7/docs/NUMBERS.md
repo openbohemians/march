@@ -70,5 +70,7 @@ There is no implicit promotion between values, decided 2026-10-01. Conversions
 are explicit (`i>f`, `f>i`). Since 2026-10-04 `+ - * /` and the comparisons
 are families resolved by type (docs/CHECKER.md, slice 2), so `1.5 2.5 +` is a
 float addition, and an integer literal just before a family call takes its
-type from context: `x 1 +` with an f64 x adds 1.0. The planned `!` operator
-converts a value to the type of the value below it.
+type from context: `x 1 +` with an f64 x adds 1.0. A word such as
+`: double dup + ;` gets an instance per input types, so `2.5 double` is 5.0,
+and the same holds at top level. The planned `!` operator converts a value to
+the type of the value below it.

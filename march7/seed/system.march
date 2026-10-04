@@ -124,8 +124,8 @@
 : f>i 43 prim, ; immediate
 
 -- Phase 3: clean base words.
-: get 1 swap @ ;
-: put 1 swap ! ;
+: get [ 44 prim, ] ;
+: put [ 45 prim, ] ;
 : 0= 0 eq? ;
 : nip swap drop ;
 : out 24 get ;
@@ -172,11 +172,11 @@
 : literal 1 c, , ;
 : fliteral 10 c, , ;
 
--- From here on, `get` and `put` compile inline: a literal 1 (working region
--- 1), a swap, and the load or store. Words above keep calling them, which the
--- hand-counted `ops` relies on; they only run at compile time.
-: get 1 literal 2 prim, 20 prim, ; immediate
-: put 1 literal 2 prim, 21 prim, ; immediate
+-- From here on, `get` and `put` compile inline, as one primitive each: a
+-- load or store in working region 1 (44, 45). Words above keep calling them,
+-- which the hand-counted `ops` relies on; they only run at compile time.
+: get 44 prim, ; immediate
+: put 45 prim, ; immediate
 
 -- Phase 5: the scratch stack, for temporaries that must survive calls.
 -- It belongs to the machine, not region 1. Every call gets its own scratch
@@ -510,13 +510,16 @@
   else drop 1 fail then ;
 -- ( id -- )
 : do-prim
-  43 over ult? if drop 11 fail exit then
+  45 over ult? if drop 11 fail exit then
+  dup 45 eq? if drop 2 0 apply 0 64 an! exit then
   dup 25 eq? if drop do-execute exit then
   dup 32 eq? if drop 1 0 apply 0 40 an! exit then
   dup 33 eq? if drop 1 0 apply 56 an@ 1 u+ 56 an! 0 64 an! exit then
   dup 34 eq? if drop 56 an@ 0= if 6 fail exit then
     56 an@ 1 u- 56 an! 0 1 apply 0 64 an! exit then
   dup 35 eq? if drop 56 an@ 0= if 6 fail exit then 0 1 apply 0 64 an! exit then
+  -- 36-41 take two and leave one (float arithmetic and comparison); 42-44
+  -- take one and leave one (conversions, and the working-region load).
   dup 36 ult? 0= if 42 ult? if 2 1 else 1 1 then apply 0 64 an! exit then
   dup 0= if drop 1 2 apply exit then
   dup prim-in swap prim-out apply 0 64 an! ;
@@ -605,7 +608,6 @@
   dup 88 put 1 swap 3840 swap copy
   1 96 put 3840 80 put
   65536 region-new 24 put 0 16 put 1 0 put ;
-: colon word begin ;
 : semicolon 0 get 0= if 6 trap then 800 get if 20 trap then
   0 c,
   632 get if out here analyze dup effect-known? 0= if effect-in 100 u+ trap then
@@ -616,7 +618,6 @@
   out region-free 0 24 put 0 0 put ;
 
 : >xt 8 u+ get ;
-: quote-word word find dup 0= if 1 trap then >xt 0 get if compile-quote then ;
 : emit-recur 7 c, ;
 : line-comment cycle 56 get 48 get ult? while input-char inc-pos 10 eq? if exit then repeat ;
 
@@ -629,6 +630,221 @@
   40 get 344 get 56 get 344 get u- publish
   inc-pos
   0 get if 8 c, out here blob-cid here 32 u+ 16 put else 0 over region-size then ; immediate
+
+-- Symbols: in source, `\times` is the word `×` (docs/SURFACE.md), so code
+-- compiles the same whether or not `march7 fmt` has rewritten it. One entry
+-- per line: the name after the backslash, a space, the symbol. A symbol is
+-- never longer in bytes than its escape, so a word only shrinks. The
+-- formatter reads this same table.
+: symbol-table s"
+times ×
+div ÷
+cdot ⋅
+pm ±
+mp ∓
+sqrt √
+cbrt ∛
+sum ∑
+prod ∏
+infty ∞
+partial ∂
+nabla ∇
+circ ∘
+leq ≤
+le ≤
+geq ≥
+ge ≥
+neq ≠
+ne ≠
+equiv ≡
+approx ≈
+ll ≪
+gg ≫
+to →
+rightarrow →
+leftarrow ←
+gets ←
+leftrightarrow ↔
+Rightarrow ⇒
+Leftarrow ⇐
+Leftrightarrow ⇔
+mapsto ↦
+uparrow ↑
+downarrow ↓
+neg ¬
+lnot ¬
+wedge ∧
+land ∧
+vee ∨
+lor ∨
+forall ∀
+exists ∃
+top ⊤
+bot ⊥
+vdash ⊢
+in ∈
+notin ∉
+ni ∋
+subset ⊂
+subseteq ⊆
+supset ⊃
+supseteq ⊇
+cup ∪
+cap ∩
+emptyset ∅
+varnothing ∅
+ldots …
+cdots ⋯
+prime ′
+degree °
+alpha α
+beta β
+gamma γ
+delta δ
+epsilon ϵ
+varepsilon ε
+zeta ζ
+eta η
+theta θ
+vartheta ϑ
+iota ι
+kappa κ
+lambda λ
+mu μ
+nu ν
+xi ξ
+pi π
+rho ρ
+sigma σ
+tau τ
+upsilon υ
+phi ϕ
+varphi φ
+chi χ
+psi ψ
+omega ω
+Gamma Γ
+Delta Δ
+Theta Θ
+Lambda Λ
+Xi Ξ
+Pi Π
+Sigma Σ
+Upsilon Υ
+Phi Φ
+Psi Ψ
+Omega Ω
+_0 ₀
+_1 ₁
+_2 ₂
+_3 ₃
+_4 ₄
+_5 ₅
+_6 ₆
+_7 ₇
+_8 ₈
+_9 ₉
+_+ ₊
+_- ₋
+_= ₌
+_a ₐ
+_e ₑ
+_o ₒ
+_x ₓ
+_h ₕ
+_k ₖ
+_l ₗ
+_m ₘ
+_n ₙ
+_p ₚ
+_s ₛ
+_t ₜ
+_i ᵢ
+_j ⱼ
+_r ᵣ
+_u ᵤ
+_v ᵥ
+^0 ⁰
+^1 ¹
+^2 ²
+^3 ³
+^4 ⁴
+^5 ⁵
+^6 ⁶
+^7 ⁷
+^8 ⁸
+^9 ⁹
+^+ ⁺
+^- ⁻
+^= ⁼
+^n ⁿ
+^i ⁱ
+" ;
+
+-- Working memory: 448 word region, 456 offset, 464 length, 472 read index,
+-- 480 write index, 488 name start, 496 name length, 504 table region, 536
+-- table length, 544 table position, 552 entry name, 560 its length, 568
+-- compare index, 576 entry symbol, 584 its length. Rewritten words go to the
+-- buffer at 3584 (256 bytes).
+-- ( n -- byte ) A byte of the word being rewritten.
+: sym-at 448 get 456 get rot u+ c@ ;
+: ascii-letter? dup 65 ult? 0= over 91 ult? and swap dup 97 ult? 0= swap 123 ult? and or ;
+-- The length of the escape name at 488, into 496: `_` or `^` with the byte
+-- after it, or a run of ASCII letters; zero if neither.
+: sym-name 0 496 put
+  488 get 464 get ult? 0= if exit then
+  488 get sym-at dup 95 eq? swap 94 eq? or if
+    488 get 1 u+ 464 get ult? if 2 496 put then exit
+  then
+  cycle 488 get 496 get u+ dup 464 get ult? if sym-at ascii-letter? else drop 0 then
+  while 496 get 1 u+ 496 put repeat ;
+-- ( -- flag ) Whether the table entry at 552 names the escape at 488.
+: sym-same? 560 get 496 get eq? 0= if 0 exit then
+  0 568 put
+  cycle 568 get 496 get ult? if
+    504 get 552 get 568 get u+ c@  488 get 568 get u+ sym-at eq?
+  else 0 then
+  while 568 get 1 u+ 568 put repeat
+  568 get 496 get eq? ;
+-- ( -- flag ) Find the escape's entry; its symbol is then at 576, 584 long.
+: sym-lookup symbol-table 536 put drop 504 put 0 544 put
+  cycle 544 get 536 get ult? while
+    544 get 552 put
+    cycle 544 get 536 get ult? if 504 get 544 get c@ 32 eq? 0= else 0 then
+    while 544 get 1 u+ 544 put repeat
+    544 get 552 get u- 560 put
+    544 get 1 u+ dup 576 put 544 put
+    cycle 544 get 536 get ult? if 504 get 544 get c@ 10 eq? 0= else 0 then
+    while 544 get 1 u+ 544 put repeat
+    544 get 576 get u- 584 put
+    544 get 1 u+ 544 put
+    sym-same? if 1 exit then
+  repeat 0 ;
+-- ( region offset length -- region offset length ) A word with its `\name`
+-- escapes rewritten as symbols, in the buffer at 3584. A word too long for
+-- the buffer comes back unchanged; an unknown name is left as written.
+: symbolize dup 256 ult? 0= if exit then
+  464 put 456 put 448 put 0 472 put 0 480 put
+  cycle 472 get 464 get ult? while
+    472 get sym-at 92 eq? if
+      472 get 1 u+ 488 put sym-name 496 get if sym-lookup else 0 then
+    else 0 then
+    if
+      504 get 576 get 1 3584 480 get u+ 584 get copy
+      480 get 584 get u+ 480 put
+      472 get 1 u+ 496 get u+ 472 put
+    else
+      472 get sym-at 1 3584 480 get u+ c!
+      480 get 1 u+ 480 put  472 get 1 u+ 472 put
+    then
+  repeat
+  1 3584 480 get ;
+-- ( region offset length -- entry | 0 ) find, and failing that, find again
+-- with the word's escapes rewritten.
+: lookup find dup if exit then drop
+  240 get 248 get 256 get symbolize find ;
+: colon word symbolize begin ;
+: quote-word word lookup dup 0= if 1 trap then >xt 0 get if compile-quote then ;
 
 -- Quotations: `[ ... ]` compiles its body into a buffer of its own and leaves
 -- it pending, anchored where it appeared. A consumer (`if`, `while`, `times`)
@@ -739,7 +955,7 @@
     number dup if
       0 get if materialize 2 eq? if fliteral else literal then else drop then
     else
-      drop token find dup 0= if 1 trap then
+      drop token lookup dup 0= if 1 trap then
       dup 16 u+ get
       dup 1 and if
         dup 4 and 0= if 0 get if materialize then then
@@ -849,7 +1065,7 @@
   ' p-region-size 24 prim-flag s" region-size" install
   ' p-call 25 prim-flag s" call" install
   ' word 0 s" word" install
-  ' find 0 s" find" install
+  ' lookup 0 s" find" install
   ' >xt 0 s" >xt" install
   ' begin 0 s" begin" install
   ' colon 0 s" :" install

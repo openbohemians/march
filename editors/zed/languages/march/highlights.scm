@@ -6,10 +6,21 @@
 (number) @number
 
 [":" ";"] @punctuation.delimiter
-["[" "]" "(" ")" "{" "}" "<" ">"] @punctuation.bracket
+["[" "]" "(" ")" "{" "}"] @punctuation.bracket
 
-; Headings name namespaces.
-(heading marker: (heading_marker) @punctuation.special)
+; A pattern's brackets: heading-colored in a context heading, plain elsewhere.
+(heading pattern: (pattern ["<" ">"] @title))
+(definition (pattern ["<" ">"] @punctuation.bracket))
+(system_definition (pattern ["<" ">"] @punctuation.bracket))
+(entry (pattern ["<" ">"] @punctuation.bracket))
+(quotation (pattern ["<" ">"] @punctuation.bracket))
+(sequence (pattern ["<" ">"] @punctuation.bracket))
+(pattern (pattern ["<" ">"] @punctuation.bracket))
+(source_file (pattern ["<" ">"] @punctuation.bracket))
+
+; Headings open namespaces (# math) and contexts (## < i64 >); both read as
+; headings. The types and guards inside a context keep their own colors.
+(heading marker: (heading_marker) @title)
 (heading name: (word) @title)
 
 ; Definitions: capitalized names are types (Money, Config), others are words.
@@ -21,14 +32,14 @@
 
 ; Patterns, in context headings and named signatures: types, guards (ending
 ; in ?), type and row variables (ending in ' or '*), and -> between inputs and
-; outputs.
-(pattern (word) @operator (#eq? @operator "->"))
+; outputs (-> or →).
+(pattern (word) @operator (#match? @operator "^(->|→)$"))
 (pattern (word) @variable.special (#match? @variable.special "'\\*?$"))
 (pattern (word) @function (#match? @function "\\?$"))
-(pattern (word) @type (#not-match? @type "(^->$)|('\\*?$)|(\\?$)|(^=$)"))
+(pattern (word) @type (#not-match? @type "(^->$)|(^→$)|('\\*?$)|(\\?$)|(^=$)"))
 (pattern (_ (word) @variable.special (#match? @variable.special "'\\*?$")))
-(pattern (_ (word) @operator (#eq? @operator "->")))
-(pattern (_ (word) @type (#not-match? @type "(^->$)|('\\*?$)")))
+(pattern (_ (word) @operator (#match? @operator "^(->|→)$")))
+(pattern (_ (word) @type (#not-match? @type "(^->$)|(^→$)|('\\*?$)")))
 
 ; = is dup and ~ is swap.
 ((word) @operator (#match? @operator "^[=~]$"))

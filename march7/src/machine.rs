@@ -59,6 +59,9 @@ pub struct Stats {
     pub peak_live_bytes: usize,
 }
 
+/// The working region's handle.
+const WORKING: u64 = 1;
+
 /// Region 1 is the virtual FORTH working memory, allocated at boot. It is not
 /// a host pointer and is never serialized. Other handles identify a slot and
 /// generation; released slots can be reused without reviving stale addresses.
@@ -539,8 +542,12 @@ impl Machine {
                 }
                 self.push(a as i64 as u64)?;
             }
-            Load8 | Load64 => {
-                let (r, o) = self.address()?;
+            Load8 | Load64 | WorkLoad => {
+                let (r, o) = if p == WorkLoad {
+                    (WORKING, self.pop()?)
+                } else {
+                    self.address()?
+                };
                 let n = if p == Load8 { 1 } else { 8 };
                 if n == 8 && o % 8 != 0 {
                     return Err(Error::Memory);
@@ -553,10 +560,14 @@ impl Machine {
                 };
                 self.push(value)?;
             }
-            Store8 | Store64 => {
-                let (r, o) = self.address()?;
+            Store8 | Store64 | WorkStore => {
+                let (r, o) = if p == WorkStore {
+                    (WORKING, self.pop()?)
+                } else {
+                    self.address()?
+                };
                 let value = self.pop()?;
-                if p == Store64 && o % 8 != 0 {
+                if p != Store8 && o % 8 != 0 {
                     return Err(Error::Memory);
                 }
                 self.write(

@@ -78,6 +78,10 @@ pub enum Primitive {
     FLt = 41,
     IToF = 42,
     FToI = 43,
+    // Load64 and Store64 in the working region, handle 1, without the region
+    // operand: March's `get` and `put`, which the compiler runs constantly.
+    WorkLoad = 44,
+    WorkStore = 45,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -125,6 +129,8 @@ impl Primitive {
         (Self::FLt, "flt?"),
         (Self::IToF, "i>f"),
         (Self::FToI, "f>i"),
+        (Self::WorkLoad, "work-load"),
+        (Self::WorkStore, "work-store"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

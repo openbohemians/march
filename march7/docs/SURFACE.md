@@ -242,6 +242,30 @@ Provisional choices, 2026-10-03, so examples are consistent:
   checker knows a family's effect without types. The examples will show
   whether that is too strict.
 
+## Symbols: `\times` is `×`
+
+Decided 2026-10-04 (Thomas: "even if they weren't formatted it still compiles;
+`\times` is the same word as `×`"). Source may spell symbols with LaTeX-style
+names, as Julia, Lean and Agda editors do.
+
+- **One table,** `symbol-table` in `seed/system.march`: 142 entries covering
+  arithmetic (`\times` ×, `\div` ÷, `\sqrt` √), relations (`\leq` ≤,
+  `\neq` ≠), arrows (`\to` →), logic, sets, Greek letters, and subscripts and
+  superscripts (`x\_1` is `x₁`, `x\^2` is `x²`).
+- **The reader accepts both spellings.** A name is `_` or `^` with the
+  character after it, or the longest run of ASCII letters, so `\infty` is not
+  `\in` followed by `fty`. A word that is not found is looked up again with
+  its escapes rewritten, so ordinary lookups cost nothing extra, and a
+  definition's name is rewritten when it is installed. `\times` and `×` are
+  one word: code compiles to the same bytes and the same identity either way.
+  An unknown name is an unknown word.
+- **`march7 fmt` rewrites the escapes** from stdin to stdout, in code and
+  comments but never in strings, reading the same table. Formatting is
+  idempotent. Zed runs it on save.
+- **Symbols mean nothing until defined.** The table only makes them typeable.
+  Which symbols the core library defines, and as what (`× : * ;`,
+  `≤ : lte? ;`, `→` wherever `->` is accepted), is still to be decided.
+
 ## Brackets
 
 | Brackets | Meaning | Status |

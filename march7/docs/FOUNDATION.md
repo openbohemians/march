@@ -126,7 +126,7 @@ adding an operation outside this list requires review.
 | Integer | wrapping add/subtract/multiply; unsigned divide/remainder; equality and unsigned less-than; bitwise and/or/xor/not; logical shifts |
 | Float | IEEE-754 binary64 add/subtract/multiply/divide, equality, less-than, integer conversion both ways, with canonical NaN (added 2026-10-03; docs/NUMBERS.md) |
 | Control | full-cell literal, resolved call, return, local branch/zero-branch, quotation reference, indirect execute, local self-call, explicit tail-call forms, trap |
-| Working memory | create/release region, region size, byte/cell load/store |
+| Working memory | create/release region, region size, byte/cell load/store, cell load/store in the working region without a region operand (added 2026-10-04: every `get` and `put`, so compiling the system takes a third fewer steps) |
 | Code | seal validated canonical bytes; obtain canonical bytes by CID; resolve/link CID to execution token; recover a token's code CID |
 | Content | hash bytes; publish/retrieve immutable blobs by verified CID |
 | Host I/O | read/write byte buffers using host-supplied endpoint handles; explicit status/count results |

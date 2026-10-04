@@ -20,9 +20,15 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let usage =
-        "usage: march7 IMAGE [--fuel N] [--eval SOURCE | FILE] [--save IMAGE] [--system IMAGE]";
+    let usage = "usage: march7 IMAGE [--fuel N] [--eval SOURCE | FILE] [--save IMAGE] [--system IMAGE]\n       march7 fmt < SOURCE > FORMATTED";
     let path = args.next().ok_or(usage)?;
+    // `fmt` rewrites `\name` escapes as symbols, from stdin to stdout.
+    if path == "fmt" {
+        let mut source = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut source)?;
+        print!("{}", march7::symbols::Symbols::standard().format(&source));
+        return Ok(());
+    }
     let image = Image::decode(&std::fs::read(path)?)?;
     let mut d = Driver::boot(&image)?;
     while let Some(arg) = args.next() {

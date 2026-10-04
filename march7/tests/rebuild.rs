@@ -22,9 +22,9 @@ fn generation_zero() -> Image {
 const REBUILD_FUEL: u64 = 40_000_000;
 
 /// Compile-cost canary: steps for a rebuilt system (generation 1) to compile
-/// the system source. It is 7.6 million today. Exceeding it means compile cost
+/// the system source. It is 5.5 million today. Exceeding it means compile cost
 /// grew; look at why before raising it (docs/REBUILD.md).
-const COMPILE_STEP_CANARY: u64 = 8_000_000;
+const COMPILE_STEP_CANARY: u64 = 6_500_000;
 
 /// Boot `image`, compile the system source, and export the image it defines.
 fn rebuild(image: &Image) -> Image {

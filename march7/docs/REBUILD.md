@@ -75,12 +75,12 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 22.6 million (75 ms) |
-| The same on generation 1 | 7.6 million (27 ms) |
+| Machine steps to compile `system.march` on generation 0 | 24.4 million (80 ms) |
+| The same on generation 1 | 5.5 million (18 ms) |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 62,756 bytes |
-| `system.march` | 931 lines |
-| `system.asm` listing | 1,395 lines |
+| Rebuilt image size | 61,724 bytes |
+| `system.march` | 1,147 lines |
+| `system.asm` listing | 1,403 lines |
 
 ## Tests
 
@@ -187,9 +187,20 @@ The driver's step budget (10 million by default) is a safety net against
 runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
 rebuild tests use an explicit budget of 40 million steps, and a named canary
-test asserts that a rebuilt system compiles the system source in under 8
-million steps (7.6 million as of floats, so the margin is now small). When the command line exhausts the budget,
-it says so and suggests `--fuel`.
+test asserts that a rebuilt system compiles the system source in under 6.5
+million steps. When the command line exhausts the budget, it says so and
+suggests `--fuel`.
+
+**Working-memory primitives (2026-10-04).** Adding symbol names
+(docs/SURFACE.md) took compiling the system on generation 1 to 8.5 million
+steps, over the canary, then 8 million. A per-word step profile showed every
+token cost about 900 steps to compile, mostly in `find`, `hash-bytes` and
+reading characters, and that the common cost was working memory: each `get` or
+`put` ran as four instructions (the offset, region 1, a swap, the load or
+store). Primitives 44 and 45 load and store a cell in region 1 directly, so
+`get` and `put` compile to two instructions. Compiling the system on
+generation 1 fell to 5.5 million steps, and a token to about 620. The canary
+was lowered to 6.5 million so it still catches growth.
 
 Next candidates:
 
@@ -197,6 +208,10 @@ Next candidates:
   still use fixed temporary offsets. That is safe now, because `evaluate` is
   reentrant and those words do not call back into user code, but the stack is
   the cleaner convention for new code.
+- **Read and hash in one pass.** `read-word` walks a word's characters and
+  `hash-bytes` walks them again; folding the hash into the read would save the
+  second walk on every token. The profile puts reading at about a fifth of
+  compile time and hashing at a tenth.
 - **The listing is frozen** (2026-09-30). `system.asm` only reproduces
   generation 0, and a test pins the SHA-256 of its assembled image.
 

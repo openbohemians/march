@@ -36,4 +36,17 @@ Zed builds the grammar from a git commit, so:
 3. In Zed, run `zed: install dev extension` and choose `editors/zed`.
 
 After changing the grammar, commit again, update `rev`, and rebuild the
-extension from Zed's extensions page.
+extension from Zed's extensions page. Query files are read straight from this
+directory, so changing only those needs a file reopened, not a rebuild.
+
+To rewrite `\times` as `×` on save, point Zed's formatter for March at
+`march7 fmt` in your settings (it reads stdin and writes stdout):
+
+```json
+"languages": {
+  "March": {
+    "formatter": { "external": { "command": "/path/to/march7", "arguments": ["fmt"] } },
+    "format_on_save": "on"
+  }
+}
+```

@@ -1,0 +1,18 @@
+{
+  "grammars": [
+    {
+      "name": "march",
+      "camelcase": "March",
+      "scope": "source.march",
+      "path": ".",
+      "file-types": ["march"],
+      "highlights": "queries/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "March grammar for tree-sitter",
+    "authors": [{ "name": "Thomas Sawyer" }]
+  }
+}

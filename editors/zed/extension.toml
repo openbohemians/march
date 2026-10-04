@@ -1,0 +1,14 @@
+id = "march"
+name = "March"
+description = "Syntax highlighting and outline for the March language."
+version = "0.1.0"
+schema_version = 1
+authors = ["Thomas Sawyer"]
+repository = "https://github.com/openbohemians/march"
+
+# The grammar lives in this repository, under editors/tree-sitter-march.
+# Zed builds it from a commit, so rev must name one that contains it.
+[grammars.march]
+repository = "file:///home/trans/my/com/tabcomputing/march"
+rev = "COMMIT"
+path = "editors/tree-sitter-march"

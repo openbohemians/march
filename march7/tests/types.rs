@@ -7,7 +7,7 @@ use march7::{Driver, Error, Image};
 fn system() -> Image {
     let g0 = assembler::assemble(include_str!("../seed/system.asm")).unwrap();
     let mut d = Driver::boot(&g0).unwrap();
-    d.fuel = 60_000_000;
+    d.fuel = 80_000_000;
     d.evaluate(include_str!("../seed/system.march")).unwrap();
     let boot = d.machine.stack.pop().unwrap();
     d.system_image(boot).unwrap()
@@ -227,4 +227,33 @@ fn top_level_code_is_typed_too() {
     assert!(d.evaluate("1 2.5 +").is_err());
     d.evaluate("1.5 2.5 +").unwrap();
     assert_eq!(d.machine.stack, floats(&[4.0]));
+}
+
+/// `n` floats 1.0 to n.0 followed by n - 1 additions.
+fn float_sum(n: usize) -> String {
+    let xs: Vec<String> = (1..=n).map(|i| format!("{i}.0")).collect();
+    format!("{} {}", xs.join(" "), vec!["+"; n - 1].join(" "))
+}
+
+#[test]
+fn types_are_kept_for_many_values() {
+    let g = system();
+    // Nine and twenty floats, inside a definition and at top level.
+    for n in [9, 20] {
+        let sum = (n * (n + 1) / 2) as f64;
+        assert_eq!(
+            run(&g, &format!(": s {} ; s", float_sum(n))).unwrap(),
+            floats(&[sum])
+        );
+        assert_eq!(run(&g, &float_sum(n)).unwrap(), floats(&[sum]));
+    }
+    // At top level there is no window: forty values are fine.
+    assert_eq!(run(&g, &float_sum(40)).unwrap(), floats(&[820.0]));
+    // Inside a word, types are kept for 32 cells above its entry depth.
+    // Beyond that a type is lost, and a family call on it is an error, not
+    // integer arithmetic on a float's bits.
+    assert_eq!(
+        run(&g, &format!(": s {} ;", float_sum(40))),
+        Err(Error::User(23))
+    );
 }

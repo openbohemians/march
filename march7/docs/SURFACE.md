@@ -354,7 +354,9 @@ fails to match.
 From the lineage research (doc/lineage/CONTROL-FLOW-COMPREHENSIONS.md §5), in
 order: families resolved statically with runtime dispatch only when needed;
 one lifting rule for arrays; comprehensions with a runtime depth marker and an
-explicit `_` pull; loop sugar. Their surface syntax is not yet designed.
+explicit `_` pull; loop sugar. Families, the lifting rule and `( … )` with a
+runtime depth marker are built (docs/CHECKER.md, docs/ARRAYS.md); `_` and loop
+sugar are not.
 
 ## Open questions
 

@@ -7,7 +7,7 @@ use march7::{Driver, Error, Image};
 fn system() -> Image {
     let g0 = assembler::assemble(include_str!("../seed/system.asm")).unwrap();
     let mut d = Driver::boot(&g0).unwrap();
-    d.fuel = 60_000_000;
+    d.fuel = 80_000_000;
     d.evaluate(include_str!("../seed/system.march")).unwrap();
     let boot = d.machine.stack.pop().unwrap();
     d.system_image(boot).unwrap()

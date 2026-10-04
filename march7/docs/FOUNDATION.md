@@ -122,7 +122,7 @@ adding an operation outside this list requires review.
 
 | Family | Included mechanisms |
 |---|---|
-| Stack | `dup`, `drop`, `swap`, `over`, `rot` |
+| Stack | `dup`, `drop`, `swap`, `over`, `rot`; `mark` and `gather`, which collect the cells above a marked depth into a region (added 2026-10-04 for array literals) |
 | Integer | wrapping add/subtract/multiply; unsigned divide/remainder; equality and unsigned less-than; bitwise and/or/xor/not; logical shifts |
 | Float | IEEE-754 binary64 add/subtract/multiply/divide, equality, less-than, integer conversion both ways, with canonical NaN (added 2026-10-03; docs/NUMBERS.md) |
 | Control | full-cell literal, resolved call, return, local branch/zero-branch, quotation reference, indirect execute, local self-call, explicit tail-call forms, trap |

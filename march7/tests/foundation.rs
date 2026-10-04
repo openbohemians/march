@@ -64,6 +64,8 @@ fn primitive_wire_ids_are_pinned() {
         FToI,
         WorkLoad,
         WorkStore,
+        Mark,
+        Gather,
     ];
     for (id, p) in primitives.into_iter().enumerate() {
         assert_eq!(
@@ -75,7 +77,7 @@ fn primitive_wire_ids_are_pinned() {
             [Op::Prim(p), Op::Return]
         );
     }
-    for id in 46..=255 {
+    for id in 48..=255 {
         assert_eq!(Primitive::decode(id), Err(Error::InvalidCode));
     }
 }

@@ -461,6 +461,25 @@ impl Machine {
                     let v = *self.scratch.last().ok_or(Error::Stack)?;
                     self.push(v)?;
                 }
+                Instruction::Prim(Primitive::Mark) => {
+                    if self.scratch.len() >= 65536 {
+                        return Err(Error::Stack);
+                    }
+                    self.scratch.push(self.stack.len() as u64);
+                }
+                Instruction::Prim(Primitive::Gather) => {
+                    if self.scratch.len() <= base {
+                        return Err(Error::Stack);
+                    }
+                    let mark = self.scratch.pop().ok_or(Error::Stack)? as usize;
+                    if mark > self.stack.len() {
+                        return Err(Error::Stack);
+                    }
+                    let cells = self.stack.split_off(mark);
+                    let bytes = cells.iter().flat_map(|c| c.to_le_bytes()).collect();
+                    let r = self.allocate(bytes, None)?;
+                    self.push(r)?;
+                }
                 Instruction::Prim(p) => self.primitive(p)?,
             }
             self.stats.peak_control = self.stats.peak_control.max(returns.len());
@@ -645,7 +664,7 @@ impl Machine {
                 self.push(n as u64)?;
             }
             Trap => return Err(Error::User(self.pop()?)),
-            Execute | ScratchPush | ScratchPop | ScratchPeek => unreachable!(),
+            Execute | ScratchPush | ScratchPop | ScratchPeek | Mark | Gather => unreachable!(),
         }
         Ok(())
     }

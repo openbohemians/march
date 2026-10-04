@@ -94,6 +94,8 @@ Selected generic primitive contracts (leftmost item is deeper on the stack):
 | `load8/load64` | `(region offset -- cell)` |
 | `store8/store64` | `(cell region offset --)` |
 | `work-load/work-store` | `(offset -- cell)`, `(cell offset --)`; cells in working region 1 (44, 45) |
+| `mark` | `( -- )`; push the data stack's depth onto the scratch stack (46) |
+| `gather` | `(cells… -- region)`; pop that depth and move every cell above it into a new region (47) |
 | `region-new/free/size` | `(bytes -- region)`, `(region --)`, `(region -- bytes)` |
 | `execute` | `(… token -- …)`; no system-level signature inference |
 | `seal` | `(region offset length -- token)`; complete canonical code bytes |

@@ -82,6 +82,11 @@ pub enum Primitive {
     // operand: March's `get` and `put`, which the compiler runs constantly.
     WorkLoad = 44,
     WorkStore = 45,
+    // Array literals (docs/ARRAYS.md): `mark` pushes the data stack's depth
+    // onto the scratch stack; `gather` pops it and moves every cell above
+    // that depth into a new region, leaving the region.
+    Mark = 46,
+    Gather = 47,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -131,6 +136,8 @@ impl Primitive {
         (Self::FToI, "f>i"),
         (Self::WorkLoad, "work-load"),
         (Self::WorkStore, "work-store"),
+        (Self::Mark, "mark"),
+        (Self::Gather, "gather"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

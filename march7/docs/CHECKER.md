@@ -130,8 +130,13 @@ by a hashed dictionary (docs/REBUILD.md). Generation 1 compiles the system in
 ## Slice 2: value types and families (2026-10-04)
 
 **Types.** The same analysis now tracks value types: 0 unknown, 1 i64, 2 f64,
-a byte each, for the top eight stack slots (analysis field 128). Deeper
-slots, and a word's inputs, are unknown.
+a byte each, by stack position in 64-byte blocks. Position p is the cell at
+depth p - 32 relative to the word's entry, so a word's inputs (unknown unless
+an instance gives them types) are 31, 30, and so on down, and it may grow 32
+cells above its entry. A cell outside the block is lost (255): no clause
+matches it, so a family call on it is an error (trap 23), never the i64
+version applied to a float's bits. The first version kept only the top eight
+slots in one cell, and a ninth value slid off unknown.
 
 - Literals give i64 (opcode 1) or f64 (opcode 10). Integer arithmetic, logic
   and comparisons give i64; float arithmetic and `i>f` give f64; float
@@ -178,8 +183,9 @@ instance:
 - A known type that matches no clause in the instance is the caller's error
   (trap 23 at its `;`).
 
-**Top level.** The interpreter keeps the types of the values it pushes, the
-top eight (working offset 3576): literals give theirs, and each word run
+**Top level.** The interpreter keeps the types of the values it pushes in a
+stack of its own, a byte each for the whole data stack (a 64 KB region whose
+handle is at working offset 3576): literals give theirs, and each word run
 there gives its outputs the types an analysis from its inputs' types finds
 (remembered by word and input types). So `1.5 2.5 +`, `1.5 dup +` and
 `2.5 double` typed at top level use the f64 clause or an instance, and an
@@ -190,9 +196,14 @@ Words run at top level are analysed the first time they run there, which
 costs the system's own rebuild about a million steps once per session (the
 analysis of `:` covers much of the compiler).
 
+**Arrays** (docs/ARRAYS.md) add types 3 (array of i64), 4 (array of f64)
+and 5 (any other array). The checker models `mark` and `gather`, so an array
+literal's element count and type are exact, and families lift over arrays.
+
 ## Next slices
 
-1. **Arrays, quotation types and strings** as types, and `!` conversion.
+1. **Quotation types and strings** as types, `!` conversion, and effects with
+   a varying count for comprehensions.
 2. **Consumer-completed control flow.** Done (docs/QUOTATIONS.md): `if`,
    `while` and `times` inline pending quotations, so the checker sees plain
    branches. `map` waits for arrays.

@@ -123,7 +123,7 @@ adding an operation outside this list requires review.
 | Family | Included mechanisms |
 |---|---|
 | Stack | `dup`, `drop`, `swap`, `over`, `rot`; `mark` and `gather`, which collect the cells above a marked depth into a persistent vector (added 2026-10-04 for array literals) |
-| Vectors | persistent vectors of cells (`merkle_champ::Vector`): length, element, append in place, update to a new version (added 2026-10-04) |
+| Vectors | persistent sequences of cells (`merkle_champ::Sequence`, content-defined since 2026-10-05): length, element, append in place, update to a new version (added 2026-10-04) |
 | Integer | wrapping add/subtract/multiply; unsigned divide/remainder; equality and unsigned less-than; bitwise and/or/xor/not; logical shifts |
 | Float | IEEE-754 binary64 add/subtract/multiply/divide, equality, less-than, integer conversion both ways, with canonical NaN (added 2026-10-03; docs/NUMBERS.md) |
 | Control | full-cell literal, resolved call, return, local branch/zero-branch, quotation reference, indirect execute, local self-call, explicit tail-call forms, trap |

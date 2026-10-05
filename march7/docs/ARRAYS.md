@@ -1,8 +1,8 @@
 # Arrays and the lifting rule
 
 Status: strict arrays, built 2026-10-04 (Thomas: "you can do strict first"),
-as persistent vectors from merkle-champ, our in-house persistent collections
-crate. Laziness for
+as persistent sequences from merkle-champ, our in-house persistent collections
+crate (content-defined since 2026-10-05). Laziness for
 collections, arrays and maps alike, comes next on the same representation.
 Apart from six primitives, everything is March code in `seed/system.march`.
 
@@ -31,11 +31,15 @@ where a literal inside a loop body, `3 [ ( i0 i0 ) ] times`, hid the loop's
 index from `i0`. While compiling, `(` and `)` emit them; at top level,
 `interpret` runs them itself, in its own frame (dictionary flag bits 5 and 6).
 
-An array is one cell: a handle to a persistent vector of cells
-(`merkle_champ::Vector`), which the machine keeps in a region
-slot, so handles, generations and `region-free` work as for regions. The
-vector is a 32-way trie of canonical shape with cached SHA-256 identities, the
-companion of merkle-champ's map, in the same crate. Primitives: `vector-length` (48),
+An array is one cell: a handle to a persistent sequence of cells
+(`merkle_champ::Sequence`), which the machine keeps in a region slot, so
+handles, generations and `region-free` work as for regions. The sequence is a
+content-defined tree: its leaves and branches end where a rolling hash over
+the elements says, so its shape depends only on its contents, identities are
+cached SHA-256, and inserting, joining or slicing rewrites only a few nodes
+near the change (merkle-champ FORMAT.md section 10). Cells pushed while
+building (`vector-push`) collect in a plain buffer beside the sequence and
+join it when the array is next needed whole. Primitives: `vector-length` (48),
 `vector-at` (49), `vector-push` (50, appends in place, for building) and
 `vector-set` (51, a new version with one element replaced). Surface words:
 `length ( a -- n )` and `at ( a i -- x )`, which compile to primitives 48
@@ -197,8 +201,8 @@ system without `describe`, such as generation 0.
 
 Every array takes a region slot, charged 8 bytes per element against the
 machine's live-byte limit, and nothing frees them yet; memory management is
-the 2.0 work. Versions share structure inside the vector, so an array made
-with `vector-set` from another costs a path, not a copy.
+the 2.0 work. Versions share structure inside the sequence, so an array made
+with `vector-set` from another costs a few nodes, not a copy.
 
 ## Next
 

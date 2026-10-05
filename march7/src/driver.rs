@@ -111,7 +111,7 @@ impl Driver {
             return;
         }
         if (3..=254).contains(&t) {
-            if let Ok(vector) = self.machine.vector(v) {
+            if let Ok(vector) = self.machine.sequence(v) {
                 out.push('(');
                 for &x in vector.iter().take(SHOWN) {
                     out.push(' ');

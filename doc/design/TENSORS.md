@@ -12,6 +12,11 @@ March7's arrays (march7/docs/ARRAYS.md) are one-dimensional:
 - **Representation.** An array is a handle to a `merkle_champ::Vector` of
   64-bit cells: a 32-way trie with a tail. Its shape depends only on its
   length. Each node caches its SHA-256 identity when first asked.
+  *Update 2026-10-05:* now a content-defined `merkle_champ::Sequence`, whose
+  leaves end where a rolling hash says, so inserts and joins rewrite only a
+  few nodes (merkle-champ FORMAT.md section 10). Stage 4's chunk grid should
+  be weighed against that: a fixed grid shifts every chunk after an
+  inserted row, as the vector did.
 - **Types.** Element types are i64 or f64, or the array nests other arrays,
   which may be ragged: `( ( 1 2 ) ( 3 ) )`.
 - **Operations.** Families lift over arrays all the way down, and `each`,

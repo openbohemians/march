@@ -46,12 +46,39 @@ struct Region {
     bytes: Vec<u8>,
     cid: Option<Cid>,
     read_only: bool,
-    /// A persistent vector of cells, for an array (docs/ARRAYS.md); its
-    /// bytes are empty, so byte access fails.
-    vector: Option<merkle_champ::Vector<u64>>,
+    /// An array (docs/ARRAYS.md); its bytes are empty, so byte access fails.
+    array: Option<Array>,
     /// Bytes counted against the live limit: the byte length, or 8 per
-    /// element of a vector.
+    /// element of an array.
     charged: usize,
+}
+
+/// An array: a persistent, content-defined sequence of cells, and the cells
+/// appended to it since (`vector-push`, which builds in place), which join
+/// the sequence when the array is next needed whole.
+struct Array {
+    seq: merkle_champ::Sequence<u64>,
+    tail: Vec<u64>,
+}
+
+impl Array {
+    fn len(&self) -> usize {
+        self.seq.len() + self.tail.len()
+    }
+    fn get(&self, i: usize) -> Option<u64> {
+        match i.checked_sub(self.seq.len()) {
+            None => self.seq.get(i).copied(),
+            Some(j) => self.tail.get(j).copied(),
+        }
+    }
+    /// The whole array as one sequence.
+    fn whole(&self) -> merkle_champ::Sequence<u64> {
+        if self.tail.is_empty() {
+            self.seq.clone()
+        } else {
+            self.seq.concat(&self.tail.iter().copied().collect())
+        }
+    }
 }
 struct RegionSlot {
     generation: u32,
@@ -163,7 +190,7 @@ impl Machine {
             bytes,
             cid,
             read_only: cid.is_some(),
-            vector: None,
+            array: None,
             charged: size,
         });
         self.live_bytes += size;
@@ -210,8 +237,8 @@ impl Machine {
         }
         Ok(index)
     }
-    /// A new region holding a vector, charged 8 bytes per element.
-    fn allocate_vector(&mut self, v: merkle_champ::Vector<u64>) -> Result<u64, Error> {
+    /// A new region holding an array, charged 8 bytes per element.
+    fn allocate_vector(&mut self, v: merkle_champ::Sequence<u64>) -> Result<u64, Error> {
         let size = v.len().checked_mul(8).ok_or(Error::Limit)?;
         if size > MAX_BYTES || self.live_bytes.checked_add(size).ok_or(Error::Limit)? > MAX_BYTES {
             return Err(Error::Limit);
@@ -219,16 +246,22 @@ impl Machine {
         let r = self.allocate(Vec::new(), None)?;
         let slot = self.region_slot(r)?;
         let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
-        region.vector = Some(v);
+        region.array = Some(Array {
+            seq: v,
+            tail: Vec::new(),
+        });
         region.charged = size;
         self.live_bytes += size;
         self.stats.allocated_bytes += size as u64;
         self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(self.live_bytes);
         Ok(r)
     }
-    /// The vector an array handle holds.
-    pub fn vector(&self, r: u64) -> Result<&merkle_champ::Vector<u64>, Error> {
-        self.region(r)?.vector.as_ref().ok_or(Error::Memory)
+    fn array(&self, r: u64) -> Result<&Array, Error> {
+        self.region(r)?.array.as_ref().ok_or(Error::Memory)
+    }
+    /// The elements an array handle holds, as one sequence.
+    pub fn sequence(&self, r: u64) -> Result<merkle_champ::Sequence<u64>, Error> {
+        Ok(self.array(r)?.whole())
     }
     fn region(&self, r: u64) -> Result<&Region, Error> {
         self.regions[self.region_slot(r)?]
@@ -708,13 +741,13 @@ impl Machine {
             Trap => return Err(Error::User(self.pop()?)),
             VecLen => {
                 let r = self.pop()?;
-                self.push(self.vector(r)?.len() as u64)?;
+                self.push(self.array(r)?.len() as u64)?;
             }
             VecAt => {
                 let i = self.pop()?;
                 let r = self.pop()?;
                 let i = usize::try_from(i).map_err(|_| Error::Memory)?;
-                let x = *self.vector(r)?.get(i).ok_or(Error::Memory)?;
+                let x = self.array(r)?.get(i).ok_or(Error::Memory)?;
                 self.push(x)?;
             }
             VecPush => {
@@ -725,7 +758,7 @@ impl Machine {
                 }
                 let slot = self.region_slot(r)?;
                 let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
-                region.vector.as_mut().ok_or(Error::Memory)?.push(x);
+                region.array.as_mut().ok_or(Error::Memory)?.tail.push(x);
                 region.charged += 8;
                 self.live_bytes += 8;
                 self.push(r)?;
@@ -735,8 +768,11 @@ impl Machine {
                 let i = self.pop()?;
                 let r = self.pop()?;
                 let i = usize::try_from(i).map_err(|_| Error::Memory)?;
-                let mut v = self.vector(r)?.clone();
-                v.set(i, x).map_err(|_| Error::Memory)?;
+                let a = self.array(r)?;
+                if i >= a.len() {
+                    return Err(Error::Memory);
+                }
+                let v = a.whole().update(i, x);
                 let r = self.allocate_vector(v)?;
                 self.push(r)?;
             }

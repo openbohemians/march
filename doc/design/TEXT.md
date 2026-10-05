@@ -67,21 +67,22 @@ A string is a persistent sequence of UTF-8 bytes, valid by construction.
 - **Identity is over the bytes,** so equal text has equal identity and is
   stored once.
 
-Representation, in merkle-champ:
-- **Leaves of about 1 KB.** Today's vector holds 64-bit cells in leaves of
-  32. A leaf of 32 bytes would carry as much overhead as data.
-- **Narrow element types.** This is the same step TENSORS.md needs for
-  numeric arrays of u8, i32 and f32. Done once, it serves both: a byte array
-  is an array of u8, and a string is a byte array known to be valid UTF-8,
-  with a type of its own.
-- **Counts in each branch.** A branch records, for each child, how many code
-  points and newlines it holds, as ropes do. Then "the n-th character" and
-  "line k" take O(log n) steps, not a scan.
-- **Canonical shape by length,** like the vector, so identity never depends
-  on how a string was built.
-
-Joining two strings and inserting in the middle copy for now. Slices become
-views when laziness comes (TENSORS.md stage 1), for strings as for arrays.
+Representation, in merkle-champ (stage 1, done 2026-10-05):
+- **A content-defined sequence of bytes,** `Sequence<u8>` (merkle-champ
+  FORMAT.md section 10). Its leaves end where a rolling hash over the bytes
+  says, so its shape depends only on the text, and inserting, deleting,
+  joining or slicing rewrites a few nodes near the change; a store shares the
+  rest across versions. A first design, a vector with leaves at fixed
+  positions, was replaced because an insert rewrote everything after it
+  (transfs's observation, 2026-10-05).
+- **Leaves of about 1 KB,** since bytes are packed: a leaf of 32 bytes would
+  carry as much overhead as data. The same narrow element types serve
+  TENSORS.md's numeric arrays: a byte array is a sequence of u8, and a string
+  is a byte array known to be valid UTF-8, with a type of its own.
+- **Counts in each branch,** to add: a branch already records its
+  children's lengths in bytes; it should also record how many code points
+  and newlines each holds, as ropes do. Then "the n-th character" and "line
+  k" take O(log n) steps, not a scan.
 
 ### Layer 2: characters
 

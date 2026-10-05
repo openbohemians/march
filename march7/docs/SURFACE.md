@@ -237,7 +237,8 @@ Provisional choices, 2026-10-03, so examples are consistent:
   starting with `"` by its first character, as it does numbers, and reads raw
   input to the closing `"`. Only `seed/system.march` keeps FORTH's `s" text"`,
   because the frozen generation 0 reads it. If a track ever cannot have
-  `"…"`, the fallback is `" text "` with the spaces enforced.
+  `"…"`, the fallback is `" text "` with the spaces enforced. Built
+  2026-10-05 (docs/STRINGS.md).
 - **Every clause of a family has the same stack effect,** so the counting
   checker knows a family's effect without types. The examples will show
   whether that is too strict.

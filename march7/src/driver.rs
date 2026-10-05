@@ -17,6 +17,9 @@ pub struct Driver {
 /// Elements shown of an array, before the count of the rest.
 const SHOWN: usize = 16;
 
+/// The checker's type of a string (docs/STRINGS.md).
+const STRING: u8 = 253;
+
 /// The type of an array's elements, for a type byte as the checker writes it
 /// (docs/ARRAYS.md): 3, 4 and 5 are arrays of i64, f64 and unknown elements,
 /// each rank adds 3, 252 has mixed elements and 254 is empty.
@@ -93,8 +96,8 @@ impl Driver {
         Ok(types)
     }
     /// The stack as March source writes values, after its depth: integers
-    /// signed, floats with a point, arrays as `( … )`. Values whose types
-    /// March does not know are shown as integers.
+    /// signed, floats with a point, arrays as `( … )`, strings as `"…"`.
+    /// Values whose types March does not know are shown as integers.
     pub fn show(&mut self) -> String {
         let n = self.machine.stack.len();
         let types = self.types().unwrap_or_else(|_| vec![0; n]);
@@ -106,6 +109,14 @@ impl Driver {
         out
     }
     fn show_value(&self, v: u64, t: u8, out: &mut String) {
+        if t == STRING {
+            if let Some(s) = self.machine.text(v).ok().and_then(|t| t.to_text()) {
+                out.push('"');
+                out.push_str(&s);
+                out.push('"');
+                return;
+            }
+        }
         if t == 2 {
             out.push_str(&format!("{:?}", f64::from_bits(v)));
             return;

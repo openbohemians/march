@@ -127,6 +127,15 @@ element operation to every element:
   `( 1.5 2.5 )` gets an instance whose `+` is lifted.
 - **At top level too:** `( 1 2 3 ) 1 + 2 at` is 4.
 
+## Joining, slicing and comparing
+
+`concat ( a b -- c )` joins two arrays, `slice ( a i j -- b )` takes elements
+i to j - 1, and `same? ( a b -- flag )` says whether two arrays have equal
+contents, through their identities: `( 1 2 ) ( 1 2 ) same?` is 1, where
+`eq?` compares handles. They are primitives 53 to 55, and work on strings too
+(docs/STRINGS.md). Joining and slicing rewrite a few nodes of the sequences
+near the seam, not the whole array.
+
 ## Consuming arrays: `each`, `fold` and `map`
 
 Lifting covers a family applied to every element. The consumers cover the

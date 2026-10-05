@@ -128,6 +128,10 @@
 : vector-at 49 prim, ; immediate
 : vector-push 50 prim, ; immediate
 : vector-set 51 prim, ; immediate
+: make-text 52 prim, ; immediate
+: seq-concat 53 prim, ; immediate
+: seq-slice 54 prim, ; immediate
+: seq-same? 55 prim, ; immediate
 
 -- Phase 3: clean base words.
 : get [ 44 prim, ] ;
@@ -578,9 +582,11 @@
 -- Arrays (docs/ARRAYS.md) have types by element type and rank: 3, 4 and 5
 -- are arrays of i64, of f64 and of unknown elements; each rank adds 3, so 6
 -- is an array of arrays of i64. 252 is an array whose elements' known types
--- differ, 254 an empty array, whose elements have no type yet.
+-- differ, 254 an empty array, whose elements have no type yet. 253 is a
+-- string (docs/STRINGS.md), which is not an array to the checker: families
+-- do not lift over its characters.
 -- ( t -- flag )
-: array-type? dup 3 ult? 0= swap 255 ult? and ;
+: array-type? dup 3 ult? 0= over 253 eq? 0= and swap 255 ult? and ;
 -- ( t -- t' ) The type of an array of elements of type t.
 : array-of
   dup 0= if drop 5 exit then
@@ -933,12 +939,24 @@
 -- element of an array whose elements' types differ is lost (255): it may be
 -- either, so a family call on it is an error rather than a guess.
 : at-type
+  dup 253 eq? if drop 1 exit then
   dup array-type? 0= if drop 0 exit then
   dup 252 eq? if drop 255 exit then
   element-type ;
+-- ( ta tb -- t ) The type of two arrays or strings joined: theirs if they
+-- agree, the other's if one is an empty array, otherwise unknown.
+: concat-type
+  over over eq? if drop exit then
+  dup 254 eq? if drop exit then
+  over 254 eq? if nip exit then
+  drop drop 0 ;
 -- ( id -- )
 : do-prim
-  51 over ult? if drop 11 fail exit then
+  55 over ult? if drop 11 fail exit then
+  dup 52 eq? if drop 3 1 apply 253 ty-set 0 64 an! exit then
+  dup 53 eq? if drop 1 ty@ 0 ty@ concat-type >r 2 1 apply r> ty-set 0 64 an! exit then
+  dup 54 eq? if drop 2 ty@ >r 3 1 apply r> ty-set 0 64 an! exit then
+  dup 55 eq? if drop 2 1 apply 1 ty-set 0 64 an! exit then
   dup 48 eq? if drop 1 1 apply 1 ty-set 0 64 an! exit then
   dup 49 eq? if drop 1 ty@ at-type >r 2 1 apply r> ty-set 0 64 an! exit then
   dup 50 eq? if drop 1 ty@ 0 ty@ push-type >r 2 1 apply r> ty-set 0 64 an! exit then
@@ -1254,6 +1272,19 @@
   40 get 344 get 56 get 344 get u- publish
   inc-pos
   0 get if 8 c, out here blob-cid here 32 u+ 16 put else 0 over region-size then ; immediate
+
+-- ( -- s ) A string literal (docs/STRINGS.md): a token that starts with a
+-- double quote. The text runs from after it to the next double quote, raw,
+-- so it may hold spaces. Compiling, the text is data and `make-text` turns it
+-- into a string when the code runs; at top level the string is made at once.
+: string-literal
+  64 get 1 u+ dup 56 put 344 put
+  cycle 56 get 48 get ult? if input-char 34 eq? 0= else 0 then while inc-pos repeat
+  56 get 48 get ult? 0= if 8 trap then
+  40 get 344 get 56 get 344 get u- publish
+  inc-pos
+  0 get if 8 c, out here blob-cid here 32 u+ 16 put 52 prim,
+  else 0 over region-size make-text 253 shadow-push then ;
 
 -- Symbols: in source, `\times` is the word `×` (docs/SURFACE.md), so code
 -- compiles the same whether or not `march7 fmt` has rewritten it. One entry
@@ -1646,7 +1677,8 @@ _v ᵥ
 : qexit 800 get if mark-flow then tailify 0 c, ;
 : qrecur 800 get if mark-flow then mark-call 7 c, ;
 
--- The outer interpreter over the current input: numbers before lookup.
+-- The outer interpreter over the current input: string literals and numbers
+-- before lookup.
 -- Compiling a word whose entry is flagged as an inline primitive emits the
 -- primitive op itself instead of a call to its wrapper. Before compiling
 -- anything, or running an immediate word not flagged transparent (bit 2),
@@ -1655,6 +1687,9 @@ _v ᵥ
 -- immediate words (the consumers, `[`, `--`) run directly at top level.
 : interpret
   cycle read-word while
+    40 get 64 get c@ 34 eq? if
+      0 get if materialize else top-materialize then string-literal
+    else
     number dup if
       0 get if materialize 2 eq? if fliteral else literal then
       else >r >r top-materialize r> r> shadow-literal then
@@ -1675,6 +1710,7 @@ _v ᵥ
           dup 2 and if nip 8 rshift prim, else drop >xt compile, then
         then
       then
+    then
     then
   repeat 0 get 0= if top-materialize then ;
 
@@ -1756,6 +1792,12 @@ _v ᵥ
 : length vector-length ;
 -- ( a i -- x )
 : at vector-at ;
+-- ( a b -- c ) Two arrays, or two strings, joined.
+: concat seq-concat ;
+-- ( a i j -- b ) Elements, or characters, i to j - 1.
+: slice seq-slice ;
+-- ( a b -- flag ) Whether two arrays, or two strings, have equal contents.
+: same? seq-same? ;
 
 -- The lifting rule. A lifted word is one of these templates with its calls to
 -- `lift-op` pointed at the element operation. Each keeps its arrays, value,
@@ -1984,6 +2026,9 @@ _v ᵥ
   ' qclose 65 s" )" install
   ' length 48 prim-flag s" length" install
   ' at 49 prim-flag s" at" install
+  ' concat 53 prim-flag s" concat" install
+  ' slice 54 prim-flag s" slice" install
+  ' same? 55 prim-flag s" same?" install
   ' hash-bytes 0 s" hash-bytes" install
   ' checked 0 s" checked" install
   ' unchecked 0 s" unchecked" install ;

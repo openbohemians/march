@@ -48,10 +48,17 @@ struct Region {
     read_only: bool,
     /// An array (docs/ARRAYS.md); its bytes are empty, so byte access fails.
     array: Option<Array>,
+    /// A string (docs/STRINGS.md): UTF-8 text, measured in characters and
+    /// lines; its bytes are empty too.
+    text: Option<Text>,
     /// Bytes counted against the live limit: the byte length, or 8 per
     /// element of an array.
     charged: usize,
 }
+
+/// A string: UTF-8 text in a content-defined sequence, whose branches count
+/// characters and lines.
+pub type Text = merkle_champ::Sequence<merkle_champ::sequence::TextByte>;
 
 /// An array: a persistent, content-defined sequence of cells, and the cells
 /// appended to it since (`vector-push`, which builds in place), which join
@@ -191,6 +198,7 @@ impl Machine {
             cid,
             read_only: cid.is_some(),
             array: None,
+            text: None,
             charged: size,
         });
         self.live_bytes += size;
@@ -236,6 +244,26 @@ impl Machine {
             return Err(Error::Memory);
         }
         Ok(index)
+    }
+    /// A new region holding a string, charged a byte per byte.
+    fn allocate_text(&mut self, t: Text) -> Result<u64, Error> {
+        let size = t.len();
+        if size > MAX_BYTES || self.live_bytes.checked_add(size).ok_or(Error::Limit)? > MAX_BYTES {
+            return Err(Error::Limit);
+        }
+        let r = self.allocate(Vec::new(), None)?;
+        let slot = self.region_slot(r)?;
+        let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+        region.text = Some(t);
+        region.charged = size;
+        self.live_bytes += size;
+        self.stats.allocated_bytes += size as u64;
+        self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(self.live_bytes);
+        Ok(r)
+    }
+    /// The text a string handle holds.
+    pub fn text(&self, r: u64) -> Result<&Text, Error> {
+        self.region(r)?.text.as_ref().ok_or(Error::Memory)
     }
     /// A new region holding an array, charged 8 bytes per element.
     fn allocate_vector(&mut self, v: merkle_champ::Sequence<u64>) -> Result<u64, Error> {
@@ -739,15 +767,25 @@ impl Machine {
                 self.push(n as u64)?;
             }
             Trap => return Err(Error::User(self.pop()?)),
+            // On a string, length counts characters and `at` gives one.
             VecLen => {
                 let r = self.pop()?;
-                self.push(self.array(r)?.len() as u64)?;
+                let n = match self.text(r) {
+                    Ok(t) => t.chars() as usize,
+                    Err(_) => self.array(r)?.len(),
+                };
+                self.push(n as u64)?;
             }
             VecAt => {
                 let i = self.pop()?;
                 let r = self.pop()?;
-                let i = usize::try_from(i).map_err(|_| Error::Memory)?;
-                let x = self.array(r)?.get(i).ok_or(Error::Memory)?;
+                let x = match self.text(r) {
+                    Ok(t) => u64::from(t.char_at(i).ok_or(Error::Memory)?),
+                    Err(_) => {
+                        let i = usize::try_from(i).map_err(|_| Error::Memory)?;
+                        self.array(r)?.get(i).ok_or(Error::Memory)?
+                    }
+                };
                 self.push(x)?;
             }
             VecPush => {
@@ -775,6 +813,66 @@ impl Machine {
                 let v = a.whole().update(i, x);
                 let r = self.allocate_vector(v)?;
                 self.push(r)?;
+            }
+            Text => {
+                let n = usize::try_from(self.pop()?).map_err(|_| Error::Memory)?;
+                let (r, o) = self.address()?;
+                let s = std::str::from_utf8(self.read(r, o, n)?).map_err(|_| Error::Memory)?;
+                let t = merkle_champ::Sequence::text(s);
+                let r = self.allocate_text(t)?;
+                self.push(r)?;
+            }
+            Concat => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let r = match (self.text(a), self.text(b)) {
+                    (Ok(x), Ok(y)) => {
+                        let t = x.concat(y);
+                        self.allocate_text(t)?
+                    }
+                    _ => {
+                        let v = self.array(a)?.whole().concat(&self.array(b)?.whole());
+                        self.allocate_vector(v)?
+                    }
+                };
+                self.push(r)?;
+            }
+            Slice => {
+                let j = self.pop()?;
+                let i = self.pop()?;
+                let a = self.pop()?;
+                if i > j {
+                    return Err(Error::Memory);
+                }
+                let r = match self.text(a) {
+                    Ok(t) => {
+                        let t = t.char_slice(i..j).ok_or(Error::Memory)?;
+                        self.allocate_text(t)?
+                    }
+                    Err(_) => {
+                        let whole = self.array(a)?.whole();
+                        let (i, j) = (i as usize, j as usize);
+                        if j > whole.len() {
+                            return Err(Error::Memory);
+                        }
+                        self.allocate_vector(whole.slice(i..j))?
+                    }
+                };
+                self.push(r)?;
+            }
+            // Equal contents, by identity, for two strings or two arrays;
+            // for anything else, equal cells.
+            Same => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let same = match (self.text(a), self.text(b)) {
+                    (Ok(x), Ok(y)) => x.identity() == y.identity(),
+                    _ => match (self.array(a), self.array(b)) {
+                        (Ok(x), Ok(y)) => x.whole().identity() == y.whole().identity(),
+                        _ => a == b,
+                    },
+                };
+                self.push(same as u64)?;
             }
             Execute | ScratchPush | ScratchPop | ScratchPeek | Mark | Gather => unreachable!(),
         }

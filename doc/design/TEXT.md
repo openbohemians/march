@@ -154,10 +154,15 @@ content.
 ## 6. Stages
 
 1. **Narrow element types in merkle-champ's vector,** with leaf sizes per
-   element width, for bytes and for TENSORS.md's numeric types.
+   element width, for bytes and for TENSORS.md's numeric types. Done
+   2026-10-05, on the content-defined `Sequence` that replaced the vector,
+   with branches counting code points and newlines.
 2. **Strings in March:** the type, `"…"` literals, display, and words for
    length in bytes and in code points, comparison, joining, slicing by byte
-   position, searching, and `each` over code points.
+   position, searching, and `each` over code points. First slice done
+   2026-10-05 (march7/docs/STRINGS.md): the type, literals, display,
+   `length` and `at` by character, `concat`, `slice` by character, `same?`,
+   and `each` over code points; byte positions and searching are next.
 3. **Maps keyed by any value, strings included** (the next item after
    strings).
 4. **Grapheme clusters and normalization,** as library words.

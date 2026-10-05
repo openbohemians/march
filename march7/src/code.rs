@@ -94,6 +94,13 @@ pub enum Primitive {
     VecAt = 49,
     VecPush = 50,
     VecSet = 51,
+    // Strings (docs/STRINGS.md): text from UTF-8 bytes in a region; and, for
+    // arrays and strings alike, joining, slicing (by element or character)
+    // and equality of contents.
+    Text = 52,
+    Concat = 53,
+    Slice = 54,
+    Same = 55,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -149,6 +156,10 @@ impl Primitive {
         (Self::VecAt, "vector-at"),
         (Self::VecPush, "vector-push"),
         (Self::VecSet, "vector-set"),
+        (Self::Text, "text"),
+        (Self::Concat, "concat"),
+        (Self::Slice, "slice"),
+        (Self::Same, "same?"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

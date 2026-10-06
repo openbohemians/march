@@ -51,6 +51,8 @@ struct Region {
     /// A string (docs/STRINGS.md): UTF-8 text, measured in characters and
     /// lines; its bytes are empty too.
     text: Option<Text>,
+    /// A map (docs/MAPS.md) from cells to cells.
+    map: Option<Map>,
     /// Bytes counted against the live limit: the byte length, or 8 per
     /// element of an array.
     charged: usize,
@@ -59,6 +61,10 @@ struct Region {
 /// A string: UTF-8 text in a content-defined sequence, whose branches count
 /// characters and lines.
 pub type Text = merkle_champ::Sequence<merkle_champ::sequence::TextByte>;
+
+/// A map: a persistent CHAMP map from cells to cells. Strings are interned,
+/// so a string key is a cell like any other.
+pub type Map = merkle_champ::ChampMap<u64, u64>;
 
 /// An array: a persistent, content-defined sequence of cells, and the cells
 /// appended to it since (`vector-push`, which builds in place), which join
@@ -116,6 +122,8 @@ pub struct Machine {
     /// way, apart from the scratch stack so that a literal inside a loop body
     /// does not hide the loop's index.
     marks: Vec<u64>,
+    /// Strings by the identity of their text, so equal text is one handle.
+    strings: HashMap<merkle_champ::Identity, u64>,
     pub stats: Stats,
     pub(crate) blobs: BTreeMap<Cid, Blob>,
     words: Vec<Executable>,
@@ -134,6 +142,7 @@ impl Machine {
             stack: Vec::new(),
             scratch: Vec::new(),
             marks: Vec::new(),
+            strings: HashMap::new(),
             stats: Stats::default(),
             blobs: image.blobs.clone(),
             words: Vec::new(),
@@ -156,6 +165,7 @@ impl Machine {
             stack: Vec::new(),
             scratch: Vec::new(),
             marks: Vec::new(),
+            strings: HashMap::new(),
             stats: Stats::default(),
             blobs: BTreeMap::new(),
             words: Vec::new(),
@@ -199,6 +209,7 @@ impl Machine {
             read_only: cid.is_some(),
             array: None,
             text: None,
+            map: None,
             charged: size,
         });
         self.live_bytes += size;
@@ -229,6 +240,9 @@ impl Machine {
         if let Some(c) = region.cid {
             self.read_only.remove(&c);
         }
+        if let Some(t) = &region.text {
+            self.strings.remove(&t.identity());
+        }
         self.live_bytes -= region.charged;
         // Never wrap a generation. Retire an exhausted slot permanently.
         if let Some(next) = self.regions[slot].generation.checked_add(1) {
@@ -245,8 +259,19 @@ impl Machine {
         }
         Ok(index)
     }
-    /// A new region holding a string, charged a byte per byte.
+    /// The handle of a string with this text: an existing one, since strings
+    /// are interned, so equal text is one handle and strings compare and hash
+    /// as cells; otherwise a new region, charged a byte per byte.
     fn allocate_text(&mut self, t: Text) -> Result<u64, Error> {
+        let id = t.identity();
+        if let Some(&r) = self.strings.get(&id) {
+            return Ok(r);
+        }
+        let r = self.allocate_new_text(t)?;
+        self.strings.insert(id, r);
+        Ok(r)
+    }
+    fn allocate_new_text(&mut self, t: Text) -> Result<u64, Error> {
         let size = t.len();
         if size > MAX_BYTES || self.live_bytes.checked_add(size).ok_or(Error::Limit)? > MAX_BYTES {
             return Err(Error::Limit);
@@ -264,6 +289,26 @@ impl Machine {
     /// The text a string handle holds.
     pub fn text(&self, r: u64) -> Result<&Text, Error> {
         self.region(r)?.text.as_ref().ok_or(Error::Memory)
+    }
+    /// A new region holding a map, charged 16 bytes per entry.
+    fn allocate_map(&mut self, m: Map) -> Result<u64, Error> {
+        let size = m.len().checked_mul(16).ok_or(Error::Limit)?;
+        if size > MAX_BYTES || self.live_bytes.checked_add(size).ok_or(Error::Limit)? > MAX_BYTES {
+            return Err(Error::Limit);
+        }
+        let r = self.allocate(Vec::new(), None)?;
+        let slot = self.region_slot(r)?;
+        let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+        region.map = Some(m);
+        region.charged = size;
+        self.live_bytes += size;
+        self.stats.allocated_bytes += size as u64;
+        self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(self.live_bytes);
+        Ok(r)
+    }
+    /// The map a map handle holds.
+    pub fn map(&self, r: u64) -> Result<&Map, Error> {
+        self.region(r)?.map.as_ref().ok_or(Error::Memory)
     }
     /// A new region holding an array, charged 8 bytes per element.
     fn allocate_vector(&mut self, v: merkle_champ::Sequence<u64>) -> Result<u64, Error> {
@@ -571,6 +616,22 @@ impl Machine {
                     }
                     self.marks.push(self.stack.len() as u64);
                 }
+                Instruction::Prim(Primitive::MapGather) => {
+                    if self.marks.len() <= mbase {
+                        return Err(Error::Stack);
+                    }
+                    let mark = self.marks.pop().ok_or(Error::Stack)? as usize;
+                    if mark > self.stack.len() || (self.stack.len() - mark) % 2 != 0 {
+                        return Err(Error::Stack);
+                    }
+                    let cells = self.stack.split_off(mark);
+                    let mut m = Map::new();
+                    for pair in cells.chunks_exact(2) {
+                        m.insert(pair[0], pair[1]);
+                    }
+                    let r = self.allocate_map(m)?;
+                    self.push(r)?;
+                }
                 Instruction::Prim(Primitive::Gather) => {
                     if self.marks.len() <= mbase {
                         return Err(Error::Stack);
@@ -767,24 +828,29 @@ impl Machine {
                 self.push(n as u64)?;
             }
             Trap => return Err(Error::User(self.pop()?)),
-            // On a string, length counts characters and `at` gives one.
+            // On a string, length counts characters and `at` gives one; on a
+            // map, length counts entries and `at` looks a key up.
             VecLen => {
                 let r = self.pop()?;
-                let n = match self.text(r) {
-                    Ok(t) => t.chars() as usize,
-                    Err(_) => self.array(r)?.len(),
+                let n = if let Ok(t) = self.text(r) {
+                    t.chars() as usize
+                } else if let Ok(m) = self.map(r) {
+                    m.len()
+                } else {
+                    self.array(r)?.len()
                 };
                 self.push(n as u64)?;
             }
             VecAt => {
                 let i = self.pop()?;
                 let r = self.pop()?;
-                let x = match self.text(r) {
-                    Ok(t) => u64::from(t.char_at(i).ok_or(Error::Memory)?),
-                    Err(_) => {
-                        let i = usize::try_from(i).map_err(|_| Error::Memory)?;
-                        self.array(r)?.get(i).ok_or(Error::Memory)?
-                    }
+                let x = if let Ok(t) = self.text(r) {
+                    u64::from(t.char_at(i).ok_or(Error::Memory)?)
+                } else if let Ok(m) = self.map(r) {
+                    *m.get(&i).ok_or(Error::Memory)?
+                } else {
+                    let i = usize::try_from(i).map_err(|_| Error::Memory)?;
+                    self.array(r)?.get(i).ok_or(Error::Memory)?
                 };
                 self.push(x)?;
             }
@@ -869,12 +935,61 @@ impl Machine {
                     (Ok(x), Ok(y)) => x.identity() == y.identity(),
                     _ => match (self.array(a), self.array(b)) {
                         (Ok(x), Ok(y)) => x.whole().identity() == y.whole().identity(),
-                        _ => a == b,
+                        _ => match (self.map(a), self.map(b)) {
+                            (Ok(x), Ok(y)) => x.identity() == y.identity(),
+                            _ => a == b,
+                        },
                     },
                 };
                 self.push(same as u64)?;
             }
-            Execute | ScratchPush | ScratchPop | ScratchPeek | Mark | Gather => unreachable!(),
+            // A new version with key k set to v, for a map; with element k
+            // replaced, for an array.
+            Put => {
+                let v = self.pop()?;
+                let k = self.pop()?;
+                let m = self.pop()?;
+                let r = if let Ok(map) = self.map(m) {
+                    let map = map.update(k, v);
+                    self.allocate_map(map)?
+                } else {
+                    let a = self.array(m)?;
+                    let i = usize::try_from(k).map_err(|_| Error::Memory)?;
+                    if i >= a.len() {
+                        return Err(Error::Memory);
+                    }
+                    let s = a.whole().update(i, v);
+                    self.allocate_vector(s)?
+                };
+                self.push(r)?;
+            }
+            Has => {
+                let k = self.pop()?;
+                let m = self.pop()?;
+                let has = self.map(m)?.contains_key(&k);
+                self.push(has as u64)?;
+            }
+            Remove => {
+                let k = self.pop()?;
+                let m = self.pop()?;
+                let map = self.map(m)?.without(&k);
+                let r = self.allocate_map(map)?;
+                self.push(r)?;
+            }
+            Keys | Values => {
+                let m = self.pop()?;
+                let map = self.map(m)?;
+                let cells: merkle_champ::Sequence<u64> = if p == Keys {
+                    map.iter().map(|(k, _)| *k).collect()
+                } else {
+                    map.iter().map(|(_, v)| *v).collect()
+                };
+                let r = self.allocate_vector(cells)?;
+                self.push(r)?;
+            }
+            Execute | ScratchPush | ScratchPop | ScratchPeek | Mark | Gather | MapGather => {
+                unreachable!()
+            }
         }
         Ok(())
     }

@@ -101,6 +101,16 @@ pub enum Primitive {
     Concat = 53,
     Slice = 54,
     Same = 55,
+    // Maps (docs/MAPS.md): persistent CHAMP maps of cells, gathered from the
+    // key and value pairs above a mark like an array literal; a new version
+    // with a key set (or an array element replaced), membership, a new
+    // version without a key, and the keys and values as arrays.
+    MapGather = 56,
+    Put = 57,
+    Has = 58,
+    Remove = 59,
+    Keys = 60,
+    Values = 61,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -160,6 +170,12 @@ impl Primitive {
         (Self::Concat, "concat"),
         (Self::Slice, "slice"),
         (Self::Same, "same?"),
+        (Self::MapGather, "map-gather"),
+        (Self::Put, "put"),
+        (Self::Has, "has?"),
+        (Self::Remove, "remove"),
+        (Self::Keys, "keys"),
+        (Self::Values, "values"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

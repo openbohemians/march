@@ -19,15 +19,21 @@ const SHOWN: usize = 16;
 
 /// The checker's type of a string (docs/STRINGS.md).
 const STRING: u8 = 253;
+/// Map types run from 231 (unknown keys and values) to 245, by key and
+/// value kind, and 246 is the empty map (docs/MAPS.md).
+const MAP: u8 = 231;
+const EMPTY_MAP: u8 = 246;
 
 /// The type of an array's elements, for a type byte as the checker writes it
 /// (docs/ARRAYS.md): 3, 4 and 5 are arrays of i64, f64 and unknown elements,
-/// each rank adds 3, 252 has mixed elements and 254 is empty.
+/// each rank adds 3, 247 holds strings, 252 has mixed elements and 254 is
+/// empty.
 fn element_type(t: u8) -> u8 {
     match t {
         3 => 1,
         4 => 2,
-        6..=251 => t - 3,
+        6..=230 => t - 3,
+        247 => STRING,
         _ => 0,
     }
 }
@@ -117,11 +123,44 @@ impl Driver {
                 return;
             }
         }
+        if (MAP..=EMPTY_MAP).contains(&t) {
+            if let Ok(map) = self.machine.map(v) {
+                // Keys and values are shown by the kinds the type gives them.
+                let (k, val) = ((t - MAP) / 5, (t - MAP) % 5);
+                let key_type = [0, 1, STRING][usize::from(k.min(2))];
+                let value_type = [0, 1, 2, STRING, 0][usize::from(val)];
+                let mut entries: Vec<(String, u64)> = map
+                    .iter()
+                    .map(|(&key, &value)| {
+                        let mut s = String::new();
+                        self.show_value(key, key_type, &mut s);
+                        (s, value)
+                    })
+                    .collect();
+                if key_type == 1 {
+                    entries.sort_by_key(|(s, _)| s.parse::<i64>().unwrap_or(0));
+                } else {
+                    entries.sort();
+                }
+                out.push('{');
+                for (key, value) in entries.iter().take(SHOWN) {
+                    out.push(' ');
+                    out.push_str(key);
+                    out.push(' ');
+                    self.show_value(*value, value_type, out);
+                }
+                if entries.len() > SHOWN {
+                    out.push_str(&format!(" … {} more", entries.len() - SHOWN));
+                }
+                out.push_str(" }");
+                return;
+            }
+        }
         if t == 2 {
             out.push_str(&format!("{:?}", f64::from_bits(v)));
             return;
         }
-        if (3..=254).contains(&t) {
+        if (3..=230).contains(&t) || t == 247 || t == 252 || t == 254 {
             if let Ok(vector) = self.machine.sequence(v) {
                 out.push('(');
                 for &x in vector.iter().take(SHOWN) {

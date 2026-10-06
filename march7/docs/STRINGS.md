@@ -49,10 +49,10 @@ the frozen generation 0 reads it.
 - `length` and `at` are the array words; the machine looks at what the handle
   holds. So `each`, `fold` and `map` walk a string's characters:
   `"abc" [ 1 + ] map` is `( 98 99 100 )`.
-- `same?` compares contents through identities, so it is cheap after the
-  first comparison; on anything other than two strings or two arrays it
-  compares cells, like `eq?`. `eq?` compares cells, which for strings means
-  handles.
+- **Strings are interned** (since maps, docs/MAPS.md): equal text is always
+  the same handle, so `eq?` compares strings correctly, and strings serve as
+  map keys. `same?` compares contents through identities, for arrays and
+  maps as well as strings.
 - `concat`, `slice` and `same?` are primitives 53, 54 and 55, and work on
   arrays too.
 - Errors: reading or slicing past the end, a slice whose end is before its
@@ -71,6 +71,4 @@ The command line shows a string as March writes it: `<1> "hello"`.
   needs a literal and display syntax (TEXT.md, open question 3).
 - **Escapes in literals,** so a string can contain `"`.
 - **Comparison and ordering** beyond `same?`, as family clauses.
-- **Arrays of strings** are typed as arrays of unknown elements (5), so their
-  elements show as raw cells.
 - Grapheme clusters, normalization and custom glyphs (TEXT.md stages 4 and 5).

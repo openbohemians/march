@@ -164,7 +164,9 @@ content.
    `length` and `at` by character, `concat`, `slice` by character, `same?`,
    and `each` over code points; byte positions and searching are next.
 3. **Maps keyed by any value, strings included** (the next item after
-   strings).
+   strings). First slice done 2026-10-05 (march7/docs/MAPS.md): strings are
+   interned, so string keys are cells; arrays and maps as keys compare by
+   handle for now.
 4. **Grapheme clusters and normalization,** as library words.
 5. **Glyphs by identity, fonts and numeral systems** (layers 3 and 4). These
    are later, and Thomas called them "a down the road thing".

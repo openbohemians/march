@@ -197,16 +197,34 @@ costs the system's own rebuild about a million steps once per session (the
 analysis of `:` covers much of the compiler).
 
 **Arrays** (docs/ARRAYS.md) add types by element type and rank: 3, 4 and 5
-for arrays of i64, f64 and unknown elements, 3 more per rank, 252 for mixed
-elements and 254 for the empty array. The checker models `mark` and `gather`,
-so an array literal's element count and type are exact, even when its count
-varies, and families lift over arrays, all the way down nested ones.
+for arrays of i64, f64 and unknown elements, 3 more per rank up to 230, 247
+for strings, 252 for mixed elements and 254 for the empty array. The checker
+models `mark` and `gather`, so an array literal's element count and type are
+exact, even when its count varies, and families lift over arrays, all the
+way down nested ones. **Strings** are 253 (docs/STRINGS.md) and **maps** 231
+to 246, by their keys' and values' kinds (docs/MAPS.md).
+
+| Type | Meaning |
+|---|---|
+| 0, 1, 2 | unknown, i64, f64 |
+| 3 to 230 | arrays, by element type and rank |
+| 231 to 245 | maps: 231 + 5 × key kind + value kind |
+| 246 | the empty map |
+| 247 | an array of strings |
+| 252 | an array of mixed elements |
+| 253 | a string |
+| 254 | the empty array |
+| 255 | lost: outside the tracked window |
 
 **Scratch types.** The types of the first eight scratch-stack slots are kept
 too (field 128, a byte each), and merged where paths meet like the data
-stack's (per-op tables 9 and 10), except that an empty array meeting an array
-of t becomes an array of t. So `i0` is an i64, and `each` and `map` know
-their array's element type.
+stack's (per-op tables 9 and 10). So `i0` is an i64, and `each` and `map`
+know their array's element type.
+
+**Empty collections join.** Where paths meet, an empty array meeting an array
+of t becomes an array of t, and an empty map meeting a typed map becomes that
+map, on the data stack and the scratch stack alike (since maps; it was the
+scratch stack only), so a collection built in a loop keeps its type.
 
 **Type errors.** Known types that cannot work are errors, recorded as a trap
 number (field 208) and raised at `;`: 23 for a family call whose inputs match

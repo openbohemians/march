@@ -57,7 +57,8 @@ type and rank:
 | Type | Array of |
 |---|---|
 | 3, 4, 5 | i64, f64, elements of unknown type |
-| 6, 7, 8 | arrays of i64, of f64, of unknown: each rank adds 3 |
+| 6, 7, 8 | arrays of i64, of f64, of unknown: each rank adds 3, up to 230 |
+| 247 | strings |
 | 252 | elements whose known types differ, as in `( 1 2.5 )` |
 | 254 | nothing yet: the empty array `( )` |
 
@@ -126,6 +127,11 @@ element operation to every element:
 - **Generic words lift inside their instances:** `: double dup + ;` on
   `( 1.5 2.5 )` gets an instance whose `+` is lifted.
 - **At top level too:** `( 1 2 3 ) 1 + 2 at` is 4.
+
+## Replacing an element
+
+`put ( a i x -- a' )` gives a new array with element i replaced; the old one
+is unchanged. It is the map word (docs/MAPS.md), primitive 57.
 
 ## Joining, slicing and comparing
 

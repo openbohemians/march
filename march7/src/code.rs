@@ -111,6 +111,16 @@ pub enum Primitive {
     Remove = 59,
     Keys = 60,
     Values = 61,
+    // Byte spans (docs/REBUILD.md), so reading source needs no byte loops in
+    // March: the first byte equal to, above, or at or below a given byte,
+    // in a region from an offset to an end (or the end); FNV-1a over a span;
+    // two spans equal; and a span's decimal digits as a number.
+    ByteFind = 62,
+    BytePast = 63,
+    ByteUpto = 64,
+    ByteHash = 65,
+    BytesEq = 66,
+    Decimal = 67,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -176,6 +186,12 @@ impl Primitive {
         (Self::Remove, "remove"),
         (Self::Keys, "keys"),
         (Self::Values, "values"),
+        (Self::ByteFind, "byte-find"),
+        (Self::BytePast, "byte-past"),
+        (Self::ByteUpto, "byte-upto"),
+        (Self::ByteHash, "byte-hash"),
+        (Self::BytesEq, "bytes-eq?"),
+        (Self::Decimal, "decimal"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

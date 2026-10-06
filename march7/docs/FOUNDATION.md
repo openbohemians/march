@@ -126,6 +126,7 @@ adding an operation outside this list requires review.
 | Vectors | persistent sequences of cells (`merkle_champ::Sequence`, content-defined since 2026-10-05): length, element, append in place, update to a new version (added 2026-10-04) |
 | Strings | UTF-8 text from a region's bytes, interned; for strings and arrays, joining, slicing and equality of contents (added 2026-10-05; docs/STRINGS.md) |
 | Maps | persistent CHAMP maps of cells gathered from key and value pairs; put (or replace an array element), membership, remove, keys and values (added 2026-10-05; docs/MAPS.md) |
+| Bytes | the first byte equal to, above, or at or below a given byte in a span; FNV-1a over a span; two spans equal; a span's decimal digits as a number (added 2026-10-05 for reading source; docs/REBUILD.md) |
 | Integer | wrapping add/subtract/multiply; unsigned divide/remainder; equality and unsigned less-than; bitwise and/or/xor/not; logical shifts |
 | Float | IEEE-754 binary64 add/subtract/multiply/divide, equality, less-than, integer conversion both ways, with canonical NaN (added 2026-10-03; docs/NUMBERS.md) |
 | Control | full-cell literal, resolved call, return, local branch/zero-branch, quotation reference, indirect execute, local self-call, explicit tail-call forms, trap |

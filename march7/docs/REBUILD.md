@@ -28,7 +28,7 @@ below. After generation 0, only images and March source are involved.
 
 ```sh
 cargo run --offline --bin march7-seed -- seed/system.asm gen0.image
-cargo run --offline -- gen0.image --fuel 80000000 seed/system.march --system gen1.image
+cargo run --offline -- gen0.image --fuel 120000000 seed/system.march --system gen1.image
 cargo run --offline -- gen1.image seed/system.march --system gen2.image
 cargo run --offline -- gen2.image seed/system.march --system gen3.image
 cmp gen2.image gen3.image
@@ -85,11 +85,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 76.5 million |
-| The same on generation 1 | 8.90 million |
+| Machine steps to compile `system.march` on generation 0 | 77.2 million |
+| The same on generation 1 | 5.51 million |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 106,174 bytes |
-| `system.march` | 2,158 lines |
+| Rebuilt image size | 105,833 bytes |
+| `system.march` | 2,153 lines |
 | `system.asm` listing | 1,403 lines |
 
 ## Tests
@@ -200,12 +200,12 @@ command line needs `--fuel`, and the tests give it 60 million.
 The driver's step budget (10 million by default) is a safety net against
 runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
-rebuild tests use an explicit budget of 80 million steps, and a named canary
-test asserts that a rebuilt system compiles the system source in under 8
-million steps. It is 8.90 million with strings and maps (8.17 with
-consumers at top level), within 0.1 million of the canary and 1.1 million of
-the driver's default budget, which the plain rebuild command uses. It was
-raised to 9 million when `each`, `fold`, `map`,
+rebuild tests use an explicit budget of 120 million steps, and a named canary
+test asserts that a rebuilt system compiles the system source in under 6.5
+million steps. It is 5.51 million since the byte primitives (below), down
+from 8.90 million with strings and maps, which had come within 0.1 million
+of the canary of the time and 1.1 million of the driver's default budget.
+The canary was raised to 9 million when `each`, `fold`, `map`,
 nested array types and scratch types (2026-10-04) took it to 8.09 million:
 the code grew 6.6% in tokens and the steps 6.5%, so the cost per token did
 not change. It took 7.59 million as of arrays on persistent vectors (6.65 million as of checker
@@ -214,18 +214,17 @@ slice 2: its code added
 mostly analysing the words the source runs at top level once per session,
 and keeping types by stack position rather than for the top eight slots half
 a million; arrays and lifting added 0.8 million). `an@` and `an!` became
-inline emitters along the way. The margin is small again, and the driver's
-default budget of 10 million is getting close; the profile's biggest items
-are reading words, `find` and skipping comments, all byte loops in March.
+inline emitters along the way.
 
-Generation 0 grows faster: 76.5 million steps as of maps (65.5 as of
-consumers at top level, 55.7 as of arrays), within 3.5 million of the
-tests' 80 million. Its frozen compiler looks words up linearly, so each new
-definition costs it more than the last. Two remedies, both decisions for
-Thomas: re-freeze the listing from a newer generation, whose lookup is
-hashed, or add bulk byte primitives (scan to a delimiter, compare, hash) that
-would speed up every generation's reading. When the command line exhausts the budget, it says so and
-suggests `--fuel`.
+Generation 0 grows faster: 77.2 million steps as of the byte primitives
+(76.5 as of maps, 65.5 as of consumers at top level, 55.7 as of arrays), so
+the tests' budget was raised from 80 to 120 million. Its frozen compiler looks
+words up linearly, so each new definition costs it more than the last, and
+its reading cannot use the byte primitives, which help only the generations
+built from `system.march`. It runs once per bootstrap, in about half a
+second. The lasting remedy is to re-freeze the listing from a newer
+generation, whose lookup is hashed and whose reading uses the primitives.
+When the command line exhausts the budget, it says so and suggests `--fuel`.
 
 **Working-memory primitives (2026-10-04).** Adding symbol names
 (docs/SURFACE.md) took compiling the system on generation 1 to 8.5 million
@@ -259,16 +258,44 @@ million steps, and a token to about 460:
 
 The canary was lowered to 4.5 million so it still catches growth.
 
+**Byte primitives (2026-10-05).** Strings and maps took compiling the system
+on generation 1 to 8.90 million steps, against a canary of 9 million and the
+driver's default budget of 10 million. A per-word step profile showed where:
+
+| Word | Before | After |
+|---|---:|---:|
+| `read-word` | 1.87 million (21%) | 0.69 million |
+| `find` | 1.17 million (13%) | 0.43 million |
+| `line-comment` | 0.58 million (6.5%) | under 0.03 million |
+| `int-number` | 0.51 million (5.8%) | 0.18 million |
+| total | 8.90 million | 5.51 million |
+
+Six primitives (62 to 67) take the per-byte loops out of March, each keeping
+the word's meaning exactly:
+- `byte-find`, `byte-past` and `byte-upto` ( r o end b -- k ): the first offset
+  whose byte is b, is above b, or is at or below b. `read-word` skips spaces
+  and finds a word's end with them, and comments and string literals find
+  their end with `byte-find`; `symbolize` checks for a backslash first.
+- `byte-hash` ( r o n -- h ): FNV-1a over a span, as `read-word` and
+  `hash-bytes` hashed byte by byte.
+- `bytes-eq?` ( r1 o1 r2 o2 n -- flag ): `find` compares a name in one step.
+- `decimal` ( r o n -- value status ): digits to a number, with status 0 for
+  a span that is not all digits and 2 for one that overflows 64 bits; the
+  sign and the range of a signed integer stay in `int-number`.
+
+The rest of the profile is spread out: `read-word` itself, emitting code a
+byte at a time (`c,`), `interpret`, `find`, then the checker's analyses.
+The canary was lowered to 6.5 million so it still catches growth.
+
 Next candidates:
 
 - **Keep temporaries on the scratch stack.** Words like `find` and `number`
   still use fixed temporary offsets. That is safe now, because `evaluate` is
   reentrant and those words do not call back into user code, but the stack is
   the cleaner convention for new code.
-- **The remaining profile.** Reading words is about a quarter of compile time
-  and `find` (mostly comparing a name's bytes) about a sixth, then number
-  parsing. Bigger gains there would need bulk byte primitives (compare, scan),
-  which would widen the host's inventory.
+- **The remaining profile.** After the byte primitives, reading words is
+  about an eighth of compile time, emitting code a byte at a time about a
+  twelfth, then `interpret` and `find`.
 - **The listing is frozen** (2026-09-30). `system.asm` only reproduces
   generation 0, and a test pins the SHA-256 of its assembled image.
 

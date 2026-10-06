@@ -138,6 +138,12 @@
 : kv-remove 59 prim, ; immediate
 : kv-keys 60 prim, ; immediate
 : kv-values 61 prim, ; immediate
+: byte-find 62 prim, ; immediate
+: byte-past 63 prim, ; immediate
+: byte-upto 64 prim, ; immediate
+: byte-hash 65 prim, ; immediate
+: bytes-eq? 66 prim, ; immediate
+: decimal 67 prim, ; immediate
 
 -- Phase 3: clean base words.
 : get [ 44 prim, ] ;
@@ -257,12 +263,7 @@
 : mix64 dup 33 rshift xor -49064778989728563 u* dup 33 rshift xor
   -4265267296055464877 u* dup 33 rshift xor ;
 -- ( region offset length -- hash )
-: hash-bytes 760 put 752 put 744 put -3750763034362895579 768 put 0 776 put
-  cycle 776 get 760 get ult? while
-    744 get 752 get 776 get u+ c@ 768 get xor 1099511628211 u* 768 put
-    776 get 1 u+ 776 put
-  repeat
-  768 get 760 get xor mix64 ;
+: hash-bytes dup >r byte-hash r> xor mix64 ;
 
 -- The dictionary is hashed: 1,024 buckets in the region whose handle is at
 -- working offset 736, each the head of a chain through the entries' bucket
@@ -305,12 +306,7 @@
   736 get 240 get 248 get 256 get name-bucket @ 264 put
   cycle 264 get while
     264 get 24 u+ get 256 get eq? if
-      -- Compare the bytes: the word's offset and the entry's name offset on
-      -- the stack, the word's end on the scratch stack.
-      248 get dup 256 get u+ >r 264 get 40 u+
-      cycle over r@ ult? if over 240 get swap c@ over 1 swap c@ eq? else 0 then
-      while 1 u+ swap 1 u+ swap repeat
-      drop r> eq? if 264 get exit then
+      240 get 248 get 1 264 get 40 u+ 256 get bytes-eq? if 264 get exit then
     then
     264 get 32 u+ get 264 put
   repeat 0 ;
@@ -318,16 +314,15 @@
 : token 40 get 64 get 72 get ;
 
 -- ( -- flag ) Skip whitespace, then take the next whitespace-delimited word,
--- hashing its bytes on the way (FNV-1a, as `hash-bytes` begins) for `find`.
+-- and hash its bytes (FNV-1a, as `hash-bytes` begins) for `find`. The byte
+-- primitives do the scanning and hashing, so no loop runs per byte here.
 : read-word
-  56 get
-  cycle dup 48 get ult? if 40 get over c@ 33 ult? else 0 then while 1 u+ repeat
+  40 get 56 get 48 get 32 byte-past
   dup 56 put dup 64 put
   48 get ult? 0= if 0 72 put 0 exit then
-  -3750763034362895579 56 get
-  cycle dup 48 get ult? if 40 get over c@ 32 over ult? else 0 0 then
-  while rot xor 1099511628211 u* swap 1 u+ repeat
-  drop dup 56 put 64 get u- 72 put 816 put
+  40 get 64 get 48 get 32 byte-upto
+  dup 56 put 64 get u- 72 put
+  40 get 64 get 72 get byte-hash 816 put
   40 get 824 put 64 get 832 put 72 get 840 put 1 ;
 
 : word read-word 0= if 4 trap then token ;
@@ -341,17 +336,11 @@
   64 get 288 put 64 get 72 get u+ 296 put 0 304 put
   scan-char 45 eq? if 1 304 put scan-inc else scan-char 43 eq? if scan-inc then then
   288 get 296 get eq? if 0 exit then
-  288 get 336 put
-  cycle 288 get 296 get ult? while
-    scan-char 48 u- 10 ult? 0= if 0 exit then scan-inc
-  repeat
-  336 get 288 put 0 312 put 9223372036854775807 304 get u+ 320 put
-  cycle 288 get 296 get ult? while
-    scan-char 48 u- 328 put
-    320 get 328 get u- 10 u/ 312 get ult? if 2 trap then
-    312 get 10 u* 328 get u+ 312 put scan-inc
-  repeat
-  312 get 304 get if 0 swap u- then 1 ;
+  40 get 288 get 296 get 288 get u- decimal
+  dup 0= if drop drop 0 exit then
+  2 eq? if 2 trap then
+  dup 9223372036854775807 304 get u+ swap ult? if 2 trap then
+  304 get if 0 swap u- then 1 ;
 
 -- Float literals: [sign] digits [. digits] [e|E [sign] digits], with a dot or
 -- an exponent (so `1.` is a word, not a number). The value is correctly rounded
@@ -1012,7 +1001,13 @@
   drop drop 0 ;
 -- ( id -- )
 : do-prim
-  61 over ult? if drop 11 fail exit then
+  67 over ult? if drop 11 fail exit then
+  dup 62 ult? 0= if
+    dup 65 ult? if drop 4 1 apply 1 ty-set 0 64 an! exit then
+    dup 65 eq? if drop 3 1 apply 1 ty-set 0 64 an! exit then
+    dup 66 eq? if drop 5 1 apply 1 ty-set 0 64 an! exit then
+    drop 3 2 apply 1 0 ty! 1 1 ty! 0 64 an! exit
+  then
   dup 56 eq? if drop do-map-gather exit then
   dup 57 eq? if drop
     2 ty@ dup map-type? if 1 ty@ 0 ty@ map-put-type else 0 ty@ push-type then
@@ -1345,15 +1340,14 @@
 : >xt 8 u+ get ;
 : emit-recur 7 c, ;
 -- Skip to the end of the line, past its newline.
-: line-comment 56 get
-  cycle dup 48 get ult? if 40 get over c@ 10 eq? 0= else 0 then while 1 u+ repeat
+: line-comment 40 get 56 get 48 get 10 byte-find
   dup 48 get ult? if 1 u+ then 56 put ;
 
 -- ( -- region 0 length ) or, compiling, emit a data operand.
 -- Reads to the next double quote.
 : s"
   inc-pos 56 get 344 put
-  cycle 56 get 48 get ult? if input-char 34 eq? 0= else 0 then while inc-pos repeat
+  40 get 56 get 48 get 34 byte-find 56 put
   56 get 48 get ult? 0= if 8 trap then
   40 get 344 get 56 get 344 get u- publish
   inc-pos
@@ -1365,7 +1359,7 @@
 -- into a string when the code runs; at top level the string is made at once.
 : string-literal
   64 get 1 u+ dup 56 put 344 put
-  cycle 56 get 48 get ult? if input-char 34 eq? 0= else 0 then while inc-pos repeat
+  40 get 56 get 48 get 34 byte-find 56 put
   56 get 48 get ult? 0= if 8 trap then
   40 get 344 get 56 get 344 get u- publish
   inc-pos
@@ -1565,6 +1559,7 @@ _v ᵥ
 -- escapes rewritten as symbols, in the buffer at 3584. A word too long for
 -- the buffer comes back unchanged; an unknown name is left as written.
 : symbolize dup 256 ult? 0= if exit then
+  >r over over dup r@ u+ 92 byte-find over r@ u+ eq? if r> exit then r>
   464 put 456 put 448 put 0 472 put 0 480 put
   cycle 472 get 464 get ult? while
     472 get sym-at 92 eq? if

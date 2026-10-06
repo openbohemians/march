@@ -987,6 +987,59 @@ impl Machine {
                 let r = self.allocate_vector(cells)?;
                 self.push(r)?;
             }
+            // ( r o end b -- k ) The first offset from o before end whose
+            // byte is b, is above b, or is at or below b; end if none.
+            ByteFind | BytePast | ByteUpto => {
+                let b = self.pop()? as u8;
+                let end = self.pop()?;
+                let o = self.pop()?;
+                let r = self.pop()?;
+                let n = end.checked_sub(o).ok_or(Error::Memory)?;
+                let n = usize::try_from(n).map_err(|_| Error::Memory)?;
+                let bytes = self.read(r, o, n)?;
+                let i = match p {
+                    ByteFind => bytes.iter().position(|&x| x == b),
+                    BytePast => bytes.iter().position(|&x| x > b),
+                    _ => bytes.iter().position(|&x| x <= b),
+                };
+                self.push(o + i.unwrap_or(n) as u64)?;
+            }
+            // ( r o n -- h ) FNV-1a over the span, unmixed.
+            ByteHash => {
+                let n = usize::try_from(self.pop()?).map_err(|_| Error::Memory)?;
+                let (r, o) = self.address()?;
+                let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+                for &b in self.read(r, o, n)? {
+                    h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+                }
+                self.push(h)?;
+            }
+            // ( r1 o1 r2 o2 n -- flag )
+            BytesEq => {
+                let n = usize::try_from(self.pop()?).map_err(|_| Error::Memory)?;
+                let (r2, o2) = self.address()?;
+                let (r1, o1) = self.address()?;
+                let same = self.read(r1, o1, n)? == self.read(r2, o2, n)?;
+                self.push(same as u64)?;
+            }
+            // ( r o n -- value status ) The span's decimal digits as a number:
+            // status 1, or 0 if the span is empty or not all digits, or 2 if
+            // the digits do not fit 64 bits.
+            Decimal => {
+                let n = usize::try_from(self.pop()?).map_err(|_| Error::Memory)?;
+                let (r, o) = self.address()?;
+                let bytes = self.read(r, o, n)?;
+                let (value, status) = if bytes.is_empty() || !bytes.iter().all(u8::is_ascii_digit) {
+                    (0, 0)
+                } else {
+                    bytes
+                        .iter()
+                        .try_fold(0u64, |v, &b| v.checked_mul(10)?.checked_add(u64::from(b - b'0')))
+                        .map_or((0, 2), |v| (v, 1))
+                };
+                self.push(value)?;
+                self.push(status)?;
+            }
             Execute | ScratchPush | ScratchPop | ScratchPeek | Mark | Gather | MapGather => {
                 unreachable!()
             }

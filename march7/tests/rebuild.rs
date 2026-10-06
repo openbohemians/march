@@ -16,20 +16,20 @@ fn generation_zero() -> Image {
 }
 
 /// Step budget for compiling the system source in these tests. Generation 0
-/// takes about 22.6 million steps, because the frozen listing's `find` scans
-/// the dictionary linearly. This budget is only a safety net; compile cost is
-/// tracked by `compiling_the_system_stays_under_its_step_canary`.
-const REBUILD_FUEL: u64 = 80_000_000;
+/// takes about 77 million steps, because the frozen listing's `find` scans
+/// the dictionary linearly and its reading cannot use the byte primitives.
+/// This budget is only a safety net; compile cost is tracked by
+/// `compiling_the_system_stays_under_its_step_canary`.
+const REBUILD_FUEL: u64 = 120_000_000;
 
 /// Compile-cost canary: steps for a rebuilt system (generation 1) to compile
-/// the system source. It is 8.09 million today: 3.8 before checker slice 2,
-/// whose code added 1.3 million, top-level typing about 1 million more,
-/// mostly analysing the words the source runs at top level, once per session,
-/// types kept by stack position half a million, arrays 0.8 million, and the
-/// array consumers with nested and scratch types 0.5 million, in proportion
-/// to the code they added. Exceeding it means compile cost grew; look at why
-/// before raising it (docs/REBUILD.md).
-const COMPILE_STEP_CANARY: u64 = 9_000_000;
+/// the system source. It is 5.51 million today, down from 8.90 when the byte
+/// primitives (62 to 67) took the per-byte loops out of reading words,
+/// finding them, skipping comments and parsing integers. Before that, checker
+/// slices, typing, arrays, strings and maps had grown it from 3.8 million,
+/// in proportion to the code they added. Exceeding it means compile cost
+/// grew; look at why before raising it (docs/REBUILD.md).
+const COMPILE_STEP_CANARY: u64 = 6_500_000;
 
 /// Boot `image`, compile the system source, and export the image it defines.
 fn rebuild(image: &Image) -> Image {

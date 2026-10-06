@@ -66,6 +66,27 @@ pub type Text = merkle_champ::Sequence<merkle_champ::sequence::TextByte>;
 /// so a string key is a cell like any other.
 pub type Map = merkle_champ::ChampMap<u64, u64>;
 
+/// The checker's type of a string (docs/STRINGS.md).
+const STRING: u8 = 253;
+/// Map types run from 231 (unknown keys and values) to 245, by key and
+/// value kind, and 246 is the empty map (docs/MAPS.md).
+const MAP: u8 = 231;
+const EMPTY_MAP: u8 = 246;
+
+/// The type of an array's elements, for a type byte as the checker writes it
+/// (docs/ARRAYS.md): 3, 4 and 5 are arrays of i64, f64 and unknown elements,
+/// each rank adds 3, 247 holds strings, 252 has mixed elements and 254 is
+/// empty.
+fn element_type(t: u8) -> u8 {
+    match t {
+        3 => 1,
+        4 => 2,
+        6..=230 => t - 3,
+        247 => STRING,
+        _ => 0,
+    }
+}
+
 /// An array: a persistent, content-defined sequence of cells, and the cells
 /// appended to it since (`vector-push`, which builds in place), which join
 /// the sequence when the array is next needed whole.
@@ -124,6 +145,8 @@ pub struct Machine {
     marks: Vec<u64>,
     /// Strings by the identity of their text, so equal text is one handle.
     strings: HashMap<merkle_champ::Identity, u64>,
+    /// Text written by `write`, for the host to show.
+    output: Vec<u8>,
     pub stats: Stats,
     pub(crate) blobs: BTreeMap<Cid, Blob>,
     words: Vec<Executable>,
@@ -143,6 +166,7 @@ impl Machine {
             scratch: Vec::new(),
             marks: Vec::new(),
             strings: HashMap::new(),
+            output: Vec::new(),
             stats: Stats::default(),
             blobs: image.blobs.clone(),
             words: Vec::new(),
@@ -166,6 +190,7 @@ impl Machine {
             scratch: Vec::new(),
             marks: Vec::new(),
             strings: HashMap::new(),
+            output: Vec::new(),
             stats: Stats::default(),
             blobs: BTreeMap::new(),
             words: Vec::new(),
@@ -289,6 +314,97 @@ impl Machine {
     /// The text a string handle holds.
     pub fn text(&self, r: u64) -> Result<&Text, Error> {
         self.region(r)?.text.as_ref().ok_or(Error::Memory)
+    }
+    /// Writes a value of checker type `t` as March writes it: integers
+    /// signed, floats with a point, arrays as `( … )`, maps as `{ … }` sorted
+    /// by key, strings as literals that read back (docs/STRINGS.md), except a
+    /// string at the top when `quote` is false, which is its text as it is.
+    /// Collections show their first `limit` elements, if one is given. A
+    /// value whose type is unknown is written as an integer.
+    pub fn format_value(&self, v: u64, t: u8, quote: bool, limit: Option<usize>, out: &mut String) {
+        let shown = limit.unwrap_or(usize::MAX);
+        if t == STRING
+            && let Some(s) = self.text(v).ok().and_then(|t| t.to_text())
+        {
+            if !quote {
+                out.push_str(&s);
+                return;
+            }
+            out.push('"');
+            for c in s.chars() {
+                match c {
+                    '\\' | '"' => {
+                        out.push('\\');
+                        out.push(c);
+                    }
+                    '\n' => out.push_str("\\n;"),
+                    '\t' => out.push_str("\\t;"),
+                    '\r' => out.push_str("\\r;"),
+                    c if c.is_control() => {
+                        out.push_str(&format!("\\#{};", u32::from(c)));
+                    }
+                    c => out.push(c),
+                }
+            }
+            out.push('"');
+            return;
+        }
+        if (MAP..=EMPTY_MAP).contains(&t)
+            && let Ok(map) = self.map(v)
+        {
+            // Keys and values are shown by the kinds the type gives them.
+            let (k, val) = ((t - MAP) / 5, (t - MAP) % 5);
+            let key_type = [0, 1, STRING][usize::from(k.min(2))];
+            let value_type = [0, 1, 2, STRING, 0][usize::from(val)];
+            let mut entries: Vec<(String, u64, u64)> = map
+                .iter()
+                .map(|(&key, &value)| {
+                    let mut s = String::new();
+                    self.format_value(key, key_type, true, limit, &mut s);
+                    (s, key, value)
+                })
+                .collect();
+            if key_type == 1 {
+                entries.sort_by_key(|e| e.1 as i64);
+            } else {
+                entries.sort();
+            }
+            out.push('{');
+            for (key, _, value) in entries.iter().take(shown) {
+                out.push(' ');
+                out.push_str(key);
+                out.push(' ');
+                self.format_value(*value, value_type, true, limit, out);
+            }
+            if entries.len() > shown {
+                out.push_str(&format!(" … {} more", entries.len() - shown));
+            }
+            out.push_str(" }");
+            return;
+        }
+        if t == 2 {
+            out.push_str(&format!("{:?}", f64::from_bits(v)));
+            return;
+        }
+        if ((3..=230).contains(&t) || t == 247 || t == 252 || t == 254)
+            && let Ok(seq) = self.sequence(v)
+        {
+            out.push('(');
+            for &x in seq.iter().take(shown) {
+                out.push(' ');
+                self.format_value(x, element_type(t), true, limit, out);
+            }
+            if seq.len() > shown {
+                out.push_str(&format!(" … {} more", seq.len() - shown));
+            }
+            out.push_str(" )");
+            return;
+        }
+        out.push_str(&(v as i64).to_string());
+    }
+    /// The text written by `write` (primitive 69) since it was last taken.
+    pub fn take_output(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.output)
     }
     /// A new region holding a map, charged 16 bytes per entry.
     fn allocate_map(&mut self, m: Map) -> Result<u64, Error> {
@@ -621,7 +737,7 @@ impl Machine {
                         return Err(Error::Stack);
                     }
                     let mark = self.marks.pop().ok_or(Error::Stack)? as usize;
-                    if mark > self.stack.len() || (self.stack.len() - mark) % 2 != 0 {
+                    if mark > self.stack.len() || !(self.stack.len() - mark).is_multiple_of(2) {
                         return Err(Error::Stack);
                     }
                     let cells = self.stack.split_off(mark);
@@ -1034,11 +1150,72 @@ impl Machine {
                 } else {
                     bytes
                         .iter()
-                        .try_fold(0u64, |v, &b| v.checked_mul(10)?.checked_add(u64::from(b - b'0')))
+                        .try_fold(0u64, |v, &b| {
+                            v.checked_mul(10)?.checked_add(u64::from(b - b'0'))
+                        })
                         .map_or((0, 2), |v| (v, 1))
                 };
                 self.push(value)?;
                 self.push(status)?;
+            }
+            // ( x t -- s ) A value of checker type t as text: a string as
+            // itself, anything else as March writes it.
+            TextOf => {
+                let t = self.pop()? as u8;
+                let x = self.pop()?;
+                let mut s = String::new();
+                self.format_value(x, t, false, None, &mut s);
+                let r = self.allocate_text(merkle_champ::Sequence::text(&s))?;
+                self.push(r)?;
+            }
+            Write => {
+                let r = self.pop()?;
+                let t = self.text(r)?;
+                let bytes: Vec<u8> = t.iter().map(|b| b.0).collect();
+                self.output.extend(bytes);
+            }
+            // ( a b -- n ) -1, 0 or 1 as a is before, equal to or after b, by
+            // code point.
+            Compare => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                let order = if a == b {
+                    std::cmp::Ordering::Equal
+                } else {
+                    self.text(a)?
+                        .iter()
+                        .map(|x| x.0)
+                        .cmp(self.text(b)?.iter().map(|x| x.0))
+                };
+                self.push(order as i64 as u64)?;
+            }
+            // ( s t -- i ) The index, in characters, of t's first occurrence
+            // in s, or -1.
+            Search => {
+                let t = self.pop()?;
+                let s = self.pop()?;
+                let hay = self.text(s)?.to_text().ok_or(Error::Memory)?;
+                let needle = self.text(t)?.to_text().ok_or(Error::Memory)?;
+                let i = hay
+                    .find(&needle)
+                    .map_or(u64::MAX, |b| hay[..b].chars().count() as u64);
+                self.push(i)?;
+            }
+            // ( s -- n ok ) ( s -- f ok ) A string's number: a decimal integer
+            // in i64's range, or a float; ok is 0 if it is not one.
+            TextInt | TextFloat => {
+                let s = self.pop()?;
+                let text = self.text(s)?.to_text().ok_or(Error::Memory)?;
+                let parsed = if p == TextInt {
+                    text.parse::<i64>().ok().map(|n| n as u64)
+                } else {
+                    text.parse::<f64>()
+                        .ok()
+                        .filter(|x| x.is_finite())
+                        .map(float_bits)
+                };
+                self.push(parsed.unwrap_or(0))?;
+                self.push(parsed.is_some() as u64)?;
             }
             Execute | ScratchPush | ScratchPop | ScratchPeek | Mark | Gather | MapGather => {
                 unreachable!()

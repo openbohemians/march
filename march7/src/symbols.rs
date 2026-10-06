@@ -51,26 +51,67 @@ impl Symbols {
     }
 
     /// Rewrites each `\name` in code and comments as its symbol. Strings are
-    /// left alone, and so is a name that is not in the table.
+    /// left alone, except the code in their holes, and so is a name that is
+    /// not in the table.
     pub fn format(&self, source: &str) -> String {
-        let bytes = source.as_bytes();
         let mut out = String::with_capacity(source.len());
-        let mut i = 0;
+        self.code(source, 0, false, &mut out);
+        out
+    }
+
+    /// Formats code from byte `i` to the end of the source, or, in a string's
+    /// hole, through the `]` that closes it, and returns where it stopped. As
+    /// in the reader, a `]` closes a hole wherever a word would start at the
+    /// hole's own depth, outside any quotation opened in it.
+    fn code(&self, source: &str, mut i: usize, hole: bool, out: &mut String) -> usize {
+        let bytes = source.as_bytes();
         let mut token_start = true;
+        let mut depth = 0usize;
         while i < bytes.len() {
             let b = bytes[i];
-            // A `--` word starts a comment, which runs to the end of the line.
-            if token_start
-                && bytes[i..].starts_with(b"--")
-                && bytes.get(i + 2).is_none_or(|c| c.is_ascii_whitespace())
-            {
-                let end = source[i..].find('\n').map_or(bytes.len(), |n| i + n);
-                out.push_str(&self.rewrite(&source[i..end]));
-                i = end;
-                continue;
+            if token_start && !b.is_ascii_whitespace() {
+                let end = bytes[i..]
+                    .iter()
+                    .position(u8::is_ascii_whitespace)
+                    .map_or(bytes.len(), |n| i + n);
+                let word = &source[i..end];
+                // A `--` word starts a comment, which runs to the end of the line.
+                if word == "--" {
+                    let end = source[i..].find('\n').map_or(bytes.len(), |n| i + n);
+                    out.push_str(&self.rewrite(&source[i..end]));
+                    i = end;
+                    continue;
+                }
+                if hole {
+                    if b == b']' && depth == 0 {
+                        out.push(']');
+                        return i + 1;
+                    }
+                    match word {
+                        "[" => depth += 1,
+                        "]" => depth = depth.saturating_sub(1),
+                        _ => {}
+                    }
+                }
+                // A word that starts with `"` is a string literal.
+                if b == b'"' {
+                    i = self.string(source, i, out);
+                    token_start = false;
+                    continue;
+                }
+                // A raw string runs to the next `'`; `'` alone quotes a word.
+                if b == b'\'' && word.len() > 1 {
+                    let end = source[i + 1..]
+                        .find('\'')
+                        .map_or(bytes.len(), |n| i + n + 2);
+                    out.push_str(&source[i..end]);
+                    i = end;
+                    token_start = false;
+                    continue;
+                }
             }
-            // A string runs to the next quote, as `s" …"` does in the reader;
-            // strings have no escapes yet.
+            // A quote inside a word, as in `s" …"`, starts raw text that runs
+            // to the next quote, as in the reader.
             if b == b'"' {
                 let end = source[i + 1..].find('"').map_or(bytes.len(), |n| i + n + 2);
                 out.push_str(&source[i..end]);
@@ -92,7 +133,41 @@ impl Symbols {
             token_start = c.is_whitespace();
             i += c.len_utf8();
         }
-        out
+        i
+    }
+
+    /// Copies the string literal at byte `i` (its opening quote) as it is,
+    /// formatting the code in its holes, and returns the byte after it. An
+    /// escape is a backslash and the character after it, so `\"` does not end
+    /// the string.
+    fn string(&self, source: &str, mut i: usize, out: &mut String) -> usize {
+        let bytes = source.as_bytes();
+        out.push('"');
+        i += 1;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'"' => {
+                    out.push('"');
+                    return i + 1;
+                }
+                b'\\' if bytes.get(i + 1) == Some(&b'[') => {
+                    out.push_str("\\[");
+                    i = self.code(source, i + 2, true, out);
+                }
+                _ => {
+                    let c = source[i..].chars().next().expect("a character");
+                    out.push(c);
+                    i += c.len_utf8();
+                    if c == '\\'
+                        && let Some(c) = source[i..].chars().next()
+                    {
+                        out.push(c);
+                        i += c.len_utf8();
+                    }
+                }
+            }
+        }
+        i
     }
 
     /// Rewrites every escape in a comment.

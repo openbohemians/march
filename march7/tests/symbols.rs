@@ -53,6 +53,12 @@ fn the_formatter_rewrites_code_and_comments_but_not_strings() {
     // `--` inside a word is not a comment; a quote inside a comment is not a
     // string.
     assert_eq!(s.format("a--b \\pi -- 5\" \\pi"), "a--b π -- 5\" π");
+    // String literals keep their escapes, `\"` included, but the code in
+    // their holes is code; a raw string is left alone.
+    assert_eq!(
+        s.format(r#""a \" \times; \[ 2 \times 3 ] b" '\times' ' \times"#),
+        r#""a \" \times; \[ 2 × 3 ] b" '\times' ' ×"#
+    );
     // Formatting twice changes nothing more.
     let once = s.format(include_str!("../docs/surface/calc.march"));
     assert_eq!(s.format(&once), once);

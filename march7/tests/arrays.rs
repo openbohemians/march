@@ -151,6 +151,17 @@ fn literals_whose_count_varies_still_check() {
         run(&g, "checked : w 4 [ i0 ] times ;"),
         Err(Error::User(104))
     );
+    // At top level the loop runs as a word of its own, whose effect is not
+    // known. The literal still makes an array, or a map, of unknown elements,
+    // and the values below it keep their types.
+    let show = |src: &str| {
+        let mut d = Driver::boot(&g).unwrap();
+        d.evaluate(src).unwrap();
+        d.show()
+    };
+    assert_eq!(show("1.5 ( 3 [ 2 ] times ) 2.5"), "<3> 1.5 ( 2 2 2 ) 2.5");
+    assert_eq!(show("\"a\" { 3 [ 1 ] times 7 }"), "<2> \"a\" { 1 7 }");
+    assert_eq!(show("( 1 ( 2 [ 0 ] times ) length )"), "<1> ( 1 2 )");
 }
 
 #[test]
@@ -181,7 +192,10 @@ fn known_type_errors_stop_the_definition() {
     // word's instance, or in a loop's test.
     assert_eq!(run(&g, ": w ( 1 2 ) [ 3 ] if ;"), Err(Error::User(26)));
     assert_eq!(
-        run(&g, ": mag dup 0 lt? [ 0 swap - ] if ; : w ( 0 5 - 7 ) mag ;"),
+        run(
+            &g,
+            ": mag dup 0 lt? [ 0 swap - ] if ; : w ( 0 5 - 7 ) mag ;"
+        ),
         Err(Error::User(26))
     );
     assert_eq!(run(&g, ": w [ ( 1 ) ] [ ] while ;"), Err(Error::User(26)));
@@ -232,7 +246,10 @@ fn each_fold_and_map_consume_arrays() {
         elements(&g, "( ( 1 5 2 7 ) [ dup 3 lt? [ drop ] if ] each )", 2),
         [5, 7]
     );
-    assert_eq!(run(&g, ": e ( ( 1 2 3 ) [ dup ] each ) ; e length").unwrap(), [6]);
+    assert_eq!(
+        run(&g, ": e ( ( 1 2 3 ) [ dup ] each ) ; e length").unwrap(),
+        [6]
+    );
     // Results are typed, so families resolve on them.
     let ty = |src: &str| {
         let r = run(&g, &format!(": w {src} ; ' w stack-types")).unwrap();
@@ -283,7 +300,11 @@ fn words_that_build_arrays_from_inputs_get_instances() {
     // call with arrays gets an instance whose result is an array of arrays.
     let pair = ": pair >r >r ( r> r> ) ;";
     assert_eq!(
-        run(&g, &format!("{pair} : w ( 1 2 ) ( 3 4 ) pair 1 + ; w 0 at 1 at")).unwrap(),
+        run(
+            &g,
+            &format!("{pair} : w ( 1 2 ) ( 3 4 ) pair 1 + ; w 0 at 1 at")
+        )
+        .unwrap(),
         [3]
     );
     let r = run(&g, &format!("{pair} : w 1.5 2.5 pair ; ' w stack-types")).unwrap();

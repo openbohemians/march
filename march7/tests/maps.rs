@@ -59,15 +59,25 @@ fn persistent_updates() {
         show(&g, "{ \"a\" 1 } dup \"a\" 2 put"),
         "<2> { \"a\" 1 } { \"a\" 2 }"
     );
-    assert_eq!(show(&g, "{ \"a\" 1 \"b\" 2 } \"a\" remove"), "<1> { \"b\" 2 }");
+    assert_eq!(
+        show(&g, "{ \"a\" 1 \"b\" 2 } \"a\" remove"),
+        "<1> { \"b\" 2 }"
+    );
     assert_eq!(
         run(&g, "{ \"a\" 1 } \"a\" has? { \"a\" 1 } \"z\" has?").unwrap(),
         [1, 0]
     );
     assert_eq!(run(&g, "{ \"a\" 1 \"b\" 2 } length").unwrap(), [2]);
+    // `keys` and `values` come in the map's order, the same for both; for
+    // string keys it follows their handles, so it is not tested here.
+    assert_eq!(run(&g, "{ \"a\" 1 \"b\" 2 } keys length").unwrap(), [2]);
     assert_eq!(
-        show(&g, "{ \"a\" 1 \"b\" 2 } keys { \"a\" 1 \"b\" 2 } values"),
-        "<2> ( \"a\" \"b\" ) ( 1 2 )"
+        run(
+            &g,
+            ": m { \"a\" 1 \"b\" 2 } ; m keys 1 at m swap at m values 1 at eq?"
+        )
+        .unwrap(),
+        [1]
     );
     // `put` replaces an array's element too.
     assert_eq!(show(&g, "( 1 2 3 ) 1 99 put"), "<1> ( 1 99 3 )");
@@ -84,14 +94,15 @@ fn equal_contents_are_same() {
         [1]
     );
     assert_eq!(
-        run(&g, "\"ab\" \"ab\" eq? \"a\" \"b\" concat \"ab\" eq? \"ab\" \"ba\" eq?").unwrap(),
+        run(
+            &g,
+            "\"ab\" \"ab\" eq? \"a\" \"b\" concat \"ab\" eq? \"ab\" \"ba\" eq?"
+        )
+        .unwrap(),
         [1, 1, 0]
     );
     // A key made by concatenation finds the entry a literal made.
-    assert_eq!(
-        run(&g, "{ \"ab\" 5 } \"a\" \"b\" concat at").unwrap(),
-        [5]
-    );
+    assert_eq!(run(&g, "{ \"ab\" 5 } \"a\" \"b\" concat at").unwrap(), [5]);
 }
 
 #[test]

@@ -121,6 +121,15 @@ pub enum Primitive {
     ByteHash = 65,
     BytesEq = 66,
     Decimal = 67,
+    // Strings, second slice (docs/STRINGS.md): a value as text by its checker
+    // type, writing text out, ordering two strings, searching one in
+    // another, and reading an integer or a float from a string.
+    TextOf = 68,
+    Write = 69,
+    Compare = 70,
+    Search = 71,
+    TextInt = 72,
+    TextFloat = 73,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -192,6 +201,12 @@ impl Primitive {
         (Self::ByteHash, "byte-hash"),
         (Self::BytesEq, "bytes-eq?"),
         (Self::Decimal, "decimal"),
+        (Self::TextOf, "text-of"),
+        (Self::Write, "write"),
+        (Self::Compare, "compare"),
+        (Self::Search, "search"),
+        (Self::TextInt, "text>integer"),
+        (Self::TextFloat, "text>float"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

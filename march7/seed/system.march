@@ -144,6 +144,11 @@
 : byte-hash 65 prim, ; immediate
 : bytes-eq? 66 prim, ; immediate
 : decimal 67 prim, ; immediate
+: write 69 prim, ; immediate
+: compare 70 prim, ; immediate
+: search 71 prim, ; immediate
+: text>integer 72 prim, ; immediate
+: text>float 73 prim, ; immediate
 
 -- Phase 3: clean base words.
 : get [ 44 prim, ] ;
@@ -1001,7 +1006,20 @@
   drop drop 0 ;
 -- ( id -- )
 : do-prim
-  67 over ult? if drop 11 fail exit then
+  73 over ult? if drop 11 fail exit then
+  -- `text-of` takes the type of the value below it from the literal before
+  -- it: resolving, the literal is set to the value's type when it is known;
+  -- when it is not, the word is generic, so a call with a known type gets an
+  -- instance that knows it.
+  dup 68 eq? if drop
+    1 ty@ dup 0= over 255 eq? or if drop 1 224 an! else
+      968 get 600 get eq? retype-ok? and if 2 u+ 24 an@ 13 tab! else drop then
+    then
+    2 1 apply 253 ty-set 0 64 an! exit then
+  dup 69 eq? if drop 1 0 apply 0 64 an! exit then
+  dup 70 eq? over 71 eq? or if drop 2 1 apply 1 ty-set 0 64 an! exit then
+  dup 72 eq? if drop 1 2 apply 1 0 ty! 1 1 ty! 0 64 an! exit then
+  dup 73 eq? if drop 1 2 apply 1 0 ty! 2 1 ty! 0 64 an! exit then
   dup 62 ult? 0= if
     dup 65 ult? if drop 4 1 apply 1 ty-set 0 64 an! exit then
     dup 65 eq? if drop 3 1 apply 1 ty-set 0 64 an! exit then
@@ -1113,12 +1131,22 @@
     200 an@ 176 an@ 8 u* rshift 192 an@ 1 u+ 176 an@ u+ code!
     176 an@ 1 u+ 176 an!
   repeat ;
--- ( -- ) Patch each resolved family call to its clause.
+-- ( value k -- ) Set the value of the integer literal at op k.
+: set-literal
+  0 tab@ 192 an! 200 an!
+  0 176 an!
+  cycle 176 an@ 8 ult? while
+    200 an@ 176 an@ 8 u* rshift 192 an@ 1 u+ 176 an@ u+ code!
+    176 an@ 1 u+ 176 an!
+  repeat ;
+-- ( -- ) Patch each resolved family call to its clause, and each literal
+-- marked in table 13: 1 to become a float, or 2 plus a type for `text-of`.
 : apply-resolutions
   0 24 an!
   cycle 24 an@ 16 an@ ult? while
     24 an@ 12 tab@ dup if 0 an@ 24 an@ 0 tab@ 1 u+ code-cid else drop then
-    24 an@ 13 tab@ if 24 an@ 1 u- retype-literal then
+    24 an@ 13 tab@ dup 1 eq? if drop 24 an@ 1 u- retype-literal else
+      dup if 2 u- 24 an@ 1 u- set-literal else drop then then
     24 an@ 1 u+ 24 an!
   repeat ;
 
@@ -1264,7 +1292,9 @@
   0 swap cycle dup while 1 u- dup shadow@ >r swap r> ty-join swap repeat
   drop summary-type ;
 -- `(` and `)` at top level also keep the type stack's top at each `(`
--- (3328 a count, 3336-3384 the tops), so `)` can type the array.
+-- (3328 a count, 3336-3384 the tops), so `)` can type the array. Bit 32 of
+-- a top marks a literal whose count varies (`shadow-unknown`): its `)` types
+-- an array of unknown elements, its `}` a map of unknown kinds.
 : shadow-open
   3328 get 7 ult? if 784 get 3328 get 8 u* 3336 u+ put 3328 get 1 u+ 3328 put then
   0 3528 put ;
@@ -1272,6 +1302,7 @@
   0 3528 put
   3328 get 0= if 0 784 put 5 shadow-push exit then
   3328 get 1 u- dup 3328 put 8 u* 3336 u+ get
+  dup 32 rshift if 4294967295 and 784 put 5 shadow-push exit then
   784 get over ult? if drop 0 784 put 5 shadow-push exit then
   784 get over u- shadow-elem swap 784 put shadow-push ;
 -- ( mark -- t ) The type of a map of the pairs from a mark to the top.
@@ -1287,6 +1318,7 @@
   0 3528 put
   3328 get 0= if 0 784 put 231 shadow-push exit then
   3328 get 1 u- dup 3328 put 8 u* 3336 u+ get
+  dup 32 rshift if 4294967295 and 784 put 231 shadow-push exit then
   784 get over ult? if drop 0 784 put 231 shadow-push exit then
   dup 784 get eq? if 784 put 246 shadow-push exit then
   dup shadow-pair-type swap 784 put shadow-push ;
@@ -1305,9 +1337,18 @@
     dup 1 shadow@ 2 3392 get call dup if >r nip r> 792 put exit then drop
   then
   dup 8 shadow-top types-mismatch? if 23 trap then ;
+-- ( -- ) After a word whose effect is not known, such as a loop that pushes
+-- a varying count, nothing is known of the stack's types; inside an open
+-- literal, only of those above its mark, which the word is taken to keep,
+-- and the literal's count varies.
+: shadow-unknown
+  3328 get 0= if 0 784 put exit then
+  3328 get 1 u- 8 u* 3336 u+ dup get 4294967295 and
+  dup 784 get ult? if dup 784 put then drop
+  dup get 4294967296 or swap put ;
 -- ( xt -- ) The types of the stack after running xt.
 : shadow-effect
-  dup callee-effect dup effect-known? 0= if drop drop 0 784 put exit then
+  dup callee-effect dup effect-known? 0= if drop drop shadow-unknown exit then
   dup effect-in shadow-top
   dup if rot swap typed-outputs else drop swap 8 u* 712 get swap @ then
   over effect-out ty-mask and
@@ -1353,18 +1394,6 @@
   inc-pos
   0 get if 8 c, out here blob-cid here 32 u+ 16 put else 0 over region-size then ; immediate
 
--- ( -- s ) A string literal (docs/STRINGS.md): a token that starts with a
--- double quote. The text runs from after it to the next double quote, raw,
--- so it may hold spaces. Compiling, the text is data and `make-text` turns it
--- into a string when the code runs; at top level the string is made at once.
-: string-literal
-  64 get 1 u+ dup 56 put 344 put
-  40 get 56 get 48 get 34 byte-find 56 put
-  56 get 48 get ult? 0= if 8 trap then
-  40 get 344 get 56 get 344 get u- publish
-  inc-pos
-  0 get if 8 c, out here blob-cid here 32 u+ 16 put 52 prim,
-  else 0 over region-size make-text 253 shadow-push then ;
 
 -- Symbols: in source, `\times` is the word `×` (docs/SURFACE.md), so code
 -- compiles the same whether or not `march7 fmt` has rewritten it. One entry
@@ -1672,14 +1701,14 @@ _v ᵥ
 -- anonymous word and runs it at once. It is resolved and checked as an
 -- instance for the types of the values it takes, so
 -- `( 1.5 2.5 ) [ 1 + ] map` adds floats there too, and `( 1 2 ) [ 3 ] if`
--- is an error.
-: at-top
-  pending-here 0= if 19 trap then
+-- is an error. `run-at-top` does this for any compiling word.
+: run-at-top
   65536 region-new 24 put 0 16 put 1 0 put
   call 0 c, 0 0 put
   out 0 here seal out region-free 0 24 put 0 16 put
   dup callee-effect effect-in shadow-top instantiate 0 960 put
   0 run-typed ;
+: at-top pending-here 0= if 19 trap then run-at-top ;
 -- ( -- ) Quotation-aware `if`: `c [ t ] [ f ] if`, `c [ t ] if`, or, with
 -- nothing pending, FORTH's `if ... else ... then`.
 : emit-if
@@ -1758,6 +1787,193 @@ _v ᵥ
 : qexit 800 get if mark-flow then tailify 0 c, ;
 : qrecur 800 get if mark-flow then mark-call 7 c, ;
 
+-- Strings, second slice (docs/STRINGS.md): escapes and holes in literals.
+-- `text-of` ( x t -- s ) marks its definition for resolving, which sets its
+-- type literal (primitive 68).
+: text-of 68 prim, 1 960 put ; immediate
+-- ( x -- s ) A value as text: a string as itself, anything else as March
+-- writes it, by the type the checker gives it.
+: >string 0 text-of ;
+
+-- A literal's state is in a region of its own, so literals nest (a hole may
+-- hold another literal); its handle is at 752. Fields: 0 the text buffer,
+-- 8 its length, 16 the part count, 24 the code holes, then parts of 16 bytes
+-- from 32: kind (0 text, 1 code hole, 2 a bare `\_`) and the text's blob or
+-- the hole's pending entry; 1056 the open hole's depth. The buffer has twice
+-- the input left, since an escape may write more bytes than it takes. 744 counts the inputs the literal takes with `_`
+-- and `\_`, and is -1 outside any literal, where `_` traps 29. A bad escape
+-- traps 27. Working memory 760-776 holds temporaries.
+-- ( field -- v ) ( v field -- )
+: lit@ 752 get swap @ ;
+: lit! 752 get swap ! ;
+-- ( b -- ) ( r o n -- ) Append a byte, or bytes, to the text.
+: lit-byte 0 lit@ 8 lit@ c! 8 lit@ 1 u+ 8 lit! ;
+: lit-bytes >r 0 lit@ 8 lit@ r@ copy 8 lit@ r> u+ 8 lit! ;
+-- ( kind value -- ) Add a part.
+: lit-part
+  16 lit@ dup 64 ult? 0= if 27 trap then
+  16 u* 32 u+ >r r@ 8 u+ lit! r> lit!
+  16 lit@ 1 u+ 16 lit! ;
+-- ( -- ) The text so far as a part, if there is any.
+: lit-flush
+  8 lit@ if 0 lit@ 0 8 lit@ publish 0 swap lit-part 0 8 lit! then ;
+-- ( cp -- ) Append a code point as UTF-8.
+: lit-utf8
+  dup 1114111 swap ult? if 27 trap then
+  dup 55296 ult? 0= over 57344 ult? and if 27 trap then
+  dup 128 ult? if lit-byte exit then
+  dup 2048 ult? if dup 6 rshift 192 or lit-byte 63 and 128 or lit-byte exit then
+  dup 65536 ult? if
+    dup 12 rshift 224 or lit-byte dup 6 rshift 63 and 128 or lit-byte
+    63 and 128 or lit-byte exit
+  then
+  dup 18 rshift 240 or lit-byte dup 12 rshift 63 and 128 or lit-byte
+  dup 6 rshift 63 and 128 or lit-byte 63 and 128 or lit-byte ;
+-- ( c -- v )
+: hex-digit
+  dup 48 u- 10 ult? if 48 u- exit then
+  dup 97 u- 6 ult? if 87 u- exit then
+  dup 65 u- 6 ult? if 55 u- exit then
+  27 trap ;
+-- ( semi -- semi v ) Hex digits up to the `;`.
+: lit-hex
+  dup 760 put 0
+  56 get 760 get eq? if 27 trap then
+  cycle 56 get 760 get ult? while
+    16 u* input-char hex-digit u+ inc-pos
+    dup 1114111 swap ult? if 27 trap then
+  repeat ;
+-- ( semi len -- semi ) `\#digits;` or `\#xhex;`: a code point.
+: lit-number
+  drop inc-pos
+  input-char 120 eq? if inc-pos lit-hex else
+    dup 56 get u- >r 40 get 56 get r> decimal 1 eq? 0= if 27 trap then
+  then
+  lit-utf8 ;
+-- ( semi len -- semi ) `\name;`: a control character (`n`, `t`, `r`), or a
+-- symbol from the table `\name` uses in source.
+: lit-name
+  dup 1 eq? if
+    input-char dup 110 eq? if drop drop 10 lit-byte exit then
+    dup 116 eq? if drop drop 9 lit-byte exit then
+    114 eq? if drop 13 lit-byte exit then
+  then
+  40 get 448 put 0 456 put 56 get 488 put 496 put
+  sym-lookup 0= if 27 trap then
+  504 get 576 get 584 get lit-bytes ;
+-- ( -- flag ) `\_x;` where `_x` names a symbol, such as `\_1;`, is that
+-- symbol, as `\_1` is in code; any other `\_` is an input. 56 is at the `_`.
+: lit-subscript?
+  56 get 2 u+ 48 get ult? 0= if 0 exit then
+  40 get 56 get 2 u+ c@ 59 eq? 0= if 0 exit then
+  40 get 448 put 0 456 put 56 get 488 put 2 496 put
+  sym-lookup 0= if 0 exit then
+  504 get 576 get 584 get lit-bytes
+  56 get 3 u+ 56 put 1 ;
+-- ( -- ) A code hole `\[ … ]`, compiled as a quotation and left pending.
+-- At the hole's own depth a `]` ends it wherever a word would start, so the
+-- text resumes right after it: `"\[ n ] apples"`. The hole's depth is at
+-- field 1056, where `_` checks it. The interpreter's step is reached through
+-- 104, since it reads literals in turn.
+: lit-hole
+  quote-open 800 get 1056 lit!
+  cycle
+    40 get 56 get 48 get 32 byte-past dup 56 put
+    dup 48 get ult? 0= if 8 trap then
+    40 get swap c@ 93 eq? 800 get 1056 lit@ eq? and 0=
+  while read-word drop 104 get call repeat
+  inc-pos materialize quote-close 0 1056 lit!
+  808 get 1 u- dup q-entry 8 u+ get 0= if 27 trap then
+  1 swap lit-part
+  24 lit@ 1 u+ 24 lit! ;
+-- ( -- ) An escape: 56 is at the byte after the backslash.
+: lit-escape
+  input-char
+  dup 92 eq? over 34 eq? or if lit-byte inc-pos exit then
+  dup 95 eq? if drop
+    lit-subscript? if exit then
+    inc-pos lit-flush 2 0 lit-part 744 get 1 u+ 744 put exit
+  then
+  dup 91 eq? if drop inc-pos lit-flush lit-hole exit then
+  drop 40 get 56 get 48 get 59 byte-find
+  dup 48 get ult? 0= if 27 trap then
+  dup 56 get u- dup 0= over 64 ult? 0= or if 27 trap then
+  input-char 35 eq? if lit-number else lit-name then
+  1 u+ 56 put ;
+-- ( -- ) Compiling: take the inputs onto the scratch stack, the first one on
+-- top, then build the string from its parts in order: text as data made a
+-- string, a code hole inlined, a bare input taken, each hole's value made
+-- text by `>string`, joined with `concat`.
+: lit-emit
+  744 get cycle dup while 33 prim, 1 u- repeat drop
+  0 cycle dup 16 lit@ ult? while
+    dup 16 u* 32 u+ dup lit@ swap 8 u+ lit@
+    over 0= if nip 8 c, out here blob-cid here 32 u+ 16 put 52 prim, else
+      over 2 eq? if drop drop 34 prim, ' >string compile, else
+        nip inline-quote ' >string compile, then then
+    dup if 53 prim, then
+    1 u+
+  repeat drop
+  24 lit@ consumed
+  744 get 24 lit@ or if 1 960 put then ;
+-- ( -- s ) A string literal (docs/STRINGS.md): a token that starts with a
+-- double quote, read to the closing one: text, escapes (`\\`, `\"`, `\name;`,
+-- `\#n;`), and holes (`\[ code ]`, `\_`). Compiling, it becomes code that
+-- builds the string; at top level, a literal without holes is made at once.
+: string-literal
+  744 get >r 752 get >r
+  1064 region-new 752 put
+  48 get 64 get u- 2 u* region-new 0 lit! 0 8 lit! 0 16 lit! 0 24 lit!
+  0 1056 lit!
+  0 744 put
+  64 get 1 u+ 56 put
+  cycle
+    40 get 56 get 48 get 92 byte-find 776 put
+    40 get 56 get 776 get 34 byte-find 768 put
+    40 get 56 get 768 get 56 get u- lit-bytes
+    768 get 776 get ult? if 768 get 1 u+ 56 put 0 else
+      776 get 1 u+ 48 get ult? 0= if 8 trap then
+      776 get 1 u+ 56 put lit-escape 1
+    then
+  while repeat
+  8 lit@ 16 lit@ 0= or if 0 lit@ 0 8 lit@ publish 0 swap lit-part then
+  0 lit@ region-free
+  0 get if lit-emit else 40 lit@ 0 over region-size make-text 253 shadow-push then
+  752 get region-free
+  r> 752 put r> 744 put ;
+-- ( -- flag ) Whether the literal at the current word has a hole, which at
+-- top level needs a word to run in.
+: lit-holes?
+  64 get 1 u+
+  cycle
+    40 get over 48 get 92 byte-find 776 put
+    40 get over 776 get 34 byte-find 768 put
+    768 get 776 get ult? 776 get 1 u+ 48 get ult? 0= or if drop 0 exit then
+    drop 40 get 776 get 1 u+ c@ dup 91 eq? swap 95 eq? or if 1 exit then
+    776 get 2 u+
+  again ;
+-- ( -- s ) At top level, a literal with holes compiles into a temporary
+-- word, resolved and checked for the types of the values it takes, and runs
+-- at once, as the consumers do.
+: literal-at-top ' string-literal run-at-top ;
+-- ( -- s ) A raw string literal: a token that starts with `'` and is longer
+-- than `'` alone, read to the next `'`, with no escapes.
+: raw-literal
+  64 get 1 u+ dup 56 put 344 put
+  40 get 56 get 48 get 39 byte-find 56 put
+  56 get 48 get ult? 0= if 8 trap then
+  40 get 344 get 56 get 344 get u- publish
+  inc-pos
+  0 get if 8 c, out here blob-cid here 32 u+ 16 put 52 prim,
+  else 0 over region-size make-text 253 shadow-push then ;
+-- ( -- ) `_` in a hole: the next input, taken from the scratch stack. Only
+-- at the hole's own depth, not inside a quotation in it, which a loop may
+-- run with its own state on the scratch stack.
+: input-word
+  744 get -1 eq? if 29 trap then
+  800 get 1056 lit@ eq? 0= if 29 trap then
+  744 get 1 u+ 744 put 34 prim, ;
+
 -- The outer interpreter over the current input: string literals and numbers
 -- before lookup.
 -- Compiling a word whose entry is flagged as an inline primitive emits the
@@ -1766,35 +1982,46 @@ _v ᵥ
 -- pending quotations are materialized where they stand; at top level they
 -- become values on the stack, there and at the end of the input. Transparent
 -- immediate words (the consumers, `[`, `--`) run directly at top level.
+-- ( -- ) `compile-token` compiles the word just read; the code in a string's
+-- holes is compiled by it too, through 104.
+: compile-token
+  40 get 64 get c@
+  dup 34 eq? if drop materialize string-literal exit then
+  39 eq? 1 72 get ult? and if materialize raw-literal exit then
+  number dup if materialize 2 eq? if fliteral else literal then exit then
+  drop token lookup dup 0= if 1 trap then
+  dup 16 u+ get
+  dup 1 and if dup 4 and 0= if materialize then drop >xt call exit then
+  materialize
+  dup 24 and if 1 960 put then
+  dup 2 and if nip 8 rshift prim, else drop >xt compile, then ;
+-- At top level the brackets mark and gather the stack in place, and marks
+-- belong to a frame, so this half stays in `interpret` itself.
 : interpret
   cycle read-word while
+    0 get if compile-token else
     40 get 64 get c@ 34 eq? if
-      0 get if materialize else top-materialize then string-literal
+      top-materialize lit-holes? if literal-at-top else string-literal then
     else
-    number dup if
-      0 get if materialize 2 eq? if fliteral else literal then
-      else >r >r top-materialize r> r> shadow-literal then
-    else
+    40 get 64 get c@ 39 eq? 1 72 get ult? and if top-materialize raw-literal else
+    number dup if >r >r top-materialize r> r> shadow-literal else
       drop token lookup dup 0= if 1 trap then
       dup 16 u+ get
       dup 1 and if
-        dup 4 and 0= if 0 get if materialize else >r >r top-materialize r> r> then then
-        0 get if drop >xt call else
-          dup 224 and if
-            dup 32 and if drop drop mark shadow-open else
-            64 and if drop gather shadow-close else drop map-gather shadow-close-map then then
-          else dup 4 and if drop >xt call else swap >xt swap run-typed then then
-        then
+        dup 4 and 0= if >r >r top-materialize r> r> then
+        dup 224 and if
+          dup 32 and if drop drop mark shadow-open else
+          64 and if drop gather shadow-close else drop map-gather shadow-close-map then then
+        else dup 4 and if drop >xt call else swap >xt swap run-typed then then
       else
-        0 get 0= if swap >xt swap >r >r top-materialize r> r> run-typed else
-          materialize
-          dup 24 and if 1 960 put then
-          dup 2 and if nip 8 rshift prim, else drop >xt compile, then
-        then
+        swap >xt swap >r >r top-materialize r> r> run-typed
       then
     then
     then
-  repeat 0 get 0= if top-materialize then ;
+    then
+    then
+  repeat
+  0 get 0= if top-materialize then ;
 
 -- ( input-region length -- ) Reentrant: the caller's input is restored, so
 -- words may evaluate text while their own input is being interpreted.
@@ -1810,7 +2037,7 @@ _v ᵥ
   repeat
   cycle 808 get while 808 get 1 u- dup 808 put q-entry get region-free repeat
   0 24 put 0 16 put 0 0 put 0 600 put 0 872 put 0 960 put 0 968 put
-  0 3520 put 0 3528 put 0 784 put ;
+  0 3520 put 0 3528 put 0 784 put -1 744 put ;
 
 -- Dictionary export: oldest first, name length, flags, code CID, name bytes.
 : out-byte 400 get 408 get c! 408 get 1 u+ 408 put ;
@@ -1894,6 +2121,22 @@ _v ᵥ
 -- ( m -- a ) ( m -- a ) A map's keys, and its values, as arrays.
 : keys kv-keys ;
 : values kv-values ;
+
+-- Strings, second slice (docs/STRINGS.md).
+-- ( x -- ) Writes a value as text.
+: print >string write ;
+-- ( s -- n ) ( s -- f ) A string's number; a string that is not one traps 28.
+: >integer text>integer 0= if 28 trap then ;
+: >float text>float 0= if 28 trap then ;
+-- ( a b -- n ) ( s t -- i ) Order two strings (-1, 0 or 1), and find one in
+-- another (its index in characters, or -1).
+: order compare ;
+: index-of search ;
+-- Ordering words' clauses for strings, by code point.
+: text-lt? compare 0 lt? ;
+: text-gt? compare 0 gt? ;
+: text-lte? compare 0 lte? ;
+: text-gte? compare 0 gte? ;
 
 -- The lifting rule. A lifted word is one of these templates with its calls to
 -- `lift-op` pointed at the element operation. Each keeps its arrays, value,
@@ -2009,7 +2252,11 @@ _v ᵥ
   ' lt? ' p.flt? 514 2 0 add-clause
   ' gt? ' f-gt? 514 2 0 add-clause
   ' lte? ' f-lte? 514 2 0 add-clause
-  ' gte? ' f-gte? 514 2 0 add-clause ;
+  ' gte? ' f-gte? 514 2 0 add-clause
+  ' lt? ' text-lt? 65021 2 1 add-clause
+  ' gt? ' text-gt? 65021 2 1 add-clause
+  ' lte? ' text-lte? 65021 2 1 add-clause
+  ' gte? ' text-gte? 65021 2 1 add-clause ;
 
 : STATE 1 0 ;
 : HERE 1 16 ;
@@ -2130,6 +2377,13 @@ _v ᵥ
   ' remove 59 prim-flag s" remove" install
   ' keys 60 prim-flag s" keys" install
   ' values 61 prim-flag s" values" install
+  ' >string 16 s" >string" install
+  ' print 16 s" print" install
+  ' input-word 5 s" _" install
+  ' >integer 0 s" >integer" install
+  ' >float 0 s" >float" install
+  ' order 70 prim-flag s" compare" install
+  ' index-of 71 prim-flag s" search" install
   ' qopen 33 s" {" install
   ' qmapclose 129 s" }" install
   ' hash-bytes 0 s" hash-bytes" install
@@ -2141,7 +2395,7 @@ _v ᵥ
 : describe 3576 get 0 784 get ;
 
 -- ( data-region 0 length -- evaluate recover export describe )
-: boot 4096 32 put 0 8 put 0 0 put
+: boot 4096 32 put 0 8 put 0 0 put -1 744 put ' compile-token 104 put
   1048576 region-new 624 put 1048576 region-new 712 put ' effect-of 616 put 0 632 put
   4096 region-new 728 put register-families
   98312 region-new 3512 put ' instantiate 3504 put ' lift-for 3392 put

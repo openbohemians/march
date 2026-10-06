@@ -11,6 +11,20 @@ fn guard(fuel: u64, step: Result<(), Error>) -> Result<(), Box<dyn std::error::E
     }
 }
 
+/// Writes what the program has printed so far.
+fn flush(d: &mut Driver) {
+    use std::io::Write;
+    let out = d.machine.take_output();
+    if !out.is_empty() {
+        let mut stdout = std::io::stdout();
+        let _ = stdout.write_all(&out);
+        if out.last() != Some(&b'\n') {
+            let _ = stdout.write_all(b"\n");
+        }
+        let _ = stdout.flush();
+    }
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("Error: {e}");
@@ -34,7 +48,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--fuel" => d.fuel = args.next().ok_or("missing fuel")?.parse()?,
-            "--eval" => guard(d.fuel, d.evaluate(&args.next().ok_or("missing source")?))?,
+            "--eval" => {
+                let result = d.evaluate(&args.next().ok_or("missing source")?);
+                flush(&mut d);
+                guard(d.fuel, result)?
+            }
             "--save" => std::fs::write(
                 args.next().ok_or("missing output")?,
                 d.snapshot()?.encode()?,
@@ -50,7 +68,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .ok_or("--system needs an entry token")?;
                 std::fs::write(out, d.system_image(xt)?.encode()?)?;
             }
-            _ => guard(d.fuel, d.evaluate(&std::fs::read_to_string(arg)?))?,
+            _ => {
+                let result = d.evaluate(&std::fs::read_to_string(arg)?);
+                flush(&mut d);
+                guard(d.fuel, result)?
+            }
         }
     }
     println!("{}", d.show());

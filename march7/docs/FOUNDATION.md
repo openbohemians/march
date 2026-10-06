@@ -124,7 +124,7 @@ adding an operation outside this list requires review.
 |---|---|
 | Stack | `dup`, `drop`, `swap`, `over`, `rot`; `mark` and `gather`, which collect the cells above a marked depth into a persistent vector (added 2026-10-04 for array literals) |
 | Vectors | persistent sequences of cells (`merkle_champ::Sequence`, content-defined since 2026-10-05): length, element, append in place, update to a new version (added 2026-10-04) |
-| Strings | UTF-8 text from a region's bytes, interned; for strings and arrays, joining, slicing and equality of contents (added 2026-10-05; docs/STRINGS.md) |
+| Strings | UTF-8 text from a region's bytes, interned; for strings and arrays, joining, slicing and equality of contents (added 2026-10-05; docs/STRINGS.md); a value's text by its checker type, writing text to output, ordering, search, and parsing integers and floats (added the same day) |
 | Maps | persistent CHAMP maps of cells gathered from key and value pairs; put (or replace an array element), membership, remove, keys and values (added 2026-10-05; docs/MAPS.md) |
 | Bytes | the first byte equal to, above, or at or below a given byte in a span; FNV-1a over a span; two spans equal; a span's decimal digits as a number (added 2026-10-05 for reading source; docs/REBUILD.md) |
 | Integer | wrapping add/subtract/multiply; unsigned divide/remainder; equality and unsigned less-than; bitwise and/or/xor/not; logical shifts |

@@ -86,6 +86,12 @@ fn primitive_wire_ids_are_pinned() {
         ByteHash,
         BytesEq,
         Decimal,
+        TextOf,
+        Write,
+        Compare,
+        Search,
+        TextInt,
+        TextFloat,
     ];
     for (id, p) in primitives.into_iter().enumerate() {
         assert_eq!(
@@ -97,7 +103,7 @@ fn primitive_wire_ids_are_pinned() {
             [Op::Prim(p), Op::Return]
         );
     }
-    for id in 68..=255 {
+    for id in 74..=255 {
         assert_eq!(Primitive::decode(id), Err(Error::InvalidCode));
     }
 }

@@ -162,7 +162,10 @@ content.
    position, searching, and `each` over code points. First slice done
    2026-10-05 (march7/docs/STRINGS.md): the type, literals, display,
    `length` and `at` by character, `concat`, `slice` by character, `same?`,
-   and `each` over code points; byte positions and searching are next.
+   and `each` over code points. Second slice the same day: escapes
+   (`\name;` from the symbol table, `\#9731;`), holes (`\[ code ]`, `\_`),
+   raw `'…'` literals, `print`, conversions to and from numbers, ordering and
+   search. Byte positions are next.
 3. **Maps keyed by any value, strings included** (the next item after
    strings). First slice done 2026-10-05 (march7/docs/MAPS.md): strings are
    interned, so string keys are cells; arrays and maps as keys compare by

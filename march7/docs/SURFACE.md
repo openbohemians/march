@@ -234,11 +234,23 @@ Provisional choices, 2026-10-03, so examples are consistent:
   March spells comparison `eq?`. In literate prose, keep `~` inside backticks,
   since GitHub's Markdown treats `~text~` as strikethrough.
 - **Strings are `"…"`,** on both tracks. The reader recognizes a token
-  starting with `"` by its first character, as it does numbers, and reads raw
+  starting with `"` by its first character, as it does numbers, and reads
   input to the closing `"`. Only `seed/system.march` keeps FORTH's `s" text"`,
   because the frozen generation 0 reads it. If a track ever cannot have
   `"…"`, the fallback is `" text "` with the spaces enforced. Built
   2026-10-05 (docs/STRINGS.md).
+- **Escapes in strings follow the symbols** (decided 2026-10-05): `\name;`
+  is the symbol `\name` names in code, ended by `;` as in HTML's `&times;`,
+  with `\n;`, `\t;` and `\r;` for control characters and `\#9731;` or
+  `\#x2603;` for any code point. `\\` and `\"` need no `;`.
+- **Holes are quotations:** `"\[ code ]"` writes the code's value into the
+  string, and `_` in a hole takes the literal's next input, so a literal can
+  consume the stack the way a comprehension does. `\_` is short for
+  `\[ _ ]`. Erlang's `~` style was considered and passed over, since `\`
+  already escapes in code.
+- **Raw strings are `'…'`,** as in Ruby's single quotes but with no escapes
+  at all; `'` followed by a space still quotes a word. Provisional (Thomas:
+  "we can always revisit").
 - **Every clause of a family has the same stack effect,** so the counting
   checker knows a family's effect without types. The examples will show
   whether that is too strict.
@@ -261,7 +273,8 @@ names, as Julia, Lean and Agda editors do.
   one word: code compiles to the same bytes and the same identity either way.
   An unknown name is an unknown word.
 - **`march7 fmt` rewrites the escapes** from stdin to stdout, in code and
-  comments but never in strings, reading the same table. Formatting is
+  comments but never in strings (the code in a string's holes is code),
+  reading the same table. Formatting is
   idempotent. Zed runs it on save.
 - **Symbols mean nothing until defined.** The table only makes them typeable.
   Which symbols the core library defines, and as what (`× : * ;`,

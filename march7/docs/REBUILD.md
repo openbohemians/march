@@ -85,11 +85,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 77.2 million |
-| The same on generation 1 | 5.51 million |
+| Machine steps to compile `system.march` on generation 0 | 93.4 million |
+| The same on generation 1 | 6.23 million |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 105,833 bytes |
-| `system.march` | 2,153 lines |
+| Rebuilt image size | 119,019 bytes |
+| `system.march` | 2,407 lines |
 | `system.asm` listing | 1,403 lines |
 
 ## Tests
@@ -202,8 +202,10 @@ runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
 rebuild tests use an explicit budget of 120 million steps, and a named canary
 test asserts that a rebuilt system compiles the system source in under 6.5
-million steps. It is 5.51 million since the byte primitives (below), down
-from 8.90 million with strings and maps, which had come within 0.1 million
+million steps. It is 6.23 million as of the second string slice (escapes,
+holes, raw literals and the words on text), which added 11% to the source
+and 0.7 million steps; it was 5.51 million after the byte primitives
+(below), down from 8.90 million with strings and maps, which had come within 0.1 million
 of the canary of the time and 1.1 million of the driver's default budget.
 The canary was raised to 9 million when `each`, `fold`, `map`,
 nested array types and scratch types (2026-10-04) took it to 8.09 million:
@@ -216,15 +218,18 @@ and keeping types by stack position rather than for the top eight slots half
 a million; arrays and lifting added 0.8 million). `an@` and `an!` became
 inline emitters along the way.
 
-Generation 0 grows faster: 77.2 million steps as of the byte primitives
-(76.5 as of maps, 65.5 as of consumers at top level, 55.7 as of arrays), so
-the tests' budget was raised from 80 to 120 million. Its frozen compiler looks
-words up linearly, so each new definition costs it more than the last, and
-its reading cannot use the byte primitives, which help only the generations
-built from `system.march`. It runs once per bootstrap, in about half a
-second. The lasting remedy is to re-freeze the listing from a newer
-generation, whose lookup is hashed and whose reading uses the primitives.
-When the command line exhausts the budget, it says so and suggests `--fuel`.
+Generation 0 grows faster: 93.4 million steps as of the second string slice
+(77.2 as of the byte primitives, 76.5 as of maps, 65.5 as of consumers at
+top level, 55.7 as of arrays), so the tests' budget was raised from 80 to
+120 million. Its frozen compiler looks words up linearly, so each new
+definition costs it more than the last, and its reading cannot use the byte
+primitives, which help only the generations built from `system.march`. It
+runs once per bootstrap, in about half a second. The lasting remedy is to
+re-freeze the listing from a newer generation, whose lookup is hashed and
+whose reading uses the primitives. At this rate the tests' 120 million will
+be reached in two or three more slices of the size of the second string
+slice. When the command line exhausts the budget, it says so and suggests
+`--fuel`.
 
 **Working-memory primitives (2026-10-04).** Adding symbol names
 (docs/SURFACE.md) took compiling the system on generation 1 to 8.5 million

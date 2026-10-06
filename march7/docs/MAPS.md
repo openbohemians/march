@@ -86,6 +86,9 @@ value of unknown kind shows as a raw cell.
   contents instead of handles.
 - **Arrays and maps as keys** are compared by handle, not by contents, since
   only strings are interned.
+- **The order of `keys` and `values`** is the map's own, the same for both,
+  which follows the keys' cells. For string keys those are handles, so the
+  order can differ between sessions; it should follow contents.
 - **Nested maps** work at run time (`m "inner" at "x" at`), but the outer
   map's value kind is unknown, so the inner map shows as a raw cell.
 - **Iteration** over entries with `each`, and map literal names

@@ -1,4 +1,7 @@
-# FROZEN (2026-09-30). This listing exists only to reproduce generation 0,
+# FROZEN (2026-09-30; re-frozen 2026-10-06, when `find` and `install` became
+# hashed, with 1,024 buckets at 4096 and entries from 12288 whose names start
+# at offset 40, after a bucket link, as in the rebuilt system's dictionary;
+# generation 1 is unchanged). This listing exists only to reproduce generation 0,
 # which compiles seed/system.march into the real system. tests/rebuild.rs pins
 # the SHA-256 of the image assembled from it, so any change that alters that
 # image is a foundation change, not maintenance: extend seed/system.march
@@ -146,17 +149,41 @@ lit 192
 call get
 lit 184
 call get
-lit 1
+lit 176
+call get
+prim byte-hash
+lit 54
+prim shr
+lit 8
+prim mul
+lit 4096
+prim add
+prim dup
+call get
 lit 216
 call get
 lit 32
+prim add
+call put
+lit 216
+call get
+prim swap
+call put
+lit 192
+call get
+lit 184
+call get
+lit 1
+lit 216
+call get
+lit 40
 prim add
 lit 176
 call get
 call copy
 lit 216
 call get
-lit 32
+lit 40
 prim add
 lit 176
 call get
@@ -184,15 +211,24 @@ lit 248
 call put
 lit 240
 call put
+lit 240
+call get
+lit 248
+call get
+lit 256
+call get
+prim byte-hash
+lit 54
+prim shr
 lit 8
+prim mul
+lit 4096
+prim add
 call get
-lit 264
-call put
 next:
-lit 264
-call get
 prim dup
 zero done
+prim dup
 lit 24
 prim add
 call get
@@ -200,53 +236,28 @@ lit 256
 call get
 prim eq
 zero miss
-lit 0
-lit 272
+prim dup
+lit 264
 call put
-chars:
-lit 272
-call get
-lit 256
-call get
-prim lt
-zero found
 lit 240
 call get
 lit 248
 call get
-lit 272
-call get
-prim add
-prim load8
 lit 1
 lit 264
 call get
+lit 40
+prim add
+lit 256
+call get
+prim bytes-eq?
+zero miss
+ret
+miss:
 lit 32
 prim add
-lit 272
 call get
-prim add
-prim load8
-prim eq
-zero miss
-lit 272
-call get
-lit 1
-prim add
-lit 272
-call put
-branch chars
-miss:
-lit 264
-call get
-call get
-lit 264
-call put
 branch next
-found:
-lit 264
-call get
-ret
 done:
 ret
 end
@@ -843,7 +854,7 @@ call put
 lit 1
 lit 440
 call get
-lit 32
+lit 40
 prim add
 lit 400
 call get
@@ -1376,7 +1387,7 @@ ret
 end
 
 word boot
-lit 4096
+lit 12288
 lit 32
 call put
 lit 0

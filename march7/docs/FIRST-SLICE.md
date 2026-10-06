@@ -29,7 +29,8 @@ Changing it later requires updating the seed and its boot contract explicitly.
 | 8 | `LATEST`: newest dictionary entry offset |
 | 16 | `HERE`: next byte in the current definition's output region |
 | 24 | Current output region, or zero |
-| 32 | Next free dictionary byte, initially 4096 |
+| 32 | Next free dictionary byte, initially 12288 |
+| 4096–12287 | Dictionary hash buckets: 1,024 entry offsets |
 | 40–72 | Input region/length/cursor and current word boundaries |
 | 80–96 | Name of the unfinished definition |
 | 128–440 | Private scratch for byte copies, lookup, number conversion and image data |
@@ -37,11 +38,16 @@ Changing it later requires updating the seed and its boot contract explicitly.
 `STATE`, `HERE` and `LATEST` are words returning addresses. `@`/`!` use cell
 addresses; `c@`/`c!` use byte addresses. The seed's private `get`/`put` helpers
 access offsets in region 1. Its dictionary entries are ordinary March memory:
-previous-entry offset, executable token, immediate flag, name length, name bytes,
-then alignment padding. The Rust host knows none of those fields. (This is the
-frozen generation-0 listing's layout. The system rebuilt from
-`seed/system.march` adds a bucket link before the name, which then starts at
-offset 40, and finds names through a hashed dictionary; see docs/REBUILD.md.)
+previous-entry offset, executable token, immediate flag, name length, the next
+entry in the same hash bucket, name bytes from offset 40, then alignment
+padding. A name's bucket is the top ten bits of its FNV-1a hash (the
+`byte-hash` primitive); each bucket chains newest first, so the newest
+definition of a name is found first. The Rust host knows none of those
+fields. The listing was re-frozen with this layout on 2026-10-06; before, it
+had no buckets, names started at offset 32, and `find` scanned the whole
+chain (docs/REBUILD.md). It is the layout of the
+system rebuilt from `seed/system.march`, which hashes names with
+`hash-bytes` instead.
 
 `:` calls `word begin`. `begin` allocates a bounded 64 KiB output region and
 records the name. `c,` emits one byte; `,` emits eight little-endian bytes even

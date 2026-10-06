@@ -28,7 +28,7 @@ below. After generation 0, only images and March source are involved.
 
 ```sh
 cargo run --offline --bin march7-seed -- seed/system.asm gen0.image
-cargo run --offline -- gen0.image --fuel 120000000 seed/system.march --system gen1.image
+cargo run --offline -- gen0.image --fuel 30000000 seed/system.march --system gen1.image
 cargo run --offline -- gen1.image seed/system.march --system gen2.image
 cargo run --offline -- gen2.image seed/system.march --system gen3.image
 cmp gen2.image gen3.image
@@ -85,7 +85,7 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 93.4 million |
+| Machine steps to compile `system.march` on generation 0 | 14.8 million |
 | The same on generation 1 | 6.23 million |
 | Driver's default budget | 10 million steps |
 | Rebuilt image size | 119,019 bytes |
@@ -186,16 +186,17 @@ million on generation 1. The rebuild tests caught that growth. The cost is the
 dictionary: every lookup scanned it linearly, so compile cost grew with tokens
 times entries.
 
-The dictionary is now hashed: 1,024 buckets, each a chain through the entries,
-newest first so shadowing still finds the newest definition. Names hash with
-`hash-bytes`, the same function merkle-champ uses to place keys, so a name
-hashes the same in the working dictionary and in a store. A test checks it
-against the crate itself. Compiling the system on generation 1 dropped from
-12.5 to 5.3 million steps, and later generations rebuild within the default
-budget again. Generation 0's frozen compiler still scans linearly, so its
-cost grows faster than the source: 18.3 million steps as of the quotation
-work, 34.8 million as of checker slice 2. A rebuild from generation 0 on the
-command line needs `--fuel`, and the tests give it 60 million.
+The dictionary is now hashed: 1,024 buckets, each a chain through the
+entries, newest first so shadowing still finds the newest definition. Names
+hash with `hash-bytes`, the same function merkle-champ uses to place keys,
+so a name hashes the same in the working dictionary and in a store. A test
+checks it against the crate itself. Compiling the system on generation 1
+dropped from 12.5 to 5.3 million steps, and later generations rebuild within
+the default budget again. Generation 0's frozen compiler still scanned
+linearly (until the re-freeze below), so its cost grew faster than the
+source: 18.3 million steps as of the quotation work, 34.8 million as of
+checker slice 2. A rebuild from generation 0 on the command line needed
+`--fuel`, and the tests gave it 60 million.
 
 The driver's step budget (10 million by default) is a safety net against
 runaway programs, and it stays tight on purpose while runaways are common
@@ -218,18 +219,29 @@ and keeping types by stack position rather than for the top eight slots half
 a million; arrays and lifting added 0.8 million). `an@` and `an!` became
 inline emitters along the way.
 
-Generation 0 grows faster: 93.4 million steps as of the second string slice
+Generation 0 grew faster: 93.4 million steps as of the second string slice
 (77.2 as of the byte primitives, 76.5 as of maps, 65.5 as of consumers at
-top level, 55.7 as of arrays), so the tests' budget was raised from 80 to
-120 million. Its frozen compiler looks words up linearly, so each new
-definition costs it more than the last, and its reading cannot use the byte
-primitives, which help only the generations built from `system.march`. It
-runs once per bootstrap, in about half a second. The lasting remedy is to
-re-freeze the listing from a newer generation, whose lookup is hashed and
-whose reading uses the primitives. At this rate the tests' 120 million will
-be reached in two or three more slices of the size of the second string
-slice. When the command line exhausts the budget, it says so and suggests
-`--fuel`.
+top level, 55.7 as of arrays), and the tests' budget had been raised from 80
+to 120 million. A profile put 93% of those steps in the listing's `find`,
+`get` and `put`, mostly the scan in `find`, which read each entry's fields
+through `get`: it scanned the whole dictionary for every word, and the
+common words, defined early, were at the far end of the chain, so the cost
+grew with the square of the number of definitions.
+
+**Re-freezing the listing (2026-10-06).** The listing's `find` and `install`
+became hashed, as the rebuilt system's had: 1,024 buckets at offset 4096 of
+working memory, entries from 12288 with a bucket link at offset 32 and the
+name from offset 40, the same layout as the rebuilt dictionary. Names hash
+with the `byte-hash` primitive (FNV-1a), whose top ten bits pick the bucket,
+and compare with `bytes-eq?`. About fifty lines of the listing changed, and
+it stays hand-written. Generation 0 now compiles the system in 14.8 million
+steps, a sixth of before, and 0.06 seconds instead of 0.37, and its cost
+grows with the source rather than its square. Generations 1, 2 and 3 are
+byte-identical to those built before the change, so only the pinned hash of
+generation 0 changed (`b9b9c609…` became `578a2424…`). The rebuild tests'
+budget went down to 30 million. A rebuild from generation 0 on the command
+line still needs `--fuel`, since the driver's default is 10 million; when
+the command line exhausts the budget, it says so and suggests `--fuel`.
 
 **Working-memory primitives (2026-10-04).** Adding symbol names
 (docs/SURFACE.md) took compiling the system on generation 1 to 8.5 million
@@ -302,7 +314,8 @@ Next candidates:
   about an eighth of compile time, emitting code a byte at a time about a
   twelfth, then `interpret` and `find`.
 - **The listing is frozen** (2026-09-30). `system.asm` only reproduces
-  generation 0, and a test pins the SHA-256 of its assembled image.
+  generation 0, and a test pins the SHA-256 of its assembled image. It was
+  re-frozen once, on 2026-10-06, to hash its dictionary (below).
 
 `tests/rebuild.rs` now has nine tests, adding: scratch stack and nested
 `evaluate`; checked signed arithmetic and its traps; definitions spanning

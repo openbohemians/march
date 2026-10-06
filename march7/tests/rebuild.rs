@@ -16,11 +16,11 @@ fn generation_zero() -> Image {
 }
 
 /// Step budget for compiling the system source in these tests. Generation 0
-/// takes about 93 million steps, because the frozen listing's `find` scans
-/// the dictionary linearly and its reading cannot use the byte primitives.
-/// This budget is only a safety net; compile cost is tracked by
+/// takes about 15 million steps since its `find` became hashed (2026-10-06);
+/// it took 93 million when it scanned the dictionary linearly. This budget is
+/// only a safety net; compile cost is tracked by
 /// `compiling_the_system_stays_under_its_step_canary`.
-const REBUILD_FUEL: u64 = 120_000_000;
+const REBUILD_FUEL: u64 = 30_000_000;
 
 /// Compile-cost canary: steps for a rebuilt system (generation 1) to compile
 /// the system source. It is 6.23 million today, after the second string
@@ -52,8 +52,10 @@ fn rebuild(image: &Image) -> Image {
 /// The SHA-256 of the image assembled from `seed/system.asm`. The listing is
 /// frozen: its only job is to reproduce generation 0. Changing this value is a
 /// foundation change (docs/FOUNDATION.md, "Bounded generation-zero assembler").
+/// It changed once, on 2026-10-06, when the listing's dictionary became
+/// hashed; the generations built from it did not change.
 const GENERATION_ZERO_SHA256: &str =
-    "b9b9c609238803fab214d66698f1d44e09501041245de505571d754bb1d83cea";
+    "578a24245593faf3fc12bb2c3f171459a89f945e0c46f89bb6dc776956524ad7";
 
 #[test]
 fn generation_zero_is_frozen() {

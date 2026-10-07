@@ -1,8 +1,10 @@
 # Types
 
-Status: design note, 2026-10-07, from a conversation with Thomas. Nothing
-here is built. Section 2 records decisions, section 3 what is still open,
-and section 4 proposes a way to build it, which Thomas has not yet reviewed.
+Status: design note, 2026-10-07, from a conversation with Thomas. Section 2
+records decisions, section 3 what is still open, and section 4 proposes a
+way to build it. A first, thin prototype is built in march7
+(march7/docs/STAGED.md): integers, floats, money, literal types and `+`,
+through both stages.
 
 ## 1. Why
 

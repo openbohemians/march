@@ -184,3 +184,31 @@ fn guards_must_not_write() {
     let mut s = session(&[cd, "3 cd."]).unwrap();
     assert_eq!(String::from_utf8(s.take_output()).unwrap(), "321");
 }
+
+#[test]
+fn value_patterns_choose_by_equality() {
+    // A value left in a signature is a value pattern: the input must equal
+    // it. Tested in the order defined, like a guard, by `eq?`.
+    let cmd = "[ < \"quit\" > drop. 0 ] cmd def. [ < string > length. ] cmd def.";
+    assert_eq!(
+        cells(&[cmd, "\"quit\" cmd. \"hello\" cmd."]).unwrap(),
+        [0, 5]
+    );
+    assert_eq!(
+        cells(&[cmd, "\"quit\" \"hello\"", "cmd. swap. cmd."]).unwrap(),
+        [5, 0]
+    );
+    // On a known value it is decided now.
+    assert_eq!(code(cmd, "\"quit\" cmd."), code("", "0"));
+    // An untyped number matches a value of any type it becomes, compared in
+    // that type; `.` gives it a type of its own.
+    let h = "[ < 0.5 > drop. 1 ] h def. [ < f64 > drop. 0 ] h def.";
+    assert_eq!(cells(&[h, "0.5 0.25", "h. swap. h."]).unwrap(), [0, 1]);
+    let z = "[ < 0 i64. > drop. \"zero\" ] z def. [ < i64 > drop. \"other\" ] z def.";
+    assert_eq!(show(&[z, "0 3", "z. swap. z."]), "<2> \"other\" \"zero\"");
+    assert_eq!(cells(&[z, "0.0 z."]), Err(Kind::NoWord));
+    assert_eq!(cells(&["[ < 1.5 i64. > ] b def."]), Err(Kind::Literal));
+    // Patterns belong in signatures, and a value is not an output.
+    assert_eq!(cells(&["1 < 1 >"]), Err(Kind::Syntax));
+    assert_eq!(cells(&["[ < i64 -- 0 > ] b def."]), Err(Kind::Mismatch));
+}

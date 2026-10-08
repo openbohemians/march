@@ -57,9 +57,11 @@ runs to the end of the line, except inside `< >`.
 **Types are values.** `100 i64 vec.` builds the type "array of 100 i64",
 and `x 100 i64 vec..` annotates `x` with it. A bracket is the short
 form: inside `< >` every word applies at once, a type's name pushes the
-type, a number a length, a single letter a type variable, and a constructor
-(`ary`, `vec`, `map`) builds from what is below it. A bracket of n types
-annotates the top n values, the deepest first: `x y < i64 f64 >`.
+type, a number or a string a value, a single letter a type variable, and a
+constructor (`ary`, `vec`, `map`) builds from what is below it, `vec` taking
+a value as its length; `.` gives a value the type above it, as `0 i64.`. A
+bracket of n types annotates the top n values, the deepest first:
+`x y < i64 f64 >`. In a signature, a value left over is a value pattern.
 
 **A definition is data:** a quotation, a name and `def`:
 `[ < i64 -- i64 > 1 +. ] inc def.`. A bracket first in the quotation is
@@ -189,6 +191,29 @@ x sign.        dup 0 swap lt? 0branch L
 
 This is if-free code (TYPES.md 2.12): a sign, a minimum, a partial
 function, written as clauses.
+
+### Value patterns
+
+A value left in a signature, not taken as a `vec`'s length, is a **value
+pattern**: the input must equal it (TYPES.md 2.12).
+
+```
+[ < 0 > ] fib def.
+[ < 1 > ] fib def.
+[ < n > dup. 1 -. fib. swap. 2 -. fib. +. ] fib def.
+```
+
+- **It is a guard,** testing the input `eq?` the value, so it is chosen in
+  the order defined, decided now on a known value, and tested at run time
+  otherwise. `fib`'s instance tests `dup 0 eq` and `dup 1 eq` before its
+  step, and `0 fib.` is the literal 0.
+- **An untyped value matches an input of any type it becomes,** compared in
+  that type: `< 0 >` takes an i64, an f64 or money, and `< 0.5 >` an f64.
+  The input keeps its own type. `< 0 i64. >` takes an i64 only, as `0 i64.`
+  is an i64 in code.
+- **Strings too:** `< "quit" >`.
+- Value patterns belong in signatures, among the inputs: one in a bracket
+  in a body, or among the outputs, is an error.
 
 ### Effects
 
@@ -398,7 +423,9 @@ running are the machine's.
 - **Mutual recursion** between instances, which would make a cycle of
   content identities; and words used before they are defined.
 - **Sharing large words** that are not recursive, as instances, to save code.
-- **Value patterns** such as `0` in a signature, and OR between contexts.
+- **OR between contexts.**
+- **What a value pattern tells its clause:** inside `< 0 >`, the input is
+  known to be 0, so code there could fold on it.
 - **Effects in signatures,** declared and checked like outputs, for words
   whose bodies the compiler cannot see; and domains besides `io`, such as
   the global store, with primitives that read.

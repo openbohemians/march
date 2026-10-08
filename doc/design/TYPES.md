@@ -216,7 +216,17 @@ branches, and lowering turns dispatch on values into branches.
   tie.
 - A value pattern such as `0` is a constant in a pattern, matched by a
   check at run time, or at compile time when the value is known. It is not
-  a runtime value in a type.
+  a runtime value in a type. Written (2026-10-08): a value left in a bracket,
+  `< 0 >`, matches an input of any type the literal becomes, compared in
+  that type; `< 0 i64. >` gives it a type, as `0 i64.` does in code. A
+  section's context ANDs with it slot by slot, so under `## < i64 >`, `< 0 >`
+  is an i64 equal to 0. `fib` needs no helper words:
+
+  ```
+  [ < 0 > ] fib def.
+  [ < 1 > ] fib def.
+  [ < n > dup. 1 -. fib. swap. 2 -. fib. +. ] fib def.
+  ```
 - Loops tend to become recursion over clauses, which tail calls make cheap.
   `map`, `fold`, `each` and `times` remain: they are consumers, not
   conditions.

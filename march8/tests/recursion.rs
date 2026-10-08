@@ -49,6 +49,12 @@ fn families_recurse_through_their_instances() {
         [ < i64 one? > ] fib def.
         [ < i64 > dup. 1 -. fib. swap. 2 -. fib. +. ] fib def.";
     assert_eq!(cells(&[fib, "15 fib."]).unwrap(), [610]);
+    // With value patterns, no helper words: 0 and 1 are their own results.
+    let fib = "[ < 0 > ] fib def. [ < 1 > ] fib def.
+        [ < n > dup. 1 -. fib. swap. 2 -. fib. +. ] fib def.";
+    assert_eq!(cells(&[fib, "15 fib.", "20", "fib."]).unwrap(), [610, 6765]);
+    let s = session(&[fib, "10.0 fib."]).unwrap();
+    assert_eq!(s.show(), "<1> 55.0");
 }
 
 #[test]

@@ -34,7 +34,7 @@ pub enum Val {
     Quote(Rc<[Token]>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Jdg {
     pub ty: Type,
     pub val: Val,
@@ -65,10 +65,47 @@ pub enum Ins {
 /// `slot`, without taking them, and leaves a flag (TYPES.md 2.15).
 #[derive(Clone, Debug)]
 pub struct Guard {
-    pub name: Rc<str>,
+    pub test: Test,
     pub slot: usize,
     pub arity: usize,
     pub pos: Pos,
+}
+
+/// What a guard tests: a word that leaves a flag, or, for a value pattern,
+/// that its input equals a value (`< 0 >`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Test {
+    Word(Rc<str>),
+    Equals(Jdg),
+}
+
+impl Guard {
+    /// The guard as a message names it.
+    fn name(&self) -> String {
+        match &self.test {
+            Test::Word(n) => format!("the guard `{n}`"),
+            Test::Equals(j) => format!("the value pattern {}", value_text(j)),
+        }
+    }
+}
+
+/// A value as it is written.
+fn value_text(j: &Jdg) -> String {
+    match &j.val {
+        Val::Int(n) if j.ty == MONEY => prims::show_dec(*n, 2),
+        Val::Int(n) => n.to_string(),
+        Val::Dec(d, s) => prims::show_dec(*d, *s),
+        Val::Float(x) => format!("{x:?}"),
+        Val::Str(s) => format!("{s:?}"),
+        _ => "a value".into(),
+    }
+}
+
+/// A part of a bracket, while it is read: a type, or a value with where it
+/// was written.
+enum Part {
+    Ty(Type),
+    Val(Jdg, Pos),
 }
 
 /// A signature: the input patterns, deepest first, and the outputs it
@@ -82,7 +119,7 @@ pub struct Sig {
 
 impl PartialEq for Guard {
     fn eq(&self, o: &Self) -> bool {
-        (&self.name, self.slot, self.arity) == (&o.name, o.slot, o.arity)
+        (&self.test, self.slot, self.arity) == (&o.test, o.slot, o.arity)
     }
 }
 
@@ -90,6 +127,12 @@ impl Sig {
     /// The context a clause is chosen by: its inputs and guards.
     fn context(&self) -> (&[Type], &[Guard]) {
         (&self.ins, &self.guards)
+    }
+    /// Whether input `k` is a value pattern.
+    fn value(&self, k: usize) -> bool {
+        self.guards
+            .iter()
+            .any(|g| g.slot == k && matches!(g.test, Test::Equals(_)))
     }
 }
 
@@ -604,6 +647,12 @@ impl Stage {
 
     /// A bracket in a body: it types the values on top.
     fn annotate_top(&mut self, sig: &Sig) -> Result<()> {
+        if !sig.guards.is_empty() {
+            return Err(self.err(
+                Kind::Syntax,
+                "guards and value patterns belong in a signature, first in a quotation",
+            ));
+        }
         if sig.outs.is_some() {
             return Err(self.err(
                 Kind::Syntax,
@@ -639,6 +688,19 @@ impl Stage {
         let mut score = 0;
         for k in 0..n {
             let have = self.stack[base + k].ty;
+            // An untyped value pattern, as `< 0 >`, matches a value of any
+            // type its literal becomes.
+            let p = sig.ins[k];
+            if sig.value(k) && self.types.is_literal(p) {
+                let fits = have == p
+                    || self.accepts(have, p)
+                    || (self.types.is_literal(have) && self.accepts(p, have));
+                if !fits {
+                    return None;
+                }
+                score += if have == p { 4 } else { 2 };
+                continue;
+            }
             score += self.match_slot(sig.ins[k], have, &mut env)?;
         }
         Some((score, env))
@@ -696,11 +758,14 @@ impl Stage {
     }
 
     /// Gives the inputs the types their patterns name, so literals convert.
+    /// An untyped value pattern names no type: its input keeps its own.
     fn settle(&mut self, sig: &Sig, env: &Env) -> Result<()> {
         let base = self.stack.len() - sig.ins.len();
         for (k, &p) in sig.ins.iter().enumerate() {
             let t = self.types.subst(p, env);
-            self.annotate(base + k, t)?;
+            if !(sig.value(k) && self.types.is_literal(t)) {
+                self.annotate(base + k, t)?;
+            }
         }
         Ok(())
     }
@@ -865,7 +930,10 @@ impl Stage {
         let base = self.stack.len() - sig.ins.len();
         for (k, &p) in sig.ins.iter().enumerate() {
             let t = self.types.subst(p, env);
-            if self.types.is_literal(self.stack[base + k].ty) && !self.types.has_vars(t) {
+            if self.types.is_literal(self.stack[base + k].ty)
+                && !self.types.has_vars(t)
+                && !(sig.value(k) && self.types.is_literal(t))
+            {
                 self.annotate(base + k, t)?;
             }
         }
@@ -1405,7 +1473,14 @@ impl Stage {
             let floor = std::mem::replace(&mut self.floor, depth);
             let outer = std::mem::replace(&mut self.effects, 0);
             self.pos = g.pos;
-            let r = self.apply_word(&g.name);
+            let r = match &g.test {
+                Test::Word(name) => self.apply_word(name),
+                // A value pattern is the input `eq?` the value.
+                Test::Equals(v) => {
+                    self.stack.push(v.clone());
+                    self.apply_word(&"eq?".into())
+                }
+            };
             let found = std::mem::replace(&mut self.effects, outer);
             self.effects |= found;
             self.floor = floor;
@@ -1417,17 +1492,14 @@ impl Stage {
                 return Err(self.err(
                     Kind::Effect,
                     format!(
-                        "the guard `{}` {}, and a guard must not write",
-                        g.name,
+                        "{} {}, and a guard must not write",
+                        g.name(),
                         prims::describe_effects(found)
                     ),
                 ));
             }
             if self.stack.len() != depth + 1 {
-                return Err(self.err(
-                    Kind::Mismatch,
-                    format!("the guard `{}` must leave one flag", g.name),
-                ));
+                return Err(self.err(Kind::Mismatch, format!("{} must leave one flag", g.name())));
             }
             let flag = self.stack.pop().expect("one");
             match flag.val {
@@ -1440,11 +1512,7 @@ impl Stage {
                 _ => {
                     return Err(self.err(
                         Kind::Mismatch,
-                        format!(
-                            "the guard `{}` leaves {}, not a flag",
-                            g.name,
-                            self.describe(&flag)
-                        ),
+                        format!("{} leaves {}, not a flag", g.name(), self.describe(&flag)),
                     ));
                 }
             }
@@ -1715,60 +1783,83 @@ impl Stage {
     // ---- Types as values ----
 
     /// A type expression in `< >`: a type's name pushes the type, a number a
-    /// length, a single letter a variable, and a constructor builds from what
-    /// is below it. `--` divides inputs from outputs.
+    /// value, a single letter a variable, and a constructor builds from what
+    /// is below it; `.` gives the value below a type, as `0 i64.`. A word
+    /// that is none of these is a guard. `--` divides inputs from outputs.
+    /// What is left is the inputs' patterns: types, or values, which the
+    /// inputs must equal (value patterns).
     pub fn bracket(&mut self, toks: &[Token]) -> Result<Sig> {
-        let mut items: Vec<Type> = Vec::new();
+        let mut items: Vec<Part> = Vec::new();
         let mut guards = Vec::new();
         let mut dashes = None;
         for t in toks {
             self.pos = t.pos;
+            let lit = |ty, val| Part::Val(Jdg { ty, val }, t.pos);
             match &t.tok {
-                Tok::Int(n) => {
-                    let n = u64::try_from(*n)
-                        .map_err(|_| self.err(Kind::Mismatch, "a length cannot be negative"))?;
-                    items.push(self.types.intern(Term::Nat(n)));
-                }
+                Tok::Int(n) => items.push(lit(INT_LIT, Val::Int(*n))),
+                Tok::Dec(d, p) => items.push(lit(DEC_LIT, Val::Dec(*d, *p))),
+                Tok::Str(v) => items.push(lit(STRING, Val::Str(v.clone()))),
+                Tok::Apply => self.typed_value(&mut items)?,
                 Tok::Dashes if dashes.is_none() => dashes = Some(items.len()),
                 Tok::Name(s) => {
                     let w = self.words.get(s);
                     if let Some(t) = w.and_then(|w| w.ty) {
-                        items.push(t);
+                        items.push(Part::Ty(t));
                     } else if let Some(c) = w.and_then(|w| w.con) {
                         self.build(c, &mut items)?;
                     } else if w.is_none() && s.len() == 1 && s.as_bytes()[0].is_ascii_lowercase() {
-                        items.push(self.types.intern(Term::Var(s.as_bytes()[0] - b'a')));
+                        let v = self.types.intern(Term::Var(s.as_bytes()[0] - b'a'));
+                        items.push(Part::Ty(v));
                     } else if w.is_some() {
-                        guards.push(self.guard(s, &items, dashes.is_some(), t.pos)?);
+                        guards.push(self.guard(s, items.len(), dashes.is_some(), t.pos)?);
                     } else {
                         return Err(self.err(Kind::NoWord, format!("no type `{s}`")));
                     }
                 }
                 _ => {
-                    return Err(
-                        self.err(Kind::Syntax, "a bracket holds types, lengths and one `--`")
-                    );
+                    return Err(self.err(
+                        Kind::Syntax,
+                        "a bracket holds types, values, guards and one `--`",
+                    ));
                 }
             }
         }
-        for &t in &items {
-            if let Term::Nat(n) = self.types.term(t) {
-                return Err(self.err(
-                    Kind::Mismatch,
-                    format!("a bracket leaves types, and {n} is a length"),
-                ));
+        // The values left are value patterns, tested before the guards.
+        let mut ins = Vec::new();
+        let mut equals = Vec::new();
+        for (k, part) in items.into_iter().enumerate() {
+            match part {
+                Part::Ty(t) => ins.push(t),
+                Part::Val(j, pos) if dashes.is_none_or(|d| k < d) => {
+                    ins.push(j.ty);
+                    equals.push(Guard {
+                        test: Test::Equals(j),
+                        slot: k,
+                        arity: 1,
+                        pos,
+                    });
+                }
+                Part::Val(j, pos) => {
+                    self.pos = pos;
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!("an output is a type, and {} is a value", value_text(&j)),
+                    ));
+                }
             }
         }
+        equals.extend(guards);
+        let guards = equals;
         Ok(match dashes {
             None => Sig {
-                ins: items,
+                ins,
                 guards,
                 outs: None,
             },
             Some(d) => {
-                let outs = items.split_off(d);
+                let outs = ins.split_off(d);
                 Sig {
-                    ins: items,
+                    ins,
                     guards,
                     outs: Some(outs),
                 }
@@ -1776,9 +1867,35 @@ impl Stage {
         })
     }
 
+    /// `.` in a bracket: the value below the type on top, as that type, so
+    /// `0 i64.` is a value pattern for an i64.
+    fn typed_value(&mut self, items: &mut Vec<Part>) -> Result<()> {
+        let n = items.len();
+        let (Some(Part::Val(..)), Some(Part::Ty(t))) =
+            (n.checked_sub(2).map(|i| &items[i]), items.last())
+        else {
+            return Err(self.err(
+                Kind::Syntax,
+                "`.` in a bracket gives the value below a type, as `0 i64.`",
+            ));
+        };
+        let t = *t;
+        items.pop();
+        let Some(Part::Val(j, pos)) = items.pop() else {
+            unreachable!("checked")
+        };
+        self.stack.push(j);
+        let i = self.stack.len() - 1;
+        let r = self.annotate(i, t);
+        let j = self.stack.pop().expect("pushed");
+        r?;
+        items.push(Part::Val(j, pos));
+        Ok(())
+    }
+
     /// A guard in a bracket: a word that looks at the inputs before it and
     /// leaves one flag.
-    fn guard(&self, name: &Rc<str>, items: &[Type], outputs: bool, pos: Pos) -> Result<Guard> {
+    fn guard(&self, name: &Rc<str>, before: usize, outputs: bool, pos: Pos) -> Result<Guard> {
         if outputs {
             return Err(self.err(
                 Kind::Syntax,
@@ -1800,42 +1917,42 @@ impl Stage {
                 ),
             ));
         }
-        if ins > items.len()
-            || items
-                .iter()
-                .any(|&t| matches!(self.types.term(t), Term::Nat(_)))
-        {
+        if ins > before {
             return Err(self.err(
                 Kind::Mismatch,
                 format!(
                     "the guard `{name}` looks at {}, and {} before it",
                     values(ins),
-                    values(items.len())
+                    values(before)
                 ),
             ));
         }
         Ok(Guard {
-            name: name.clone(),
-            slot: items.len() - ins,
+            test: Test::Word(name.clone()),
+            slot: before - ins,
             arity: ins,
             pos,
         })
     }
 
-    /// Applies a constructor inside a bracket.
-    fn build(&mut self, c: Con, items: &mut Vec<Type>) -> Result<()> {
+    /// Applies a constructor inside a bracket. A length is a value, a whole
+    /// number, or a variable.
+    fn build(&mut self, c: Con, items: &mut Vec<Part>) -> Result<()> {
         let missing = |s: &Self| {
             s.err(
                 Kind::Mismatch,
                 format!("`{c:?}` needs more below it").to_lowercase(),
             )
         };
-        let ty = |s: &mut Self, items: &mut Vec<Type>| -> Result<Type> {
-            let t = items.pop().ok_or_else(|| missing(s))?;
-            if let Term::Nat(n) = s.types.term(t) {
-                return Err(s.err(Kind::Mismatch, format!("{n} is a length, not a type")));
+        let ty = |s: &mut Self, items: &mut Vec<Part>| -> Result<Type> {
+            match items.pop() {
+                Some(Part::Ty(t)) => Ok(t),
+                Some(Part::Val(j, _)) => Err(s.err(
+                    Kind::Mismatch,
+                    format!("{} is a value, not a type", value_text(&j)),
+                )),
+                None => Err(missing(s)),
             }
-            Ok(t)
         };
         let t = match c {
             Con::Ary => {
@@ -1844,10 +1961,23 @@ impl Stage {
             }
             Con::Vec => {
                 let e = ty(self, items)?;
-                let n = items.pop().ok_or_else(|| missing(self))?;
-                if !matches!(self.types.term(n), Term::Nat(_) | Term::Var(_)) {
-                    return Err(self.err(Kind::Mismatch, "`vec` needs a length below its type"));
-                }
+                let n = match items.pop() {
+                    Some(Part::Val(
+                        Jdg {
+                            ty: INT_LIT,
+                            val: Val::Int(n),
+                        },
+                        _,
+                    )) if n >= 0 => self.types.intern(Term::Nat(n as u64)),
+                    Some(Part::Ty(v)) if matches!(self.types.term(v), Term::Var(_)) => v,
+                    Some(_) => {
+                        return Err(self.err(
+                            Kind::Mismatch,
+                            "`vec` needs a length below its type: a whole number or a variable",
+                        ));
+                    }
+                    None => return Err(missing(self)),
+                };
                 Term::Vec(n, e)
             }
             Con::Map => {
@@ -1856,7 +1986,7 @@ impl Stage {
                 Term::Map(k, v)
             }
         };
-        items.push(self.types.intern(t));
+        items.push(Part::Ty(self.types.intern(t)));
         Ok(())
     }
 

@@ -254,8 +254,9 @@ fn a_vec_knows_its_length_at_compile_time() {
     );
     // A literal index past the end is refused at compile time.
     assert_eq!(fails("[ < 3 i64 vec > 5 at . ] b def ."), Kind::Mismatch);
-    // A bracket leaves types only.
-    assert_eq!(fails("[ < 2 > ] b def ."), Kind::Mismatch);
+    // A value left in a bracket is a value pattern, so it cannot be an
+    // output (tests/choice.rs).
+    assert_eq!(fails("[ < -- 2 > ] b def ."), Kind::Mismatch);
 }
 
 #[test]

@@ -5,8 +5,9 @@ records decisions, section 3 what is still open, and section 4 proposes a
 way to build it. A prototype is built in march7 (march7/docs/STAGED.md):
 integers, floats, money, literal types, arithmetic and stack words through
 both stages, typed words evaluated for each use, brackets that annotate,
-and types as data (`ary`, `vec`, `map`), with containers typed by their
-structure.
+types as data (`ary`, `vec`, `map`) with containers typed by their
+structure, headings, and families chosen by types and by guards, with type
+variables, outputs, lifting and array literals.
 
 ## 1. Why
 
@@ -236,6 +237,44 @@ checker does; it decides the types and emits the code in one pass, so what
 was checked is what runs. Type theory calls this an elaborator: checking
 and translation together, as Pie, The Little Typer's language, is
 implemented.
+
+### 2.15 Contexts, definitions and guards
+
+Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
+
+- **Terms.** A **clause** is one definition: a name, a context and a body.
+  A **family** is the clauses that share a name: `+`, with an i64 clause, an
+  f64 clause and so on. A **domain** is the clauses that share a context:
+  everything defined on `< i64 >`. A **section** is the text under one
+  heading; sections far apart in a program can define in the same domain,
+  so the domain is the meaning and the section only the layout. A domain is
+  not a Haskell type class, which is an interface; the definitions of a
+  domain are nearer a Haskell instance.
+
+- **A definition is data in the lowered form:** a quoted body, a name, and
+  `def` applied: `[ 1 + . ] inc def .`. `name : … ;` is the surface's
+  spelling of it.
+- **A heading sets a mode** for the definitions after it, as a stack
+  machine's state: `## < i64 -- i64 >` makes them clauses for those types,
+  until the next heading. A heading always starts a section, even an empty
+  one, so consecutive headings do not combine; how to write OR between
+  patterns is deferred.
+- **Lowering removes the mode:** each definition carries its section's
+  context as its own signature, first in its quoted body, so the lowered form
+  has no hidden state, though the definitions of a section share one
+  context.
+- **`--` separates inputs from outputs** inside a bracket, whose reader reads
+  its own words. Outputs are an obligation, checked; they never select a
+  clause.
+- **Contexts are compile-time (types) or run-time (guards).** A clause is
+  chosen in two phases: by types at compile time, keeping the clauses whose
+  types match; then by guards at run time, tested in the order the clauses
+  were defined, an unguarded clause last. A guard looks at its values and does
+  not consume them. Clauses chosen between at run time return the same type
+  (2.9).
+- **No match is no word.** When no clause matches, by types at compile time
+  or by guards at run time, it is the same error as an undefined word. The
+  name is a word's outermost context; types and guards narrow it.
 
 ## 3. Open
 

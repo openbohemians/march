@@ -2249,32 +2249,42 @@ _v ᵥ
 -- type stage over it (stage 2). The type stage keeps a stack of judgments
 -- beside the code, settles each literal's type from its context, and leaves
 -- plain code behind. `explicit name … ;` takes a body already in the
--- explicit form. A typed word applied in a typed body is evaluated there, on
--- the caller's judgments, so its types are worked out for each use. A typed
--- word that takes values without saying their types, `< t … >`, has no code
--- of its own: it exists only to be applied so.
+-- explicit form. A heading, `# < … >`, gives the definitions after it their
+-- context, which lowering puts first in each body as its own signature.
+--
+-- Typed words of one name are the clauses of a family. Applied in a typed
+-- body, a family is resolved there, on the caller's judgments: by types at
+-- compile time, the most specific clause winning, and by guards at run time,
+-- in the order the clauses were defined. A clause is evaluated where it is
+-- applied, so its types are worked out for each use. A clause that takes
+-- values without saying their types, or has guards or type variables, has no
+-- code of its own: it exists only to be applied so.
 --
 -- Types: 1 i64, 2 f64, 3 money (exact cents), 4 integer literal, 5 decimal
--- literal, 6 a type, 7 an operation, 8 a typed word, 9 string, and from 256
--- types built by `ary`, `vec` and `map`, each a term in a table, equal terms
--- one entry, so equal types are one number. A judgment is 40 bytes:
--- type, known (1 if its value is), value, scale (a decimal literal's digits
--- after the point), and the offset of the literal emitted for it, or -1. A
--- literal is emitted where it appears, as a placeholder whose opcode and
--- value are patched once its type is known, so the code's stack always
--- matches the judgments'. Operations: 1 `+`, 2 `*`, 3 `-`, 4 `dup`, 5 `drop`,
--- 6 `swap`, 7 `length`, 8 `at`, 9 `concat`. A type term is 24 bytes:
--- constructor (1 `ary`, 2 `vec`, 3 `map`) and two arguments: an element
--- type; a length and an element type; a key and a value type. A typed word is
--- 80 bytes: its explicit form's region and length,
--- the values it takes and leaves, and its name's length and bytes.
+-- literal, 6 a type, 7 an operation, 8 a typed word, 9 string, 10-35 the type
+-- variables `a` to `z`, 50 the start of an array literal, and from 256 types
+-- built by `ary`, `vec` and `map`, each a term in a table, equal terms one
+-- entry, so equal types are one number. A judgment is 40 bytes: type, known
+-- (1 if its value is), value, scale (a decimal literal's digits after the
+-- point), and the offset of the literal emitted for it, or -1. A literal is
+-- emitted where it appears, as a placeholder whose opcode and value are
+-- patched once its type is known, so the code's stack always matches the
+-- judgments'. Operations: 1 `+`, 2 `*`, 3 `-`, 4 `dup`, 5 `drop`, 6 `swap`,
+-- 7 `length`, 8 `at`, 9 `concat`, 10 `lt?`, 11 `gt?`, 12 `eq?`. A type term
+-- is 24 bytes: constructor (1 `ary`, 2 `vec`, 3 `map`) and two arguments: an
+-- element type; a length and an element type; a key and a value type. A
+-- typed word is 80 bytes: its explicit form's region and length, the values
+-- it takes and leaves, and its name's length and bytes.
 --
 -- Working memory: 272 the judgments' region, 280 their count, 112 the typed
 -- words' region, 120 their count, 168 how deeply typed words are being
--- applied, 592 the token of `st-token-body`, 608 the type terms' region,
--- 640 their count, 312-336, 368-376 and 512 temporaries. Traps: 23 no clause, a type
--- mismatch, or too few values; 40 a word the prototype does not know; 41 a
--- literal that cannot become its type; 42 typed words applied too deeply.
+-- applied, 592 the token of `st-token-body`, 608 the type terms' region, 640
+-- their count, 312-336, 368-376 and 512 temporaries. The typed words' region
+-- keeps more state after the 64 words: see `st-state`. Traps: 1 no clause,
+-- like an unknown word, at compile time or at run time; 23 a type mismatch,
+-- a tie, or too few values; 27 a limit; 40 a word the prototype does not
+-- know; 41 a literal that cannot become its type; 42 typed words applied too
+-- deeply.
 -- ( k -- offset ) The k-th judgment from the top.
 : st-at 280 get swap u- 1 u- 40 u* ;
 -- ( k field -- v ) ( v k field -- )
@@ -2290,11 +2300,24 @@ _v ᵥ
 -- ( n -- ) At least n judgments, or trap.
 : st-need 280 get swap ult? if 23 trap then ;
 -- ( t -- flag ) Whether a type is a literal's; whether it has values at run
--- time, rather than being a type, an operation or a typed word; whether it is
--- a number's or a literal's.
+-- time, rather than being a type, an operation, a typed word or a mark;
+-- whether it is a number's or a literal's.
 : st-lit? dup 4 eq? swap 5 eq? or ;
 : st-value-type? dup 6 ult? over 9 eq? or swap 255 swap ult? or ;
 : st-num? dup 1 u- 3 ult? swap st-lit? or ;
+-- ( -- ) The typed words' region, with 1,024 bytes after the 64 words for
+-- the prototype's other state, at 5120 and on: 0 and 8 the current heading's
+-- bracket, its region and length; 16 where `--` fell in the bracket being
+-- read; 24 and 32 the declared outputs, 16 bits each, and how many; 40-247
+-- the type variables' bindings; 248 how many guards a signature has, and from
+-- 256 each guard's word and how many types precede it, 16 bytes each; 320
+-- whether guards are being recorded; 328 where the bracket's types start;
+-- 344-360 a match's score, verdict and length; 728-768 a guard test's and
+-- an alternative's temporaries; 776-792 a bracket's effect.
+: st-state 112 get 0= if 6144 region-new 112 put 0 120 put then ;
+-- ( off -- v ) ( v off -- )
+: st-cell@ st-state 112 get swap 5120 u+ @ ;
+: st-cell! st-state 112 get swap 5120 u+ ! ;
 -- ( i f -- v ) A field of type term i.
 : st-tfield swap 24 u* u+ 608 get swap @ ;
 -- ( con a b -- t ) The type a constructor builds from its arguments: the
@@ -2318,6 +2341,49 @@ _v ᵥ
 : st-tparts
   dup 256 ult? if drop 0 0 0 exit then
   256 u- dup 0 st-tfield over 8 st-tfield rot 16 st-tfield ;
+-- ( t -- flag ) Whether a type is a variable; ( v -- off ) its binding's
+-- cell; ( -- ) forget every binding.
+: st-var? 10 u- 26 ult? ;
+: st-var-cell 10 u- 8 u* 40 u+ ;
+: st-unbind 0 cycle dup 26 ult? while 0 over 8 u* 40 u+ st-cell! 1 u+ repeat drop ;
+-- ( t -- t' ) A type with its bound variables replaced.
+: st-subst
+  dup st-var? if dup st-var-cell st-cell@ dup if nip recur exit then drop exit then
+  dup 256 ult? if exit then
+  st-tparts >r >r >r
+  r@ 1 eq? if r> drop r> recur r> drop 1 swap 0 st-tterm exit then
+  r@ 2 eq? if r> drop r> r> recur >r 2 swap r> st-tterm exit then
+  r> drop r> recur r> recur >r 3 swap r> st-tterm ;
+-- ( t -- flag ) Whether a type has a variable in it.
+: st-has-var?
+  dup st-var? if drop 1 exit then
+  dup 256 ult? if drop 0 exit then
+  st-tparts >r >r
+  2 eq? if r> drop r> recur exit then
+  r> recur r> recur or ;
+-- ( p t -- flag ) Whether type t matches pattern p, binding p's variables; a
+-- bound variable must match what it was bound to.
+: st-unify
+  over st-var? if
+    over st-var-cell st-cell@ dup if rot drop swap recur exit then drop
+    swap st-var-cell st-cell! 1 exit
+  then
+  over over eq? if drop drop 1 exit then
+  over 256 ult? over 256 ult? or if drop drop 0 exit then
+  st-tparts >r >r >r
+  st-tparts
+  rot dup r> eq? 0= if drop drop drop r> drop r> drop 0 exit then
+  2 eq? if swap r> eq? 0= if drop r> drop 0 exit then r> recur exit then
+  swap r> recur 0= if drop r> drop 0 exit then
+  r> recur ;
+-- ( t -- n ) How specific a type is: its parts that are not variables.
+: st-weight
+  dup 0= if exit then
+  dup st-var? if drop 0 exit then
+  dup 256 ult? if drop 1 exit then
+  st-tparts >r >r
+  2 eq? if r> drop r> recur 2 u+ exit then
+  r> recur r> recur u+ 1 u+ ;
 -- ( n -- 10^n )
 : st-pow10 1 swap cycle dup while swap 10 u* swap 1 u- repeat drop ;
 -- ( -- slot ) A literal to be settled later.
@@ -2359,11 +2425,16 @@ _v ᵥ
 -- ( k -- ) A literal no context typed: an integer is an i64, a decimal a
 -- float.
 : st-default dup 0 st@ 4 eq? if 1 else 2 then st-convert ;
--- ( k t -- ) Judgment k is of type t: a literal takes it; anything else must
--- already have it, since nothing converts implicitly.
+-- ( k t -- ) Judgment k is of type t, a pattern whose variables bind: a
+-- literal takes it, or its default if it is still a variable; anything else
+-- must match it, since nothing converts implicitly.
 : st-annotate-at
-  over 0 st@ st-lit? if st-convert exit then
-  swap 0 st@ eq? 0= if 23 trap then ;
+  st-subst
+  over 0 st@ st-lit? if
+    dup st-has-var? 0= if st-convert exit then
+    over st-default
+  then
+  swap 0 st@ st-unify 0= if 23 trap then ;
 -- ( a b op -- c ) Checked integer arithmetic, at compile time.
 : st-int-op dup 1 eq? if drop + exit then 2 eq? if * else - then ;
 -- ( op -- ) Two literals emitted last, folded into one at compile time.
@@ -2384,25 +2455,40 @@ _v ᵥ
     then
     5 328 put
   then
-  1 32 st@ 16 put st-drop st-drop
+  1 32 st@ 16 put 0 848 put st-drop st-drop
   328 get 1 320 get 336 get placeholder st-push ;
--- ( op -- ) `+`, `*` or `-`, by its operands' types: two literals emitted
--- last fold; a literal takes the other operand's type; then both types must
--- agree. Floats use the float primitive; integers and cents the checked
--- word, which traps on overflow; money is not multiplied.
-: st-binop
-  368 put 2 st-need
-  1 0 st@ st-lit? 0 0 st@ st-lit? and if
-    1 32 st@ 9 u+ 0 32 st@ eq? 0 32 st@ 9 u+ here eq? and if
-      368 get st-fold exit
-    then
-    1 st-default 0 st-default
-  then
-  1 0 st@ st-num? 0 0 st@ st-num? and 0= if 23 trap then
-  1 0 st@ st-lit? if 1 0 0 st@ st-convert then
-  0 0 st@ st-lit? if 0 1 0 st@ st-convert then
-  1 0 st@ 0 0 st@ eq? 0= if 23 trap then
-  1 0 st@ 3 eq? 368 get 2 eq? and if 23 trap then
+-- ( t -- e ) An array type's element type, or 0.
+: st-elem-of
+  dup 256 ult? if drop 0 exit then
+  st-tparts drop swap 1 eq? if exit then drop 0 ;
+-- ( t -- b ) A type as the checker's byte: i64, and money, 1; f64 2;
+-- arrays of them 3 and 4; anything else 0.
+: st-checker-type
+  dup 2 eq? if drop 2 exit then
+  dup 1 eq? over 3 eq? or if drop 1 exit then
+  st-elem-of dup 2 eq? if drop 4 exit then
+  dup 1 eq? swap 3 eq? or if 3 else 0 then ;
+-- ( t -- ) The two judgments on top give way to a value of type t, after
+-- an operation is emitted.
+: st-result st-drop st-drop 0 0 0 -1 st-push ;
+-- ( -- ) `+`, `*` or `-` (at 368) with an array: the clause `< a ary a -- a
+-- ary >`, by the lifted word march's checker makes for the element
+-- operation (`lift-for`). A literal takes the elements' type.
+: st-lift
+  1 0 st@ st-elem-of dup 0= if drop 0 0 st@ st-elem-of then 376 put
+  376 get dup 1 u- 3 ult? 0= if 23 trap then
+  3 eq? 368 get 2 eq? and if 23 trap then
+  1 0 st@ st-lit? if 1 376 get st-convert then
+  0 0 st@ st-lit? if 0 376 get st-convert then
+  1 0 st@ dup 376 get eq? swap st-elem-of 376 get eq? or 0= if 23 trap then
+  0 0 st@ dup 376 get eq? swap st-elem-of 376 get eq? or 0= if 23 trap then
+  368 get 1 eq? if ' + else 368 get 2 eq? if ' * else ' - then then
+  1 0 st@ st-checker-type 0 0 st@ st-checker-type lift-for
+  dup 0= if 23 trap then drop compile,
+  1 0 st@ st-elem-of if 1 0 st@ else 0 0 st@ then st-result ;
+-- ( -- ) Arithmetic (at 368) on two numbers of one type: floats by the
+-- float primitive, integers and cents by the checked word.
+: st-arith
   1 0 st@ 2 eq? if
     368 get 1 eq? if 36 else 368 get 2 eq? if 38 else 37 then then prim,
   else
@@ -2410,9 +2496,41 @@ _v ᵥ
       368 get 2 eq? if ' * compile, else ' - compile, then
     then
   then
-  1 0 st@ st-drop st-drop 0 0 0 -1 st-push ;
--- ( n -- ) Judgments with values at run time, not types, operations or
--- typed words, which have no code to move.
+  1 0 st@ st-result ;
+-- ( -- ) A comparison (at 368) of two numbers of one type: a flag.
+: st-compare
+  1 0 st@ 2 eq? if
+    368 get 10 eq? if 41 prim, else
+      368 get 11 eq? if 2 prim, 41 prim, else 40 prim, then
+    then
+  else
+    368 get 10 eq? if ' lt? compile, else
+      368 get 11 eq? if ' gt? compile, else 10 prim, then
+    then
+  then
+  1 st-result ;
+-- ( op -- ) `+`, `*`, `-` or a comparison, by its operands' types: two
+-- literals emitted last fold, for arithmetic; an array lifts; a literal takes
+-- the other operand's type; then both types must agree. Money is not
+-- multiplied.
+: st-binop
+  368 put 2 st-need
+  1 0 st@ st-lit? 0 0 st@ st-lit? and if
+    368 get 4 ult?
+    1 32 st@ 9 u+ 0 32 st@ eq? and 0 32 st@ 9 u+ here eq? and if
+      368 get st-fold exit
+    then
+    1 st-default 0 st-default
+  then
+  368 get 4 ult? 1 0 st@ st-elem-of 0 0 st@ st-elem-of or 0= 0= and if
+    st-lift exit
+  then
+  1 0 st@ st-num? 0 0 st@ st-num? and 0= if 23 trap then
+  1 0 st@ st-lit? if 1 0 0 st@ st-convert then
+  0 0 st@ st-lit? if 0 1 0 st@ st-convert then
+  1 0 st@ 0 0 st@ eq? 0= if 23 trap then
+  1 0 st@ 3 eq? 368 get 2 eq? and if 23 trap then
+  368 get 9 ult? if st-arith else st-compare then ;
 -- ( k -- ) Judgment k must have a value at run time.
 : st-value 0 st@ st-value-type? 0= if 23 trap then ;
 -- ( -- ) `dup`: a literal is copied as a new literal, so each copy can take
@@ -2428,7 +2546,7 @@ _v ᵥ
 : st-drop-word
   1 st-need 0 st-value
   0 32 st@ dup -1 eq? 0= swap 9 u+ here eq? and if
-    0 32 st@ 16 put st-drop exit
+    0 32 st@ 16 put 0 848 put st-drop exit
   then
   1 prim, st-drop ;
 -- ( f -- ) ( -- ) `swap`, at run time, and of the two judgments.
@@ -2438,9 +2556,6 @@ _v ᵥ
   2 prim,
   0 st-swap-field 8 st-swap-field 16 st-swap-field 24 st-swap-field
   32 st-swap-field ;
--- ( t -- ) The two judgments on top give way to a value of type t, after
--- an operation is emitted.
-: st-result st-drop st-drop 0 0 0 -1 st-push ;
 -- ( -- ) `length`: of a string, an array or a map, an i64 at run time; of a
 -- vec, its length, known at compile time, so the value is dropped and the
 -- length is a literal.
@@ -2494,9 +2609,38 @@ _v ᵥ
     368 get + 2 swap 376 get st-tterm st-concat-to exit
   then
   23 trap ;
+-- ( -- ) `(`: an array literal begins. The machine marks the stack, and a
+-- judgment marks where the elements start.
+: st-open 46 prim, 50 0 0 0 -1 st-push ;
+-- ( -- k ) How many judgments are above the nearest `(`.
+: st-mark-depth
+  0 cycle dup 280 get ult? if dup 0 st@ 50 eq? 0= else 0 then while 1 u+ repeat
+  dup 280 get ult? 0= if 23 trap then ;
+-- ( -- ) `)`: the elements gathered into an array. They share one type:
+-- literals take the others', or, all literals, f64 if any is a decimal and
+-- i64 otherwise.
+: st-close
+  st-mark-depth 368 put 368 get 0= if 23 trap then
+  0 376 put
+  0 cycle dup 368 get ult? while
+    dup 0 st@ st-lit? 0= if dup 0 st@ 376 put then 1 u+
+  repeat drop
+  376 get 0= if
+    1 376 put
+    0 cycle dup 368 get ult? while dup 0 st@ 5 eq? if 2 376 put then 1 u+ repeat drop
+  then
+  0 cycle dup 368 get ult? while
+    dup 0 st@ st-lit? if dup 376 get st-convert then
+    dup 0 st@ 376 get eq? 0= if 23 trap then
+    dup st-value 1 u+
+  repeat drop
+  47 prim,
+  368 get cycle dup while st-drop 1 u- repeat drop st-drop
+  1 376 get 0 st-tterm 0 0 0 -1 st-push ;
 -- ( id -- ) An operation, applied.
 : st-op
   dup 4 ult? if st-binop exit then
+  dup 10 u- 3 ult? if st-binop exit then
   dup 4 eq? if drop st-dup exit then
   dup 5 eq? if drop st-drop-word exit then
   dup 6 eq? if drop st-swap exit then
@@ -2519,13 +2663,22 @@ _v ᵥ
       dup 80 u* 40 u+ >r 40 get 64 get 112 get r> 72 get bytes-eq? if exit then
     then
   repeat drop -1 ;
--- ( -- t ) The type the current word names.
+-- ( -- t ) The type the current word names: a type's name, or a single
+-- letter, a type variable.
 : st-type-name
   s" i64" tok= if 1 exit then
   s" f64" tok= if 2 exit then
   s" money" tok= if 3 exit then
   s" string" tok= if 9 exit then
+  72 get 1 eq? if 40 get 64 get c@ 97 u- dup 26 ult? if 10 u+ exit then drop then
   40 trap ;
+-- ( -- ref | -1 ) The guard the current word names: a comparison (1010 to
+-- 1012), or a typed word.
+: st-guard-ref
+  s" lt?" tok= if 1010 exit then
+  s" gt?" tok= if 1011 exit then
+  s" eq?" tok= if 1012 exit then
+  st-find ;
 -- ( -- ) A name: an operation, a typed word or a type, as a value until `.`
 -- applies it.
 : st-name
@@ -2538,11 +2691,15 @@ _v ᵥ
   s" length" tok= if 7 1 7 0 -1 st-push exit then
   s" at" tok= if 7 1 8 0 -1 st-push exit then
   s" concat" tok= if 7 1 9 0 -1 st-push exit then
+  s" lt?" tok= if 7 1 10 0 -1 st-push exit then
+  s" gt?" tok= if 7 1 11 0 -1 st-push exit then
+  s" eq?" tok= if 7 1 12 0 -1 st-push exit then
   st-find dup -1 eq? 0= if 8 swap 1 swap 0 -1 st-push exit then drop
   st-type-name 6 swap 1 swap 0 -1 st-push ;
 -- ( -- in out ) What applying the current name takes and leaves.
 : st-name-effect
   s" +" tok= s" *" tok= or s" -" tok= or if 2 1 exit then
+  s" lt?" tok= s" gt?" tok= or s" eq?" tok= or if 2 1 exit then
   s" dup" tok= if 1 2 exit then
   s" drop" tok= if 1 0 exit then
   s" swap" tok= if 2 2 exit then
@@ -2572,12 +2729,22 @@ _v ᵥ
 : st-push-type 6 1 rot 0 -1 st-push ;
 -- ( k -- t ) Judgment k must be a type; its number.
 : st-type-arg dup 0 st@ 6 eq? 0= if 23 trap then 16 st@ ;
--- ( -- ) A word inside a bracket: a number is a length, a type's name is the
--- type, and `ary`, `vec` and `map` build types from those below them.
+-- ( ref -- ) A guard in a bracket: recorded, with how many types precede
+-- it, when a clause's signature is read for matching; otherwise passed by.
+: st-guard-word
+  320 st-cell@ 0= if drop exit then
+  248 st-cell@ 4 ult? 0= if 27 trap then
+  248 st-cell@ 16 u* 256 u+ st-cell!
+  280 get 328 st-cell@ u- 248 st-cell@ 16 u* 264 u+ st-cell!
+  248 st-cell@ 1 u+ 248 st-cell! ;
+-- ( -- ) A word inside a bracket: a number is a length, a type's name or a
+-- variable is the type, `ary`, `vec` and `map` build types from those below
+-- them, `--` divides inputs from outputs, and a guard looks.
 : st-type-word
   numeric-start? if
     number 1 eq? 0= if 41 trap then >r 4 1 r> 0 -1 st-push exit
   then
+  s" --" tok= if 280 get 16 st-cell! exit then
   s" ary" tok= if 1 st-need 1 0 st-type-arg 0 st-tterm st-drop st-push-type exit then
   s" vec" tok= if
     2 st-need 1 0 st@ 4 eq? 0= if 23 trap then
@@ -2586,18 +2753,33 @@ _v ᵥ
   s" map" tok= if
     2 st-need 3 1 st-type-arg 0 st-type-arg st-tterm st-drop st-drop st-push-type exit
   then
+  st-guard-ref dup -1 eq? 0= if st-guard-word exit then drop
   st-type-name st-push-type ;
 -- ( -- ) `< … >`: a type expression, which leaves a type for each value it
--- types. First in a definition, they are its inputs, values not known until
--- run time. Anywhere else, they type as many values on top, the deepest
--- first: a literal takes its type, and anything else must already have it.
--- So a typed word's signature, applied in another typed body, types what it
--- is given. 376 holds where the types start, then how many there are, and
--- 368 whether they are inputs; `st-convert` uses 320-336.
+-- types, inputs before `--` and outputs after. First in a definition, the
+-- inputs are its values, not known until run time, and the outputs an
+-- obligation checked at `;`. Anywhere else, the inputs type as many values
+-- on top, the deepest first: a literal takes its type, anything else must
+-- match it; there, outputs and guards are passed by. So a typed word's
+-- signature, applied in another typed body, types what it is given. 376
+-- holds where the types start, then how many there are, 368 whether they are
+-- inputs, 312 how many outputs; `st-convert` uses 320-336.
 : st-sig
-  280 get 376 put
+  st-unbind
+  280 get dup 376 put 328 st-cell! -1 16 st-cell!
   168 get 0= 280 get 0= and here 0= and 368 put
   cycle read-word 0= if 8 trap then 62 tok-char? 0= while st-type-word repeat
+  16 st-cell@ -1 eq? if 280 get 16 st-cell! then
+  280 get 16 st-cell@ u- 312 put
+  368 get if
+    312 get 5 ult? 0= if 27 trap then
+    0 24 st-cell! 312 get 32 st-cell!
+    0 cycle dup 312 get ult? while
+      312 get over u- 1 u- st-type-arg over 16 u* lshift 24 st-cell@ or 24 st-cell!
+      1 u+
+    repeat drop
+  then
+  312 get cycle dup while st-drop 1 u- repeat drop
   280 get 376 get u- 376 put
   0 cycle dup 376 get ult? while dup st-type-arg drop 1 u+ repeat drop
   368 get if
@@ -2612,10 +2794,19 @@ _v ᵥ
     1 u+
   repeat drop
   376 get cycle dup while st-drop 1 u- repeat drop ;
--- ( -- ) `;`: every literal still undecided takes its default type; a type,
--- an operation or a typed word left over is an error. Then the definition
--- ends as any other does.
+-- ( -- ) `;`: the outputs a signature declared, if any, type the results; a
+-- literal still undecided takes its default type; a type, an operation or a
+-- typed word left over is an error. Then the definition ends as any other
+-- does.
 : st-finish
+  32 st-cell@ dup if
+    dup 280 get eq? 0= if 23 trap then
+    0 cycle over over swap ult? while
+      over over u- 1 u- over 24 st-cell@ swap 16 u* rshift 65535 and st-annotate-at
+      1 u+
+    repeat drop
+  then drop
+  0 32 st-cell!
   0 cycle dup 280 get ult? while
     dup 0 st@ st-lit? if dup st-default else
       dup 0 st@ st-value-type? 0= if 23 trap then then
@@ -2635,12 +2826,253 @@ _v ᵥ
   cycle read-word 0= if 8 trap then 59 tok-char? 0= while 592 get call repeat
   r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put
   168 get 1 u- 168 put ;
+-- Families. Applying a family allocates a frame of 512 bytes for its state,
+-- since a clause's evaluation may apply other families: 0 the candidates,
+-- how many, and from 8 each one's typed word and its score, doubled, plus 1
+-- if guarded, 16 bytes each; 136 the best unguarded candidate, 144 its
+-- score, 152 whether it ties; 160 a snapshot of the judgments, 168 their
+-- count, 176 how many inputs, 184 the judgments below them; 192 how many
+-- results the first alternative left, -1 before it, and from 200 their
+-- types; 264 how many alternatives jump to the end, and from 272 where; 336
+-- how many guards jump to the next alternative, and from 344 where; 376 the
+-- current clause's guards, how many, and from 384 each one's word and the
+-- types before it.
+-- ( i j -- flag ) Whether typed words i and j have one name.
+: st-same-name?
+  over 32 st-entry over 32 st-entry eq? 0= if drop drop 0 exit then
+  >r 80 u* 40 u+ 112 get swap 112 get r@ 80 u* 40 u+ r> 32 st-entry bytes-eq? ;
+-- ( idx -- n ) Push the input types of typed word idx's signature, its
+-- bracket first in its explicit form, recording its guards; -1, and nothing
+-- pushed, if it has none. Its outputs are dropped.
+: st-clause-sig
+  dup 0 st-entry swap 8 st-entry
+  40 get >r 48 get >r 56 get >r 64 get >r 72 get >r
+  48 put 40 put 0 56 put
+  0 248 st-cell!
+  read-word 0= if 8 trap then
+  60 tok-char? if
+    280 get 328 st-cell! -1 16 st-cell! 1 320 st-cell!
+    cycle read-word 0= if 8 trap then 62 tok-char? 0= while st-type-word repeat
+    0 320 st-cell!
+    16 st-cell@ -1 eq? if 280 get 16 st-cell! then
+    280 get 16 st-cell@ u- cycle dup while st-drop 1 u- repeat drop
+    280 get 328 st-cell@ u-
+  else -1 then
+  r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put ;
+-- ( i -- ) One input of a match: the pattern among the n types on top (n at
+-- 360), against the value below them. A literal matches a type it converts
+-- to, scoring 2 for its default type and 1 for another, or a variable,
+-- scoring 0; anything else must unify, scoring 4 for each part of the
+-- pattern that is not a variable.
+: st-match-slot
+  360 st-cell@ over u- 1 u- 16 st@
+  swap 360 st-cell@ 2 u* swap u- 1 u-
+  dup 0 st@ st-lit? if
+    0 st@ swap st-subst
+    dup st-has-var? if drop drop exit then
+    over 4 eq? if dup 1 u- 3 ult? else dup 2 eq? over 3 eq? or then
+    0= if drop drop 0 352 st-cell! exit then
+    swap 4 eq? if 1 else 2 then eq? if 2 else 1 then 344 st-cell@ + 344 st-cell!
+    exit
+  then
+  0 st@ over swap st-unify 0= if drop 0 352 st-cell! exit then
+  st-weight 4 * 344 st-cell@ + 344 st-cell! ;
+-- ( n -- score ok ) Whether the n types on top match the n values below
+-- them, and how specifically. The types are dropped.
+: st-match
+  st-unbind 360 st-cell! 0 344 st-cell! 1 352 st-cell!
+  280 get 360 st-cell@ 2 u* ult? if 0 352 st-cell! then
+  352 st-cell@ if
+    0 cycle dup 360 st-cell@ ult? 352 st-cell@ and while dup st-match-slot 1 u+ repeat drop
+  then
+  360 st-cell@ cycle dup while st-drop 1 u- repeat drop
+  344 st-cell@ 352 st-cell@ ;
+-- ( F j sg -- ) Add a candidate to frame F.
+: st-cand-add
+  rot >r
+  r@ 0 @ dup 8 ult? 0= if 27 trap then 16 u* 8 u+
+  r@ swap 8 u+ !
+  r@ r@ 0 @ 16 u* 8 u+ !
+  r@ 0 @ 1 u+ r> 0 ! ;
+-- ( F j -- ) Typed word j, a clause, is a candidate if its types match.
+: st-candidate
+  dup st-clause-sig dup -1 eq? if drop 0 1 else st-match then
+  0= if drop drop drop exit then
+  248 st-cell@ 0= 0= swap 1 lshift or st-cand-add ;
+-- ( F -- ) The most specific unguarded candidate; equal scores tie.
+: st-choose
+  >r -1 r@ 136 ! -1 r@ 144 ! 0 r@ 152 !
+  0 cycle dup r@ 0 @ ult? while
+    dup 16 u* 16 u+ r@ swap @
+    dup 1 and if drop else
+      1 rshift
+      dup r@ 144 @ eq? if drop 1 r@ 152 ! else
+        r@ 144 @ over lt? if r@ 144 ! dup r@ 136 ! 0 r@ 152 ! else drop then
+      then
+    then
+    1 u+
+  repeat drop r> drop ;
+-- ( F -- flag ) Whether any candidate is guarded; ( F -- c ) the first.
+: st-guarded?
+  >r 0 0 cycle dup r@ 0 @ ult? while
+    dup 16 u* 16 u+ r@ swap @ 1 and rot or swap 1 u+
+  repeat drop r> drop ;
+: st-first-guarded
+  >r 0 cycle dup r@ 0 @ ult? if dup 16 u* 16 u+ r@ swap @ 1 and 0= else 0 then
+  while 1 u+ repeat r> drop ;
+-- ( j -- n ) Settle the inputs by clause j's signature, so every clause
+-- tried at run time starts from values of known types: a literal takes its
+-- type. How many inputs it has.
+: st-settle-inputs
+  st-clause-sig dup -1 eq? if drop 0 exit then
+  dup 2 u* st-need
+  st-unbind
+  0 cycle over over swap ult? while
+    over over u+ over 16 st@ st-annotate-at
+    1 u+
+  repeat drop
+  dup cycle dup while st-drop 1 u- repeat drop ;
+-- ( F -- ) Save the judgments, and where the inputs start; put them back.
+: st-snapshot
+  280 get over 168 !
+  280 get 40 u* 8 u+ region-new over 160 !
+  dup 160 @ >r 272 get 0 r> 0 280 get 40 u* copy
+  280 get over 176 @ u- swap 184 ! ;
+: st-restore
+  >r r@ 160 @ 0 272 get 0 r@ 168 @ 40 u* copy
+  r> 168 @ 280 put ;
+-- ( F -- ) The guards st-clause-sig recorded, into the frame.
+: st-copy-guards
+  248 st-cell@ over 376 !
+  0 cycle dup 8 ult? while
+    dup 8 u* 256 u+ st-cell@ over 8 u* 384 u+ >r >r over r> swap r> !
+    1 u+
+  repeat drop drop ;
+-- ( F -- ) An alternative ends: its results' literals take their defaults;
+-- the first alternative's results are remembered, and each later one must
+-- leave the same types; then a jump to the end, patched later.
+: st-end-alt
+  280 get over 184 @ u- 768 st-cell!
+  768 st-cell@ 8 ult? 0= if 27 trap then
+  0 cycle dup 768 st-cell@ ult? while dup 0 st@ st-lit? if dup st-default then 1 u+ repeat drop
+  dup 192 @ -1 eq? if
+    768 st-cell@ over 192 !
+    0 cycle dup 768 st-cell@ ult? while
+      dup 0 st@ over 8 u* 200 u+ >r >r over r> swap r> !
+      1 u+
+    repeat drop
+  else
+    dup 192 @ 768 st-cell@ eq? 0= if 23 trap then
+    0 cycle dup 768 st-cell@ ult? while
+      over over 8 u* 200 u+ @ over 0 st@ eq? 0= if 23 trap then
+      1 u+
+    repeat drop
+  then
+  5 c, here over dup 264 @ 8 u* 272 u+ ! 0 u32,
+  dup 264 @ 1 u+ swap 264 ! ;
+-- ( F -- ) Point the jumps to the next alternative, or to the end, here.
+: st-patch-nexts
+  0 cycle over 336 @ over swap ult? while
+    over over 8 u* 344 u+ @ ops swap u32!
+    1 u+
+  repeat drop drop ;
+: st-patch-ends
+  0 cycle over 264 @ over swap ult? while
+    over over 8 u* 272 u+ @ ops swap u32!
+    1 u+
+  repeat drop drop ;
+-- ( F g -- ) Guard g of the current clause, tested at run time on copies of
+-- the inputs it looks at (`dup`, `over`, or a copy from two down; deeper is
+-- a limit), with a jump to the next alternative if it fails.
+: st-guard-test
+  over over 16 u* 384 u+ @ 752 st-cell!
+  over over 16 u* 392 u+ @ 736 st-cell!
+  drop
+  dup 176 @ 728 st-cell!
+  752 st-cell@ 1000 ult? if 752 st-cell@ 16 st-entry else 2 then 744 st-cell!
+  728 st-cell@ 1 u- 736 st-cell@ u- 744 st-cell@ u+ 760 st-cell!
+  760 st-cell@ 3 ult? 0= if 27 trap then
+  744 st-cell@ cycle dup while
+    760 st-cell@ dup 0= if drop 0 prim, else
+      1 eq? if 3 prim, else 33 prim, 3 prim, 34 prim, 2 prim, then
+    then
+    760 st-cell@ 0 st@ 0 0 0 -1 st-push
+    1 u-
+  repeat drop
+  752 st-cell@ dup 1000 ult? if st-inline else 1000 u- st-binop then
+  0 0 st@ st-lit? if 0 st-default then
+  0 0 st@ 1 eq? 0= if 23 trap then
+  6 c, here over dup 336 @ 8 u* 344 u+ ! 0 u32,
+  dup 336 @ 1 u+ over 336 !
+  st-drop drop ;
+-- ( F c -- ) Candidate c, guarded: from the judgments as they were, its
+-- guards, then its body, as one alternative.
+: st-try-guarded
+  over st-restore
+  16 u* 8 u+ over swap @
+  dup st-clause-sig dup -1 eq? if drop else cycle dup while st-drop 1 u- repeat drop then
+  over st-copy-guards
+  over >r 0 r> 336 !
+  >r
+  0 cycle over 376 @ over swap ult? while over over st-guard-test 1 u+ repeat drop
+  r> st-inline
+  dup st-end-alt
+  st-patch-nexts ;
+-- ( F -- ) With no unguarded clause, after the trap for no word: the
+-- results the alternatives leave, values known at run time.
+: st-noword-state
+  dup 184 @ 280 put
+  dup 192 @ cycle dup while
+    1 u- over over 8 u* 200 u+ @ 0 0 0 -1 st-push
+  repeat drop drop ;
+-- ( F -- ) The results, values known only at run time.
+: st-runtime-results
+  184 @ 280 get swap u-
+  0 cycle over over swap ult? while 0 over 8 st! -1 over 32 st! 1 u+ repeat drop drop ;
+-- ( F -- ) A choice at run time: each guarded clause, in the order defined,
+-- tests its guards on copies of its inputs and runs if they hold; then the
+-- most specific unguarded clause, or the trap for no word. The inputs are
+-- settled first, by the unguarded clause or the first guarded one.
+: st-dispatch
+  dup 136 @ dup -1 eq? if drop dup st-first-guarded then
+  16 u* 8 u+ over swap @ st-settle-inputs over 176 !
+  dup st-snapshot
+  0 cycle over 0 @ over swap ult? while
+    over over 16 u* 16 u+ @ 1 and if over over st-try-guarded then
+    1 u+
+  repeat drop
+  dup st-restore
+  dup 136 @ -1 eq? if
+    1 literal 32 prim, dup st-noword-state
+  else
+    dup dup 136 @ 16 u* 8 u+ @ st-inline dup st-end-alt
+  then
+  dup st-patch-ends
+  dup 160 @ region-free
+  st-runtime-results ;
+-- ( idx -- ) A typed word applied: of the typed words with its name, the
+-- clauses whose input types match the values on top, chosen by types now and
+-- by guards at run time. No match is the error for an unknown word.
+: st-family
+  512 region-new swap >r
+  0 over 0 ! -1 over 192 ! 0 over 264 ! 0 over 336 !
+  0 cycle dup 120 get ult? while
+    dup r@ st-same-name? if over over st-candidate then
+    1 u+
+  repeat drop r> drop
+  dup st-choose
+  dup 152 @ if 23 trap then
+  dup st-guarded? 0= if
+    dup 136 @ -1 eq? if 1 trap then
+    dup dup 136 @ 16 u* 8 u+ @ swap region-free st-inline exit
+  then
+  dup st-dispatch region-free ;
 -- ( -- ) `.`: apply the top judgment, a type, an operation or a typed word.
 : st-apply
   1 st-need
   0 0 st@ 6 eq? if 0 16 st@ st-drop 1 st-need 0 swap st-annotate-at exit then
   0 0 st@ 7 eq? if 0 16 st@ st-drop st-op exit then
-  0 0 st@ 8 eq? if 0 16 st@ st-drop st-inline exit then
+  0 0 st@ 8 eq? if 0 16 st@ st-drop st-family exit then
   23 trap ;
 -- ( -- ) Past a string literal, from the quote that starts the current
 -- word to the one that ends it, a backslash escaping the byte after it.
@@ -2659,6 +3091,8 @@ _v ᵥ
   40 get 64 get c@ 34 eq? if string-literal 9 0 0 0 -1 st-push exit then
   46 tok-char? if st-apply exit then
   60 tok-char? if st-sig exit then
+  40 tok-char? if st-open exit then
+  41 tok-char? if st-close exit then
   numeric-start? if st-literal exit then
   st-name ;
 -- ( -- done ) One word of the definition's own body.
@@ -2667,7 +3101,7 @@ _v ᵥ
   st-token-body 0 ;
 -- ( -- ) The type stage, over the input up to `;`.
 : stage
-  2560 region-new 272 put 0 280 put 0 168 put
+  2560 region-new 272 put 0 280 put 0 168 put 0 32 st-cell!
   cycle read-word 0= if 8 trap then st-token 0= while repeat ;
 -- ( r n -- ) Make r, n bytes long, the input, and run the type stage over it.
 : stage-text
@@ -2675,11 +3109,28 @@ _v ᵥ
   48 put 40 put 0 56 put
   stage
   r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put ;
+-- ( -- n ok ) A bracket, read to its `>`: how many input types it leaves,
+-- and whether a word whose signature it is can be compiled for itself, with
+-- no type variable and no guard.
+: st-bracket-effect
+  0 776 st-cell! 1 784 st-cell! -1 792 st-cell!
+  cycle read-word 0= if 8 trap then 62 tok-char? 0= while
+    numeric-start? if 776 st-cell@ 1 u+ 776 st-cell! else
+    s" --" tok= if 776 st-cell@ 792 st-cell! else
+    s" ary" tok= if else
+    s" vec" tok= s" map" tok= or if 776 st-cell@ 1 u- 776 st-cell! else
+    st-guard-ref -1 eq? 0= if 0 784 st-cell! else
+      72 get 1 eq? if 40 get 64 get c@ 97 u- 26 ult? if 0 784 st-cell! then then
+      776 st-cell@ 1 u+ 776 st-cell!
+    then then then then then
+  repeat
+  792 st-cell@ -1 eq? if 776 st-cell@ else 792 st-cell@ then 784 st-cell@ ;
 -- ( r n -- in out k ) What a body in the explicit form takes and leaves,
--- and how many types a signature first in it names. Numbers push; a name
--- pushes a value, which `.` applies; a bracket needs as many values as it
--- names. Working memory: 368 the depth, 376 its lowest, 312 and 320 what the
--- last name takes and leaves, 336 whether this is the first word, 328 the
+-- and how many types a signature first in it names (4095 if it cannot be
+-- compiled for itself). Numbers push; a name pushes a value, which `.`
+-- applies; a bracket needs as many values as it types; `( … )` leaves one.
+-- Working memory: 368 the depth, 376 its lowest, 312 and 320 what the last
+-- name takes and leaves, 336 whether this is the first word, 328 the
 -- signature's length.
 : st-effect
   40 get >r 48 get >r 56 get >r 64 get >r 72 get >r
@@ -2691,12 +3142,13 @@ _v ᵥ
       368 get 1 - 312 get - dup 376 get lt? if dup 376 put then
       320 get + 368 put
     else 60 tok-char? if
-      0 cycle read-word 0= if 8 trap then 62 tok-char? 0= while 1 + repeat
-      336 get if dup 328 put then
+      st-bracket-effect
+      336 get if if dup 328 put else 4095 328 put then else drop then
       368 get swap - dup 376 get lt? if 376 put else drop then
-    else numeric-start? if 368 get 1 + 368 put else
+    else 40 tok-char? if 368 get >r else 41 tok-char? if r> 1 + 368 put else
+    numeric-start? if 368 get 1 + 368 put else
       st-name-effect 320 put 312 put 368 get 1 + 368 put
-    then then then then
+    then then then then then then
     0 336 put
   repeat
   r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put
@@ -2704,7 +3156,7 @@ _v ᵥ
 -- ( r n in out -- r n ) Record a typed word: its name (at 80-96, as `colon`
 -- left it), its explicit form and what it takes and leaves.
 : st-record
-  112 get 0= if 5120 region-new 112 put 0 120 put then
+  st-state
   120 get 64 ult? 0= if 27 trap then
   88 get 40 ult? 0= if 7 trap then
   120 get 80 u* 312 put
@@ -2714,8 +3166,8 @@ _v ᵥ
   96 get 80 get 112 get 312 get 40 u+ 88 get copy
   120 get 1 u+ 120 put ;
 -- ( r n -- ) A typed definition, in the explicit form: recorded, then
--- compiled as a word of its own if a signature types all it takes; a word
--- that takes values of types it does not say has no code of its own.
+-- compiled as a word of its own if a signature types all it takes, with no
+-- variable and no guard; otherwise it has no code of its own.
 : st-define
   over over st-effect >r over r> eq? >r
   st-record
@@ -2733,8 +3185,8 @@ _v ᵥ
   >r 312 get 320 get r@ copy 320 get r> u+ 320 put
   32 312 get 320 get c! 320 get 1 u+ 320 put ;
 -- ( -- r n ) Stage 1: the rest of the definition, through its `;`, in the
--- explicit form. A word that is not a number is followed by `.`; a
--- bracket and a string literal are copied as they are.
+-- explicit form. A word that is not a number is followed by `.`, except `(`
+-- and `)`; a bracket and a string literal are copied as they are.
 : lower
   48 get 56 get u- 3 u* 16 u+ region-new 312 put 0 320 put 0 336 put
   cycle
@@ -2746,16 +3198,40 @@ _v ᵥ
       336 get if 62 tok-char? if 0 336 put then 1 else
         60 tok-char? if 1 336 put 1 else
           59 tok-char? if 0 else
-            numeric-start? 0= if s" ." emit-text then 1
+            40 tok-char? 41 tok-char? or 0= numeric-start? 0= and if
+              s" ." emit-text
+            then 1
           then
         then
       then
     then
   while repeat
   312 get 320 get ;
+-- ( -- ) `#`, `##` or `###`, then a bracket: the context of the typed
+-- definitions after it, until the next heading, which starts a new section
+-- even if this one is empty. A heading that names a namespace instead ends
+-- the context.
+: st-heading
+  0 8 st-cell!
+  read-word 0= if exit then
+  60 tok-char? 0= if exit then
+  64 get 312 put
+  cycle read-word 0= if 8 trap then 62 tok-char? 0= while repeat
+  56 get 312 get u- dup region-new 320 put
+  >r 40 get 312 get 320 get 0 r@ copy
+  320 get 0 st-cell! r> 8 st-cell! ;
+-- ( r n -- r' n' ) The current heading's bracket, put first in a body, as
+-- its own signature: the per-definition form lowering gives.
+: st-with-context
+  8 st-cell@ 0= if exit then
+  dup 8 st-cell@ u+ 1 u+ region-new >r
+  0 st-cell@ 0 r@ 0 8 st-cell@ copy
+  32 r@ 8 st-cell@ c!
+  >r 0 r> r@ swap 8 st-cell@ 1 u+ swap dup >r copy
+  r> 8 st-cell@ 1 u+ u+ r> swap ;
 -- ( -- ) `typed name … ;` and `explicit name … ;`.
-: typed colon lower st-define ;
-: explicit colon st-capture st-define ;
+: typed colon lower st-with-context st-define ;
+: explicit colon st-capture st-with-context st-define ;
 
 : register-families
   0 728 get 0 !
@@ -2895,6 +3371,9 @@ _v ᵥ
   ' print 16 s" print" install
   ' typed 0 s" typed" install
   ' explicit 0 s" explicit" install
+  ' st-heading 0 s" #" install
+  ' st-heading 0 s" ##" install
+  ' st-heading 0 s" ###" install
   ' input-word 5 s" _" install
   ' >integer 0 s" >integer" install
   ' >float 0 s" >float" install

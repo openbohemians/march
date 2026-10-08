@@ -177,10 +177,11 @@ fn structured_types_follow_values_through_containers() {
         run(&g, &format!("{h} {{ \"k\" ( 41 2 ) }} h")).unwrap(),
         [42]
     );
-    // So adding 1 to the array is refused, instead of adding 1 to a handle.
+    // So adding 1 lifts over the array, instead of adding 1 to a handle.
+    let bad = "typed b < string i64 ary map > \"k\" at 1 + ;";
     assert_eq!(
-        run(&g, "typed bad < string i64 ary map > \"k\" at 1 + ;"),
-        Err(Error::User(23))
+        show(&g, &format!("{bad} {{ \"k\" ( 1 2 ) }} b")),
+        "<1> ( 2 3 )"
     );
     // Literals take their type from what the container holds.
     let fl = "typed fl < string f64 ary map > \"k\" at 0 at 1 + ;";
@@ -242,4 +243,109 @@ fn a_vec_knows_its_length_at_compile_time() {
     );
     // A bracket must leave types only.
     assert_eq!(run(&g, "typed b < 2 > ;"), Err(Error::User(23)));
+}
+
+#[test]
+fn headings_give_definitions_their_context() {
+    let g = system();
+    // A heading's bracket is each definition's signature; `--` divides
+    // inputs from outputs, which are checked.
+    let fee = "# < money -- money >\ntyped fee 1.10 + ;";
+    assert_eq!(run(&g, &format!("{fee} 1999 fee")).unwrap(), [2109]);
+    assert_eq!(
+        run(&g, "# < i64 -- f64 >\ntyped b 1 + ;"),
+        Err(Error::User(23))
+    );
+    // A heading starts a section even when the one before is empty: `inc`
+    // has an f64 clause only, so applying it to an i64 is no word.
+    let inc = "# < i64 >\n# < f64 >\ntyped inc 1 + ;";
+    assert_eq!(show(&g, &format!("{inc} 2.5 inc")), "<1> 3.5");
+    assert_eq!(
+        run(&g, &format!("{inc}\n# < i64 >\ntyped u inc ;")),
+        Err(Error::User(1))
+    );
+}
+
+#[test]
+fn clauses_are_chosen_by_types() {
+    let g = system();
+    let d = "# < i64 >\ntyped d 2 * ;\n# < string >\ntyped d dup concat ;\n";
+    assert_eq!(
+        show(
+            &g,
+            &format!("{d}# < i64 >\ntyped a d ;\n# < string >\ntyped b d ; 21 a \"ab\" b")
+        ),
+        "<2> 42 \"abab\""
+    );
+    // The most specific clause wins; a type variable matches anything.
+    let first = "# < a ary >\ntyped first 0 at ;\n# < i64 ary >\ntyped first 1 at ;\n";
+    assert_eq!(
+        show(
+            &g,
+            &format!(
+                "{first}# < i64 ary >\ntyped f first ;\n# < f64 ary >\ntyped h first ; ( 5 6 ) f ( 1.5 2.5 ) h"
+            )
+        ),
+        "<2> 6 1.5"
+    );
+    // Equally specific clauses tie.
+    let w = "# < i64 a >\ntyped w drop drop 1 ;\n# < a i64 >\ntyped w drop drop 2 ;\n";
+    assert_eq!(
+        run(&g, &format!("{w}# < i64 i64 >\ntyped x w ;")),
+        Err(Error::User(23))
+    );
+    // A literal prefers a clause of its default type, then one it converts to.
+    let fee = "# < money >\ntyped fee 1.10 + ;\n# < i64 >\ntyped fee 1 + ;\n# main\n";
+    assert_eq!(
+        run(&g, &format!("{fee}typed u 5 fee ; typed v 5.5 fee ; u v")).unwrap(),
+        [6, 660]
+    );
+}
+
+#[test]
+fn guards_choose_at_run_time() {
+    let g = system();
+    let sign = "typed positive? 0 gt? ;\n# < i64 positive? >\ntyped sign drop 1 ;\n\
+                # < i64 >\ntyped sign drop 0 ;\n# < i64 >\ntyped s sign ;";
+    assert_eq!(run(&g, &format!("{sign} 5 s -3 s")).unwrap(), [1, 0]);
+    // No clause whose guard holds is no word, at run time.
+    let only = "typed positive? 0 gt? ;\n# < i64 positive? >\ntyped only drop 7 ;\n\
+                # < i64 >\ntyped o only ;";
+    assert_eq!(run(&g, &format!("{only} 5 o")).unwrap(), [7]);
+    assert_eq!(run(&g, &format!("{only} -1 o")), Err(Error::User(1)));
+    // A guard over two inputs: the smaller of two, with no `if`.
+    let min = "# < i64 i64 lt? >\ntyped mn drop ;\n# < i64 i64 >\ntyped mn swap drop ;\n\
+               # < i64 i64 >\ntyped m mn ;";
+    assert_eq!(run(&g, &format!("{min} 3 5 m 5 3 m")).unwrap(), [3, 3]);
+    // Clauses chosen between at run time must leave the same types.
+    let bad = "typed positive? 0 gt? ;\n# < i64 positive? >\ntyped b drop 1.5 ;\n\
+               # < i64 >\ntyped b drop 1 ;\n# < i64 >\ntyped c b ;";
+    assert_eq!(run(&g, bad), Err(Error::User(23)));
+}
+
+#[test]
+fn arithmetic_lifts_and_arrays_are_literals() {
+    let g = system();
+    assert_eq!(
+        show(&g, "# < i64 ary >\ntyped l 1 + ; ( 1 2 3 ) l"),
+        "<1> ( 2 3 4 )"
+    );
+    assert_eq!(
+        show(&g, "# < f64 ary >\ntyped l 2 * ; ( 1.5 2.5 ) l"),
+        "<1> ( 3.0 5.0 )"
+    );
+    assert_eq!(
+        run(&g, "# < money ary >\ntyped l 2 * ;"),
+        Err(Error::User(23))
+    );
+    // Array literals in typed bodies: one element type, literals settling on
+    // it, and nesting.
+    assert_eq!(show(&g, "typed a ( 1 2 3 ) ; a"), "<1> ( 1 2 3 )");
+    assert_eq!(show(&g, "typed a ( 1 2.5 ) ; a"), "<1> ( 1.0 2.5 )");
+    assert_eq!(show(&g, "typed a ( 1 2 ) 10 * ; a"), "<1> ( 10 20 )");
+    assert_eq!(
+        run(&g, "typed a ( ( 1 2 ) ( 3 ) ) length ; a").unwrap(),
+        [2]
+    );
+    assert_eq!(run(&g, "typed a ( ) ;"), Err(Error::User(23)));
 }

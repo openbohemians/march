@@ -5,7 +5,10 @@ integers, floats, money, two kinds of literal and `+`, through every stage.
 Step 2, 2026-10-08: typed words applied in typed bodies and typed for each
 use, brackets that annotate, `*`, `-`, `dup`, `drop` and `swap`. Step 3, the
 same day: types as data, built by `ary`, `vec` and `map`; strings; and
-`length`, `at` and `concat` typed by structure.
+`length`, `at` and `concat` typed by structure. Step 4, the same day:
+headings, families of clauses chosen by types and by guards, type
+variables, `--` outputs, lifting over arrays, comparisons and array
+literals.
 
 ## What it does
 
@@ -21,6 +24,15 @@ typed h < string i64 ary map > "k" at 0 at 1 + ;   { "k" ( 41 2 ) } h → 42
 typed bad < string i64 ary map > "k" at 1 + ;      compile error: an array
 typed fl < string f64 ary map > "k" at 0 at 1 + ;  the 1 is a float
 typed v < 3 i64 vec > length ;                     the constant 3
+
+typed positive? 0 gt? ;
+# < i64 positive? >
+typed sign drop 1 ;
+# < i64 >
+typed sign drop 0 ;                5 sign → 1, -3 sign → 0, chosen at run time
+
+# < string i64 ary map >
+typed h "k" at 1 + ;               { "k" ( 1 2 ) } h → ( 2 3 ): it lifts
 ```
 
 - **`typed name … ;`** takes a body in the surface form. **Stage 1** lowers
@@ -45,7 +57,19 @@ typed v < 3 i64 vec > length ;                     the constant 3
 - **Brackets, `< t … >`,** declare the inputs when first in a definition,
   and anywhere else type as many values on top, the deepest first (TYPES.md
   2.13). So a signature applied in another body types what its word is
-  given: `19.99 fee` makes 19.99 money.
+  given: `19.99 fee` makes 19.99 money. Types after `--` are outputs.
+- **Headings, `# < … >`,** give the definitions after them their context
+  (TYPES.md 2.15). Lowering puts the bracket first in each body, as that
+  definition's own signature, so the explicit form has no mode. A heading
+  always starts a section, even after an empty one; a heading that names a
+  namespace, `# main`, ends the context. (Terms, TYPES.md 2.15: a family
+  shares a name, a domain a context, a section is the text under one
+  heading.)
+- **Typed words of one name are a family,** each a clause. Applied in a typed
+  body, a family is resolved there: the clauses whose input types match, the
+  most specific winning, a tie an error; then, if some have guards, a choice
+  at run time. No clause that matches is the error for an unknown word (trap
+  1), whether found at compile time or at run time.
 
 ## Types and judgments
 
@@ -60,6 +84,8 @@ typed v < 3 i64 vec > length ;                     the constant 3
 | 7 | an operation, as a value: `+`, `*`, `-`, `dup`, `drop`, `swap` |
 | 8 | a typed word, as a value |
 | 9 | string |
+| 10 to 35 | type variables `a` to `z` |
+| 50 | where an array literal's elements start |
 | 256 on | a type built by `ary`, `vec` or `map`: a term in the type table |
 
 A judgment holds a type, whether its value is known, the value, a decimal
@@ -110,9 +136,34 @@ literal's scale, and where its literal was emitted.
     value is dropped and the length is a literal;
   - `concat` joins two strings, or two arrays of one type; two vecs make a
     vec as long as both.
-- **Arithmetic is on numbers only.** An array, a map or a string given to
-  `+`, `*` or `-` is refused at compile time; lifting over arrays comes with
-  families.
+- **Arithmetic lifts over arrays,** as the built-in clause
+  `< a ary a -- a ary >`: `+`, `*` or `-` with an array of numbers uses the
+  lifted word march's checker already makes for the element operation, and
+  a literal takes the elements' type. A map or a string given to arithmetic
+  is refused, and money is not multiplied. `lt?`, `gt?` and `eq?` compare
+  numbers of one type and leave a flag.
+- **Array literals,** `( … )`, mark where their elements start; at `)` the
+  elements share one type, literals settling on the others' type, or f64 if
+  any is a decimal and i64 otherwise.
+- **Clause choice by types.** Each candidate clause's signature is read and
+  matched against the values on top: a literal matches a type it converts
+  to, scoring 2 for its default type and 1 for another; a variable matches
+  anything, binding, the same letter the same type; anything else must
+  unify, scoring 4 for each part of the pattern that is not a variable. The
+  highest score wins, so `< i64 ary >` beats `< a ary >`, and an exact type
+  beats a literal's conversion.
+- **Clause choice by guards.** A guard in a signature, a word leaving a flag
+  such as `positive?` or `lt?`, looks at the inputs before it without
+  consuming them. With guarded candidates, the inputs are settled first,
+  the judgments saved, and a chain of tests emitted: for each guarded clause
+  in the order defined, copies of the inputs its guards look at (`dup`,
+  `over`, or a copy from two down), the guard, and a jump past the clause if
+  it fails; then the clause, and a jump to the end. Last comes the most
+  specific unguarded clause, or the trap for no word. Every alternative
+  starts from the saved judgments, and all must leave the same types.
+- **Each family application has a frame of its own,** a small region for its
+  candidates, its saved judgments and its jumps, since a clause may apply
+  other families.
 - **String literals** are compiled as anywhere else, and are strings. Stage
   1 copies them whole, spaces and all.
 - **Stack words** move judgments as the code moves values:
@@ -121,14 +172,18 @@ literal's scale, and where its literal was emitted.
   - `drop` takes back a literal emitted last, leaving no code;
   - `swap` is a run-time swap of the two judgments.
 - **A word's stack effect** comes from a pass over its explicit form:
-  numbers push, a name pushes a value that `.` applies, and a bracket needs
-  as many values as it names.
-- **At `;`,** a literal no context typed defaults, an integer to i64 and a
-  decimal to f64. A type, operation or typed word left unapplied is an error.
+  numbers push, a name pushes a value that `.` applies, a bracket needs as
+  many values as it types, and `( … )` leaves one. A word is compiled for
+  itself only if its signature types all it takes, with no type variable and
+  no guard.
+- **At `;`,** declared outputs type the results; a literal no context typed
+  defaults, an integer to i64 and a decimal to f64. A type, operation or
+  typed word left unapplied is an error.
 
-Errors are traps: 23 when no clause matches, types disagree or values are
-missing; 40 for a word the prototype does not know; 41 for a literal that
-cannot become its type; 42 for typed words applied more than 16 deep.
+Errors are traps: 1 when no clause matches, as for an unknown word; 23 when
+types disagree, clauses tie, or values are missing; 27 for a limit; 40 for
+a word the prototype does not know; 41 for a literal that cannot become its
+type; 42 for typed words applied more than 16 deep.
 
 ## What it found
 
@@ -148,17 +203,27 @@ cannot become its type; 42 for typed words applied more than 16 deep.
 6. **The type stage is recursive,** since applying a typed word reads words,
    and System March defines words before use. So the stage reaches its own
    token reader through a working-memory cell, as the interpreter does.
-7. **The original bug becomes a compile error.** With the map's type known,
-   `"k" at 1 +` is an array plus a number, refused, where `:` quietly adds 1
-   to a handle. And types reach literals through containers: a map of f64
-   arrays makes `1` a float.
+7. **The original bug is gone.** With the map's type known, `"k" at 1 +` is
+   an array plus a number: refused in step 3, lifted over the array in step
+   4, where `:` quietly adds 1 to a handle. And types reach literals through
+   containers: a map of f64 arrays makes `1` a float.
 8. **Shared temporaries are fragile.** The prototype keeps its state in
    working-memory cells, and one bug came from a helper reusing a cell its
    caller still needed. A real type stage should keep its state in its own
    regions, or in locals.
 9. **Postfix types can hide their arity.** `< i64 ary a >` is two types, but
    a reader must know `ary` takes one argument (Thomas). Aliases for common
-   types are the likely remedy.
+   types are the likely remedy: SURFACE.md's roles.
+10. **If-free code works.** Guards turn clause choice into the program's
+    conditionals: a sign, a minimum, a partial function, without `if`, and
+    the same-type rule for choices at run time falls out of saving and
+    comparing judgments.
+11. **No match is one error at both times,** as Thomas framed it: a word's
+    name is its outermost context, so a missing clause at compile time and a
+    failed guard at run time are both an unknown word.
+12. **Recursion through shared state needs frames.** Family resolution
+    nests, since a clause may apply families, so its state lives in a region
+    per application rather than in working memory: finding 8, applied.
 
 ## Not yet
 
@@ -174,10 +239,16 @@ cannot become its type; 42 for typed words applied more than 16 deep.
 - **Checking a vec's length at run time.** A word declaring a `3 i64 vec`
   input trusts what ordinary March gives it; the declared length should be
   checked on entry.
-- **Tuples and records,** and array and map literals in typed bodies.
-- **Families as declarations.** The operations are built in; clauses with
-  signature patterns, lifting over arrays, and value patterns for if-free
-  bodies come next.
+- **Tuples and records,** and map literals in typed bodies.
+- **OR between contexts,** and nested headings and namespaces: one heading
+  level for now.
+- **Calling families from ordinary March.** A family's clauses that compile
+  for themselves are each installed under its name, so ordinary March sees
+  the newest; only typed bodies choose among clauses.
+- **Outputs of applied clauses.** A clause's declared outputs are checked
+  when it is compiled for itself, not where it is applied.
+- **Guards** look at inputs at most two down, are tested in the order
+  defined, and must be words: no value patterns such as `0`.
 - **Showing money.** Money shows as its cents.
 - **Saving.** Typed words live in the session, not in a saved image.
 - **Limits.** A body holds at most 64 judgments, 64 typed words and 256

@@ -87,7 +87,7 @@ marks opens a namespace, and `< … >` patterns open a context.
 # shape
 
 ## < i64 > < f64 >
-double : = + ;           -- two clauses: i64 and f64
+double : = + ;           -- two clauses: i64 and f64 (OR: how to write it is open)
 square : = * ;
 
 ## < str >
@@ -144,13 +144,15 @@ Type signatures are one kind of context, a compile-time one.
 | Rule | Meaning |
 |---|---|
 | A pattern is AND | `< i64 positive? >` is a type and a guard; every guard must hold |
-| Several patterns are OR | Each alternative compiles to its own clause of the family, and the body is checked for each |
+| OR is deferred | Consecutive headings do not combine: each heading starts a section, even an empty one, as readers expect of headings. How to write OR between patterns is open (2026-10-08; it was to be several patterns on one heading, or headings with no definitions between them) |
 | Sections | A context lasts until the next heading of the same or shallower depth |
+| Terms | A clause is one definition; a family, the clauses sharing a name; a domain, the clauses sharing a context; a section, the text under one heading. Sections far apart can define in one domain (2026-10-08) |
 | Nesting is AND | A definition's context is the AND of the context headings enclosing it |
-| Inputs only | Contexts select a clause by its inputs. Outputs may appear as an obligation (`< i64 -> i64 >`) but never select. Return-type polymorphism is rejected |
+| Inputs only | Contexts select a clause by its inputs. Outputs may appear as an obligation (`< i64 -- i64 >`) but never select. Return-type polymorphism is rejected |
+| No match is no word | When no clause matches, by types at compile time or by guards at run time, it is the same error as an undefined word: a word's name is its outermost context (2026-10-08) |
 
 No context at all means the effect and types are inferred. A context with OR
-patterns is static duck typing over a declared set.
+patterns, once OR has a syntax, is static duck typing over a declared set.
 
 ### The type stack
 
@@ -177,15 +179,28 @@ each type pushes an input slot. A pattern builds the inputs from the bottom up
 - **Names for contexts are ordinary bindings.** A role is a word that pushes a
   type, `price : Money ;`, used as `< price >`. A guard is any word that
   returns a flag. There is no separate `context` definer.
-- **Outputs follow `->`,** which marks where the inputs end: `< i64 -> i64 >`.
-  FORTH's `--` cannot serve, since it starts a comment.
+- **Outputs follow `--`,** which marks where the inputs end:
+  `< i64 -- i64 >` (2026-10-08). It was `->`, since `--` starts a comment, but
+  a bracket is a type expression whose reader reads its own words, so inside
+  `< >` `--` is not a comment. Tools that colour comments must know that.
 - **`< >` is the pattern and signature literal,** beside `[ ]` for code,
   `( )` for sequences and `{ }` for maps. A named signature is
-  `adjustment : < price -> price > ;`.
+  `adjustment : < price -- price > ;`.
 
 ### Lowering
 
 A context heading produces no code; it sets the compiler's current context.
+In the lowered form there is no such mode: each definition carries its
+section's context as its own signature, and a definition is data, a quoted
+body and a name given to `def` (2026-10-08, doc/design/TYPES.md 2.15):
+
+```
+## < i64 -- i64 >
+inc : 1 + ;
+```
+
+lowers to `[ < i64 -- i64 > 1 + . ] inc def .`, the signature first in the
+quoted body, as the staged-types prototype does (docs/STAGED.md).
 Each definition under it lowers to one clause word per alternative, plus an
 entry in the family's clause table:
 

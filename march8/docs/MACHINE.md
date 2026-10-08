@@ -190,6 +190,32 @@ x sign.        dup 0 swap lt? 0branch L
 This is if-free code (TYPES.md 2.12): a sign, a minimum, a partial
 function, written as clauses.
 
+### Effects
+
+**A guard must not write** (Thomas, 2026-10-08). Otherwise its write would
+happen or not as the choice is made, and on known values it would vanish
+with a clause dropped at compile time. It may read, which makes it a choice
+at run time.
+
+So the stage works out effects as it works out types. Each primitive has a
+set of effects, for each domain whether it reads and whether it writes, as
+march5's effect rows; so far only `write`, which writes `io`, has any. The
+stage adds up the effects of the primitives it emits, and an instance
+records its effects beside its results' types, so the effects of a word
+are found through everything it applies. A guard whose effects include a
+write is refused, where its clause is defined if the clause's signature
+types all its inputs, else where it is applied:
+
+```
+1:54: the guard `noisy?` writes io, and a guard must not write
+  in `f`, defined at 1:48
+```
+
+A primitive with an effect is never folded: a read is a fact of the run, and
+a write must happen then. march5 also had effect tokens at run time, to put
+effects in order in its interaction nets; code here runs in order, so
+nothing needs them yet.
+
 ### `map` and lifting
 
 `ary quote map.` applies the quotation to each element. The quotation is
@@ -334,8 +360,9 @@ being applied:
 Their kinds: no word; a mismatch (types that disagree, clauses that tie,
 values missing or out of reach, a type left unapplied); a literal that
 cannot become its type; arithmetic that overflows or divides by zero,
-found at compile time; a limit. An error inside a core clause is reported
-where the clause was applied. Errors while running are the machine's.
+found at compile time; an effect where none is allowed; a limit. An error
+inside a core clause is reported where the clause was applied. Errors while
+running are the machine's.
 
 ## What it found
 
@@ -372,6 +399,9 @@ where the clause was applied. Errors while running are the machine's.
   content identities; and words used before they are defined.
 - **Sharing large words** that are not recursive, as instances, to save code.
 - **Value patterns** such as `0` in a signature, and OR between contexts.
+- **Effects in signatures,** declared and checked like outputs, for words
+  whose bodies the compiler cannot see; and domains besides `io`, such as
+  the global store, with primitives that read.
 - **Quotations at run time:** a quotation is always consumed at compile
   time, by `.`, `def` or `map`.
 - **The surface notation** and its lowering to this form.

@@ -32,6 +32,8 @@ pub enum Kind {
     Arithmetic,
     /// A limit of the machine, or something not built yet.
     Limit,
+    /// An effect where none is allowed: a guard that writes.
+    Effect,
     /// Inside the compiler only: a recursive call whose results' types are
     /// not known yet (docs/MACHINE.md, "Recursion").
     Ghost,

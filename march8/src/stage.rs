@@ -9,7 +9,7 @@
 
 use crate::code::{Blob, Cid, Op, Primitive as P};
 use crate::error::{Error, Kind, Pos, Result};
-use crate::prims::{self, PRIMS, Prim};
+use crate::prims::{self, Effects, PRIMS, Prim};
 use crate::read::{Tok, Token};
 use crate::types::*;
 use std::collections::HashMap;
@@ -213,10 +213,13 @@ pub struct Stage {
     /// Instances being compiled, innermost last.
     frames: Vec<Frame>,
     /// Instances compiled: their code's identity and their results' types.
-    instances: HashMap<Key, (Cid, Vec<Type>)>,
+    instances: HashMap<Key, (Cid, Vec<Type>, Effects)>,
     /// Code and data made while compiling, in the order made, so a callee
     /// comes before its callers; the session publishes them.
     pub blobs: Vec<Blob>,
+    /// The effects of the code compiled so far, in the word or guard being
+    /// compiled.
+    pub effects: Effects,
     pos: Pos,
     steps: u64,
     depth: u32,
@@ -294,6 +297,7 @@ impl Stage {
             frames: Vec::new(),
             instances: HashMap::new(),
             blobs: Vec::new(),
+            effects: 0,
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
             let name: Rc<str> = (*name).into();
@@ -336,6 +340,7 @@ impl Stage {
         self.literals.clear();
         self.active.clear();
         self.frames.clear();
+        self.effects = 0;
         self.steps = 0;
         self.depth = 0;
     }
@@ -741,6 +746,7 @@ impl Stage {
             self.code.len(),
             self.floor,
             self.literals.len(),
+            self.effects,
         );
         self.active.push(key);
         let r = self.resolve(name, arity, at, false);
@@ -752,6 +758,7 @@ impl Stage {
                 self.code.truncate(saved.1);
                 self.floor = saved.2;
                 self.literals.truncate(saved.3);
+                self.effects = saved.4;
                 self.call_instance(name, arity)
             }
             r => r,
@@ -1182,7 +1189,8 @@ impl Stage {
             ));
         }
         let at = self.pos;
-        let (cid, outs) = self.instance(name, ins, arity, at)?;
+        let (cid, outs, effects) = self.instance(name, ins, arity, at)?;
+        self.effects |= effects;
         self.pos = at;
         self.materialize_top(arity)?;
         self.emit(Op::Call(cid));
@@ -1221,7 +1229,7 @@ impl Stage {
         ins: Vec<Type>,
         arity: usize,
         at: Pos,
-    ) -> Result<(Cid, Vec<Type>)> {
+    ) -> Result<(Cid, Vec<Type>, Effects)> {
         let key = (name.clone(), ins.clone());
         if let Some(r) = self.instances.get(&key) {
             return Ok(r.clone());
@@ -1237,6 +1245,7 @@ impl Stage {
             std::mem::take(&mut self.literals),
             std::mem::take(&mut self.active),
             std::mem::replace(&mut self.depth, 0),
+            std::mem::replace(&mut self.effects, 0),
         );
         let ghost = self.promised(name);
         self.frames.push(Frame {
@@ -1254,6 +1263,7 @@ impl Stage {
             self.floor = 0;
             self.literals.clear();
             self.active.clear();
+            self.effects = 0;
             let r = self.resolve(name, arity, at, true).and_then(|()| {
                 for i in 0..self.stack.len() {
                     self.materialize(i)?;
@@ -1296,6 +1306,7 @@ impl Stage {
             }
         };
         let code = std::mem::take(&mut self.code);
+        let effects = self.effects;
         self.frames.pop();
         (
             self.stack,
@@ -1304,11 +1315,12 @@ impl Stage {
             self.literals,
             self.active,
             self.depth,
+            self.effects,
         ) = saved;
         let outs = r?;
         let (_, cid) = self.seal(code);
-        self.instances.insert(key, (cid, outs.clone()));
-        Ok((cid, outs))
+        self.instances.insert(key, (cid, outs.clone(), effects));
+        Ok((cid, outs, effects))
     }
 
     /// The outputs a family's signature promises for the values on top, if
@@ -1391,11 +1403,26 @@ impl Stage {
                 self.copy(base + k)?;
             }
             let floor = std::mem::replace(&mut self.floor, depth);
+            let outer = std::mem::replace(&mut self.effects, 0);
             self.pos = g.pos;
             let r = self.apply_word(&g.name);
+            let found = std::mem::replace(&mut self.effects, outer);
+            self.effects |= found;
             self.floor = floor;
             r?;
             self.pos = g.pos;
+            // A guard may read, which makes it a choice at run time, but
+            // must not write (Thomas, 2026-10-08).
+            if found & prims::WRITES != 0 {
+                return Err(self.err(
+                    Kind::Effect,
+                    format!(
+                        "the guard `{}` {}, and a guard must not write",
+                        g.name,
+                        prims::describe_effects(found)
+                    ),
+                ));
+            }
             if self.stack.len() != depth + 1 {
                 return Err(self.err(
                     Kind::Mismatch,
@@ -1655,6 +1682,7 @@ impl Stage {
             std::mem::replace(&mut self.floor, 0),
             std::mem::take(&mut self.literals),
             self.pos,
+            self.effects,
         );
         let sig = c.sig.as_ref().expect("typed");
         let mut r = Ok(None);
@@ -1669,7 +1697,14 @@ impl Stage {
                 r = self.materialize(i);
             }
         }
-        (self.stack, self.code, self.floor, self.literals, self.pos) = saved;
+        (
+            self.stack,
+            self.code,
+            self.floor,
+            self.literals,
+            self.pos,
+            self.effects,
+        ) = saved;
         r.map_err(|e| {
             let mut e = e;
             e.trace.push(format!("in `{name}`, defined at {}", c.at));
@@ -2092,6 +2127,7 @@ impl Stage {
                 } else {
                     let ops = PRIMS.iter().find(|d| d.prim == p).expect("listed").ops;
                     self.emit_ops(n, ops, &outs)?;
+                    self.effects |= prims::effects(p);
                 }
             }
         }

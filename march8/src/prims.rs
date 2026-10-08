@@ -240,18 +240,43 @@ pub fn compile_time_only(p: Prim) -> bool {
     )
 }
 
+/// What a primitive does besides leaving its results: for each domain,
+/// whether it reads and whether it writes, as a set of bits (march5's effect
+/// rows). Only `io` has any so far.
+pub type Effects = u32;
+pub const IO_READ: Effects = 1;
+pub const IO_WRITE: Effects = 2;
+/// Every effect that writes.
+pub const WRITES: Effects = IO_WRITE;
+
+pub fn effects(p: Prim) -> Effects {
+    match p {
+        Prim::Write => IO_WRITE,
+        _ => 0,
+    }
+}
+
+/// Effects as a message says them: "writes io".
+pub fn describe_effects(e: Effects) -> String {
+    let mut parts = Vec::new();
+    if e & IO_READ != 0 {
+        parts.push("reads io");
+    }
+    if e & IO_WRITE != 0 {
+        parts.push("writes io");
+    }
+    parts.join(" and ")
+}
+
 /// Whether applying the primitive to known values may be done at compile
-/// time. Writing is an effect, so it never is.
+/// time: never one with an effect, whose reads are facts of the run and
+/// whose writes must happen then.
 pub fn foldable(p: Prim) -> bool {
-    !matches!(
-        p,
-        Prim::Write
-            | Prim::AryLength
-            | Prim::AryAt
-            | Prim::AryConcat
-            | Prim::MapLength
-            | Prim::MapAt
-    )
+    effects(p) == 0
+        && !matches!(
+            p,
+            Prim::AryLength | Prim::AryAt | Prim::AryConcat | Prim::MapLength | Prim::MapAt
+        )
 }
 
 type Folded = Result<Vec<Val>, (Kind, String)>;

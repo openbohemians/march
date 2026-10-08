@@ -282,6 +282,12 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   were defined, an unguarded clause last. A guard looks at its values and does
   not consume them. Clauses chosen between at run time return the same type
   (2.9).
+- **A guard must not write** (Thomas, 2026-10-08). It may read, the time or
+  a random number, say, which makes it a choice at run time. The compiler
+  works out each word's effects as it works out types, from the primitives
+  it applies: for each domain, whether it reads and whether it writes, the
+  effect rows of march5. Its run-time effect tokens are not needed while
+  code runs in order.
 - **No match is no word.** When no clause matches, by types at compile time
   or by guards at run time, it is the same error as an undefined word. The
   name is a word's outermost context; types and guards narrow it.

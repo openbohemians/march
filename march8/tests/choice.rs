@@ -160,3 +160,27 @@ fn arithmetic_lifts_over_arrays() {
     // At run time too.
     assert_eq!(show(&["( 4 5 )", "1 +."]), "<1> ( 5 6 )");
 }
+
+#[test]
+fn guards_must_not_write() {
+    // A guard may only look: one that writes is refused where its clause is
+    // defined, or, for a clause whose inputs are not all typed, where it is
+    // applied, even when its values are known and it would be decided now.
+    let noisy = "[ dup. i64>text. write. 0 gt?. ] noisy? def.";
+    assert_eq!(
+        cells(&[noisy, "[ < i64 noisy? > drop. 1 ] f def."]),
+        Err(Kind::Effect)
+    );
+    let generic = "[ < a noisy? > drop. 1 ] f def. [ < a > drop. 0 ] f def.";
+    assert_eq!(cells(&[noisy, generic, "-5 f."]), Err(Kind::Effect));
+    // Writes are found through the words a guard applies, instances
+    // included: `cd` writes as it counts down.
+    let cd = "[ 0 eq?. ] zero? def.
+        [ < i64 zero? > ] cd def.
+        [ < i64 > dup. print. 1 -. cd. ] cd def.
+        [ cd. 0 eq?. ] done? def.";
+    assert_eq!(cells(&[cd, "[ < i64 done? > ] g def."]), Err(Kind::Effect));
+    // Writing in a clause's body is fine.
+    let mut s = session(&[cd, "3 cd."]).unwrap();
+    assert_eq!(String::from_utf8(s.take_output()).unwrap(), "321");
+}

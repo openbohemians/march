@@ -8,7 +8,10 @@ both stages, typed words evaluated for each use, brackets that annotate,
 types as data (`ary`, `vec`, `map`) with containers typed by their
 structure, headings, families chosen by types and by guards, with type
 variables, outputs, lifting and array literals, and instances, with
-recursion typed by ghosts and tail calls.
+recursion typed by ghosts and tail calls. On 2026-10-08 Thomas decided to
+build the compiler in Rust, as march8 (march8/docs/MACHINE.md), with System
+March frozen, and to write it in March once March is mature; march8's first
+slice is the symbolic stack machine for the explicit form.
 
 ## 1. Why
 
@@ -51,6 +54,10 @@ every application is marked:
 - **`.` applies.** Everything is a value or a symbol until `.` applies it.
   `.` is the only special word, and types and operations share one
   namespace. (`.` is free: the surface language prints with `print`.)
+- **A dot at the end of a word applies it** (Thomas, 2026-10-08): `sq.` is
+  `sq .`, so `1 i64. 1 i64. +.` reads more easily. By that convention no
+  name ends in a dot, and the reader enforces it. Each dot applies once:
+  `x 100 i64 vec..` builds a type and annotates `x` with it.
 - **A type is a value until it is applied, and applying a type annotates.**
   - `1 i64 .` annotates 1 as an i64.
   - `100 i64 vec .` builds a type: `i64` unapplied is a type value, and
@@ -295,6 +302,10 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
    them.
 
 ## 4. A way to build it (proposal)
+
+Superseded on 2026-10-08: the compiler is built in Rust, in march8, and
+System March is frozen. The steps below still describe the order of the
+work.
 
 The bootstrap does not need to change. System March stays FORTH, and
 compiles itself with today's checker; the staged pipeline is written in

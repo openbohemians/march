@@ -1,0 +1,81 @@
+-- March8's core vocabulary, in the explicit form (docs/MACHINE.md).
+--
+-- A dot at the end of a word applies it: `def.` is `def .`.
+--
+-- A definition is data: a quotation, a name, and `def` applied. A bracket
+-- first in the quotation is the clause's context: the types of its inputs,
+-- and after `--` the outputs it promises. Clauses of one name are a family;
+-- applying it chooses the clause whose inputs match best
+-- (doc/design/TYPES.md 2.8, 2.15).
+
+-- How a literal becomes each type. A clause under a type's name is a
+-- conversion: applying the type to a literal converts it, and a clause
+-- that wants the type converts a literal it is given (TYPES.md 2.10).
+
+[ < int# -- i64 > int#>i64. ] i64 def.
+[ < int# -- f64 > int#>f64. ] f64 def.
+[ < dec# -- f64 > dec#>f64. ] f64 def.
+[ < int# -- money > int#>money. ] money def.
+[ < dec# -- money > dec#>money. ] money def.
+[ < int# -- dec# > int#>dec#. ] dec# def.
+
+-- Arithmetic. Two literals fold exactly, at compile time, and stay
+-- literals; a literal beside a number takes its type. Money is added and
+-- subtracted, not multiplied.
+
+[ < int# int# -- int# > int#+. ] + def.
+[ < dec# dec# -- dec# > dec#+. ] + def.
+[ < i64 i64 -- i64 > i64+. ] + def.
+[ < f64 f64 -- f64 > f64+. ] + def.
+[ < money money -- money > money+. ] + def.
+
+[ < int# int# -- int# > int#-. ] - def.
+[ < dec# dec# -- dec# > dec#-. ] - def.
+[ < i64 i64 -- i64 > i64-. ] - def.
+[ < f64 f64 -- f64 > f64-. ] - def.
+[ < money money -- money > money-. ] - def.
+
+[ < int# int# -- int# > int#*. ] * def.
+[ < dec# dec# -- dec# > dec#*. ] * def.
+[ < i64 i64 -- i64 > i64*. ] * def.
+[ < f64 f64 -- f64 > f64*. ] * def.
+
+[ < i64 i64 -- i64 > i64/. ] / def.
+[ < f64 f64 -- f64 > f64/. ] / def.
+[ < i64 i64 -- i64 > i64mod. ] mod def.
+
+-- Comparisons leave a flag: 1 or 0, an i64.
+
+[ < i64 i64 -- i64 > i64lt?. ] lt? def.
+[ < f64 f64 -- i64 > f64lt?. ] lt? def.
+[ < money money -- i64 > money-lt?. ] lt? def.
+[ < i64 i64 -- i64 > swap. i64lt?. ] gt? def.
+[ < f64 f64 -- i64 > swap. f64lt?. ] gt? def.
+[ < money money -- i64 > swap. money-lt?. ] gt? def.
+[ < i64 i64 -- i64 > i64eq?. ] eq? def.
+[ < f64 f64 -- i64 > f64eq?. ] eq? def.
+[ < money money -- i64 > money-eq?. ] eq? def.
+[ < string string -- i64 > string-eq?. ] eq? def.
+
+-- Containers, typed by their structure. A vec knows its length at compile
+-- time, so its length is a constant.
+
+[ < string -- i64 > string-length. ] length def.
+[ < a ary -- i64 > ary-length. ] length def.
+[ < n a vec -- i64 > vec-length. ] length def.
+[ < k v map -- i64 > map-length. ] length def.
+
+[ < string i64 -- i64 > string-at. ] at def.
+[ < a ary i64 -- a > ary-at. ] at def.
+[ < n a vec i64 -- a > vec-at. ] at def.
+[ < k v map k -- v > map-at. ] at def.
+
+[ < string string -- string > string-concat. ] concat def.
+[ < a ary a ary -- a ary > ary-concat. ] concat def.
+[ < n a vec m a vec > vec-concat. ] concat def.
+
+-- Writing.
+
+[ < string > write. ] print def.
+[ < i64 > i64>text. write. ] print def.
+[ < f64 > f64>text. write. ] print def.

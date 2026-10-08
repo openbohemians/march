@@ -4,8 +4,9 @@ Status: design note, 2026-10-07, from a conversation with Thomas. Section 2
 records decisions, section 3 what is still open, and section 4 proposes a
 way to build it. A prototype is built in march7 (march7/docs/STAGED.md):
 integers, floats, money, literal types, arithmetic and stack words through
-both stages, typed words evaluated for each use, and brackets that
-annotate.
+both stages, typed words evaluated for each use, brackets that annotate,
+and types as data (`ary`, `vec`, `map`), with containers typed by their
+structure.
 
 ## 1. Why
 

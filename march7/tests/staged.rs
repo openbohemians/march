@@ -166,3 +166,80 @@ fn brackets_annotate_and_stack_words_move_judgments() {
     // Money is added, not multiplied.
     assert_eq!(run(&g, "typed b < money money > * ;"), Err(Error::User(23)));
 }
+
+#[test]
+fn structured_types_follow_values_through_containers() {
+    let g = system();
+    // The map's type says its values are arrays of i64, so `at` gives an
+    // array, and `at` again an i64.
+    let h = "typed h < string i64 ary map > \"k\" at 0 at 1 + ;";
+    assert_eq!(
+        run(&g, &format!("{h} {{ \"k\" ( 41 2 ) }} h")).unwrap(),
+        [42]
+    );
+    // So adding 1 to the array is refused, instead of adding 1 to a handle.
+    assert_eq!(
+        run(&g, "typed bad < string i64 ary map > \"k\" at 1 + ;"),
+        Err(Error::User(23))
+    );
+    // Literals take their type from what the container holds.
+    let fl = "typed fl < string f64 ary map > \"k\" at 0 at 1 + ;";
+    assert_eq!(show(&g, &format!("{fl} {{ \"k\" ( 1.5 ) }} fl")), "<1> 2.5");
+    let m = "typed m < string money map > \"fee\" at 1.10 + ;";
+    assert_eq!(
+        run(&g, &format!("{m} {{ \"fee\" 1999 }} m")).unwrap(),
+        [2109]
+    );
+    // Equal types built apart are one type; different ones do not mix.
+    assert_eq!(
+        run(
+            &g,
+            "typed c < i64 ary i64 ary > concat length ; ( 1 2 ) ( 3 ) c"
+        )
+        .unwrap(),
+        [3]
+    );
+    assert_eq!(
+        run(&g, "typed c < i64 ary f64 ary > concat ;"),
+        Err(Error::User(23))
+    );
+    assert_eq!(
+        run(&g, "typed k < i64 ary > \"x\" at ;"),
+        Err(Error::User(23))
+    );
+    // Strings, with spaces, and their own operations.
+    assert_eq!(
+        show(&g, "typed s < string > \"!\" concat ; \"hi\" s"),
+        "<1> \"hi!\""
+    );
+    assert_eq!(run(&g, "typed l \"a b c\" length ; l").unwrap(), [5]);
+    assert_eq!(run(&g, "typed s < string > 1 + ;"), Err(Error::User(23)));
+}
+
+#[test]
+fn a_vec_knows_its_length_at_compile_time() {
+    let g = system();
+    // `length` of a vec is a constant: the value is dropped.
+    assert_eq!(
+        run(&g, "typed v < 3 i64 vec > length ; ( 7 8 9 ) v").unwrap(),
+        [3]
+    );
+    let c = cids(&g, "typed v < 3 i64 vec > length ; : v2 drop 3 ; ' v ' v2");
+    assert_eq!(c[0], c[1]);
+    // Two vecs concatenate to a vec as long as both.
+    assert_eq!(
+        run(
+            &g,
+            "typed c < 2 i64 vec 3 i64 vec > concat length ; ( 1 2 ) ( 3 4 5 ) c"
+        )
+        .unwrap(),
+        [5]
+    );
+    // A literal index past the end is refused at compile time.
+    assert_eq!(
+        run(&g, "typed b < 3 i64 vec > 5 at ;"),
+        Err(Error::User(23))
+    );
+    // A bracket must leave types only.
+    assert_eq!(run(&g, "typed b < 2 > ;"), Err(Error::User(23)));
+}

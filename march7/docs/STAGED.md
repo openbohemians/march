@@ -3,7 +3,9 @@
 Status: prototype, doc/design/TYPES.md made concrete. Step 1, 2026-10-07:
 integers, floats, money, two kinds of literal and `+`, through every stage.
 Step 2, 2026-10-08: typed words applied in typed bodies and typed for each
-use, brackets that annotate, `*`, `-`, `dup`, `drop` and `swap`.
+use, brackets that annotate, `*`, `-`, `dup`, `drop` and `swap`. Step 3, the
+same day: types as data, built by `ary`, `vec` and `map`; strings; and
+`length`, `at` and `concat` typed by structure.
 
 ## What it does
 
@@ -14,6 +16,11 @@ typed nine 3 sq ;                 nine       → 9, compiled as the literal 9
 typed fee < money > 1.10 + ;      1999 fee   → 2109
 typed total 19.99 fee ;           total      → 2109: 19.99 becomes money
 typed two 1 1 + ;                 two        → 2, compiled as the literal 2
+
+typed h < string i64 ary map > "k" at 0 at 1 + ;   { "k" ( 41 2 ) } h → 42
+typed bad < string i64 ary map > "k" at 1 + ;      compile error: an array
+typed fl < string f64 ary map > "k" at 0 at 1 + ;  the 1 is a float
+typed v < 3 i64 vec > length ;                     the constant 3
 ```
 
 - **`typed name … ;`** takes a body in the surface form. **Stage 1** lowers
@@ -52,6 +59,8 @@ typed two 1 1 + ;                 two        → 2, compiled as the literal 2
 | 6 | a type, as a value: `i64`, `f64`, `money` |
 | 7 | an operation, as a value: `+`, `*`, `-`, `dup`, `drop`, `swap` |
 | 8 | a typed word, as a value |
+| 9 | string |
+| 256 on | a type built by `ary`, `vec` or `map`: a term in the type table |
 
 A judgment holds a type, whether its value is known, the value, a decimal
 literal's scale, and where its literal was emitted.
@@ -80,6 +89,32 @@ literal's scale, and where its literal was emitted.
   - to money: an integer literal is whole units; a decimal literal becomes
     cents exactly, once trailing zeros go, and is an error with more than
     two digits after the point.
+- **Types are data.** A built type is a term, a constructor with its
+  arguments, in a table where equal terms are one entry (hash-consing). So
+  `i64 ary` built twice is one type, and comparing types is comparing
+  numbers. The constructors:
+  - `ary` takes an element type: an array of any length;
+  - `vec` takes a length, a number known at compile time, and an element
+    type: an array of exactly that length;
+  - `map` takes a key type and a value type.
+- **A bracket is a type expression,** a little stack program: a type's name
+  pushes the type, a number a length, and a constructor builds from what is
+  below it. It leaves one type for each value it types: `< i64 ary a >` types
+  two values, an array of i64 and an `a`.
+- **Containers are typed by their structure:**
+  - `at` gives an array's element type, by an i64 index; a map's value type,
+    by a key of its key type; a string's code point. A literal index or key
+    takes the type wanted, and a literal index into a vec is checked against
+    its length at compile time;
+  - `length` is an i64, except of a vec, whose length is a constant: the
+    value is dropped and the length is a literal;
+  - `concat` joins two strings, or two arrays of one type; two vecs make a
+    vec as long as both.
+- **Arithmetic is on numbers only.** An array, a map or a string given to
+  `+`, `*` or `-` is refused at compile time; lifting over arrays comes with
+  families.
+- **String literals** are compiled as anywhere else, and are strings. Stage
+  1 copies them whole, spaces and all.
 - **Stack words** move judgments as the code moves values:
   - `dup` copies a literal as a new literal, so each copy can take its own
     type, and `1.5 dup +` still folds;
@@ -113,6 +148,17 @@ cannot become its type; 42 for typed words applied more than 16 deep.
 6. **The type stage is recursive,** since applying a typed word reads words,
    and System March defines words before use. So the stage reaches its own
    token reader through a working-memory cell, as the interpreter does.
+7. **The original bug becomes a compile error.** With the map's type known,
+   `"k" at 1 +` is an array plus a number, refused, where `:` quietly adds 1
+   to a handle. And types reach literals through containers: a map of f64
+   arrays makes `1` a float.
+8. **Shared temporaries are fragile.** The prototype keeps its state in
+   working-memory cells, and one bug came from a helper reusing a cell its
+   caller still needed. A real type stage should keep its state in its own
+   regions, or in locals.
+9. **Postfix types can hide their arity.** `< i64 ary a >` is two types, but
+   a reader must know `ary` takes one argument (Thomas). Aliases for common
+   types are the likely remedy.
 
 ## Not yet
 
@@ -122,15 +168,21 @@ cannot become its type; 42 for typed words applied more than 16 deep.
 - **Recursion.** A word is not known while it is being defined, so it cannot
   apply itself. With instances, it would call its own instance, typed by a
   ghost (TYPES.md 2.7).
-- **Type values as data.** The type numbers are fixed. Types as
-  content-addressed values, with constructors such as `vec`, come next.
+- **Content identities of types.** Built types are one number each within
+  a session; the hash of a term, for storing types and for instances across
+  sessions, is not computed yet.
+- **Checking a vec's length at run time.** A word declaring a `3 i64 vec`
+  input trusts what ordinary March gives it; the declared length should be
+  checked on entry.
+- **Tuples and records,** and array and map literals in typed bodies.
 - **Families as declarations.** The operations are built in; clauses with
-  signature patterns, lifting, and value patterns for if-free bodies come
-  later.
+  signature patterns, lifting over arrays, and value patterns for if-free
+  bodies come next.
 - **Showing money.** Money shows as its cents.
 - **Saving.** Typed words live in the session, not in a saved image.
-- **Limits.** A body holds at most 64 judgments, a bracket 8 types, and 64
-  typed words exist at once. Errors carry no position in the source.
+- **Limits.** A body holds at most 64 judgments, 64 typed words and 256
+  built types exist at once, and a string literal in a typed body may not
+  hold a code hole. Errors carry no position in the source.
 
 The prototype is in `seed/system.march`, under "Staged types, a
 prototype", and its tests are in `tests/staged.rs`.

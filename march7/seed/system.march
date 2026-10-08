@@ -2255,19 +2255,24 @@ _v ᵥ
 -- of its own: it exists only to be applied so.
 --
 -- Types: 1 i64, 2 f64, 3 money (exact cents), 4 integer literal, 5 decimal
--- literal, 6 a type, 7 an operation, 8 a typed word. A judgment is 40 bytes:
+-- literal, 6 a type, 7 an operation, 8 a typed word, 9 string, and from 256
+-- types built by `ary`, `vec` and `map`, each a term in a table, equal terms
+-- one entry, so equal types are one number. A judgment is 40 bytes:
 -- type, known (1 if its value is), value, scale (a decimal literal's digits
 -- after the point), and the offset of the literal emitted for it, or -1. A
 -- literal is emitted where it appears, as a placeholder whose opcode and
 -- value are patched once its type is known, so the code's stack always
 -- matches the judgments'. Operations: 1 `+`, 2 `*`, 3 `-`, 4 `dup`, 5 `drop`,
--- 6 `swap`. A typed word is 80 bytes: its explicit form's region and length,
+-- 6 `swap`, 7 `length`, 8 `at`, 9 `concat`. A type term is 24 bytes:
+-- constructor (1 `ary`, 2 `vec`, 3 `map`) and two arguments: an element
+-- type; a length and an element type; a key and a value type. A typed word is
+-- 80 bytes: its explicit form's region and length,
 -- the values it takes and leaves, and its name's length and bytes.
 --
 -- Working memory: 272 the judgments' region, 280 their count, 112 the typed
 -- words' region, 120 their count, 168 how deeply typed words are being
--- applied, 592 the token of `st-token-body`, 312-336 and 368-376
--- temporaries. Traps: 23 no clause, a type
+-- applied, 592 the token of `st-token-body`, 608 the type terms' region,
+-- 640 their count, 312-336, 368-376 and 512 temporaries. Traps: 23 no clause, a type
 -- mismatch, or too few values; 40 a word the prototype does not know; 41 a
 -- literal that cannot become its type; 42 typed words applied too deeply.
 -- ( k -- offset ) The k-th judgment from the top.
@@ -2284,8 +2289,35 @@ _v ᵥ
 : st-drop 280 get 1 u- 280 put ;
 -- ( n -- ) At least n judgments, or trap.
 : st-need 280 get swap ult? if 23 trap then ;
--- ( t -- flag ) Whether a type is a literal's.
+-- ( t -- flag ) Whether a type is a literal's; whether it has values at run
+-- time, rather than being a type, an operation or a typed word; whether it is
+-- a number's or a literal's.
 : st-lit? dup 4 eq? swap 5 eq? or ;
+: st-value-type? dup 6 ult? over 9 eq? or swap 255 swap ult? or ;
+: st-num? dup 1 u- 3 ult? swap st-lit? or ;
+-- ( i f -- v ) A field of type term i.
+: st-tfield swap 24 u* u+ 608 get swap @ ;
+-- ( con a b -- t ) The type a constructor builds from its arguments: the
+-- existing term if there is one, so equal types are one number.
+: st-tterm
+  608 get 0= if 6144 region-new 608 put 0 640 put then
+  328 put 320 put 312 put
+  0 cycle dup 640 get ult? while
+    dup 0 st-tfield 312 get eq?
+    over 8 st-tfield 320 get eq? and
+    over 16 st-tfield 328 get eq? and if 256 u+ exit then
+    1 u+
+  repeat drop
+  640 get 256 ult? 0= if 27 trap then
+  640 get 24 u* 336 put
+  312 get 608 get 336 get ! 320 get 608 get 336 get 8 u+ !
+  328 get 608 get 336 get 16 u+ !
+  640 get 256 u+ 640 get 1 u+ 640 put ;
+-- ( t -- con a b ) A built type's constructor and arguments; 0 0 0 for a
+-- type of its own.
+: st-tparts
+  dup 256 ult? if drop 0 0 0 exit then
+  256 u- dup 0 st-tfield over 8 st-tfield rot 16 st-tfield ;
 -- ( n -- 10^n )
 : st-pow10 1 swap cycle dup while swap 10 u* swap 1 u- repeat drop ;
 -- ( -- slot ) A literal to be settled later.
@@ -2366,6 +2398,7 @@ _v ᵥ
     then
     1 st-default 0 st-default
   then
+  1 0 st@ st-num? 0 0 st@ st-num? and 0= if 23 trap then
   1 0 st@ st-lit? if 1 0 0 st@ st-convert then
   0 0 st@ st-lit? if 0 1 0 st@ st-convert then
   1 0 st@ 0 0 st@ eq? 0= if 23 trap then
@@ -2381,7 +2414,7 @@ _v ᵥ
 -- ( n -- ) Judgments with values at run time, not types, operations or
 -- typed words, which have no code to move.
 -- ( k -- ) Judgment k must have a value at run time.
-: st-value 0 st@ 6 ult? 0= if 23 trap then ;
+: st-value 0 st@ st-value-type? 0= if 23 trap then ;
 -- ( -- ) `dup`: a literal is copied as a new literal, so each copy can take
 -- its own type; anything else is duplicated at run time.
 : st-dup
@@ -2405,11 +2438,70 @@ _v ᵥ
   2 prim,
   0 st-swap-field 8 st-swap-field 16 st-swap-field 24 st-swap-field
   32 st-swap-field ;
+-- ( t -- ) The two judgments on top give way to a value of type t, after
+-- an operation is emitted.
+: st-result st-drop st-drop 0 0 0 -1 st-push ;
+-- ( -- ) `length`: of a string, an array or a map, an i64 at run time; of a
+-- vec, its length, known at compile time, so the value is dropped and the
+-- length is a literal.
+: st-length
+  1 st-need 0 0 st@
+  dup 256 ult? if
+    9 eq? 0= if 23 trap then 48 prim, st-drop 1 0 0 0 -1 st-push exit
+  then
+  st-tparts drop swap 2 eq? if
+    1 prim, st-drop >r 4 1 r> 0 placeholder st-push exit
+  then
+  drop 48 prim, st-drop 1 0 0 0 -1 st-push ;
+-- ( t -- ) Emit `at`; its result is of type t.
+: st-elem 49 prim, st-result ;
+-- ( -- ) `at`: a string's code point or an array's element, by an i64
+-- index; a map's value, by a key of its key type. A literal index or key
+-- takes the type wanted; a literal index into a vec is checked against its
+-- length at compile time.
+: st-at
+  2 st-need
+  1 0 st@ 9 eq? if 0 1 st-annotate-at 1 st-elem exit then
+  1 0 st@ dup 256 ult? if 23 trap then
+  st-tparts 376 put 368 put
+  dup 3 eq? if drop 0 368 get st-annotate-at 376 get st-elem exit then
+  dup 2 eq? if
+    drop 0 0 st@ st-lit? if
+      0 1 st-annotate-at 0 16 st@ 368 get ult? 0= if 23 trap then
+    then
+    0 1 st-annotate-at 376 get st-elem exit
+  then
+  drop 0 1 st-annotate-at 368 get st-elem ;
+-- ( t -- ) Emit `concat`; its result is of type t.
+: st-concat-to 53 prim, st-result ;
+-- ( -- ) `concat`: two strings, or two arrays of one type; two vecs of one
+-- element type make a vec as long as both, known at compile time.
+: st-concat
+  2 st-need
+  1 0 st@ 312 put 0 0 st@ 320 put
+  312 get 9 eq? 320 get 9 eq? and if 9 st-concat-to exit then
+  312 get 256 ult? 320 get 256 ult? or if 23 trap then
+  312 get st-tparts 376 put 368 put 336 put
+  320 get st-tparts
+  336 get 1 eq? if
+    drop drop 1 eq? 0= if 23 trap then
+    312 get 320 get eq? 0= if 23 trap then
+    312 get st-concat-to exit
+  then
+  336 get 2 eq? if
+    376 get eq? 0= if 23 trap then
+    swap 2 eq? 0= if 23 trap then
+    368 get + 2 swap 376 get st-tterm st-concat-to exit
+  then
+  23 trap ;
 -- ( id -- ) An operation, applied.
 : st-op
   dup 4 ult? if st-binop exit then
   dup 4 eq? if drop st-dup exit then
-  5 eq? if st-drop-word else st-swap then ;
+  dup 5 eq? if drop st-drop-word exit then
+  dup 6 eq? if drop st-swap exit then
+  dup 7 eq? if drop st-length exit then
+  8 eq? if st-at else st-concat then ;
 -- ( r o n -- flag ) ( c -- flag ) Whether the current word is these bytes,
 -- or this one character.
 : tok=
@@ -2432,6 +2524,7 @@ _v ᵥ
   s" i64" tok= if 1 exit then
   s" f64" tok= if 2 exit then
   s" money" tok= if 3 exit then
+  s" string" tok= if 9 exit then
   40 trap ;
 -- ( -- ) A name: an operation, a typed word or a type, as a value until `.`
 -- applies it.
@@ -2442,6 +2535,9 @@ _v ᵥ
   s" dup" tok= if 7 1 4 0 -1 st-push exit then
   s" drop" tok= if 7 1 5 0 -1 st-push exit then
   s" swap" tok= if 7 1 6 0 -1 st-push exit then
+  s" length" tok= if 7 1 7 0 -1 st-push exit then
+  s" at" tok= if 7 1 8 0 -1 st-push exit then
+  s" concat" tok= if 7 1 9 0 -1 st-push exit then
   st-find dup -1 eq? 0= if 8 swap 1 swap 0 -1 st-push exit then drop
   st-type-name 6 swap 1 swap 0 -1 st-push ;
 -- ( -- in out ) What applying the current name takes and leaves.
@@ -2450,6 +2546,8 @@ _v ᵥ
   s" dup" tok= if 1 2 exit then
   s" drop" tok= if 1 0 exit then
   s" swap" tok= if 2 2 exit then
+  s" length" tok= if 1 1 exit then
+  s" at" tok= s" concat" tok= or if 2 1 exit then
   st-find dup -1 eq? 0= if dup 16 st-entry swap 24 st-entry exit then drop
   st-type-name drop 1 1 ;
 -- ( -- m s ) A decimal literal's digits and how many follow the point:
@@ -2470,35 +2568,57 @@ _v ᵥ
     dec-literal >r >r 5 1 r> r> placeholder st-push exit
   then
   number 1 eq? 0= if 41 trap then >r 4 1 r> 0 placeholder st-push ;
--- ( -- ) `< t … >`. First in a definition, its inputs' types, as values not
--- known until run time. Anywhere else, the types of as many values on top,
--- the deepest first: a literal takes its type, and anything else must
--- already have it. So a typed word's signature, applied in another typed
--- body, types what it is given.
+-- ( t -- ) Push a type, as a value.
+: st-push-type 6 1 rot 0 -1 st-push ;
+-- ( k -- t ) Judgment k must be a type; its number.
+: st-type-arg dup 0 st@ 6 eq? 0= if 23 trap then 16 st@ ;
+-- ( -- ) A word inside a bracket: a number is a length, a type's name is the
+-- type, and `ary`, `vec` and `map` build types from those below them.
+: st-type-word
+  numeric-start? if
+    number 1 eq? 0= if 41 trap then >r 4 1 r> 0 -1 st-push exit
+  then
+  s" ary" tok= if 1 st-need 1 0 st-type-arg 0 st-tterm st-drop st-push-type exit then
+  s" vec" tok= if
+    2 st-need 1 0 st@ 4 eq? 0= if 23 trap then
+    2 1 16 st@ 0 st-type-arg st-tterm st-drop st-drop st-push-type exit
+  then
+  s" map" tok= if
+    2 st-need 3 1 st-type-arg 0 st-type-arg st-tterm st-drop st-drop st-push-type exit
+  then
+  st-type-name st-push-type ;
+-- ( -- ) `< … >`: a type expression, which leaves a type for each value it
+-- types. First in a definition, they are its inputs, values not known until
+-- run time. Anywhere else, they type as many values on top, the deepest
+-- first: a literal takes its type, and anything else must already have it.
+-- So a typed word's signature, applied in another typed body, types what it
+-- is given. 376 holds where the types start, then how many there are, and
+-- 368 whether they are inputs; `st-convert` uses 320-336.
 : st-sig
-  0 368 put 0 376 put
-  cycle read-word 0= if 8 trap then 62 tok-char? 0= while
-    368 get 8 ult? 0= if 27 trap then
-    st-type-name 368 get 8 u* lshift 376 get or 376 put
-    368 get 1 u+ 368 put
-  repeat
-  168 get 0= 280 get 0= and here 0= and if
-    0 cycle dup 368 get ult? while
-      376 get over 8 u* rshift 255 and 0 0 0 -1 st-push 1 u+
+  280 get 376 put
+  168 get 0= 280 get 0= and here 0= and 368 put
+  cycle read-word 0= if 8 trap then 62 tok-char? 0= while st-type-word repeat
+  280 get 376 get u- 376 put
+  0 cycle dup 376 get ult? while dup st-type-arg drop 1 u+ repeat drop
+  368 get if
+    0 cycle dup 376 get ult? while
+      dup 16 st@ over 0 st! 0 over 8 st! 0 over 16 st!
+      1 u+
     repeat drop exit
   then
-  368 get st-need
-  0 cycle dup 368 get ult? while
-    368 get over u- 1 u- over 376 get swap 8 u* rshift 255 and st-annotate-at
+  376 get 2 u* st-need
+  0 cycle dup 376 get ult? while
+    dup 376 get u+ over 16 st@ st-annotate-at
     1 u+
-  repeat drop ;
+  repeat drop
+  376 get cycle dup while st-drop 1 u- repeat drop ;
 -- ( -- ) `;`: every literal still undecided takes its default type; a type,
 -- an operation or a typed word left over is an error. Then the definition
 -- ends as any other does.
 : st-finish
   0 cycle dup 280 get ult? while
     dup 0 st@ st-lit? if dup st-default else
-      dup 0 st@ 5 ult? 0= if 23 trap then then
+      dup 0 st@ st-value-type? 0= if 23 trap then then
     1 u+
   repeat drop
   272 get region-free 0 272 put 0 280 put
@@ -2522,8 +2642,21 @@ _v ᵥ
   0 0 st@ 7 eq? if 0 16 st@ st-drop st-op exit then
   0 0 st@ 8 eq? if 0 16 st@ st-drop st-inline exit then
   23 trap ;
--- ( -- ) One word of a body in the explicit form, other than `;`.
+-- ( -- ) Past a string literal, from the quote that starts the current
+-- word to the one that ends it, a backslash escaping the byte after it.
+: st-skip-string
+  64 get 1 u+
+  cycle
+    40 get over 48 get 92 byte-find 512 put
+    40 get swap 512 get 34 byte-find
+    dup 512 get ult? if 1 u+ 56 put exit then
+    drop 512 get 48 get ult? 0= if 8 trap then
+    512 get 2 u+
+  again ;
+-- ( -- ) One word of a body in the explicit form, other than `;`. A string
+-- literal is compiled as everywhere else, and is a string.
 : st-token-body
+  40 get 64 get c@ 34 eq? if string-literal 9 0 0 0 -1 st-push exit then
   46 tok-char? if st-apply exit then
   60 tok-char? if st-sig exit then
   numeric-start? if st-literal exit then
@@ -2553,6 +2686,7 @@ _v ᵥ
   48 put 40 put 0 56 put
   0 368 put 0 376 put 1 336 put 0 328 put
   cycle read-word 0= if 8 trap then 59 tok-char? 0= while
+    40 get 64 get c@ 34 eq? if st-skip-string 368 get 1 + 368 put else
     46 tok-char? if
       368 get 1 - 312 get - dup 376 get lt? if dup 376 put then
       320 get + 368 put
@@ -2562,7 +2696,7 @@ _v ᵥ
       368 get swap - dup 376 get lt? if 376 put else drop then
     else numeric-start? if 368 get 1 + 368 put else
       st-name-effect 320 put 312 put 368 get 1 + 368 put
-    then then then
+    then then then then
     0 336 put
   repeat
   r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put
@@ -2600,16 +2734,20 @@ _v ᵥ
   32 312 get 320 get c! 320 get 1 u+ 320 put ;
 -- ( -- r n ) Stage 1: the rest of the definition, through its `;`, in the
 -- explicit form. A word that is not a number is followed by `.`; a
--- bracket is copied as it is.
+-- bracket and a string literal are copied as they are.
 : lower
   48 get 56 get u- 3 u* 16 u+ region-new 312 put 0 320 put 0 336 put
   cycle
     read-word 0= if 8 trap then
-    40 get 64 get 72 get emit-text
-    336 get if 62 tok-char? if 0 336 put then 1 else
-      60 tok-char? if 1 336 put 1 else
-        59 tok-char? if 0 else
-          numeric-start? 0= if s" ." emit-text then 1
+    40 get 64 get c@ 34 eq? 336 get 0= and if
+      st-skip-string 40 get 64 get 56 get 64 get u- emit-text 1
+    else
+      40 get 64 get 72 get emit-text
+      336 get if 62 tok-char? if 0 336 put then 1 else
+        60 tok-char? if 1 336 put 1 else
+          59 tok-char? if 0 else
+            numeric-start? 0= if s" ." emit-text then 1
+          then
         then
       then
     then

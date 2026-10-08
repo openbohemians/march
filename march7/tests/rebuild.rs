@@ -23,7 +23,7 @@ fn generation_zero() -> Image {
 const REBUILD_FUEL: u64 = 30_000_000;
 
 /// Compile-cost canary: steps for a rebuilt system (generation 1) to compile
-/// the system source. It is 7.08 million today, with both steps of the
+/// the system source. It is 7.40 million today, with three steps of the
 /// staged-types prototype; its first step's 210 lines took it from 6.23 to
 /// 6.68 million and the canary from 6.5 to 7.5 million, the cost per line
 /// unchanged; 6.23 million after the second string slice;

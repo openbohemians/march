@@ -85,11 +85,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 16.1 million |
-| The same on generation 1 | 6.68 million |
+| Machine steps to compile `system.march` on generation 0 | 17.3 million |
+| The same on generation 1 | 7.08 million |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 129,317 bytes |
-| `system.march` | 2,607 lines |
+| Rebuilt image size | 138,488 bytes |
+| `system.march` | 2,786 lines |
 | `system.asm` listing | 1,403 lines |
 
 ## Tests
@@ -203,9 +203,10 @@ runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
 rebuild tests use an explicit budget of 30 million steps (120 million before
 generation 0 was re-frozen), and a named canary test asserts that a rebuilt
-system compiles the system source in under 7.5 million steps. It is 6.68
-million with the staged-types prototype (doc/design/TYPES.md), whose 210
-lines raised it 7%, in proportion; the canary was 6.5 million until then. It
+system compiles the system source in under 7.5 million steps. It is 7.08
+million with the staged-types prototype's second step, which added 180
+lines; its first step's 210 lines raised it from 6.23 to 6.68 million, in
+proportion, and the canary from 6.5 to 7.5 million. It
 was 6.23 million as of the second string slice (escapes, holes, raw literals
 and the words on text), which added 11% to the source and 0.7 million steps;
 it was 5.51 million after the byte primitives (below), down from 8.90

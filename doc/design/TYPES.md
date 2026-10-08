@@ -2,9 +2,10 @@
 
 Status: design note, 2026-10-07, from a conversation with Thomas. Section 2
 records decisions, section 3 what is still open, and section 4 proposes a
-way to build it. A first, thin prototype is built in march7
-(march7/docs/STAGED.md): integers, floats, money, literal types and `+`,
-through both stages.
+way to build it. A prototype is built in march7 (march7/docs/STAGED.md):
+integers, floats, money, literal types, arithmetic and stack words through
+both stages, typed words evaluated for each use, and brackets that
+annotate.
 
 ## 1. Why
 
@@ -207,6 +208,33 @@ branches, and lowering turns dispatch on values into branches.
 - Loops tend to become recursion over clauses, which tail calls make cheap.
   `map`, `fold`, `each` and `times` remain: they are consumers, not
   conditions.
+
+### 2.13 Writing types in the surface
+
+Decided 2026-10-07. Stage 1 applies every word, so in ordinary code a type
+name annotates: `19.99 money` lowers to `19.99 money .`. Building a type
+needs a bracket, as SURFACE.md assigns `< >` to signatures and patterns:
+
+- **Inside `< … >`, words build a type** instead of annotating: `i64` is
+  the type itself, so `< 100 i64 vec >` is "array of 100 i64".
+- **A bracket of n types annotates the top n values:** `x < 100 i64 vec >`
+  annotates `x`, and `x y < i64 f64 >` both. A signature at the start of a
+  word, `< f64 money >`, is then the annotation of its inputs, not a
+  construct of its own.
+- In the explicit form a bracket builds its type and applies it:
+  `x < 100 i64 vec >` lowers to `x 100 i64 vec . .`.
+
+Rejected: marking each type name, as in `100 <i64> <vec>`. It leaves unclear
+where a type expression starts (is the 100 part of it?), and makes a second
+set of names for types.
+
+### 2.14 The type stage is an elaborator
+
+The type stage does not check code after it is compiled, as march7's
+checker does; it decides the types and emits the code in one pass, so what
+was checked is what runs. Type theory calls this an elaborator: checking
+and translation together, as Pie, The Little Typer's language, is
+implemented.
 
 ## 3. Open
 

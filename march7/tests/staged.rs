@@ -100,3 +100,69 @@ fn impossible_types_are_compile_errors() {
     assert_eq!(run(&g, "explicit b i64 ;"), Err(Error::User(23)));
     assert_eq!(run(&g, "typed b 1 foo ;"), Err(Error::User(40)));
 }
+
+#[test]
+fn typed_words_are_evaluated_for_each_use() {
+    let g = system();
+    // `sq` says nothing of its input's type: it has no code of its own, and
+    // each typed body that applies it works out its types there.
+    let sq = "typed sq dup * ; ";
+    assert_eq!(
+        run(&g, &format!("{sq} typed s < i64 > sq ; 7 s")).unwrap(),
+        [49]
+    );
+    assert_eq!(
+        show(&g, &format!("{sq} typed s < f64 > sq ; 2.5 s")),
+        "<1> 6.25"
+    );
+    assert_eq!(run(&g, &format!("{sq} 5 sq")), Err(Error::User(1)));
+    // Applied to a literal, it folds: `nine` is the constant 9.
+    let c = cids(
+        &g,
+        &format!("{sq} typed nine 3 sq ; : nine2 9 ; ' nine ' nine2"),
+    );
+    assert_eq!(c[0], c[1]);
+    // Typed words apply typed words.
+    assert_eq!(
+        show(
+            &g,
+            "typed inc 1 + ; typed inc2 inc inc ; typed x < f64 > inc2 ; 0.5 x"
+        ),
+        "<1> 2.5"
+    );
+    // A signature types what its word is given: here a literal becomes money.
+    assert_eq!(
+        run(
+            &g,
+            "typed fee < money > 1.10 + ; typed total 19.99 fee ; total"
+        )
+        .unwrap(),
+        [2109]
+    );
+    // A word that applies itself is not supported yet.
+    assert_eq!(run(&g, "typed rec rec ;"), Err(Error::User(40)));
+}
+
+#[test]
+fn brackets_annotate_and_stack_words_move_judgments() {
+    let g = system();
+    // A bracket after values types them, the deepest first.
+    assert_eq!(run(&g, "typed m 1 2 < money money > + ; m").unwrap(), [300]);
+    assert_eq!(
+        run(&g, "typed m 1 2 < money i64 > + ;"),
+        Err(Error::User(23))
+    );
+    // `swap` and `drop`; a literal dropped right after it is emitted leaves
+    // no code.
+    assert_eq!(run(&g, "typed s < i64 > 10 swap - ; 3 s").unwrap(), [7]);
+    let c = cids(&g, "typed k 1 2 drop ; : k2 1 ; ' k ' k2");
+    assert_eq!(c[0], c[1]);
+    // `dup` copies a literal as a literal, so `1.5 dup +` folds exactly.
+    assert_eq!(show(&g, "typed d 1.5 dup + ; d"), "<1> 3.0");
+    // Products of decimals stay exact: 1.10 × 1.10 is 1.2100, 121 cents.
+    assert_eq!(run(&g, "typed p 1.10 1.10 * money ; p").unwrap(), [121]);
+    assert_eq!(show(&g, "typed a < f64 f64 > * ; 2.0 3.5 a"), "<1> 7.0");
+    assert_eq!(run(&g, "typed s 10 3 - ; s").unwrap(), [7]);
+    // Money is added, not multiplied.
+    assert_eq!(run(&g, "typed b < money money > * ;"), Err(Error::User(23)));
+}

@@ -2243,22 +2243,33 @@ _v ᵥ
   over callee-effect drop over 8 u* >r dup 712 get r> ! ;
 -- The families and their clauses: f64 arithmetic and comparisons (types 514
 -- are f64 f64).
--- Staged types, a prototype (doc/design/TYPES.md). `typed name … ;` lowers
--- its body to the explicit form, in which `.` applies a word (stage 1), then
--- runs a type stage over that (stage 2). The type stage keeps a stack of
--- judgments, settles each literal's type from its context, and leaves plain
--- code behind. `explicit name … ;` takes a body already in the explicit form.
--- A body may start with its inputs' types: `< f64 money >`.
+-- Staged types, a prototype (doc/design/TYPES.md, docs/STAGED.md).
+-- `typed name … ;` lowers its body to the explicit form, in which `.`
+-- applies a word (stage 1), records it with its stack effect, and runs a
+-- type stage over it (stage 2). The type stage keeps a stack of judgments
+-- beside the code, settles each literal's type from its context, and leaves
+-- plain code behind. `explicit name … ;` takes a body already in the
+-- explicit form. A typed word applied in a typed body is evaluated there, on
+-- the caller's judgments, so its types are worked out for each use. A typed
+-- word that takes values without saying their types, `< t … >`, has no code
+-- of its own: it exists only to be applied so.
 --
 -- Types: 1 i64, 2 f64, 3 money (exact cents), 4 integer literal, 5 decimal
--- literal, 6 a type, 7 an operation. A judgment is 40 bytes: type, known
--- (1 if its value is), value, scale (a decimal literal's digits after the
--- point), and the offset of the literal emitted for it, or -1. A literal is
--- emitted where it appears, as a placeholder whose opcode and value are
--- patched once its type is known, so the code's stack always matches the
--- judgments'. Working memory: 272 the judgments' region, 280 their count,
--- 312-336 temporaries. Traps: 23 no clause or a type mismatch, 40 a word
--- the prototype does not know, 41 a literal that cannot become its type.
+-- literal, 6 a type, 7 an operation, 8 a typed word. A judgment is 40 bytes:
+-- type, known (1 if its value is), value, scale (a decimal literal's digits
+-- after the point), and the offset of the literal emitted for it, or -1. A
+-- literal is emitted where it appears, as a placeholder whose opcode and
+-- value are patched once its type is known, so the code's stack always
+-- matches the judgments'. Operations: 1 `+`, 2 `*`, 3 `-`, 4 `dup`, 5 `drop`,
+-- 6 `swap`. A typed word is 80 bytes: its explicit form's region and length,
+-- the values it takes and leaves, and its name's length and bytes.
+--
+-- Working memory: 272 the judgments' region, 280 their count, 112 the typed
+-- words' region, 120 their count, 168 how deeply typed words are being
+-- applied, 592 the token of `st-token-body`, 312-336 and 368-376
+-- temporaries. Traps: 23 no clause, a type
+-- mismatch, or too few values; 40 a word the prototype does not know; 41 a
+-- literal that cannot become its type; 42 typed words applied too deeply.
 -- ( k -- offset ) The k-th judgment from the top.
 : st-at 280 get swap u- 1 u- 40 u* ;
 -- ( k field -- v ) ( v k field -- )
@@ -2271,6 +2282,8 @@ _v ᵥ
   272 get 312 get 8 u+ ! 272 get 312 get !
   280 get 1 u+ 280 put ;
 : st-drop 280 get 1 u- 280 put ;
+-- ( n -- ) At least n judgments, or trap.
+: st-need 280 get swap ult? if 23 trap then ;
 -- ( t -- flag ) Whether a type is a literal's.
 : st-lit? dup 4 eq? swap 5 eq? or ;
 -- ( n -- 10^n )
@@ -2287,19 +2300,25 @@ _v ᵥ
   repeat drop drop ;
 -- ( k t -- ) Give literal judgment k the type t, by t's conversion, and
 -- patch its placeholder: an integer literal becomes an i64, a float, or
--- cents; a decimal literal a float, or cents if it has at most two digits
--- after the point, exactly, never through a float.
+-- whole units of money; a decimal literal a float, or cents if it has at
+-- most two digits after the point once trailing zeros go, exactly, never
+-- through a float.
 : st-convert
   328 put 336 put
   336 get 0 st@ 4 eq? if
     336 get 16 st@
-    328 get 2 eq? if i>f else 328 get 3 eq? if 100 u* else
+    328 get 2 eq? if i>f else 328 get 3 eq? if 100 * else
       328 get 1 eq? 0= if 41 trap then then then
   else
     336 get 16 st@ 336 get 24 st@
     328 get 2 eq? if st-pow10 i>f swap i>f swap f/ else
-      328 get 3 eq? if dup 2 swap ult? if 41 trap then 2 swap u- st-pow10 u*
-      else 41 trap then then
+      328 get 3 eq? if
+        cycle dup 2 swap ult? if over 10 mod 0= else 0 then while
+          swap 10 / swap 1 u-
+        repeat
+        dup 2 swap ult? if 41 trap then 2 swap u- st-pow10 *
+      else 41 trap then
+    then
   then
   dup 336 get 16 st! 0 336 get 24 st! 328 get 336 get 0 st!
   336 get 32 st@ 320 put
@@ -2308,61 +2327,131 @@ _v ᵥ
 -- ( k -- ) A literal no context typed: an integer is an i64, a decimal a
 -- float.
 : st-default dup 0 st@ 4 eq? if 1 else 2 then st-convert ;
--- ( t -- ) Apply a type to the top judgment: a literal takes it; anything
--- else must already have it, since nothing converts implicitly.
-: st-annotate
-  0 0 st@ st-lit? if 0 swap st-convert exit then
-  0 0 st@ eq? 0= if 23 trap then ;
--- ( -- ) `+` on two literals emitted last: the sum, as one literal, folded
--- at compile time. Decimals are aligned to the longer fraction.
+-- ( k t -- ) Judgment k is of type t: a literal takes it; anything else must
+-- already have it, since nothing converts implicitly.
+: st-annotate-at
+  over 0 st@ st-lit? if st-convert exit then
+  swap 0 st@ eq? 0= if 23 trap then ;
+-- ( a b op -- c ) Checked integer arithmetic, at compile time.
+: st-int-op dup 1 eq? if drop + exit then 2 eq? if * else - then ;
+-- ( op -- ) Two literals emitted last, folded into one at compile time.
+-- Decimals stay exact: sums align to the longer fraction, and products add
+-- their fractions' lengths.
 : st-fold
+  376 put
   1 0 st@ 4 eq? 0 0 st@ 4 eq? and if
-    1 16 st@ 0 16 st@ + 320 put 4 328 put 0 336 put
+    1 16 st@ 0 16 st@ 376 get st-int-op 320 put 4 328 put 0 336 put
   else
-    1 24 st@ 0 24 st@ over over ult? if swap then drop 336 put
-    1 16 st@ 336 get 1 24 st@ u- st-pow10 u*
-    0 16 st@ 336 get 0 24 st@ u- st-pow10 u* + 320 put 5 328 put
+    376 get 2 eq? if
+      1 16 st@ 0 16 st@ * 320 put 1 24 st@ 0 24 st@ u+ 336 put
+    else
+      1 24 st@ 0 24 st@ over over ult? if swap then drop 336 put
+      1 16 st@ 336 get 1 24 st@ u- st-pow10 *
+      0 16 st@ 336 get 0 24 st@ u- st-pow10 *
+      376 get 1 eq? if + else - then 320 put
+    then
+    5 328 put
   then
   1 32 st@ 16 put st-drop st-drop
   328 get 1 320 get 336 get placeholder st-push ;
--- ( -- ) The family `+`, by its operands' types: two literals fold; a
--- literal takes the other operand's type; then both must agree: floats add
--- with `f+`, integers and cents with the checked `+`.
-: st-add
-  280 get 2 ult? if 23 trap then
+-- ( op -- ) `+`, `*` or `-`, by its operands' types: two literals emitted
+-- last fold; a literal takes the other operand's type; then both types must
+-- agree. Floats use the float primitive; integers and cents the checked
+-- word, which traps on overflow; money is not multiplied.
+: st-binop
+  368 put 2 st-need
   1 0 st@ st-lit? 0 0 st@ st-lit? and if
-    1 32 st@ 9 u+ 0 32 st@ eq? 0 32 st@ 9 u+ here eq? and if st-fold exit then
+    1 32 st@ 9 u+ 0 32 st@ eq? 0 32 st@ 9 u+ here eq? and if
+      368 get st-fold exit
+    then
     1 st-default 0 st-default
   then
   1 0 st@ st-lit? if 1 0 0 st@ st-convert then
   0 0 st@ st-lit? if 0 1 0 st@ st-convert then
   1 0 st@ 0 0 st@ eq? 0= if 23 trap then
-  1 0 st@ dup 2 eq? if 36 prim, else ' + compile, then
-  st-drop st-drop 0 0 0 -1 st-push ;
--- ( -- ) `.`: apply the top judgment, a type or an operation.
-: st-apply
-  280 get 0= if 23 trap then
-  0 0 st@ 6 eq? if
-    0 16 st@ st-drop 280 get 0= if 23 trap then st-annotate exit
+  1 0 st@ 3 eq? 368 get 2 eq? and if 23 trap then
+  1 0 st@ 2 eq? if
+    368 get 1 eq? if 36 else 368 get 2 eq? if 38 else 37 then then prim,
+  else
+    368 get 1 eq? if ' + compile, else
+      368 get 2 eq? if ' * compile, else ' - compile, then
+    then
   then
-  0 0 st@ 7 eq? if 0 16 st@ st-drop 1 eq? if st-add exit then 23 trap then
-  23 trap ;
+  1 0 st@ st-drop st-drop 0 0 0 -1 st-push ;
+-- ( n -- ) Judgments with values at run time, not types, operations or
+-- typed words, which have no code to move.
+-- ( k -- ) Judgment k must have a value at run time.
+: st-value 0 st@ 6 ult? 0= if 23 trap then ;
+-- ( -- ) `dup`: a literal is copied as a new literal, so each copy can take
+-- its own type; anything else is duplicated at run time.
+: st-dup
+  1 st-need 0 st-value
+  0 0 st@ st-lit? if
+    0 0 st@ 1 0 16 st@ 0 24 st@ placeholder st-push exit
+  then
+  0 prim, 0 0 st@ 0 0 0 -1 st-push ;
+-- ( -- ) `drop`: a literal emitted last is taken back; anything else is
+-- dropped at run time.
+: st-drop-word
+  1 st-need 0 st-value
+  0 32 st@ dup -1 eq? 0= swap 9 u+ here eq? and if
+    0 32 st@ 16 put st-drop exit
+  then
+  1 prim, st-drop ;
+-- ( f -- ) ( -- ) `swap`, at run time, and of the two judgments.
+: st-swap-field >r 1 r@ st@ 0 r@ st@ 1 r@ st! 0 r> st! ;
+: st-swap
+  2 st-need 0 st-value 1 st-value
+  2 prim,
+  0 st-swap-field 8 st-swap-field 16 st-swap-field 24 st-swap-field
+  32 st-swap-field ;
+-- ( id -- ) An operation, applied.
+: st-op
+  dup 4 ult? if st-binop exit then
+  dup 4 eq? if drop st-dup exit then
+  5 eq? if st-drop-word else st-swap then ;
 -- ( r o n -- flag ) ( c -- flag ) Whether the current word is these bytes,
 -- or this one character.
 : tok=
   dup 72 get eq? 0= if drop drop drop 0 exit then
   >r >r >r 40 get 64 get r> r> r> bytes-eq? ;
 : tok-char? 72 get 1 eq? if 40 get 64 get c@ eq? else drop 0 then ;
+-- ( idx field -- v ) A field of a typed word.
+: st-entry swap 80 u* u+ 112 get swap @ ;
+-- ( -- idx | -1 ) The typed word the current word names, the newest first.
+: st-find
+  120 get
+  cycle dup while
+    1 u-
+    dup 32 st-entry 72 get eq? if
+      dup 80 u* 40 u+ >r 40 get 64 get 112 get r> 72 get bytes-eq? if exit then
+    then
+  repeat drop -1 ;
 -- ( -- t ) The type the current word names.
 : st-type-name
   s" i64" tok= if 1 exit then
   s" f64" tok= if 2 exit then
   s" money" tok= if 3 exit then
   40 trap ;
--- ( -- ) A name: a type, or an operation, as a value until `.` applies it.
+-- ( -- ) A name: an operation, a typed word or a type, as a value until `.`
+-- applies it.
 : st-name
   s" +" tok= if 7 1 1 0 -1 st-push exit then
+  s" *" tok= if 7 1 2 0 -1 st-push exit then
+  s" -" tok= if 7 1 3 0 -1 st-push exit then
+  s" dup" tok= if 7 1 4 0 -1 st-push exit then
+  s" drop" tok= if 7 1 5 0 -1 st-push exit then
+  s" swap" tok= if 7 1 6 0 -1 st-push exit then
+  st-find dup -1 eq? 0= if 8 swap 1 swap 0 -1 st-push exit then drop
   st-type-name 6 swap 1 swap 0 -1 st-push ;
+-- ( -- in out ) What applying the current name takes and leaves.
+: st-name-effect
+  s" +" tok= s" *" tok= or s" -" tok= or if 2 1 exit then
+  s" dup" tok= if 1 2 exit then
+  s" drop" tok= if 1 0 exit then
+  s" swap" tok= if 2 2 exit then
+  st-find dup -1 eq? 0= if dup 16 st-entry swap 24 st-entry exit then drop
+  st-type-name drop 1 1 ;
 -- ( -- m s ) A decimal literal's digits and how many follow the point:
 -- `1.10` is 110 and 2.
 : dec-literal
@@ -2381,15 +2470,31 @@ _v ᵥ
     dec-literal >r >r 5 1 r> r> placeholder st-push exit
   then
   number 1 eq? 0= if 41 trap then >r 4 1 r> 0 placeholder st-push ;
--- ( -- ) `< t … >`: the inputs' types, as values not known until run time.
+-- ( -- ) `< t … >`. First in a definition, its inputs' types, as values not
+-- known until run time. Anywhere else, the types of as many values on top,
+-- the deepest first: a literal takes its type, and anything else must
+-- already have it. So a typed word's signature, applied in another typed
+-- body, types what it is given.
 : st-sig
-  280 get if 23 trap then
+  0 368 put 0 376 put
   cycle read-word 0= if 8 trap then 62 tok-char? 0= while
-    st-type-name 0 0 0 -1 st-push
-  repeat ;
--- ( -- ) `;`: every literal still undecided takes its default type; a type
--- or an operation left over is an error. Then the definition ends as any
--- other does.
+    368 get 8 ult? 0= if 27 trap then
+    st-type-name 368 get 8 u* lshift 376 get or 376 put
+    368 get 1 u+ 368 put
+  repeat
+  168 get 0= 280 get 0= and here 0= and if
+    0 cycle dup 368 get ult? while
+      376 get over 8 u* rshift 255 and 0 0 0 -1 st-push 1 u+
+    repeat drop exit
+  then
+  368 get st-need
+  0 cycle dup 368 get ult? while
+    368 get over u- 1 u- over 376 get swap 8 u* rshift 255 and st-annotate-at
+    1 u+
+  repeat drop ;
+-- ( -- ) `;`: every literal still undecided takes its default type; a type,
+-- an operation or a typed word left over is an error. Then the definition
+-- ends as any other does.
 : st-finish
   0 cycle dup 280 get ult? while
     dup 0 st@ st-lit? if dup st-default else
@@ -2398,17 +2503,96 @@ _v ᵥ
   repeat drop
   272 get region-free 0 272 put 0 280 put
   semicolon ;
--- ( -- done ) One word of the explicit form.
+-- ( idx -- ) A typed word applied: its explicit form, evaluated here, on
+-- these judgments, up to its `;`. Each word is read by `st-token-body`,
+-- defined below, which applies typed words through this one, so it is
+-- reached through 592.
+: st-inline
+  168 get 16 ult? 0= if 42 trap then 168 get 1 u+ 168 put
+  dup 0 st-entry swap 8 st-entry
+  40 get >r 48 get >r 56 get >r 64 get >r 72 get >r
+  48 put 40 put 0 56 put
+  cycle read-word 0= if 8 trap then 59 tok-char? 0= while 592 get call repeat
+  r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put
+  168 get 1 u- 168 put ;
+-- ( -- ) `.`: apply the top judgment, a type, an operation or a typed word.
+: st-apply
+  1 st-need
+  0 0 st@ 6 eq? if 0 16 st@ st-drop 1 st-need 0 swap st-annotate-at exit then
+  0 0 st@ 7 eq? if 0 16 st@ st-drop st-op exit then
+  0 0 st@ 8 eq? if 0 16 st@ st-drop st-inline exit then
+  23 trap ;
+-- ( -- ) One word of a body in the explicit form, other than `;`.
+: st-token-body
+  46 tok-char? if st-apply exit then
+  60 tok-char? if st-sig exit then
+  numeric-start? if st-literal exit then
+  st-name ;
+-- ( -- done ) One word of the definition's own body.
 : st-token
   59 tok-char? if st-finish 1 exit then
-  46 tok-char? if st-apply 0 exit then
-  60 tok-char? if st-sig 0 exit then
-  numeric-start? if st-literal 0 exit then
-  st-name 0 ;
+  st-token-body 0 ;
 -- ( -- ) The type stage, over the input up to `;`.
 : stage
-  2560 region-new 272 put 0 280 put
+  2560 region-new 272 put 0 280 put 0 168 put
   cycle read-word 0= if 8 trap then st-token 0= while repeat ;
+-- ( r n -- ) Make r, n bytes long, the input, and run the type stage over it.
+: stage-text
+  40 get >r 48 get >r 56 get >r 64 get >r 72 get >r
+  48 put 40 put 0 56 put
+  stage
+  r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put ;
+-- ( r n -- in out k ) What a body in the explicit form takes and leaves,
+-- and how many types a signature first in it names. Numbers push; a name
+-- pushes a value, which `.` applies; a bracket needs as many values as it
+-- names. Working memory: 368 the depth, 376 its lowest, 312 and 320 what the
+-- last name takes and leaves, 336 whether this is the first word, 328 the
+-- signature's length.
+: st-effect
+  40 get >r 48 get >r 56 get >r 64 get >r 72 get >r
+  48 put 40 put 0 56 put
+  0 368 put 0 376 put 1 336 put 0 328 put
+  cycle read-word 0= if 8 trap then 59 tok-char? 0= while
+    46 tok-char? if
+      368 get 1 - 312 get - dup 376 get lt? if dup 376 put then
+      320 get + 368 put
+    else 60 tok-char? if
+      0 cycle read-word 0= if 8 trap then 62 tok-char? 0= while 1 + repeat
+      336 get if dup 328 put then
+      368 get swap - dup 376 get lt? if 376 put else drop then
+    else numeric-start? if 368 get 1 + 368 put else
+      st-name-effect 320 put 312 put 368 get 1 + 368 put
+    then then then
+    0 336 put
+  repeat
+  r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put
+  376 get negate 368 get 376 get - 328 get ;
+-- ( r n in out -- r n ) Record a typed word: its name (at 80-96, as `colon`
+-- left it), its explicit form and what it takes and leaves.
+: st-record
+  112 get 0= if 5120 region-new 112 put 0 120 put then
+  120 get 64 ult? 0= if 27 trap then
+  88 get 40 ult? 0= if 7 trap then
+  120 get 80 u* 312 put
+  112 get 312 get 24 u+ ! 112 get 312 get 16 u+ !
+  over 112 get 312 get ! dup 112 get 312 get 8 u+ !
+  88 get 112 get 312 get 32 u+ !
+  96 get 80 get 112 get 312 get 40 u+ 88 get copy
+  120 get 1 u+ 120 put ;
+-- ( r n -- ) A typed definition, in the explicit form: recorded, then
+-- compiled as a word of its own if a signature types all it takes; a word
+-- that takes values of types it does not say has no code of its own.
+: st-define
+  over over st-effect >r over r> eq? >r
+  st-record
+  r> if stage-text exit then
+  drop drop out region-free 0 24 put 0 16 put 0 0 put ;
+-- ( -- r n ) The rest of the definition, through its `;`, as it is.
+: st-capture
+  56 get 312 put
+  cycle read-word 0= if 8 trap then 59 tok-char? 0= while repeat
+  56 get 312 get u- dup region-new 320 put
+  >r 40 get 312 get 320 get 0 r@ copy 320 get r> ;
 -- ( r o n -- ) Append bytes and a space to the explicit form being built,
 -- in the region at 312, 320 bytes long so far.
 : emit-text
@@ -2416,7 +2600,7 @@ _v ᵥ
   32 312 get 320 get c! 320 get 1 u+ 320 put ;
 -- ( -- r n ) Stage 1: the rest of the definition, through its `;`, in the
 -- explicit form. A word that is not a number is followed by `.`; a
--- signature is copied as it is.
+-- bracket is copied as it is.
 : lower
   48 get 56 get u- 3 u* 16 u+ region-new 312 put 0 320 put 0 336 put
   cycle
@@ -2432,14 +2616,8 @@ _v ᵥ
   while repeat
   312 get 320 get ;
 -- ( -- ) `typed name … ;` and `explicit name … ;`.
-: typed
-  colon lower over >r
-  40 get >r 48 get >r 56 get >r 64 get >r 72 get >r
-  48 put 40 put 0 56 put
-  stage
-  r> 72 put r> 64 put r> 56 put r> 48 put r> 40 put
-  r> region-free ;
-: explicit colon stage ;
+: typed colon lower st-define ;
+: explicit colon st-capture st-define ;
 
 : register-families
   0 728 get 0 !
@@ -2596,6 +2774,7 @@ _v ᵥ
 
 -- ( data-region 0 length -- evaluate recover export describe )
 : boot 4096 32 put 0 8 put 0 0 put -1 744 put ' compile-token 104 put
+  ' st-token-body 592 put
   1048576 region-new 624 put 1048576 region-new 712 put ' effect-of 616 put 0 632 put
   4096 region-new 728 put register-families
   98312 region-new 3512 put ' instantiate 3504 put ' lift-for 3392 put

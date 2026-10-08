@@ -23,9 +23,10 @@ fn generation_zero() -> Image {
 const REBUILD_FUEL: u64 = 30_000_000;
 
 /// Compile-cost canary: steps for a rebuilt system (generation 1) to compile
-/// the system source. It is 6.68 million today, after the staged-types
-/// prototype added 210 lines (the canary went from 6.5 to 7.5 million then,
-/// the cost per line unchanged); 6.23 million after the second string slice;
+/// the system source. It is 7.08 million today, with both steps of the
+/// staged-types prototype; its first step's 210 lines took it from 6.23 to
+/// 6.68 million and the canary from 6.5 to 7.5 million, the cost per line
+/// unchanged; 6.23 million after the second string slice;
 /// 5.51 million after the byte primitives (62 to 67), down from
 /// 8.90 when they took the per-byte loops out of reading words, finding
 /// them, skipping comments and parsing integers. Before that, checker

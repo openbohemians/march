@@ -1,6 +1,6 @@
 # The symbolic stack machine
 
-Status: slices 1 and 2, 2026-10-08. March8 is March's compiler written in Rust, as
+Status: slices 1 to 3, 2026-10-08. March8 is March's compiler written in Rust, as
 Thomas decided on 2026-10-08: build the compiler in Rust now, and write it
 in March, bootstrapping like a real FORTH, once March is mature. System March
 (march7) is frozen. This slice is the symbolic stack machine for the
@@ -9,7 +9,8 @@ to the explicit form, comes later. The staged-types prototype
 (march7/docs/STAGED.md) is its specification, and its cases are the tests,
 rewritten in the explicit form. Slice 1 is the machine, types and families
 chosen by types; slice 2 adds guards, the choice between clauses at run
-time, `map`, and arithmetic lifted over arrays.
+time, `map`, and arithmetic lifted over arrays; slice 3 adds recursion,
+instances and tail calls.
 
 ```
 [ < money -- money > 1.10 +. ] fee def.
@@ -23,6 +24,10 @@ time, `map`, and arithmetic lifted over arrays.
 x sign.                             → 1 or 0, chosen at run time
 5 sign.                             → the literal 1, chosen now
 ( 1 2 3 ) 10 *.                     → ( 10 20 30 ): it lifts
+[ 0 eq?. ] zero? def.
+[ < i64 zero? > drop. 1 ] fact def.
+[ < i64 > dup. 1 -. fact. *. ] fact def.
+10 fact.                            → 3628800, by fact's i64 instance
 ```
 
 ## The explicit form
@@ -222,6 +227,54 @@ exactly, and stay literals, so `1 2 +. 3.5 +.` is the decimal 6.5. A
 literal takes its default type, i64 or f64, only when it must be a value at
 run time.
 
+### Recursion and instances
+
+A family is evaluated where it is applied, on the caller's judgments,
+unless it is recursive. **Recursion is found as it happens:** when a family
+is applied again, to the same types, inside its own application, the
+compiler unwinds to the outer application, puts back its judgments and code,
+and makes it a call to an **instance**:
+
+- An instance is the family compiled once for its input types, as a word
+  of its own, guards and all, and cached: every word applying `fact` to an
+  i64 calls the same code, by its content identity. A literal input takes
+  the type of the best match, or its default, first.
+- Inside the instance, the family applied to those types again is a call
+  to itself, `recur`.
+- Recursion through other words is found the same way. Only recursion
+  needs an instance; every other word is inlined, so folding is unchanged.
+
+**The ghost.** A recursive call's results have the types of the
+alternatives that finish without recursing (TYPES.md 2.7). An alternative
+that reaches the recursion before any has finished **waits**; once others
+have finished, their results type the recursion and it is compiled again.
+So the base case need not come first:
+
+```
+[ 0 gt?. ] positive? def.
+[ < i64 > ] down def.                       the base, with no guard
+[ < i64 positive? > 1 -. down. ] down def.  tested first, compiled after
+```
+
+A literal result, as `fact`'s 1, takes the type of an input it can become,
+so `fact` on an f64 multiplies floats; if the instance then leaves other
+types than the ghost said, it is compiled again with the types it found. A
+family that applies itself with no clause finishing without doing so has no
+types for its results, an error where it is defined, unless its signature
+promises outputs after `--`: then it is a loop.
+
+**Tail calls.** A call followed only by a return, perhaps after branches,
+is a tail call, and a call to itself one in its own frame, so recursion that
+loops runs in constant space: a million levels of `sumto`.
+
+```
+march8 --code '5 fact.'      source:  5  tail fact-i64
+                             fact-i64:
+                               dup 0 eq 0branch L  drop 1  branch END
+                             L: dup 1 i64- recur i64*
+                           END:
+```
+
 ## The core vocabulary
 
 `core/core.march` defines `+`, `-`, `*`, `/`, `mod`, the comparisons, `length`,
@@ -250,8 +303,10 @@ and division by zero; signed `i64lt?`; `i64>text` and `f64>text`; and
 `scratch-at`, which reads a loop's state.
 
 Branches are labels until the code is sealed, so each alternative of a
-choice can be compiled on its own and laid out afterwards.
-`march8 --code SOURCE` prints the code a piece of source compiles to.
+choice can be compiled on its own and laid out afterwards. The stage seals
+code itself, hashing it into blobs, and the session publishes them, callees
+first. `march8 --code SOURCE` prints the code a piece of source compiles to,
+and the code of the words it calls.
 
 ## Sessions
 
@@ -302,12 +357,20 @@ where the clause was applied. Errors while running are the machine's.
    types be joined before any code for them is fixed, so a literal in one
    clause adapts to the type another leaves (TYPES.md 2.7).
 7. **Lifting needs no special case:** with `map`, it is ordinary clauses.
+8. **Recursion is better found as it happens than from the text.** A test
+   for a family's name in its bodies said `+` was recursive, since lifting
+   applies `+` to the elements; applied to other types, that is not
+   recursion. Finding the same types again during evaluation is exact, and
+   finds recursion through other words too.
+9. **Waiting alternatives free the order of clauses.** The prototype needed
+   a guarded base first; here any alternative that finishes types the
+   recursion.
 
 ## Not yet
 
-- **Instances, recursion and tail calls.** A word is evaluated where it is
-  applied, always; a family applying itself to the same types is an error.
-  Instances, ghosts (TYPES.md 2.7) and shared code come next.
+- **Mutual recursion** between instances, which would make a cycle of
+  content identities; and words used before they are defined.
+- **Sharing large words** that are not recursive, as instances, to save code.
 - **Value patterns** such as `0` in a signature, and OR between contexts.
 - **Quotations at run time:** a quotation is always consumed at compile
   time, by `.`, `def` or `map`.

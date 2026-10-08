@@ -7,7 +7,7 @@
 //! it is *materialized* then, so constants fold through every word, and the
 //! code holds only what must happen at run time.
 
-use crate::code::{Op, Primitive as P};
+use crate::code::{Blob, Cid, Op, Primitive as P};
 use crate::error::{Error, Kind, Pos, Result};
 use crate::prims::{self, PRIMS, Prim};
 use crate::read::{Tok, Token};
@@ -110,11 +110,52 @@ struct Alt {
 
 type Candidate = (i32, Rc<Clause>, Env);
 
+/// A family and the types it is applied to.
+type Key = (Rc<str>, Vec<Type>);
+
+/// What became of an alternative of a choice.
+enum Outcome {
+    /// Its guard fails at compile time.
+    Dropped,
+    /// Compiled; and whether it is taken for certain.
+    Taken(Alt, bool),
+    /// It reached the recursion before its results' types were known.
+    Waits(bool),
+}
+
+/// An instance being compiled: a family, its input types, and the types of
+/// its results when it calls itself, once known.
+struct Frame {
+    name: Rc<str>,
+    ins: Vec<Type>,
+    ghost: Option<Vec<Type>>,
+    /// Whether a recursive call used the ghost.
+    used: bool,
+}
+
 /// What the effect pass knows of a value.
 enum Item {
     Name(Rc<str>),
     Quote(usize, usize),
     Other,
+}
+
+/// The candidate that matches best, the first defined among equals.
+fn primary(cands: &[Candidate]) -> Option<Candidate> {
+    let top = cands.iter().map(|c| c.0).max()?;
+    cands.iter().find(|c| c.0 == top).cloned()
+}
+
+/// Whether the code from `i` returns at once, perhaps after branches.
+fn returns(ops: &[Op], mut i: usize) -> bool {
+    for _ in 0..ops.len() {
+        match ops.get(i) {
+            Some(Op::Return) => return true,
+            Some(Op::Branch(t)) => i = *t as usize,
+            _ => return false,
+        }
+    }
+    false
 }
 
 fn take(items: &mut Vec<Item>, ins: &mut usize, k: usize) {
@@ -167,8 +208,15 @@ pub struct Stage {
     literals: Vec<(u8, usize, usize)>,
     /// Families being applied, with the types they were applied to, so that
     /// one applying itself to the same types is caught.
-    active: Vec<(Rc<str>, Vec<Type>)>,
+    active: Vec<Key>,
     labels: u32,
+    /// Instances being compiled, innermost last.
+    frames: Vec<Frame>,
+    /// Instances compiled: their code's identity and their results' types.
+    instances: HashMap<Key, (Cid, Vec<Type>)>,
+    /// Code and data made while compiling, in the order made, so a callee
+    /// comes before its callers; the session publishes them.
+    pub blobs: Vec<Blob>,
     pos: Pos,
     steps: u64,
     depth: u32,
@@ -243,6 +291,9 @@ impl Stage {
             depth: 0,
             core: false,
             labels: 0,
+            frames: Vec::new(),
+            instances: HashMap::new(),
+            blobs: Vec::new(),
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
             let name: Rc<str> = (*name).into();
@@ -271,6 +322,12 @@ impl Stage {
         Error::new(kind, Some(self.pos), msg)
     }
 
+    /// Forgets the instances compiled, as when their code could not be
+    /// published.
+    pub fn forget_instances(&mut self) {
+        self.instances.clear();
+    }
+
     /// Starts a compilation whose inputs are values on the machine's stack.
     pub fn begin(&mut self, inputs: &[Type]) {
         self.stack = inputs.iter().map(|&ty| Jdg { ty, val: Val::Run }).collect();
@@ -278,6 +335,7 @@ impl Stage {
         self.floor = 0;
         self.literals.clear();
         self.active.clear();
+        self.frames.clear();
         self.steps = 0;
         self.depth = 0;
     }
@@ -644,33 +702,82 @@ impl Stage {
 
     // ---- Families ----
 
-    /// Applies a family (TYPES.md 2.8, 2.15). Its clauses are chosen in two
-    /// phases: by types now, keeping those whose inputs match; then, if some
-    /// have guards, by their guards at run time, in the order they were
-    /// defined, the best clause without guards last. A clause chosen is
-    /// evaluated here, on these judgments (2.6).
+    /// Applies a family (TYPES.md 2.6, 2.8), evaluated where it is applied,
+    /// on these judgments. A family applied again to the same types inside
+    /// its own application is recursive: the outer application starts over
+    /// as a call to an instance, a word of its own for those types, and the
+    /// inner one, compiled inside that instance, calls it.
     fn family(&mut self, name: &Rc<str>) -> Result<()> {
-        let clauses = self.words[name].clauses.clone();
-        let arity = clauses
+        let arity = self.arity(name);
+        let reach = arity.min(self.stack.len() - self.floor);
+        let types: Vec<Type> = self.stack[self.stack.len() - reach..]
+            .iter()
+            .map(|j| j.ty)
+            .collect();
+        if let Some(i) = self
+            .frames
+            .iter()
+            .rposition(|f| f.name == *name && f.ins == types)
+        {
+            if i + 1 == self.frames.len() {
+                return self.recur(arity);
+            }
+            return Err(self.err(
+                Kind::Limit,
+                format!(
+                    "`{name}` is applied inside an instance it calls: \
+                     mutual recursion is not built yet"
+                ),
+            ));
+        }
+        let key = (name.clone(), types);
+        if let Some(i) = self.active.iter().position(|k| *k == key) {
+            return Err(self.err(Kind::Again(i), name.to_string()));
+        }
+        let at = self.pos;
+        let index = self.active.len();
+        let saved = (
+            self.stack.clone(),
+            self.code.len(),
+            self.floor,
+            self.literals.len(),
+        );
+        self.active.push(key);
+        let r = self.resolve(name, arity, at, false);
+        self.active.truncate(index);
+        self.pos = at;
+        match r {
+            Err(e) if e.kind == Kind::Again(index) => {
+                self.stack = saved.0;
+                self.code.truncate(saved.1);
+                self.floor = saved.2;
+                self.literals.truncate(saved.3);
+                self.call_instance(name, arity)
+            }
+            r => r,
+        }
+    }
+
+    /// How many values a family takes: the most any signature names, or what
+    /// its definition takes.
+    fn arity(&self, name: &Rc<str>) -> usize {
+        self.words[name]
+            .clauses
             .iter()
             .filter_map(|c| c.sig.as_ref().map(|s| s.ins.len()))
             .max()
             .or_else(|| self.effect_of(name).map(|e| e.0))
-            .unwrap_or(0);
-        let reach = arity.min(self.stack.len() - self.floor);
-        let key = (
-            name.clone(),
-            self.stack[self.stack.len() - reach..]
-                .iter()
-                .map(|j| j.ty)
-                .collect::<Vec<_>>(),
-        );
-        if self.active.contains(&key) {
-            return Err(self.err(
-                Kind::Limit,
-                format!("`{name}` applies itself: recursion is not built yet"),
-            ));
-        }
+            .unwrap_or(0)
+    }
+
+    /// Chooses among a family's clauses and applies the choice. Clauses are
+    /// chosen in two phases (TYPES.md 2.15): by types now, keeping those
+    /// whose inputs match; then, if some have guards, by their guards at run
+    /// time, in the order they were defined, the best clause without guards
+    /// last. `top` says this is an instance's own family, whose recursive
+    /// alternatives may wait for its results' types.
+    fn resolve(&mut self, name: &Rc<str>, arity: usize, at: Pos, top: bool) -> Result<()> {
+        let clauses = self.words[name].clauses.clone();
         let mut cands = self.candidates(&clauses);
         if cands.is_empty() {
             let fewest = clauses
@@ -684,24 +791,27 @@ impl Stage {
                 format!("no word `{name}` for {}", self.top_types(arity.max(1))),
             ));
         }
-        let at = self.pos;
-        self.active.push(key);
-        let r = if cands.iter().any(|c| c.1.guarded()) {
+        if cands.iter().any(|c| c.1.guarded()) {
             // Literals settle by the best match, and the clauses match again.
-            let (_, c, env) = cands.iter().max_by_key(|c| c.0).expect("not empty").clone();
+            let (_, c, env) = primary(&cands).expect("not empty");
             self.settle_literals(&c, &env)?;
-            cands = self.candidates(&clauses);
-            self.chain(name, &cands, arity, at)
-        } else {
-            match self.best(name, &cands, arity) {
-                Ok(Some((c, env))) => self.apply_clause(name, &c, env, at),
-                Ok(None) => unreachable!("candidates"),
-                Err(e) => Err(e),
+            if !top {
+                // Its key is now the settled types, as an inner application's
+                // will be.
+                let reach = arity.min(self.stack.len() - self.floor);
+                let types = self.stack[self.stack.len() - reach..]
+                    .iter()
+                    .map(|j| j.ty)
+                    .collect();
+                self.active.last_mut().expect("this application").1 = types;
             }
-        };
-        self.active.pop();
-        self.pos = at;
-        r
+            cands = self.candidates(&clauses);
+            return self.chain(name, &cands, arity, at, top);
+        }
+        match self.best(name, &cands, arity)? {
+            Some((c, env)) => self.apply_clause(name, &c, env, at),
+            None => unreachable!("candidates"),
+        }
     }
 
     /// The clauses whose inputs match the values on top, in the order they
@@ -771,7 +881,19 @@ impl Stage {
     /// own, and all must leave the same types (TYPES.md 2.9). A guard on known
     /// values is decided now, so an alternative may be dropped, or taken for
     /// certain.
-    fn chain(&mut self, name: &Rc<str>, cands: &[Candidate], arity: usize, at: Pos) -> Result<()> {
+    ///
+    /// In an instance's own family (`top`), an alternative that reaches the
+    /// recursion before its results' types are known waits: once others
+    /// have finished, their results type the recursion, a ghost (TYPES.md
+    /// 2.7), and it is compiled again.
+    fn chain(
+        &mut self,
+        name: &Rc<str>,
+        cands: &[Candidate],
+        arity: usize,
+        at: Pos,
+        top: bool,
+    ) -> Result<()> {
         let n = cands
             .iter()
             .filter_map(|c| c.1.sig.as_ref().map(|s| s.ins.len()))
@@ -779,34 +901,27 @@ impl Stage {
             .unwrap_or(0);
         self.need(n)?;
         let snapshot = self.stack.clone();
-        let mut alts: Vec<Alt> = Vec::new();
+        let base = snapshot.len() - n;
+        // The alternatives in the order they are laid out, and those waiting.
+        let mut order: Vec<(Candidate, bool)> = Vec::new();
+        let mut alts: Vec<Option<Alt>> = Vec::new();
+        let mut waiting = Vec::new();
         let mut certain = false;
-        for (_, c, env) in cands.iter().filter(|c| c.1.guarded()) {
-            self.stack = snapshot.clone();
-            let outer = std::mem::take(&mut self.code);
-            let skip = self.label();
-            let test = self.test(c.sig.as_ref().expect("guarded"), skip);
-            let test = match test {
-                Ok(t) => t,
-                Err(e) => {
-                    self.code = outer;
-                    return Err(e.within(name, at));
+        for cand in cands.iter().filter(|c| c.1.guarded()) {
+            match self.alternative(name, cand, true, &snapshot, at, top)? {
+                Outcome::Dropped => continue,
+                Outcome::Taken(alt, sure) => {
+                    alts.push(Some(alt));
+                    certain = sure;
                 }
-            };
-            if test == Some(false) {
-                self.code = outer;
-                continue;
+                Outcome::Waits(sure) => {
+                    waiting.push(alts.len());
+                    alts.push(None);
+                    certain = sure;
+                }
             }
-            let r = self.apply_clause(name, c, env.clone(), at);
-            let code = std::mem::replace(&mut self.code, outer);
-            r?;
-            alts.push(Alt {
-                code,
-                stack: Some(self.stack.clone()),
-                skip: test.is_none().then_some(skip),
-            });
-            if test == Some(true) {
-                certain = true;
+            order.push((cand.clone(), true));
+            if certain {
                 break;
             }
         }
@@ -814,15 +929,16 @@ impl Stage {
             let plain: Vec<Candidate> = cands.iter().filter(|c| !c.1.guarded()).cloned().collect();
             self.stack = snapshot.clone();
             if let Some((c, env)) = self.best(name, &plain, arity)? {
-                let outer = std::mem::take(&mut self.code);
-                let r = self.apply_clause(name, &c, env, at);
-                let code = std::mem::replace(&mut self.code, outer);
-                r?;
-                alts.push(Alt {
-                    code,
-                    stack: Some(self.stack.clone()),
-                    skip: None,
-                });
+                let cand = (0, c, env);
+                match self.alternative(name, &cand, false, &snapshot, at, top)? {
+                    Outcome::Taken(alt, _) => alts.push(Some(alt)),
+                    Outcome::Waits(_) => {
+                        waiting.push(alts.len());
+                        alts.push(None);
+                    }
+                    Outcome::Dropped => unreachable!("no guards"),
+                }
+                order.push((cand, false));
             } else if alts.is_empty() {
                 return Err(self.err(
                     Kind::NoWord,
@@ -832,14 +948,105 @@ impl Stage {
                     ),
                 ));
             } else {
-                alts.push(Alt {
+                alts.push(Some(Alt {
                     code: vec![Ins::Op(Op::Lit(1)), Ins::Op(Op::Prim(P::Trap))],
                     stack: None,
                     skip: None,
-                });
+                }));
             }
         }
-        self.merge(alts, &snapshot, snapshot.len() - n)
+        if !waiting.is_empty() {
+            let done: Vec<&[Jdg]> = alts
+                .iter()
+                .flatten()
+                .filter_map(|a| a.stack.as_deref())
+                .collect();
+            if done.is_empty() {
+                return Err(Error::new(Kind::Ghost, Some(at), name.to_string()));
+            }
+            let ghost = self.ghost(&done, base);
+            self.frames.last_mut().expect("an instance").ghost = Some(ghost);
+            for i in waiting {
+                let (cand, guarded) = order[i].clone();
+                match self.alternative(name, &cand, guarded, &snapshot, at, top)? {
+                    Outcome::Taken(alt, _) => alts[i] = Some(alt),
+                    _ => return Err(Error::new(Kind::Ghost, Some(at), name.to_string())),
+                }
+            }
+        }
+        self.merge(alts.into_iter().flatten().collect(), &snapshot, base)
+    }
+
+    /// One alternative of a choice, compiled from the saved judgments into
+    /// code of its own: its guards' test, if it has guards, and its body.
+    fn alternative(
+        &mut self,
+        name: &Rc<str>,
+        cand: &Candidate,
+        guarded: bool,
+        snapshot: &[Jdg],
+        at: Pos,
+        top: bool,
+    ) -> Result<Outcome> {
+        let (_, c, env) = cand;
+        self.stack = snapshot.to_vec();
+        let outer = std::mem::take(&mut self.code);
+        let skip = self.label();
+        let test = if guarded {
+            match self.test(c.sig.as_ref().expect("guarded"), skip) {
+                Ok(t) => t,
+                Err(e) => {
+                    self.code = outer;
+                    return Err(e.within(name, at));
+                }
+            }
+        } else {
+            Some(true)
+        };
+        if test == Some(false) {
+            self.code = outer;
+            return Ok(Outcome::Dropped);
+        }
+        let r = self.apply_clause(name, c, env.clone(), at);
+        let code = std::mem::replace(&mut self.code, outer);
+        let sure = guarded && test == Some(true);
+        match r {
+            Err(e) if top && e.kind == Kind::Ghost => Ok(Outcome::Waits(sure)),
+            Err(e) => Err(e),
+            Ok(()) => Ok(Outcome::Taken(
+                Alt {
+                    code,
+                    stack: Some(self.stack.clone()),
+                    skip: test.is_none().then_some(skip),
+                },
+                sure,
+            )),
+        }
+    }
+
+    /// The types of a recursion's results, from the alternatives that have
+    /// finished. A literal result takes an input's type it can become, as
+    /// `fact`'s 1 becomes the type of what it multiplies, or its default; if
+    /// the guess is wrong, the instance is compiled again with the types it
+    /// found.
+    fn ghost(&mut self, done: &[&[Jdg]], base: usize) -> Vec<Type> {
+        let ins = self.frames.last().expect("an instance").ins.clone();
+        let slots = done[0].len() - base;
+        (0..slots)
+            .map(|k| {
+                let tys: Vec<Type> = done
+                    .iter()
+                    .filter_map(|s| s.get(base + k).map(|j| j.ty))
+                    .collect();
+                if let Some(&lit) = tys.iter().find(|&&t| self.types.is_literal(t))
+                    && tys.iter().all(|&t| self.types.is_literal(t))
+                    && let Some(&t) = ins.iter().find(|&&t| self.accepts(t, lit))
+                {
+                    return t;
+                }
+                self.join(&tys).unwrap_or(tys[0])
+            })
+            .collect()
     }
 
     /// Joins a family's alternatives. One taken for certain is just its code
@@ -905,14 +1112,15 @@ impl Stage {
         let last = alts.len() - 1;
         for (k, alt) in alts.into_iter().enumerate() {
             let outer = std::mem::replace(&mut self.code, alt.code);
-            if let Some(stack) = alt.stack {
-                self.stack = stack;
-                for (i, &t) in joined.iter().enumerate() {
-                    self.annotate(base + i, t)?;
+            let r = match alt.stack {
+                Some(stack) => {
+                    self.stack = stack;
+                    self.settle_results(base, &joined)
                 }
-                self.materialize_top(joined.len())?;
-            }
+                None => Ok(()),
+            };
             let code = std::mem::replace(&mut self.code, outer);
+            r?;
             self.code.extend(code);
             if k != last {
                 self.code.push(Ins::Jump(end));
@@ -927,6 +1135,248 @@ impl Stage {
             self.push(t, Val::Run);
         }
         Ok(())
+    }
+
+    // ---- Instances and recursion ----
+
+    /// Calls a family's instance for the types of its inputs. The inputs
+    /// settle first: literals take the types of the best match, or their
+    /// defaults. Inside that very instance, the call is to itself.
+    fn call_instance(&mut self, name: &Rc<str>, arity: usize) -> Result<()> {
+        self.need(arity)?;
+        let clauses = self.words[name].clauses.clone();
+        let cands = self.candidates(&clauses);
+        if let Some((_, c, env)) = primary(&cands) {
+            self.settle_literals(&c, &env)?;
+        }
+        let base = self.stack.len() - arity;
+        for i in base..self.stack.len() {
+            match self.stack[i].ty {
+                INT_LIT => self.annotate(i, I64)?,
+                DEC_LIT => self.annotate(i, F64)?,
+                t if self.types.compile_time_only(t) => {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!(
+                            "`{name}` applies itself, so it is compiled as a word of its own, \
+                             and its inputs must be values at run time, not {}",
+                            self.describe(&self.stack[i])
+                        ),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        let ins: Vec<Type> = self.stack[base..].iter().map(|j| j.ty).collect();
+        if let Some(i) = self
+            .frames
+            .iter()
+            .rposition(|f| f.name == *name && f.ins == ins)
+        {
+            if i + 1 == self.frames.len() {
+                return self.recur(arity);
+            }
+            return Err(self.err(
+                Kind::Limit,
+                format!("`{name}` is applied inside an instance it calls: mutual recursion is not built yet"),
+            ));
+        }
+        let at = self.pos;
+        let (cid, outs) = self.instance(name, ins, arity, at)?;
+        self.pos = at;
+        self.materialize_top(arity)?;
+        self.emit(Op::Call(cid));
+        self.stack.truncate(base);
+        for t in outs {
+            self.push(t, Val::Run);
+        }
+        Ok(())
+    }
+
+    /// A call inside an instance to itself. Its results have the ghost's
+    /// types, if they are known yet.
+    fn recur(&mut self, arity: usize) -> Result<()> {
+        self.materialize_top(arity)?;
+        let f = self.frames.last_mut().expect("an instance");
+        let Some(ghost) = f.ghost.clone() else {
+            return Err(Error::new(Kind::Ghost, Some(self.pos), f.name.to_string()));
+        };
+        f.used = true;
+        self.emit(Op::Recur);
+        self.stack.truncate(self.stack.len() - arity);
+        for t in ghost {
+            self.push(t, Val::Run);
+        }
+        Ok(())
+    }
+
+    /// Compiles a family for input types as a word of its own, once: the
+    /// family resolved on values at run time of those types, guards and all.
+    /// Its results' types, for its calls to itself, are those its signature
+    /// promises, or else those the alternatives that finish first leave; if
+    /// the code it compiles leaves others, it is compiled again with them.
+    fn instance(
+        &mut self,
+        name: &Rc<str>,
+        ins: Vec<Type>,
+        arity: usize,
+        at: Pos,
+    ) -> Result<(Cid, Vec<Type>)> {
+        let key = (name.clone(), ins.clone());
+        if let Some(r) = self.instances.get(&key) {
+            return Ok(r.clone());
+        }
+        if self.frames.len() >= 16 {
+            return Err(self.err(Kind::Limit, "instances nested more than 16 deep"));
+        }
+        let run: Vec<Jdg> = ins.iter().map(|&ty| Jdg { ty, val: Val::Run }).collect();
+        let saved = (
+            std::mem::replace(&mut self.stack, run.clone()),
+            std::mem::take(&mut self.code),
+            std::mem::replace(&mut self.floor, 0),
+            std::mem::take(&mut self.literals),
+            std::mem::take(&mut self.active),
+            std::mem::replace(&mut self.depth, 0),
+        );
+        let ghost = self.promised(name);
+        self.frames.push(Frame {
+            name: name.clone(),
+            ins: ins.clone(),
+            ghost,
+            used: false,
+        });
+        let names: Vec<_> = ins.iter().map(|&t| self.types.name(t)).collect();
+        let names = names.join(" ");
+        let mut tries = 0;
+        let r = loop {
+            self.stack = run.clone();
+            self.code.clear();
+            self.floor = 0;
+            self.literals.clear();
+            self.active.clear();
+            let r = self.resolve(name, arity, at, true).and_then(|()| {
+                for i in 0..self.stack.len() {
+                    self.materialize(i)?;
+                }
+                Ok(self.stack.iter().map(|j| j.ty).collect::<Vec<_>>())
+            });
+            match r {
+                Ok(outs) => {
+                    let f = self.frames.last_mut().expect("this instance");
+                    if f.used && f.ghost.as_ref() != Some(&outs) {
+                        if tries == 3 {
+                            break Err(Error::new(
+                                Kind::Mismatch,
+                                Some(at),
+                                format!(
+                                    "the results of `{name}` on {names} do not settle: \
+                                     give its signature outputs after `--`"
+                                ),
+                            ));
+                        }
+                        tries += 1;
+                        f.ghost = Some(outs);
+                        f.used = false;
+                        continue;
+                    }
+                    break Ok(outs);
+                }
+                Err(e) if e.kind == Kind::Ghost => {
+                    break Err(Error::new(
+                        Kind::Mismatch,
+                        Some(at),
+                        format!(
+                            "`{name}` applies itself on {names}, and none of its clauses for \
+                             them finishes without doing so, so its results have no types: \
+                             give its signature outputs after `--`"
+                        ),
+                    ));
+                }
+                Err(e) => break Err(e),
+            }
+        };
+        let code = std::mem::take(&mut self.code);
+        self.frames.pop();
+        (
+            self.stack,
+            self.code,
+            self.floor,
+            self.literals,
+            self.active,
+            self.depth,
+        ) = saved;
+        let outs = r?;
+        let (_, cid) = self.seal(code);
+        self.instances.insert(key, (cid, outs.clone()));
+        Ok((cid, outs))
+    }
+
+    /// The outputs a family's signature promises for the values on top, if
+    /// the clause that matches best says.
+    fn promised(&mut self, name: &Rc<str>) -> Option<Vec<Type>> {
+        let clauses = self.words[name].clauses.clone();
+        let cands = self.candidates(&clauses);
+        let (_, c, env) = primary(&cands)?;
+        let outs = c.sig.as_ref()?.outs.clone()?;
+        let outs: Vec<Type> = outs.iter().map(|&t| self.types.subst(t, &env)).collect();
+        outs.iter()
+            .all(|&t| !self.types.has_vars(t))
+            .then_some(outs)
+    }
+
+    /// Seals code as the machine takes it: labels become positions, string
+    /// literals data objects, a call followed only by a return a tail call,
+    /// and a return ends it. The blobs are kept for the session to publish.
+    pub fn seal(&mut self, code: Vec<Ins>) -> (Vec<Op>, Cid) {
+        let mut at = HashMap::new();
+        let mut n = 0u32;
+        for ins in &code {
+            match ins {
+                Ins::Label(l) => {
+                    at.insert(*l, n);
+                }
+                Ins::Str(_) => n += 2,
+                _ => n += 1,
+            }
+        }
+        let mut ops = Vec::new();
+        for ins in code {
+            match ins {
+                Ins::Op(op) => ops.push(op),
+                Ins::Str(s) => {
+                    let blob = Blob::Data(s.as_bytes().to_vec());
+                    ops.push(Op::Data(blob.cid()));
+                    ops.push(Op::Prim(P::Text));
+                    self.blobs.push(blob);
+                }
+                Ins::Label(_) => {}
+                Ins::Jump(l) => ops.push(Op::Branch(at[&l])),
+                Ins::JumpZero(l) => ops.push(Op::ZeroBranch(at[&l])),
+            }
+        }
+        ops.push(Op::Return);
+        for i in 0..ops.len() {
+            if returns(&ops, i + 1) {
+                match &ops[i] {
+                    Op::Call(c) => ops[i] = Op::Tail(*c),
+                    Op::Recur => ops[i] = Op::TailRecur,
+                    _ => {}
+                }
+            }
+        }
+        let blob = Blob::Code(crate::code::encode(&ops));
+        let cid = blob.cid();
+        self.blobs.push(blob);
+        (ops, cid)
+    }
+
+    /// Gives an alternative's results the types the alternatives share, and
+    /// makes them values at run time.
+    fn settle_results(&mut self, base: usize, joined: &[Type]) -> Result<()> {
+        for (i, &t) in joined.iter().enumerate() {
+            self.annotate(base + i, t)?;
+        }
+        self.materialize_top(joined.len())
     }
 
     /// Tests a clause's guards on copies of its inputs: `Some(true)` if they
@@ -1168,6 +1618,8 @@ impl Stage {
     /// errors show where it is defined; if it fails, the family is left as
     /// it was.
     fn define(&mut self, name: &Rc<str>, clause: Clause) -> Result<()> {
+        // Instances compiled before may apply the family changed.
+        self.instances.clear();
         let ins = clause.sig.as_ref().map(|s| s.ins.clone());
         let c = Rc::new(clause);
         let context = c.sig.as_ref().map(Sig::context);
@@ -1204,7 +1656,6 @@ impl Stage {
             std::mem::take(&mut self.literals),
             self.pos,
         );
-        self.active.push((name.clone(), ins.clone()));
         let sig = c.sig.as_ref().expect("typed");
         let mut r = Ok(None);
         if !sig.guards.is_empty() {
@@ -1218,7 +1669,6 @@ impl Stage {
                 r = self.materialize(i);
             }
         }
-        self.active.pop();
         (self.stack, self.code, self.floor, self.literals, self.pos) = saved;
         r.map_err(|e| {
             let mut e = e;

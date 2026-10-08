@@ -32,6 +32,13 @@ pub enum Kind {
     Arithmetic,
     /// A limit of the machine, or something not built yet.
     Limit,
+    /// Inside the compiler only: a recursive call whose results' types are
+    /// not known yet (docs/MACHINE.md, "Recursion").
+    Ghost,
+    /// Inside the compiler only: a family applied again to the same types
+    /// inside its own application, unwinding to that application, the
+    /// `n`th, to make it an instance.
+    Again(usize),
     /// An error while running.
     Run(crate::machine::Error),
 }

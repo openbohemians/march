@@ -536,6 +536,10 @@ impl Machine {
         let cid = self.publish(Blob::Code(crate::code::encode(ops)))?;
         self.link(cid)
     }
+    /// A published blob.
+    pub fn blob(&self, cid: &Cid) -> Option<&Blob> {
+        self.blobs.get(cid)
+    }
     pub fn cid(&self, xt: u64) -> Result<Cid, Error> {
         Ok(self
             .words

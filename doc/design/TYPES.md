@@ -10,8 +10,10 @@ structure, headings, families chosen by types and by guards, with type
 variables, outputs, lifting and array literals, and instances, with
 recursion typed by ghosts and tail calls. On 2026-10-08 Thomas decided to
 build the compiler in Rust, as march8 (march8/docs/MACHINE.md), with System
-March frozen, and to write it in March once March is mature; march8's first
-slice is the symbolic stack machine for the explicit form.
+March frozen, and to write it in March once March is mature. Its first
+three slices build the symbolic stack machine for the explicit form, with
+everything the prototype had: families, guards, lifting, recursion by ghosts,
+instances and tail calls.
 
 ## 1. Why
 

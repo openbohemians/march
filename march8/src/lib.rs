@@ -18,7 +18,7 @@ pub use error::{Error, Kind, Pos};
 pub use image::Image;
 pub use machine::{Machine, Stats};
 
-use stage::{Ins, Stage};
+use stage::Stage;
 use symbols::Symbols;
 use types::Type;
 
@@ -66,14 +66,27 @@ impl Session {
     }
 
     /// Compiles source as a word taking the stack, without running it: its
-    /// code, and the types of the stack after it.
+    /// code, and the types of the stack after it. The code and data it made,
+    /// the instances it compiled among them, are published even if it fails,
+    /// since the stage keeps the instances.
     pub fn compile(&mut self, src: &str) -> error::Result<(Vec<Op>, Vec<Type>)> {
+        let r = self.compile_word(src);
+        for blob in std::mem::take(&mut self.stage.blobs) {
+            if let Err(e) = self.machine.publish(blob) {
+                self.stage.forget_instances();
+                return Err(e.into());
+            }
+        }
+        r
+    }
+
+    fn compile_word(&mut self, src: &str) -> error::Result<(Vec<Op>, Vec<Type>)> {
         let toks = read::read(src, &self.symbols)?;
         self.stage.begin(&self.types);
         self.stage.run(&toks)?;
         let types = self.stage.finish()?;
         let code = std::mem::take(&mut self.stage.code);
-        Ok((self.seal(&code)?, types))
+        Ok((self.stage.seal(code).0, types))
     }
 
     /// Compiles source and runs it.
@@ -92,42 +105,6 @@ impl Session {
         );
         self.types = types;
         Ok(())
-    }
-
-    /// The code as the machine takes it: string literals become data
-    /// objects, a final call a tail call, and a return ends it.
-    fn seal(&mut self, code: &[Ins]) -> error::Result<Vec<Op>> {
-        // Where each label is, counted in operations.
-        let mut at = std::collections::HashMap::new();
-        let mut n = 0u32;
-        for ins in code {
-            match ins {
-                Ins::Label(l) => {
-                    at.insert(*l, n);
-                }
-                Ins::Str(_) => n += 2,
-                _ => n += 1,
-            }
-        }
-        let mut ops = Vec::new();
-        for ins in code {
-            match ins {
-                Ins::Op(op) => ops.push(op.clone()),
-                Ins::Str(s) => {
-                    let cid = self.machine.publish(Blob::Data(s.as_bytes().to_vec()))?;
-                    ops.push(Op::Data(cid));
-                    ops.push(Op::Prim(Primitive::Text));
-                }
-                Ins::Label(_) => {}
-                Ins::Jump(l) => ops.push(Op::Branch(at[l])),
-                Ins::JumpZero(l) => ops.push(Op::ZeroBranch(at[l])),
-            }
-        }
-        if let Some(Op::Call(c)) = ops.last().cloned() {
-            *ops.last_mut().expect("not empty") = Op::Tail(c);
-        }
-        ops.push(Op::Return);
-        Ok(ops)
     }
 
     /// The values on the stack, written by their types: `<2> 42 "abab"`.

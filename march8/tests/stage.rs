@@ -151,8 +151,9 @@ fn words_are_evaluated_for_each_use() {
         run("[ < money > 1.10 + . ] fee def . [ 19.99 fee . ] total def . total .").unwrap(),
         [2109]
     );
-    // A word applying itself is not built yet.
-    assert_eq!(fails("[ rec . ] rec def . rec ."), Kind::Limit);
+    // A word that applies itself, with no case that finishes without doing
+    // so, has no types for its results (tests/recursion.rs).
+    assert_eq!(fails("[ rec . ] rec def . rec ."), Kind::Mismatch);
 }
 
 #[test]

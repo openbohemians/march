@@ -57,6 +57,8 @@ pub enum Prim {
     VecLength,
     VecAt,
     VecConcat,
+    /// `ary quote map`: the quotation applied to each element, in a loop.
+    Map,
     // Stack words, which move judgments as the code moves values.
     Dup,
     Drop,
@@ -198,6 +200,7 @@ pub const PRIMS: &[PrimDef] = &[
         "< n a vec m a vec >",
         &[P::Concat],
     ),
+    d(Prim::Map, "map", "< b quote >", &[]),
     d(Prim::Dup, "dup", "< a -- a a >", &[]),
     d(Prim::Drop, "drop", "< a -- >", &[]),
     d(Prim::Swap, "swap", "< a b -- b a >", &[]),
@@ -212,7 +215,7 @@ pub fn custom(p: Prim) -> bool {
     use Prim::*;
     matches!(
         p,
-        VecLength | VecAt | VecConcat | Dup | Drop | Swap | Over | Rot | Def
+        VecLength | VecAt | VecConcat | Map | Dup | Drop | Swap | Over | Rot | Def
     )
 }
 

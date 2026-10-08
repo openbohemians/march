@@ -726,6 +726,15 @@ impl Machine {
                     let v = *self.scratch.last().ok_or(Error::Stack)?;
                     self.push(v)?;
                 }
+                Instruction::Prim(Primitive::ScratchAt) => {
+                    let n = usize::try_from(self.pop()?).map_err(|_| Error::Stack)?;
+                    let i = self.scratch.len().checked_sub(n + 1).ok_or(Error::Stack)?;
+                    if i < base {
+                        return Err(Error::Stack);
+                    }
+                    let v = self.scratch[i];
+                    self.push(v)?;
+                }
                 Instruction::Prim(Primitive::Mark) => {
                     if self.marks.len() >= 65536 {
                         return Err(Error::Stack);
@@ -1247,7 +1256,8 @@ impl Machine {
                 let r = self.allocate_text(merkle_champ::Sequence::text(&s))?;
                 self.push(r)?;
             }
-            Execute | ScratchPush | ScratchPop | ScratchPeek | Mark | Gather | MapGather => {
+            Execute | ScratchPush | ScratchPop | ScratchPeek | ScratchAt | Mark | Gather
+            | MapGather => {
                 unreachable!()
             }
         }

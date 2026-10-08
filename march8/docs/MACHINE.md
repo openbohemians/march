@@ -1,13 +1,15 @@
 # The symbolic stack machine
 
-Status: slice 1, 2026-10-08. March8 is March's compiler written in Rust, as
+Status: slices 1 and 2, 2026-10-08. March8 is March's compiler written in Rust, as
 Thomas decided on 2026-10-08: build the compiler in Rust now, and write it
 in March, bootstrapping like a real FORTH, once March is mature. System March
 (march7) is frozen. This slice is the symbolic stack machine for the
 explicit form (doc/design/TYPES.md 2.2). The surface notation, which lowers
 to the explicit form, comes later. The staged-types prototype
 (march7/docs/STAGED.md) is its specification, and its cases are the tests,
-rewritten in the explicit form.
+rewritten in the explicit form. Slice 1 is the machine, types and families
+chosen by types; slice 2 adds guards, the choice between clauses at run
+time, `map`, and arithmetic lifted over arrays.
 
 ```
 [ < money -- money > 1.10 +. ] fee def.
@@ -15,6 +17,12 @@ rewritten in the explicit form.
 [ dup. *. ] sq def.
 3 sq.                               → 9, compiled as the literal 9
 { "k" ( 41 2 ) } "k" at. 0 at. 1 +.        → 42
+[ 0 gt?. ] positive? def.
+[ < i64 positive? > drop. 1 ] sign def.
+[ < i64 > drop. 0 ] sign def.
+x sign.                             → 1 or 0, chosen at run time
+5 sign.                             → the literal 1, chosen now
+( 1 2 3 ) 10 *.                     → ( 10 20 30 ): it lifts
 ```
 
 ## The explicit form
@@ -71,7 +79,7 @@ The machine runs the explicit form on a stack of **judgments** (TYPES.md
 **A known value has no code until a value at run time needs it.** When an
 operation that runs takes it, or the word ends, the value is
 **materialized**: its literal is emitted, under the values at run time
-above it if there are any (moved aside on the scratch stack and back). So:
+above it if there are any (by `swap`, `rot rot`, or the scratch stack). So:
 
 - **constants fold through everything,** words, families and stack words
   alike: `3 sq.` is the literal 9, and `1 2 swap.` is two literals in the
@@ -136,8 +144,66 @@ A family applied chooses its clause by the values on top (TYPES.md 2.8):
 - **A clause whose signature types all its inputs** is also compiled where
   it is defined, on values at run time of those types, so its errors show
   there. If it fails, it is not defined.
-- **A clause with the same inputs as one before replaces it,** as a FORTH
+- **A clause with the same context as one before replaces it,** as a FORTH
   redefinition does; otherwise the two would always tie.
+
+### Guards: the choice at run time
+
+A word in a signature that is not a type is a **guard**: `< i64 positive? >`
+(TYPES.md 2.15). It looks at the inputs before it, as many as it takes,
+without taking them, and leaves a flag. How many it takes comes from its
+definition, by a pass over its words: `positive?`, `[ 0 gt?. ]`, takes one,
+and `lt?` takes two, so `< i64 i64 lt? >` compares the two inputs. A word
+that does not leave one value cannot be a guard.
+
+When some clauses that match have guards, the choice has two phases:
+
+1. **By types, now.** The literals among the inputs take the types of the
+   best match, and the clauses are matched again.
+2. **By guards, at run time.** For each guarded clause, in the order they
+   were defined: a test of its guards on copies of its inputs, then its
+   body. Last, the best clause with no guards, or, if there is none, the
+   trap for no word, so that no clause whose guard holds is no word at run
+   time, as at compile time.
+
+- **A guard on known values is decided now.** One that fails drops its
+  clause; one that holds makes its clause the choice, and the rest are never
+  compiled. So `5 sign.` is the literal 1.
+- **Every alternative starts from the same judgments** and is compiled into
+  code of its own. Its results then take the types all the alternatives
+  share, literals taking the others' type as in an array literal, or else
+  the choice is an error (TYPES.md 2.9). Then the code is laid out: each test
+  branches past its clause when it fails, and each clause jumps to the end.
+
+```
+x sign.        dup 0 swap lt? 0branch L
+               drop 1 branch END
+            L: drop 0
+          END:
+```
+
+This is if-free code (TYPES.md 2.12): a sign, a minimum, a partial
+function, written as clauses.
+
+### `map` and lifting
+
+`ary quote map.` applies the quotation to each element. The quotation is
+compiled once, on a value of the element type at run time, as the body of a
+loop; the array, the new array and the index are on the scratch stack, read
+with `scratch-at`. The quotation may read the values below its element,
+`100 ( 1 2 3 ) [ over. +. ] map.`, but must leave them as they were and leave
+one value. A vec maps to a vec as long. `map` given two types builds a map
+type instead.
+
+Lifting is six clauses in `core.march`, an array and a number in either
+order for `+`, `-` and `*`:
+
+```
+[ < a ary a -- a ary > swap. [ over. +. ] map. swap. drop. ] + def.
+```
+
+So `( 1 2 3 ) 1 +.` is `( 2 3 4 )`, a literal taking the elements' type, and
+the prototype's original bug, `{ "k" ( 1 2 ) } "k" at. 1 +.`, lifts.
 
 ### Literals are clauses too
 
@@ -178,9 +244,14 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with nine primitives added: `pick`; checked
+The machine is march7's, with ten primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64/` and `i64mod`, which trap on overflow
-and division by zero; signed `i64lt?`; and `i64>text` and `f64>text`.
+and division by zero; signed `i64lt?`; `i64>text` and `f64>text`; and
+`scratch-at`, which reads a loop's state.
+
+Branches are labels until the code is sealed, so each alternative of a
+choice can be compiled on its own and laid out afterwards.
+`march8 --code SOURCE` prints the code a piece of source compiles to.
 
 ## Sessions
 
@@ -224,16 +295,22 @@ where the clause was applied. Errors while running are the machine's.
    them, which is the design's rule.
 4. **An array literal is a vec,** so lengths are constants wherever arrays
    are written out, and a vec is accepted as an array.
+5. **Guards fold like everything else.** A guard is a word applied to
+   copies of the inputs, so on known values it is decided at compile time
+   with no extra mechanism, and the choice disappears.
+6. **Compiling each alternative into code of its own** lets the results'
+   types be joined before any code for them is fixed, so a literal in one
+   clause adapts to the type another leaves (TYPES.md 2.7).
+7. **Lifting needs no special case:** with `map`, it is ordinary clauses.
 
 ## Not yet
 
-- **Guards** and the choice at run time between clauses, with the effect pass
-  that tells a guard's arity.
-- **Lifting** arithmetic over arrays, which needs `map` and quotations at
-  run time.
 - **Instances, recursion and tail calls.** A word is evaluated where it is
-  applied, always; a family applying itself is an error. Instances, ghosts
-  (TYPES.md 2.7) and shared code come next.
+  applied, always; a family applying itself to the same types is an error.
+  Instances, ghosts (TYPES.md 2.7) and shared code come next.
+- **Value patterns** such as `0` in a signature, and OR between contexts.
+- **Quotations at run time:** a quotation is always consumed at compile
+  time, by `.`, `def` or `map`.
 - **The surface notation** and its lowering to this form.
 - **Saving** a session as an image; string holes; tuples, records and sums;
   namespaces; showing types.

@@ -22,7 +22,7 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let usage = "usage: march8 [--fuel N] [--eval SOURCE | FILE]...";
+    let usage = "usage: march8 [--fuel N] [--eval SOURCE | --code SOURCE | FILE]...";
     let mut args = std::env::args().skip(1).peekable();
     if args.peek().is_none() {
         return Err(usage.into());
@@ -35,6 +35,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
             "--eval" => s.eval(&args.next().ok_or("missing source")?),
+            // The code a piece of source compiles to, without running it.
+            "--code" => {
+                let (ops, _) = s.compile(&args.next().ok_or("missing source")?)?;
+                for (i, op) in ops.iter().enumerate() {
+                    println!("{i:4}  {op:?}");
+                }
+                continue;
+            }
             "--help" | "-h" => {
                 println!("{usage}");
                 return Ok(());

@@ -97,6 +97,18 @@ impl Session {
     /// The code as the machine takes it: string literals become data
     /// objects, a final call a tail call, and a return ends it.
     fn seal(&mut self, code: &[Ins]) -> error::Result<Vec<Op>> {
+        // Where each label is, counted in operations.
+        let mut at = std::collections::HashMap::new();
+        let mut n = 0u32;
+        for ins in code {
+            match ins {
+                Ins::Label(l) => {
+                    at.insert(*l, n);
+                }
+                Ins::Str(_) => n += 2,
+                _ => n += 1,
+            }
+        }
         let mut ops = Vec::new();
         for ins in code {
             match ins {
@@ -106,6 +118,9 @@ impl Session {
                     ops.push(Op::Data(cid));
                     ops.push(Op::Prim(Primitive::Text));
                 }
+                Ins::Label(_) => {}
+                Ins::Jump(l) => ops.push(Op::Branch(at[l])),
+                Ins::JumpZero(l) => ops.push(Op::ZeroBranch(at[l])),
             }
         }
         if let Some(Op::Call(c)) = ops.last().cloned() {

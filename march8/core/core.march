@@ -40,6 +40,17 @@
 [ < i64 i64 -- i64 > i64*. ] * def.
 [ < f64 f64 -- f64 > f64*. ] * def.
 
+-- Arithmetic lifts over arrays: an array and a number, element by element
+-- (TYPES.md 2.8). The number is read below each element; a literal takes
+-- the elements' type.
+
+[ < a ary a -- a ary > swap. [ over. +. ] map. swap. drop. ] + def.
+[ < a a ary -- a ary > [ over. +. ] map. swap. drop. ] + def.
+[ < a ary a -- a ary > swap. [ over. -. ] map. swap. drop. ] - def.
+[ < a a ary -- a ary > [ over. swap. -. ] map. swap. drop. ] - def.
+[ < a ary a -- a ary > swap. [ over. *. ] map. swap. drop. ] * def.
+[ < a a ary -- a ary > [ over. *. ] map. swap. drop. ] * def.
+
 [ < i64 i64 -- i64 > i64/. ] / def.
 [ < f64 f64 -- f64 > f64/. ] / def.
 [ < i64 i64 -- i64 > i64mod. ] mod def.

@@ -53,6 +53,22 @@ pub enum Ins {
     Op(Op),
     /// A string literal: a data object and `text`.
     Str(Rc<str>),
+    /// A place a branch goes to.
+    Label(u32),
+    /// A branch to a label.
+    Jump(u32),
+    /// A branch to a label if the value on top, taken, is 0.
+    JumpZero(u32),
+}
+
+/// A guard in a signature: a word that looks at `arity` inputs, from input
+/// `slot`, without taking them, and leaves a flag (TYPES.md 2.15).
+#[derive(Clone, Debug)]
+pub struct Guard {
+    pub name: Rc<str>,
+    pub slot: usize,
+    pub arity: usize,
+    pub pos: Pos,
 }
 
 /// A signature: the input patterns, deepest first, and the outputs it
@@ -60,7 +76,54 @@ pub enum Ins {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sig {
     pub ins: Vec<Type>,
+    pub guards: Vec<Guard>,
     pub outs: Option<Vec<Type>>,
+}
+
+impl PartialEq for Guard {
+    fn eq(&self, o: &Self) -> bool {
+        (&self.name, self.slot, self.arity) == (&o.name, o.slot, o.arity)
+    }
+}
+
+impl Sig {
+    /// The context a clause is chosen by: its inputs and guards.
+    fn context(&self) -> (&[Type], &[Guard]) {
+        (&self.ins, &self.guards)
+    }
+}
+
+impl Clause {
+    fn guarded(&self) -> bool {
+        self.sig.as_ref().is_some_and(|s| !s.guards.is_empty())
+    }
+}
+
+/// One way a family's application can go: its code, and what it leaves, if
+/// it returns.
+struct Alt {
+    code: Vec<Ins>,
+    stack: Option<Vec<Jdg>>,
+    /// The label its guards' tests branch to when they fail.
+    skip: Option<u32>,
+}
+
+type Candidate = (i32, Rc<Clause>, Env);
+
+/// What the effect pass knows of a value.
+enum Item {
+    Name(Rc<str>),
+    Quote(usize, usize),
+    Other,
+}
+
+fn take(items: &mut Vec<Item>, ins: &mut usize, k: usize) {
+    if items.len() >= k {
+        items.truncate(items.len() - k);
+    } else {
+        *ins += k - items.len();
+        items.clear();
+    }
 }
 
 /// One definition: a context and a body (doc/design/TYPES.md 2.15).
@@ -102,8 +165,10 @@ pub struct Stage {
     /// Open array and map literals: the bracket, where they start, and the
     /// floor outside.
     literals: Vec<(u8, usize, usize)>,
-    /// Families being applied, so that one applying itself is caught.
-    active: Vec<Rc<str>>,
+    /// Families being applied, with the types they were applied to, so that
+    /// one applying itself to the same types is caught.
+    active: Vec<(Rc<str>, Vec<Type>)>,
+    labels: u32,
     pos: Pos,
     steps: u64,
     depth: u32,
@@ -177,6 +242,7 @@ impl Stage {
             steps: 0,
             depth: 0,
             core: false,
+            labels: 0,
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
             let name: Rc<str> = (*name).into();
@@ -227,6 +293,11 @@ impl Stage {
 
     fn emit(&mut self, op: Op) {
         self.code.push(Ins::Op(op));
+    }
+
+    fn label(&mut self) -> u32 {
+        self.labels += 1;
+        self.labels
     }
 
     fn push(&mut self, ty: Type, val: Val) {
@@ -333,13 +404,22 @@ impl Stage {
         let Some(w) = self.words.get(name) else {
             return Err(self.err(Kind::NoWord, format!("no word `{name}`")));
         };
-        if let Some((p, sig)) = w.prim.clone() {
+        // `map` builds a type from types, and maps over an array otherwise.
+        let typeish = self.stack.len() > self.floor
+            && match &self.stack[self.stack.len() - 1].val {
+                Val::Type(_) => true,
+                Val::Name(n) => self.words.get(n).is_some_and(|w| w.ty.is_some()),
+                _ => false,
+            };
+        if let Some(c) = w.con
+            && (typeish || w.prim.is_none())
+        {
+            self.construct(c)
+        } else if let Some((p, sig)) = w.prim.clone() {
             self.prim(name, p, &sig)
         } else if let Some(t) = w.ty {
             self.need(1)?;
             self.annotate(self.stack.len() - 1, t)
-        } else if let Some(c) = w.con {
-            self.construct(c)
         } else if !w.clauses.is_empty() {
             self.family(name)
         } else {
@@ -564,39 +644,35 @@ impl Stage {
 
     // ---- Families ----
 
-    /// Applies a family: the clause whose inputs match best (TYPES.md 2.8),
+    /// Applies a family (TYPES.md 2.8, 2.15). Its clauses are chosen in two
+    /// phases: by types now, keeping those whose inputs match; then, if some
+    /// have guards, by their guards at run time, in the order they were
+    /// defined, the best clause without guards last. A clause chosen is
     /// evaluated here, on these judgments (2.6).
     fn family(&mut self, name: &Rc<str>) -> Result<()> {
-        if self.active.contains(name) {
+        let clauses = self.words[name].clauses.clone();
+        let arity = clauses
+            .iter()
+            .filter_map(|c| c.sig.as_ref().map(|s| s.ins.len()))
+            .max()
+            .or_else(|| self.effect_of(name).map(|e| e.0))
+            .unwrap_or(0);
+        let reach = arity.min(self.stack.len() - self.floor);
+        let key = (
+            name.clone(),
+            self.stack[self.stack.len() - reach..]
+                .iter()
+                .map(|j| j.ty)
+                .collect::<Vec<_>>(),
+        );
+        if self.active.contains(&key) {
             return Err(self.err(
                 Kind::Limit,
                 format!("`{name}` applies itself: recursion is not built yet"),
             ));
         }
-        let clauses = self.words[name].clauses.clone();
-        let mut best: Option<(i32, Rc<Clause>, Env)> = None;
-        let mut tie = false;
-        for c in &clauses {
-            let m = match &c.sig {
-                None => Some((0, Env::default())),
-                Some(s) => self.match_sig(s),
-            };
-            let Some((score, env)) = m else { continue };
-            match &best {
-                Some((b, ..)) if score < *b => {}
-                Some((b, ..)) if score == *b => tie = true,
-                _ => {
-                    best = Some((score, c.clone(), env));
-                    tie = false;
-                }
-            }
-        }
-        let arity = clauses
-            .iter()
-            .filter_map(|c| c.sig.as_ref().map(|s| s.ins.len()))
-            .max()
-            .unwrap_or(1);
-        let Some((_, c, env)) = best else {
+        let mut cands = self.candidates(&clauses);
+        if cands.is_empty() {
             let fewest = clauses
                 .iter()
                 .map(|c| c.sig.as_ref().map_or(0, |s| s.ins.len()))
@@ -605,24 +681,438 @@ impl Stage {
             self.need(fewest)?;
             return Err(self.err(
                 Kind::NoWord,
-                format!("no word `{name}` for {}", self.top_types(arity)),
+                format!("no word `{name}` for {}", self.top_types(arity.max(1))),
             ));
+        }
+        let at = self.pos;
+        self.active.push(key);
+        let r = if cands.iter().any(|c| c.1.guarded()) {
+            // Literals settle by the best match, and the clauses match again.
+            let (_, c, env) = cands.iter().max_by_key(|c| c.0).expect("not empty").clone();
+            self.settle_literals(&c, &env)?;
+            cands = self.candidates(&clauses);
+            self.chain(name, &cands, arity, at)
+        } else {
+            match self.best(name, &cands, arity) {
+                Ok(Some((c, env))) => self.apply_clause(name, &c, env, at),
+                Ok(None) => unreachable!("candidates"),
+                Err(e) => Err(e),
+            }
         };
-        if tie {
+        self.active.pop();
+        self.pos = at;
+        r
+    }
+
+    /// The clauses whose inputs match the values on top, in the order they
+    /// were defined, with their scores and bindings.
+    fn candidates(&mut self, clauses: &[Rc<Clause>]) -> Vec<Candidate> {
+        clauses
+            .iter()
+            .filter_map(|c| {
+                let m = match &c.sig {
+                    None => Some((0, Env::default())),
+                    Some(s) => self.match_sig(s),
+                };
+                m.map(|(score, env)| (score, c.clone(), env))
+            })
+            .collect()
+    }
+
+    /// The best of the clauses given, if any: the highest score; a tie is an
+    /// error.
+    fn best(
+        &self,
+        name: &str,
+        cands: &[Candidate],
+        arity: usize,
+    ) -> Result<Option<(Rc<Clause>, Env)>> {
+        let Some(top) = cands.iter().map(|c| c.0).max() else {
+            return Ok(None);
+        };
+        let mut best = cands.iter().filter(|c| c.0 == top);
+        let (_, c, env) = best.next().expect("the maximum");
+        if best.next().is_some() {
             return Err(self.err(
                 Kind::Mismatch,
                 format!("clauses of `{name}` tie for {}", self.top_types(arity)),
             ));
         }
-        let at = self.pos;
-        self.active.push(name.clone());
-        let r = self.clause(&c, env);
-        self.active.pop();
+        Ok(Some((c.clone(), env.clone())))
+    }
+
+    /// Converts the literals among a clause's inputs to the types its
+    /// signature gives them.
+    fn settle_literals(&mut self, c: &Clause, env: &Env) -> Result<()> {
+        let Some(sig) = &c.sig else { return Ok(()) };
+        let base = self.stack.len() - sig.ins.len();
+        for (k, &p) in sig.ins.iter().enumerate() {
+            let t = self.types.subst(p, env);
+            if self.types.is_literal(self.stack[base + k].ty) && !self.types.has_vars(t) {
+                self.annotate(base + k, t)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Evaluates a clause of a family, noting the family in its errors.
+    fn apply_clause(&mut self, name: &str, c: &Rc<Clause>, env: Env, at: Pos) -> Result<()> {
+        let r = self.clause(c, env);
         self.pos = at;
         r.map_err(|e| match c.core {
-            true => self.blame(&c, e, at),
+            true => self.blame(c, e, at),
             false => e.within(name, at),
         })
+    }
+
+    /// The choice at run time: for each guarded clause, in order, a test of
+    /// its guards and its body; then the best clause without guards, or no
+    /// word. Each alternative starts from the same judgments, in code of its
+    /// own, and all must leave the same types (TYPES.md 2.9). A guard on known
+    /// values is decided now, so an alternative may be dropped, or taken for
+    /// certain.
+    fn chain(&mut self, name: &Rc<str>, cands: &[Candidate], arity: usize, at: Pos) -> Result<()> {
+        let n = cands
+            .iter()
+            .filter_map(|c| c.1.sig.as_ref().map(|s| s.ins.len()))
+            .max()
+            .unwrap_or(0);
+        self.need(n)?;
+        let snapshot = self.stack.clone();
+        let mut alts: Vec<Alt> = Vec::new();
+        let mut certain = false;
+        for (_, c, env) in cands.iter().filter(|c| c.1.guarded()) {
+            self.stack = snapshot.clone();
+            let outer = std::mem::take(&mut self.code);
+            let skip = self.label();
+            let test = self.test(c.sig.as_ref().expect("guarded"), skip);
+            let test = match test {
+                Ok(t) => t,
+                Err(e) => {
+                    self.code = outer;
+                    return Err(e.within(name, at));
+                }
+            };
+            if test == Some(false) {
+                self.code = outer;
+                continue;
+            }
+            let r = self.apply_clause(name, c, env.clone(), at);
+            let code = std::mem::replace(&mut self.code, outer);
+            r?;
+            alts.push(Alt {
+                code,
+                stack: Some(self.stack.clone()),
+                skip: test.is_none().then_some(skip),
+            });
+            if test == Some(true) {
+                certain = true;
+                break;
+            }
+        }
+        if !certain {
+            let plain: Vec<Candidate> = cands.iter().filter(|c| !c.1.guarded()).cloned().collect();
+            self.stack = snapshot.clone();
+            if let Some((c, env)) = self.best(name, &plain, arity)? {
+                let outer = std::mem::take(&mut self.code);
+                let r = self.apply_clause(name, &c, env, at);
+                let code = std::mem::replace(&mut self.code, outer);
+                r?;
+                alts.push(Alt {
+                    code,
+                    stack: Some(self.stack.clone()),
+                    skip: None,
+                });
+            } else if alts.is_empty() {
+                return Err(self.err(
+                    Kind::NoWord,
+                    format!(
+                        "no word `{name}` for {}: no clause's guard holds",
+                        self.top_types(arity)
+                    ),
+                ));
+            } else {
+                alts.push(Alt {
+                    code: vec![Ins::Op(Op::Lit(1)), Ins::Op(Op::Prim(P::Trap))],
+                    stack: None,
+                    skip: None,
+                });
+            }
+        }
+        self.merge(alts, &snapshot, snapshot.len() - n)
+    }
+
+    /// Joins a family's alternatives. One taken for certain is just its code
+    /// and judgments. Otherwise every alternative's results take the types
+    /// they share and become values at run time, each in its own code, and
+    /// the alternatives are laid out with their branches.
+    fn merge(&mut self, alts: Vec<Alt>, snapshot: &[Jdg], base: usize) -> Result<()> {
+        if let [
+            Alt {
+                skip: None,
+                stack: Some(_),
+                ..
+            },
+        ] = &alts[..]
+        {
+            let alt = alts.into_iter().next().expect("one");
+            self.code.extend(alt.code);
+            self.stack = alt.stack.expect("returns");
+            return Ok(());
+        }
+        let below = &snapshot[..base];
+        let mut results: Option<Vec<Vec<Type>>> = None;
+        for alt in &alts {
+            let Some(stack) = &alt.stack else { continue };
+            let same_below = stack.len() >= base
+                && stack[..base]
+                    .iter()
+                    .zip(below)
+                    .all(|(a, b)| a.ty == b.ty && a.val == b.val);
+            if !same_below {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    "the clauses chosen between at run time take different values",
+                ));
+            }
+            let tys: Vec<Type> = stack[base..].iter().map(|j| j.ty).collect();
+            let r = results.get_or_insert_with(|| vec![Vec::new(); tys.len()]);
+            if r.len() != tys.len() {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    "the clauses chosen between at run time leave different numbers of values",
+                ));
+            }
+            for (slot, t) in r.iter_mut().zip(tys) {
+                slot.push(t);
+            }
+        }
+        let mut joined = Vec::new();
+        for tys in results.unwrap_or_default() {
+            let Some(t) = self.join(&tys) else {
+                let all: Vec<_> = tys.iter().map(|&t| self.types.name(t)).collect();
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "the clauses chosen between at run time leave different types: {}",
+                        all.join(", ")
+                    ),
+                ));
+            };
+            joined.push(t);
+        }
+        let end = self.label();
+        let last = alts.len() - 1;
+        for (k, alt) in alts.into_iter().enumerate() {
+            let outer = std::mem::replace(&mut self.code, alt.code);
+            if let Some(stack) = alt.stack {
+                self.stack = stack;
+                for (i, &t) in joined.iter().enumerate() {
+                    self.annotate(base + i, t)?;
+                }
+                self.materialize_top(joined.len())?;
+            }
+            let code = std::mem::replace(&mut self.code, outer);
+            self.code.extend(code);
+            if k != last {
+                self.code.push(Ins::Jump(end));
+            }
+            if let Some(skip) = alt.skip {
+                self.code.push(Ins::Label(skip));
+            }
+        }
+        self.code.push(Ins::Label(end));
+        self.stack = below.to_vec();
+        for t in joined {
+            self.push(t, Val::Run);
+        }
+        Ok(())
+    }
+
+    /// Tests a clause's guards on copies of its inputs: `Some(true)` if they
+    /// hold now, `Some(false)` if one fails now, and `None` if some are
+    /// decided at run time, each branching to `skip` when it fails.
+    fn test(&mut self, sig: &Sig, skip: u32) -> Result<Option<bool>> {
+        let base = self.stack.len() - sig.ins.len();
+        let mut certain = true;
+        for g in &sig.guards {
+            let depth = self.stack.len();
+            for k in g.slot..g.slot + g.arity {
+                self.copy(base + k)?;
+            }
+            let floor = std::mem::replace(&mut self.floor, depth);
+            self.pos = g.pos;
+            let r = self.apply_word(&g.name);
+            self.floor = floor;
+            r?;
+            self.pos = g.pos;
+            if self.stack.len() != depth + 1 {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!("the guard `{}` must leave one flag", g.name),
+                ));
+            }
+            let flag = self.stack.pop().expect("one");
+            match flag.val {
+                Val::Int(0) => return Ok(Some(false)),
+                Val::Int(_) => {}
+                Val::Run if flag.ty == I64 => {
+                    self.code.push(Ins::JumpZero(skip));
+                    certain = false;
+                }
+                _ => {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!(
+                            "the guard `{}` leaves {}, not a flag",
+                            g.name,
+                            self.describe(&flag)
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(certain.then_some(true))
+    }
+
+    /// Pushes a copy of the judgment at `i`: a known value is copied as it
+    /// is, and a value at run time by copying it on the machine's stack.
+    fn copy(&mut self, i: usize) -> Result<()> {
+        let j = self.stack[i].clone();
+        if !j.known() {
+            let above = self.stack[i + 1..].iter().filter(|j| !j.known()).count();
+            match above {
+                0 => self.emit(Op::Prim(P::Dup)),
+                1 => self.emit(Op::Prim(P::Over)),
+                n => {
+                    self.emit(Op::Lit(n as u64));
+                    self.emit(Op::Prim(P::Pick));
+                }
+            }
+        }
+        self.stack.push(j);
+        Ok(())
+    }
+
+    // ---- Stack effects ----
+
+    /// How many values a word takes and leaves, worked out from its
+    /// definition: what a guard looks at. Clauses of a family share one
+    /// effect, so the first whose effect is known gives it.
+    fn effect_of(&self, name: &Rc<str>) -> Option<(usize, usize)> {
+        self.word_effect(name, &mut Vec::new())
+    }
+
+    fn word_effect(&self, name: &Rc<str>, visiting: &mut Vec<Rc<str>>) -> Option<(usize, usize)> {
+        let w = self.words.get(name)?;
+        if let Some((p, sig)) = &w.prim {
+            return Some(match p {
+                Prim::Dup => (1, 2),
+                Prim::Drop => (1, 0),
+                Prim::Swap => (2, 2),
+                Prim::Over => (2, 3),
+                Prim::Rot => (3, 3),
+                Prim::VecConcat | Prim::Map => (2, 1),
+                Prim::Def => (2, 0),
+                _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
+            });
+        }
+        if w.ty.is_some() {
+            return Some((1, 1));
+        }
+        if let Some(c) = w.con {
+            return Some(if c == Con::Ary { (1, 1) } else { (2, 1) });
+        }
+        if visiting.contains(name) {
+            return None;
+        }
+        visiting.push(name.clone());
+        let r = w
+            .clauses
+            .iter()
+            .find_map(|c| self.clause_effect(c, visiting));
+        visiting.pop();
+        r
+    }
+
+    fn clause_effect(&self, c: &Clause, visiting: &mut Vec<Rc<str>>) -> Option<(usize, usize)> {
+        match &c.sig {
+            Some(Sig {
+                ins,
+                outs: Some(outs),
+                ..
+            }) => Some((ins.len(), outs.len())),
+            Some(sig) => {
+                let (i, o) = self.effect(&c.body, visiting)?;
+                let n = sig.ins.len();
+                Some(if i <= n { (n, n - i + o) } else { (i, o) })
+            }
+            None => self.effect(&c.body, visiting),
+        }
+    }
+
+    /// The effect of tokens of the explicit form.
+    fn effect(&self, toks: &[Token], visiting: &mut Vec<Rc<str>>) -> Option<(usize, usize)> {
+        let mut ins = 0;
+        let mut items: Vec<Item> = Vec::new();
+        let mut i = 0;
+        while i < toks.len() {
+            match &toks[i].tok {
+                Tok::Int(_) | Tok::Dec(..) | Tok::Str(_) => items.push(Item::Other),
+                Tok::Name(s) => items.push(Item::Name(s.clone())),
+                Tok::Open(b'[') => {
+                    let j = matching(toks, i);
+                    items.push(Item::Quote(i + 1, j));
+                    i = j;
+                }
+                Tok::Open(b'<') => {
+                    let j = matching(toks, i);
+                    let n = self.bracket_size(&toks[i + 1..j]);
+                    take(&mut items, &mut ins, n);
+                    items.extend((0..n).map(|_| Item::Other));
+                    i = j;
+                }
+                Tok::Open(_) => {
+                    let j = matching(toks, i);
+                    if self.effect(&toks[i + 1..j], visiting)?.0 != 0 {
+                        return None;
+                    }
+                    items.push(Item::Other);
+                    i = j;
+                }
+                Tok::Apply => {
+                    let (a, b) = match items.pop()? {
+                        Item::Name(s) => self.word_effect(&s, visiting)?,
+                        Item::Quote(from, to) => self.effect(&toks[from..to], visiting)?,
+                        Item::Other => return None,
+                    };
+                    take(&mut items, &mut ins, a);
+                    items.extend((0..b).map(|_| Item::Other));
+                }
+                _ => return None,
+            }
+            i += 1;
+        }
+        Some((ins, items.len()))
+    }
+
+    /// How many types a bracket in a body leaves.
+    fn bracket_size(&self, toks: &[Token]) -> usize {
+        let mut n: usize = 0;
+        for t in toks {
+            match &t.tok {
+                Tok::Int(_) => n += 1,
+                Tok::Name(s) => match self.words.get(s) {
+                    Some(w) if w.ty.is_some() => n += 1,
+                    Some(w) if w.con == Some(Con::Ary) => {}
+                    Some(w) if w.con.is_some() => n = n.saturating_sub(1),
+                    None => n += 1,
+                    Some(_) => {}
+                },
+                _ => {}
+            }
+        }
+        n
     }
 
     /// An error from inside a core clause, as an error where it was applied.
@@ -680,12 +1170,13 @@ impl Stage {
     fn define(&mut self, name: &Rc<str>, clause: Clause) -> Result<()> {
         let ins = clause.sig.as_ref().map(|s| s.ins.clone());
         let c = Rc::new(clause);
-        let w = self.word(name);
+        let context = c.sig.as_ref().map(Sig::context);
+        let w = self.words.entry(name.clone()).or_default();
         let before = w.clauses.clone();
         match w
             .clauses
             .iter()
-            .position(|old| old.sig.as_ref().map(|s| &s.ins) == ins.as_ref())
+            .position(|old| old.sig.as_ref().map(Sig::context) == context)
         {
             Some(i) => w.clauses[i] = c.clone(),
             None => w.clauses.push(c.clone()),
@@ -713,8 +1204,15 @@ impl Stage {
             std::mem::take(&mut self.literals),
             self.pos,
         );
-        self.active.push(name.clone());
-        let mut r = self.clause(c, Env::default());
+        self.active.push((name.clone(), ins.clone()));
+        let sig = c.sig.as_ref().expect("typed");
+        let mut r = Ok(None);
+        if !sig.guards.is_empty() {
+            let skip = self.label();
+            r = self.test(sig, skip);
+            self.stack.truncate(ins.len());
+        }
+        let mut r = r.and_then(|_| self.clause(c, Env::default()));
         for i in 0..self.stack.len() {
             if r.is_ok() {
                 r = self.materialize(i);
@@ -736,6 +1234,7 @@ impl Stage {
     /// is below it. `--` divides inputs from outputs.
     pub fn bracket(&mut self, toks: &[Token]) -> Result<Sig> {
         let mut items: Vec<Type> = Vec::new();
+        let mut guards = Vec::new();
         let mut dashes = None;
         for t in toks {
             self.pos = t.pos;
@@ -755,9 +1254,7 @@ impl Stage {
                     } else if w.is_none() && s.len() == 1 && s.as_bytes()[0].is_ascii_lowercase() {
                         items.push(self.types.intern(Term::Var(s.as_bytes()[0] - b'a')));
                     } else if w.is_some() {
-                        return Err(
-                            self.err(Kind::Limit, format!("`{s}`: guards are not built yet"))
-                        );
+                        guards.push(self.guard(s, &items, dashes.is_some(), t.pos)?);
                     } else {
                         return Err(self.err(Kind::NoWord, format!("no type `{s}`")));
                     }
@@ -780,15 +1277,63 @@ impl Stage {
         Ok(match dashes {
             None => Sig {
                 ins: items,
+                guards,
                 outs: None,
             },
             Some(d) => {
                 let outs = items.split_off(d);
                 Sig {
                     ins: items,
+                    guards,
                     outs: Some(outs),
                 }
             }
+        })
+    }
+
+    /// A guard in a bracket: a word that looks at the inputs before it and
+    /// leaves one flag.
+    fn guard(&self, name: &Rc<str>, items: &[Type], outputs: bool, pos: Pos) -> Result<Guard> {
+        if outputs {
+            return Err(self.err(
+                Kind::Syntax,
+                format!("the guard `{name}` belongs among the inputs, before `--`"),
+            ));
+        }
+        let Some((ins, outs)) = self.effect_of(name) else {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!("`{name}` cannot be a guard: how many values it takes is not known"),
+            ));
+        };
+        if outs != 1 {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "`{name}` leaves {}, and a guard leaves one flag",
+                    values(outs)
+                ),
+            ));
+        }
+        if ins > items.len()
+            || items
+                .iter()
+                .any(|&t| matches!(self.types.term(t), Term::Nat(_)))
+        {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "the guard `{name}` looks at {}, and {} before it",
+                    values(ins),
+                    values(items.len())
+                ),
+            ));
+        }
+        Ok(Guard {
+            name: name.clone(),
+            slot: items.len() - ins,
+            arity: ins,
+            pos,
         })
     }
 
@@ -882,8 +1427,9 @@ impl Stage {
     // ---- Code ----
 
     /// Makes the judgment at `i` a value at run time, if it is not: its
-    /// value is emitted, under the values at run time above it. A literal
-    /// takes its default type.
+    /// value is emitted, then moved under the values at run time above it,
+    /// by `swap`, `rot rot`, or the scratch stack. A literal takes its
+    /// default type.
     fn materialize(&mut self, i: usize) -> Result<()> {
         if !self.stack[i].known() {
             return Ok(());
@@ -908,12 +1454,26 @@ impl Stage {
             }
         };
         let above = self.stack[i + 1..].iter().filter(|j| !j.known()).count();
-        for _ in 0..above {
-            self.emit(Op::Prim(P::ScratchPush));
-        }
-        self.code.push(ins);
-        for _ in 0..above {
-            self.emit(Op::Prim(P::ScratchPop));
+        match above {
+            0 => self.code.push(ins),
+            1 => {
+                self.code.push(ins);
+                self.emit(Op::Prim(P::Swap));
+            }
+            2 => {
+                self.code.push(ins);
+                self.emit(Op::Prim(P::Rot));
+                self.emit(Op::Prim(P::Rot));
+            }
+            n => {
+                for _ in 0..n {
+                    self.emit(Op::Prim(P::ScratchPush));
+                }
+                self.code.push(ins);
+                for _ in 0..n {
+                    self.emit(Op::Prim(P::ScratchPop));
+                }
+            }
         }
         self.stack[i].val = Val::Run;
         Ok(())
@@ -1032,6 +1592,7 @@ impl Stage {
                 let t = self.types.intern(Term::Vec(k, e));
                 self.emit_ops(2, &[P::Concat], &[t])?;
             }
+            Prim::Map => self.map(name)?,
             Prim::Def => {
                 let name = self.stack.pop().expect("matched");
                 let quote = self.stack.pop().expect("matched");
@@ -1084,6 +1645,96 @@ impl Stage {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// `map`: an array and a quotation. The quotation is compiled once, on
+    /// a value of the element type at run time, as the body of a loop over
+    /// the array; it may read the values below the element but must leave
+    /// them as they were, and leave one value. The loop's state, the array,
+    /// the new array and an index, is on the scratch stack. A vec maps to a
+    /// vec as long.
+    fn map(&mut self, name: &str) -> Result<()> {
+        let quote = self.stack.pop().expect("matched");
+        let Val::Quote(q) = quote.val else {
+            unreachable!("a quotation's value is its words")
+        };
+        let base = self.stack.len() - 1;
+        let (len, e) = match self.types.term(self.stack[base].ty) {
+            Term::Ary(e) => (None, e),
+            Term::Vec(n, e) => (Some(n), e),
+            _ => {
+                return Err(self.err(
+                    Kind::NoWord,
+                    format!("no word `{name}` for {} quote", self.top_types(1)),
+                ));
+            }
+        };
+        self.materialize(base)?;
+        self.stack.pop();
+        let (top, end) = (self.label(), self.label());
+        for op in [P::ScratchPush, P::Mark, P::Gather, P::ScratchPush] {
+            self.emit(Op::Prim(op));
+        }
+        self.emit(Op::Lit(0));
+        self.emit(Op::Prim(P::ScratchPush));
+        self.code.push(Ins::Label(top));
+        self.emit(Op::Prim(P::ScratchPeek));
+        self.emit(Op::Lit(2));
+        for op in [P::ScratchAt, P::VecLen, P::ILt] {
+            self.emit(Op::Prim(op));
+        }
+        self.code.push(Ins::JumpZero(end));
+        self.emit(Op::Lit(2));
+        for op in [P::ScratchAt, P::ScratchPeek, P::VecAt] {
+            self.emit(Op::Prim(op));
+        }
+        let below = self.stack.clone();
+        self.push(e, Val::Run);
+        self.enter()?;
+        let r = self.run(&q);
+        self.depth -= 1;
+        r?;
+        let kept = self.stack.len() == below.len() + 1
+            && self.stack[..below.len()]
+                .iter()
+                .zip(&below)
+                .all(|(a, b)| a.ty == b.ty && a.val == b.val);
+        if !kept {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "`{name}`'s quotation must take its element and leave one value, \
+                     keeping the values below"
+                ),
+            ));
+        }
+        self.materialize(below.len())?;
+        let r = self.stack.pop().expect("one").ty;
+        self.emit(Op::Lit(1));
+        for op in [P::ScratchAt, P::Swap, P::VecPush, P::Drop, P::ScratchPop] {
+            self.emit(Op::Prim(op));
+        }
+        self.emit(Op::Lit(1));
+        self.emit(Op::Prim(P::IAdd));
+        self.emit(Op::Prim(P::ScratchPush));
+        self.code.push(Ins::Jump(top));
+        self.code.push(Ins::Label(end));
+        for op in [
+            P::ScratchPop,
+            P::Drop,
+            P::ScratchPop,
+            P::ScratchPop,
+            P::Drop,
+        ] {
+            self.emit(Op::Prim(op));
+        }
+        let out = match len {
+            Some(n) => Term::Vec(n, r),
+            None => Term::Ary(r),
+        };
+        let out = self.types.intern(out);
+        self.push(out, Val::Run);
         Ok(())
     }
 

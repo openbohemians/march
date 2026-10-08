@@ -142,6 +142,9 @@ pub enum Primitive {
     ILt = 80,
     IntText = 81,
     FloatText = 82,
+    // ( n -- x ) A copy of the scratch cell n below the top, in this frame:
+    // a loop's state, read as FORTH reads its indices.
+    ScratchAt = 83,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -228,6 +231,7 @@ impl Primitive {
         (Self::ILt, "i64lt?"),
         (Self::IntText, "i64>text"),
         (Self::FloatText, "f64>text"),
+        (Self::ScratchAt, "scratch-at"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

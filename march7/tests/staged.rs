@@ -349,3 +349,64 @@ fn arithmetic_lifts_and_arrays_are_literals() {
     );
     assert_eq!(run(&g, "typed a ( ) ;"), Err(Error::User(23)));
 }
+
+#[test]
+fn instances_are_compiled_once_and_shared() {
+    let g = system();
+    // `sq` applied to an i64 that is not known at compile time is called as
+    // its i64 instance; two words applying it share that instance.
+    let sq = "typed sq dup * ;\n# < i64 >\ntyped s sq ;\ntyped t sq ;";
+    assert_eq!(run(&g, &format!("{sq} 7 s 8 t")).unwrap(), [49, 64]);
+    let c = cids(&g, &format!("{sq} ' s ' t"));
+    assert_eq!(c[0], c[1]);
+}
+
+#[test]
+fn families_recurse_through_their_instances() {
+    let g = system();
+    // The base clause, guarded, is first; the step applies the family to a
+    // value known only at run time, so its instance calls itself, typed by the
+    // base case, a ghost. Ordinary March calling `fact` gets the whole
+    // family, guard included.
+    let fact = "typed zero? 0 eq? ;\n# < i64 zero? >\ntyped fact drop 1 ;\n\
+                # < i64 >\ntyped fact dup 1 - fact * ;";
+    assert_eq!(
+        run(&g, &format!("{fact} 5 fact 0 fact 10 fact")).unwrap(),
+        [120, 1, 3_628_800]
+    );
+    assert_eq!(
+        run(&g, &format!("{fact}\n# main\ntyped f 5 fact ; f")).unwrap(),
+        [120]
+    );
+    let fib = "typed zero? 0 eq? ;\ntyped one? 1 eq? ;\n# < i64 zero? >\ntyped fib ;\n\
+               # < i64 one? >\ntyped fib ;\n# < i64 >\ntyped fib dup 1 - fib swap 2 - fib + ;";
+    assert_eq!(run(&g, &format!("{fib} 15 fib")).unwrap(), [610]);
+    // A call to itself last in an alternative is a tail call: deep recursion
+    // in constant space.
+    let sumto = "typed zero? 0 eq? ;\n# < i64 i64 zero? >\ntyped sumto drop ;\n\
+                 # < i64 i64 >\ntyped sumto swap over + swap 1 - sumto ;";
+    assert_eq!(
+        run(&g, &format!("{sumto} 0 100000 sumto")).unwrap(),
+        [5_000_050_000]
+    );
+    // Recursion before any alternative has finished has no types to go by.
+    let down = "typed positive? 0 gt? ;\n# < i64 >\ntyped down ;\n\
+                # < i64 positive? >\ntyped down 1 - down ;\n# < i64 >\ntyped d down ;";
+    assert_eq!(run(&g, down), Err(Error::User(23)));
+    // A family's first clause cannot apply the family, not yet defined.
+    assert_eq!(
+        run(&g, "# < i64 >\ntyped loop loop ;"),
+        Err(Error::User(40))
+    );
+}
+
+#[test]
+fn over_and_rot_move_judgments() {
+    let g = system();
+    assert_eq!(run(&g, "typed r 1 2 3 rot ; r").unwrap(), [2, 3, 1]);
+    assert_eq!(run(&g, "typed o 1 2 over ; o").unwrap(), [1, 2, 1]);
+    assert_eq!(
+        show(&g, "# < f64 i64 >\ntyped o over ; 1.5 2 o"),
+        "<3> 1.5 2 1.5"
+    );
+}

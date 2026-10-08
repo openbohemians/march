@@ -85,11 +85,11 @@ These are local release runs, not benchmarks.
 
 | Measurement | Value |
 |---|---|
-| Machine steps to compile `system.march` on generation 0 | 21.3 million |
-| The same on generation 1 | 8.50 million |
+| Machine steps to compile `system.march` on generation 0 | 22.7 million |
+| The same on generation 1 | 8.94 million |
 | Driver's default budget | 10 million steps |
-| Rebuilt image size | 170,036 bytes |
-| `system.march` | 3,403 lines |
+| Rebuilt image size | 181,373 bytes |
+| `system.march` | 3,606 lines |
 | `system.asm` listing | 1,403 lines |
 
 ## Tests
@@ -203,27 +203,27 @@ runaway programs, and it stays tight on purpose while runaways are common
 (decided with Thomas, 2026-09-30). Compile cost is tracked separately: the
 rebuild tests use an explicit budget of 30 million steps (120 million before
 generation 0 was re-frozen), and a named canary test asserts that a rebuilt
-system compiles the system source in under 9.5 million steps. It is 8.50
-million with the staged-types prototype's fourth step, whose 480 lines added
-15%, in proportion, and the canary went from 7.5 to 9.5 million; that is
-within 1.5 million of the driver's default budget, which the plain rebuild
-command uses. The third step took it to 7.40 million, the second to 7.08,
-and the first step's 210 lines from 6.23 to 6.68 million and the canary from
-6.5 to 7.5 million. It was 6.23 million as of the second string slice
-(escapes, holes, raw literals and the words on text), which added 11% to the
-source and 0.7 million steps; it was 5.51 million after the byte primitives
-(below), down from 8.90 million with strings and maps, which had come within
-0.1 million of the canary of the time and 1.1 million of the driver's
-default budget. The canary was raised to 9 million when `each`, `fold`,
-`map`, nested array types and scratch types (2026-10-04) took it to 8.09
-million: the code grew 6.6% in tokens and the steps 6.5%, so the cost per
-token did not change. It took 7.59 million as of arrays on persistent
-vectors (6.65 million as of checker slice 2: its code added 1.3 million to
-the 3.8 before it, typing at top level about a million more, mostly
-analysing the words the source runs at top level once per session, and
-keeping types by stack position rather than for the top eight slots half a
-million; arrays and lifting added 0.8 million). `an@` and `an!` became
-inline emitters along the way.
+system compiles the system source in under 9.5 million steps. It is 8.94
+million with the staged-types prototype's fifth step, within 1.1 million of
+the driver's default budget, which the plain rebuild command uses; the
+fourth step's 480 lines took it to 8.50 million, 15% more, in proportion,
+and the canary from 7.5 to 9.5 million. The third step took it to 7.40
+million, the second to 7.08, and the first step's 210 lines from 6.23 to
+6.68 million and the canary from 6.5 to 7.5 million. It was 6.23 million as
+of the second string slice (escapes, holes, raw literals and the words on
+text), which added 11% to the source and 0.7 million steps; it was 5.51
+million after the byte primitives (below), down from 8.90 million with
+strings and maps, which had come within 0.1 million of the canary of the
+time and 1.1 million of the driver's default budget. The canary was raised
+to 9 million when `each`, `fold`, `map`, nested array types and scratch
+types (2026-10-04) took it to 8.09 million: the code grew 6.6% in tokens and
+the steps 6.5%, so the cost per token did not change. It took 7.59 million
+as of arrays on persistent vectors (6.65 million as of checker slice 2: its
+code added 1.3 million to the 3.8 before it, typing at top level about a
+million more, mostly analysing the words the source runs at top level once
+per session, and keeping types by stack position rather than for the top
+eight slots half a million; arrays and lifting added 0.8 million). `an@` and
+`an!` became inline emitters along the way.
 
 Generation 0 grew faster: 93.4 million steps as of the second string slice
 (77.2 as of the byte primitives, 76.5 as of maps, 65.5 as of consumers at

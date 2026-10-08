@@ -8,7 +8,8 @@ same day: types as data, built by `ary`, `vec` and `map`; strings; and
 `length`, `at` and `concat` typed by structure. Step 4, the same day:
 headings, families of clauses chosen by types and by guards, type
 variables, `--` outputs, lifting over arrays, comparisons and array
-literals.
+literals. Step 5, the same day: instances, recursion typed by ghosts, tail
+calls, and ordinary March calling a family; `over` and `rot`.
 
 ## What it does
 
@@ -33,6 +34,12 @@ typed sign drop 0 ;                5 sign → 1, -3 sign → 0, chosen at run ti
 
 # < string i64 ary map >
 typed h "k" at 1 + ;               { "k" ( 1 2 ) } h → ( 2 3 ): it lifts
+
+typed zero? 0 eq? ;
+# < i64 zero? >
+typed fact drop 1 ;
+# < i64 >
+typed fact dup 1 - fact * ;        5 fact → 120, from ordinary March too
 ```
 
 - **`typed name … ;`** takes a body in the surface form. **Stage 1** lowers
@@ -164,6 +171,24 @@ literal's scale, and where its literal was emitted.
 - **Each family application has a frame of its own,** a small region for its
   candidates, its saved judgments and its jumps, since a clause may apply
   other families.
+- **Evaluated where applied, or an instance.** A family applied to values
+  all known at compile time, and not already being evaluated so, is
+  evaluated where it is applied, so `3 sq` folds to 9. Otherwise its inputs
+  are settled, by the primary clause's signature or to their defaults, and
+  it is an instance: the family resolved, guard chain and all, in a word of
+  its own for those input types, compiled the first time and called, so
+  words applying `sq` to an i64 share one instance. The checker is told an
+  instance's result types, which its code alone does not show.
+- **Recursion.** A family applied within its own instance, while it is
+  being compiled, calls itself. Its results are a ghost, typed by the first
+  alternative of the instance to finish: the base case, a guarded clause
+  defined first. A call to itself last in an alternative becomes a tail
+  call, so recursion that loops runs in constant space: a million levels of
+  `sumto`.
+- **Ordinary March calls the family.** A typed word compiled for itself, if
+  its family has other clauses, runs the family applied to values of its
+  signature's types, so `5 fact` from ordinary March tests the `zero?`
+  guard.
 - **String literals** are compiled as anywhere else, and are strings. Stage
   1 copies them whole, spaces and all.
 - **Stack words** move judgments as the code moves values:
@@ -224,15 +249,28 @@ type; 42 for typed words applied more than 16 deep.
 12. **Recursion through shared state needs frames.** Family resolution
     nests, since a clause may apply families, so its state lives in a region
     per application rather than in working memory: finding 8, applied.
+13. **The ghost falls out of the guard chain.** The chain already saves the
+    first alternative's result types to check the others, so a recursive
+    call's types come from there: the base case types the recursion, as
+    TYPES.md 2.7 proposed, with no separate inference.
+14. **Inline when known, instance when not** gives both folding and sharing:
+    constants fold through families, and code for unknown values is
+    compiled once per type.
+15. **Two type systems must agree.** Ordinary March's checker infers from
+    code and cannot see into an instance, so the prototype tells it the
+    instance's result types, as march's lifted words already do.
 
 ## Not yet
 
-- **Instances.** A typed word is inlined at each use. Compiling it once per
-  set of input types, and calling that code, would share it, and would let
-  ordinary March call a generic word.
-- **Recursion.** A word is not known while it is being defined, so it cannot
-  apply itself. With instances, it would call its own instance, typed by a
-  ghost (TYPES.md 2.7).
+- **Recursion's limits.** A family's first clause cannot apply the family,
+  not yet defined, so the base case comes first; and it must be a guarded
+  clause, since guarded clauses are compiled before the unguarded one, so a
+  recursive guarded clause before an unguarded base has no types to go by
+  (TYPES.md 2.7 would add a signature's outputs, or a pass over the base
+  first). Instances calling each other in a cycle are not supported.
+- **Ordinary March and later clauses.** The word ordinary March calls is the
+  newest clause compiled for itself; a guarded clause added later, which
+  has no code of its own, is not seen until another such clause is.
 - **Content identities of types.** Built types are one number each within
   a session; the hash of a term, for storing types and for instances across
   sessions, is not computed yet.
@@ -242,9 +280,6 @@ type; 42 for typed words applied more than 16 deep.
 - **Tuples and records,** and map literals in typed bodies.
 - **OR between contexts,** and nested headings and namespaces: one heading
   level for now.
-- **Calling families from ordinary March.** A family's clauses that compile
-  for themselves are each installed under its name, so ordinary March sees
-  the newest; only typed bodies choose among clauses.
 - **Outputs of applied clauses.** A clause's declared outputs are checked
   when it is compiled for itself, not where it is applied.
 - **Guards** look at inputs at most two down, are tested in the order

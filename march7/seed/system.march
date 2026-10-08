@@ -2255,10 +2255,13 @@ _v ᵥ
 -- Typed words of one name are the clauses of a family. Applied in a typed
 -- body, a family is resolved there, on the caller's judgments: by types at
 -- compile time, the most specific clause winning, and by guards at run time,
--- in the order the clauses were defined. A clause is evaluated where it is
--- applied, so its types are worked out for each use. A clause that takes
--- values without saying their types, or has guards or type variables, has no
--- code of its own: it exists only to be applied so.
+-- in the order the clauses were defined. A family applied to values all
+-- known at compile time is evaluated where it is applied, so its code folds;
+-- otherwise it is an instance, compiled once for its input types and called.
+-- A family applied within its own instance calls itself, and its results'
+-- types are those of the first alternative to finish, its base case. A
+-- clause that takes values without saying their types, or has guards or type
+-- variables, has no code of its own: it exists only to be applied so.
 --
 -- Types: 1 i64, 2 f64, 3 money (exact cents), 4 integer literal, 5 decimal
 -- literal, 6 a type, 7 an operation, 8 a typed word, 9 string, 10-35 the type
@@ -2270,7 +2273,8 @@ _v ᵥ
 -- emitted where it appears, as a placeholder whose opcode and value are
 -- patched once its type is known, so the code's stack always matches the
 -- judgments'. Operations: 1 `+`, 2 `*`, 3 `-`, 4 `dup`, 5 `drop`, 6 `swap`,
--- 7 `length`, 8 `at`, 9 `concat`, 10 `lt?`, 11 `gt?`, 12 `eq?`. A type term
+-- 7 `length`, 8 `at`, 9 `concat`, 10 `lt?`, 11 `gt?`, 12 `eq?`, 13
+-- `over`, 14 `rot`. A type term
 -- is 24 bytes: constructor (1 `ary`, 2 `vec`, 3 `map`) and two arguments: an
 -- element type; a length and an element type; a key and a value type. A
 -- typed word is 80 bytes: its explicit form's region and length, the values
@@ -2313,7 +2317,12 @@ _v ᵥ
 -- 256 each guard's word and how many types precede it, 16 bytes each; 320
 -- whether guards are being recorded; 328 where the bracket's types start;
 -- 344-360 a match's score, verdict and length; 728-768 a guard test's and
--- an alternative's temporaries; 776-792 a bracket's effect.
+-- an alternative's temporaries; 776-792 a bracket's effect; 800 and 808 the
+-- instances' region and how many; 816 where the instance being compiled last
+-- called itself, -1 if it has not; 824 the instance whose family is to be
+-- resolved next, -1 if none; 840 the instance being compiled, -1 if none;
+-- 856-872 an instance's key; 880 the token of `st-family`; 888 how many
+-- families are being evaluated where applied, and from 896 which.
 : st-state 112 get 0= if 6144 region-new 112 put 0 120 put then ;
 -- ( off -- v ) ( v off -- )
 : st-cell@ st-state 112 get swap 5120 u+ @ ;
@@ -2461,13 +2470,18 @@ _v ᵥ
 : st-elem-of
   dup 256 ult? if drop 0 exit then
   st-tparts drop swap 1 eq? if exit then drop 0 ;
--- ( t -- b ) A type as the checker's byte: i64, and money, 1; f64 2;
--- arrays of them 3 and 4; anything else 0.
+-- ( t -- b ) A type as the checker's byte (docs/CHECKER.md): i64, and
+-- money, 1; f64 2; string 253; arrays and vecs by their elements, maps by
+-- their keys' and values' kinds, as the checker builds them; anything else 0.
 : st-checker-type
-  dup 2 eq? if drop 2 exit then
   dup 1 eq? over 3 eq? or if drop 1 exit then
-  st-elem-of dup 2 eq? if drop 4 exit then
-  dup 1 eq? swap 3 eq? or if 3 else 0 then ;
+  dup 2 eq? if drop 2 exit then
+  dup 9 eq? if drop 253 exit then
+  dup 256 ult? if drop 0 exit then
+  st-tparts rot
+  dup 1 eq? if drop drop recur array-of exit then
+  dup 2 eq? if drop nip recur array-of exit then
+  drop recur value-kind swap recur key-kind swap map-of ;
 -- ( t -- ) The two judgments on top give way to a value of type t, after
 -- an operation is emitted.
 : st-result st-drop st-drop 0 0 0 -1 st-push ;
@@ -2549,6 +2563,23 @@ _v ᵥ
     0 32 st@ 16 put 0 848 put st-drop exit
   then
   1 prim, st-drop ;
+-- ( -- ) `over`: the second value copied on top, a literal as a new
+-- literal, anything else at run time.
+: st-over
+  2 st-need 1 st-value 0 st-value
+  1 0 st@ st-lit? if
+    1 0 st@ 1 1 16 st@ 1 24 st@ placeholder st-push exit
+  then
+  3 prim, 1 0 st@ 0 0 0 -1 st-push ;
+-- ( f -- ) ( -- ) `rot`, at run time, and of the three judgments.
+: st-rot-field
+  >r 2 r@ st@ 1 r@ st@ 0 r@ st@
+  1 r@ st! 2 r@ st! 0 r> st! ;
+: st-rot
+  3 st-need 0 st-value 1 st-value 2 st-value
+  4 prim,
+  0 st-rot-field 8 st-rot-field 16 st-rot-field 24 st-rot-field
+  32 st-rot-field ;
 -- ( f -- ) ( -- ) `swap`, at run time, and of the two judgments.
 : st-swap-field >r 1 r@ st@ 0 r@ st@ 1 r@ st! 0 r> st! ;
 : st-swap
@@ -2645,6 +2676,8 @@ _v ᵥ
   dup 5 eq? if drop st-drop-word exit then
   dup 6 eq? if drop st-swap exit then
   dup 7 eq? if drop st-length exit then
+  dup 13 eq? if drop st-over exit then
+  dup 14 eq? if drop st-rot exit then
   8 eq? if st-at else st-concat then ;
 -- ( r o n -- flag ) ( c -- flag ) Whether the current word is these bytes,
 -- or this one character.
@@ -2694,6 +2727,8 @@ _v ᵥ
   s" lt?" tok= if 7 1 10 0 -1 st-push exit then
   s" gt?" tok= if 7 1 11 0 -1 st-push exit then
   s" eq?" tok= if 7 1 12 0 -1 st-push exit then
+  s" over" tok= if 7 1 13 0 -1 st-push exit then
+  s" rot" tok= if 7 1 14 0 -1 st-push exit then
   st-find dup -1 eq? 0= if 8 swap 1 swap 0 -1 st-push exit then drop
   st-type-name 6 swap 1 swap 0 -1 st-push ;
 -- ( -- in out ) What applying the current name takes and leaves.
@@ -2703,6 +2738,8 @@ _v ᵥ
   s" dup" tok= if 1 2 exit then
   s" drop" tok= if 1 0 exit then
   s" swap" tok= if 2 2 exit then
+  s" over" tok= if 2 3 exit then
+  s" rot" tok= if 3 3 exit then
   s" length" tok= if 1 1 exit then
   s" at" tok= s" concat" tok= or if 2 1 exit then
   st-find dup -1 eq? 0= if dup 16 st-entry swap 24 st-entry exit then drop
@@ -2836,7 +2873,8 @@ _v ᵥ
 -- types; 264 how many alternatives jump to the end, and from 272 where; 336
 -- how many guards jump to the next alternative, and from 344 where; 376 the
 -- current clause's guards, how many, and from 384 each one's word and the
--- types before it.
+-- types before it; 448 whether this is an instance's own resolution, whose
+-- end is its return; 456 the family, the newest typed word of its name.
 -- ( i j -- flag ) Whether typed words i and j have one name.
 : st-same-name?
   over 32 st-entry over 32 st-entry eq? 0= if drop drop 0 exit then
@@ -2968,6 +3006,7 @@ _v ᵥ
       1 u+
     repeat drop
   then
+  dup 448 @ if 816 st-cell@ 1 u+ here eq? if 11 out 816 st-cell@ c! then then
   5 c, here over dup 264 @ 8 u* 272 u+ ! 0 u32,
   dup 264 @ 1 u+ swap 264 ! ;
 -- ( F -- ) Point the jumps to the next alternative, or to the end, here.
@@ -3050,23 +3089,167 @@ _v ᵥ
   dup st-patch-ends
   dup 160 @ region-free
   st-runtime-results ;
+-- ( fam -- ) ( -- ) ( fam -- flag ) The families being evaluated where
+-- applied: one is entered, one left, and whether one is among them.
+: st-fam-push
+  888 st-cell@ dup 16 ult? 0= if 42 trap then 8 u* 896 u+ st-cell!
+  888 st-cell@ 1 u+ 888 st-cell! ;
+: st-fam-pop 888 st-cell@ 1 u- 888 st-cell! ;
+: st-fam-active?
+  0 cycle dup 888 st-cell@ ult? while
+    over over 8 u* 896 u+ st-cell@ eq? if drop drop 1 exit then
+    1 u+
+  repeat drop drop 0 ;
+-- ( F -- j ) The clause that settles the inputs: the most specific
+-- unguarded one, or else the first guarded one.
+: st-primary
+  dup 136 @ dup -1 eq? if drop dup st-first-guarded then 16 u* 8 u+ @ ;
+-- ( F -- flag ) Whether to evaluate the family where it is applied: its
+-- inputs are all known at compile time, and it is not already being
+-- evaluated so, which would recurse without end.
+: st-inline-ok?
+  dup 456 @ st-fam-active? if drop 0 exit then
+  st-primary 16 st-entry
+  280 get over ult? if drop 0 exit then
+  0 cycle over over swap ult? while dup 8 st@ 0= if drop drop 0 exit then 1 u+ repeat
+  drop drop 1 ;
+-- ( n -- ) The literals among the top n values take their defaults.
+: st-default-top
+  0 cycle over over swap ult? while dup 0 st@ st-lit? if dup st-default then 1 u+ repeat
+  drop drop ;
+-- ( n -- types ) The types of the top n values, the deepest first, 16 bits
+-- each.
+: st-in-types
+  dup 5 ult? 0= if 27 trap then
+  >r 0 0 cycle dup r@ ult? while
+    r@ over u- 1 u- 0 st@ over 16 u* lshift rot or swap 1 u+
+  repeat drop r> drop ;
+-- ( j -- n ) Settle the inputs for clause j: by its signature, or, with
+-- none, literals taking their defaults. How many inputs there are.
+: st-settle-or-default
+  dup st-clause-sig dup -1 eq? if drop 16 st-entry dup st-default-top exit then
+  cycle dup while st-drop 1 u- repeat drop
+  st-settle-inputs ;
+-- Instances, 64 bytes each, at most 32: the family, its input types and how
+-- many, the token (0 while it is compiled), the frame of its resolution, and
+-- how many results and their types.
+: st-icache 800 st-cell@ 0= if 2048 region-new 800 st-cell! 0 808 st-cell! then 800 st-cell@ ;
+-- ( rec field -- v ) ( v rec field -- )
+: st-irec@ swap 64 u* u+ st-icache swap @ ;
+: st-irec! swap 64 u* u+ st-icache swap ! ;
+-- ( fam types n -- rec | -1 ) The instance for a family and input types.
+: st-ifind
+  872 st-cell! 864 st-cell! 856 st-cell!
+  st-icache drop
+  0 cycle dup 808 st-cell@ ult? while
+    dup 0 st-irec@ 856 st-cell@ eq?
+    over 8 st-irec@ 864 st-cell@ eq? and
+    over 16 st-irec@ 872 st-cell@ eq? and if exit then
+    1 u+
+  repeat drop -1 ;
+-- ( rec -- ) An instance's results, pushed as values known at run time.
+: st-push-results
+  >r r@ 40 st-irec@ 0 cycle over over swap ult? while
+    r@ 48 st-irec@ over 16 u* rshift 65535 and 0 0 0 -1 st-push 1 u+
+  repeat drop drop r> drop ;
+-- ( rec -- ) The results of an instance calling itself, still being
+-- compiled: a ghost, typed by the first alternative of its resolution to
+-- finish, its base case. Recursion before a base case is an error.
+: st-push-ghost
+  32 st-irec@ dup 0= if 23 trap then
+  dup 192 @ dup -1 eq? if 23 trap then
+  cycle dup while 1 u- over over 8 u* 200 u+ @ 0 0 0 -1 st-push repeat drop drop ;
+-- ( -- ) The instance being compiled: its results, literals taking their
+-- defaults, remembered.
+: st-icapture-results
+  280 get dup 5 ult? 0= if 27 trap then
+  dup st-default-top
+  dup 840 st-cell@ 40 st-irec!
+  st-in-types 840 st-cell@ 48 st-irec! ;
+-- ( -- packed ) The instance being compiled's results as the checker's
+-- types, a byte each, the top first, as it remembers a word's outputs.
+: st-checker-outputs
+  0 0 cycle dup 840 st-cell@ 40 st-irec@ ult? while
+    840 st-cell@ 40 st-irec@ 1 u- over u-
+    16 u* 840 st-cell@ 48 st-irec@ swap rshift 65535 and st-checker-type
+    over 8 u* lshift rot or swap 1 u+
+  repeat drop ;
+-- ( fam types n -- rec ) Compile the instance of a family for these input
+-- types: in a word of its own, values of those types, known at run time,
+-- given to the family, resolved there (through 880, `st-family`, defined
+-- below). A call to itself last in an alternative becomes a tail call. The
+-- checker is told its results' types, which its code alone does not show.
+: st-icompile
+  808 st-cell@ 32 ult? 0= if 27 trap then
+  840 st-cell@ >r 808 st-cell@ 840 st-cell!
+  840 st-cell@ 16 st-irec! 840 st-cell@ 8 st-irec! 840 st-cell@ 0 st-irec!
+  0 840 st-cell@ 24 st-irec! 0 840 st-cell@ 32 st-irec!
+  0 840 st-cell@ 40 st-irec! 0 840 st-cell@ 48 st-irec!
+  808 st-cell@ 1 u+ 808 st-cell!
+  24 get >r 16 get >r 272 get >r 280 get >r 816 st-cell@ >r
+  65536 region-new 24 put 0 16 put 0 848 put -1 816 st-cell!
+  2560 region-new 272 put 0 280 put
+  0 cycle dup 840 st-cell@ 16 st-irec@ ult? while
+    840 st-cell@ 8 st-irec@ over 16 u* rshift 65535 and 0 0 0 -1 st-push 1 u+
+  repeat drop
+  840 st-cell@ 824 st-cell!
+  840 st-cell@ 0 st-irec@ 880 st-cell@ call
+  st-icapture-results
+  816 st-cell@ dup -1 eq? 0= swap 1 u+ here eq? and if 11 out 816 st-cell@ c! then
+  0 c,
+  out 0 here seal 840 st-cell@ 24 st-irec!
+  840 st-cell@ 24 st-irec@ dup callee-effect drop
+  st-checker-outputs swap 8 u* 712 get swap !
+  out region-free 272 get region-free
+  r> 816 st-cell! r> 280 put r> 272 put r> 16 put r> 24 put 0 848 put
+  840 st-cell@ r> 840 st-cell! ;
+-- ( F -- ) The family applied as an instance: the inputs settled, then a
+-- call to the instance for their types, compiled the first time; within the
+-- instance being compiled, a call to itself.
+: st-instance-path
+  dup st-primary st-settle-or-default
+  dup st-in-types
+  rot dup 456 @ swap region-free
+  rot >r swap r>
+  st-ifind
+  dup -1 eq? if drop 856 st-cell@ 864 st-cell@ 872 st-cell@ st-icompile then
+  dup 24 st-irec@ if
+    dup 24 st-irec@ compile,
+  else
+    dup 840 st-cell@ eq? 0= if 42 trap then
+    7 c, here 1 u- 816 st-cell!
+  then
+  dup 16 st-irec@ cycle dup while st-drop 1 u- repeat drop
+  dup 24 st-irec@ if st-push-results else st-push-ghost then ;
+-- ( F -- ) The family evaluated where it is applied: its one clause, or a
+-- choice at run time among its guarded clauses.
+: st-resolve
+  dup 456 @ st-fam-push
+  dup st-guarded? if dup st-dispatch else
+    dup 136 @ -1 eq? if 1 trap then
+    dup dup 136 @ 16 u* 8 u+ @ st-inline
+  then
+  st-fam-pop region-free ;
 -- ( idx -- ) A typed word applied: of the typed words with its name, the
 -- clauses whose input types match the values on top, chosen by types now and
--- by guards at run time. No match is the error for an unknown word.
+-- by guards at run time; evaluated where applied, or called as an instance.
+-- No match is the error for an unknown word.
 : st-family
-  512 region-new swap >r
-  0 over 0 ! -1 over 192 ! 0 over 264 ! 0 over 336 !
+  512 region-new swap over 456 !
+  0 over 0 ! -1 over 192 ! 0 over 264 ! 0 over 336 ! 0 over 448 !
   0 cycle dup 120 get ult? while
-    dup r@ st-same-name? if over over st-candidate then
+    over 456 @ over st-same-name? if over over st-candidate then
     1 u+
-  repeat drop r> drop
+  repeat drop
+  dup 0 @ 0= if 1 trap then
   dup st-choose
   dup 152 @ if 23 trap then
-  dup st-guarded? 0= if
-    dup 136 @ -1 eq? if 1 trap then
-    dup dup 136 @ 16 u* 8 u+ @ swap region-free st-inline exit
+  824 st-cell@ dup -1 eq? if
+    drop dup st-inline-ok? 0= if st-instance-path exit then
+  else
+    -1 824 st-cell! over swap 32 st-irec! 1 over 448 !
   then
-  dup st-dispatch region-free ;
+  st-resolve ;
 -- ( -- ) `.`: apply the top judgment, a type, an operation or a typed word.
 : st-apply
   1 st-need
@@ -3099,9 +3282,11 @@ _v ᵥ
 : st-token
   59 tok-char? if st-finish 1 exit then
   st-token-body 0 ;
--- ( -- ) The type stage, over the input up to `;`.
+-- ( -- ) The type stage, over the input up to `;`. It starts with no
+-- instance pending or being compiled, whatever an error left.
 : stage
   2560 region-new 272 put 0 280 put 0 168 put 0 32 st-cell!
+  -1 824 st-cell! -1 840 st-cell! 0 888 st-cell!
   cycle read-word 0= if 8 trap then st-token 0= while repeat ;
 -- ( r n -- ) Make r, n bytes long, the input, and run the type stage over it.
 : stage-text
@@ -3165,13 +3350,35 @@ _v ᵥ
   88 get 112 get 312 get 32 u+ !
   96 get 80 get 112 get 312 get 40 u+ 88 get copy
   120 get 1 u+ 120 put ;
+-- ( r o n -- ) Append bytes and a space to the explicit form being built,
+-- in the region at 312, 320 bytes long so far.
+: emit-text
+  >r 312 get 320 get r@ copy 320 get r> u+ 320 put
+  32 312 get 320 get c! 320 get 1 u+ 320 put ;
+-- ( idx -- n ) How many clauses typed word idx's family has.
+: st-family-size
+  0 swap 0 cycle dup 120 get ult? while
+    over over st-same-name? if rot 1 u+ rot rot then 1 u+
+  repeat drop drop ;
+-- ( r n -- r' n' ) What a typed word compiled for itself runs: its body, or,
+-- if its family has other clauses, the family applied to values of its
+-- signature's types, so ordinary March calling it gets every clause, guards
+-- included.
+: st-standalone-text
+  120 get 1 u- st-family-size 2 ult? if exit then
+  >r dup 0 r@ 62 byte-find dup r> eq? if drop 0 else 1 u+ then
+  dup 88 get u+ 8 u+ region-new 312 put 0 320 put
+  0 swap emit-text
+  96 get 80 get 88 get emit-text
+  s" . ;" emit-text
+  312 get 320 get ;
 -- ( r n -- ) A typed definition, in the explicit form: recorded, then
 -- compiled as a word of its own if a signature types all it takes, with no
 -- variable and no guard; otherwise it has no code of its own.
 : st-define
   over over st-effect >r over r> eq? >r
   st-record
-  r> if stage-text exit then
+  r> if st-standalone-text stage-text exit then
   drop drop out region-free 0 24 put 0 16 put 0 0 put ;
 -- ( -- r n ) The rest of the definition, through its `;`, as it is.
 : st-capture
@@ -3179,11 +3386,6 @@ _v ᵥ
   cycle read-word 0= if 8 trap then 59 tok-char? 0= while repeat
   56 get 312 get u- dup region-new 320 put
   >r 40 get 312 get 320 get 0 r@ copy 320 get r> ;
--- ( r o n -- ) Append bytes and a space to the explicit form being built,
--- in the region at 312, 320 bytes long so far.
-: emit-text
-  >r 312 get 320 get r@ copy 320 get r> u+ 320 put
-  32 312 get 320 get c! 320 get 1 u+ 320 put ;
 -- ( -- r n ) Stage 1: the rest of the definition, through its `;`, in the
 -- explicit form. A word that is not a number is followed by `.`, except `(`
 -- and `)`; a bracket and a string literal are copied as they are.
@@ -3391,7 +3593,8 @@ _v ᵥ
 
 -- ( data-region 0 length -- evaluate recover export describe )
 : boot 4096 32 put 0 8 put 0 0 put -1 744 put ' compile-token 104 put
-  ' st-token-body 592 put
+  ' st-token-body 592 put ' st-family 880 st-cell!
+  -1 824 st-cell! -1 840 st-cell! 0 888 st-cell!
   1048576 region-new 624 put 1048576 region-new 712 put ' effect-of 616 put 0 632 put
   4096 region-new 728 put register-families
   98312 region-new 3512 put ' instantiate 3504 put ' lift-for 3392 put

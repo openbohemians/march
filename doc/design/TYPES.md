@@ -6,8 +6,9 @@ way to build it. A prototype is built in march7 (march7/docs/STAGED.md):
 integers, floats, money, literal types, arithmetic and stack words through
 both stages, typed words evaluated for each use, brackets that annotate,
 types as data (`ary`, `vec`, `map`) with containers typed by their
-structure, headings, and families chosen by types and by guards, with type
-variables, outputs, lifting and array literals.
+structure, headings, families chosen by types and by guards, with type
+variables, outputs, lifting and array literals, and instances, with
+recursion typed by ghosts and tail calls.
 
 ## 1. Why
 

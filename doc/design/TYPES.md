@@ -167,8 +167,9 @@ an error.
   a map, a quotation, a type or a name. It is a class, not a type: no value
   has it, it binds nothing, and a clause using it is specialized for each
   type that arrives. It lets one clause lift a number into a tensor of any
-  rank (march8/docs/MACHINE.md, "Arrays as tensors"). Named classes such as
-  `number` (or `num`) are expected later, by OR between patterns.
+  rank (march8/docs/MACHINE.md, "Arrays as tensors"). A union is a class
+  too: `i64 f64 or` in a pattern matches either (3.6), and core.march names
+  the numbers `num` (built 2026-10-09).
 - **Families are open:** other code, such as a money module, may add
   clauses, scoped by namespaces and modules.
 - **The most specific clause wins; a tie is an error** for now. ("The
@@ -360,6 +361,10 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
      Proposed: a signature that names the union (`-- i64 or nil`) states the
      intent and silences it. Many instances of one family, chosen at compile
      time, cost code size, and are informative too.
+   - **Built so far** (2026-10-09, march8): unions in patterns, `or` and
+     `num`, and `def` naming a type. A union matches as its best member
+     does, a little less well, so a clause for one type beats one for a
+     union, which beats `atom`. Values of a union type come next.
    - **Not taken from Elixir:** gradual typing (`dynamic()`), which serves
      an existing dynamic language on a VM that tags every value; and full
      semantic subtyping, with complements of function types. March starts

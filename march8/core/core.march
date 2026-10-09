@@ -19,6 +19,11 @@
 [ < dec# -- money > dec#>money. ] money def.
 [ < int# -- dec# > int#>dec#. ] dec# def.
 
+-- Classes: a union in a pattern matches any of its types, a little less
+-- well than one of them alone (TYPES.md 3.6). `def` on a type names it.
+
+i64 f64 or. money or. int# or. dec# or. num def.
+
 -- Arithmetic. Two literals fold exactly, at compile time, and stay
 -- literals; a literal beside a number takes its type. Money is added and
 -- subtracted, not multiplied.

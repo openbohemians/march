@@ -69,7 +69,8 @@ bracket of n types annotates the top n values, the deepest first:
 `[ < i64 -- i64 > 1 +. ] inc def.`. A bracket first in the quotation is
 the clause's signature, its context (TYPES.md 2.15): the types of its
 inputs, then after `--` the outputs it promises. Clauses of one name are a
-family.
+family. `def` on a type names it: `string i64 map. config def.`, and a named
+class is called by its name in messages.
 
 ## Judgments
 
@@ -122,6 +123,8 @@ equal types are equal numbers.
 | `k v map` | a map |
 | `a` to `z` | type variables, in patterns |
 | `atom` | in patterns, any type that is not a container: a number, a string, a literal. A class, not a type: it binds nothing, so `< atom atom >` takes two of different types |
+| `a b or` | in patterns, a union: any of its types, `i64 f64 or`. Kept canonical, so order and repeats do not matter. It matches a little less well than one of its types alone, and better than `atom` |
+| `num` | the numbers: `i64 f64 or. money or. int# or. dec# or. num def.`, in `core.march` |
 
 **An array literal is a vec:** `( 7 8 9 )` is a `3 i64 vec`, so its length
 is a constant. A vec is accepted where an array of the same elements is
@@ -674,7 +677,11 @@ Warnings are planned, at three levels: informative, minor and severe
   when it is defined to the family as it is then, so a new clause makes new
   identities; or modules pinning what they import. To decide with images and
   modules (doc/design/TYPES.md, open question 2).
-- **OR between contexts.**
+- **OR between whole contexts.** A union is one slot's: `< num num >` takes
+  an i64 and an f64 together, and `< i64 i64 >` or `< f64 f64 >` as one
+  context is not built.
+- **Values of a union type,** with tags, clauses splitting on them, and the
+  informative warning (TYPES.md 3.6).
 - **Effects in signatures,** declared and checked like outputs, for words
   whose bodies the compiler cannot see; and domains besides `io`, such as
   the global store, with primitives that read.

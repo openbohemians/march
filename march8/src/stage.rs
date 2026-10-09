@@ -410,7 +410,12 @@ impl Stage {
             s.word(&name).ty = Some(i as Type);
             s.type_names.insert(i as Type, name);
         }
-        for (con, name) in [(Con::Ary, "ary"), (Con::Vec, "vec"), (Con::Map, "map")] {
+        for (con, name) in [
+            (Con::Ary, "ary"),
+            (Con::Vec, "vec"),
+            (Con::Map, "map"),
+            (Con::Or, "or"),
+        ] {
             s.word(&name.into()).con = Some(con);
         }
         let atom = s.types.intern(Term::Atom);
@@ -609,7 +614,7 @@ impl Stage {
                 _ => false,
             };
         if let Some(c) = w.con
-            && (typeish || w.prim.is_none())
+            && (typeish || (w.prim.is_none() && w.clauses.is_empty()))
         {
             self.construct(c)
         } else if let Some((p, sig)) = w.prim.clone() {
@@ -683,7 +688,12 @@ impl Stage {
     /// or it is a literal, converted by `t`'s clause for it.
     fn annotate(&mut self, i: usize, t: Type) -> Result<()> {
         let have = self.stack[i].ty;
-        if have == t || self.types.has_vars(t) {
+        // A class is checked, and the value keeps its type.
+        let fits = |s: &mut Self| s.match_slot(t, have, &mut Env::default()).is_some();
+        if have == t || (self.types.is_class(t) && fits(self)) {
+            return Ok(());
+        }
+        if self.types.is_pattern(t) && !self.types.is_class(t) {
             return Ok(());
         }
         if self.forgets(t, have) {
@@ -794,7 +804,7 @@ impl Stage {
                 if !fits {
                     return None;
                 }
-                score += if have == p { 4 } else { 2 };
+                score += if have == p { 8 } else { 4 };
                 continue;
             }
             score += self.match_slot(sig.ins[k], have, &mut env)?;
@@ -805,16 +815,36 @@ impl Stage {
     /// A literal matches its own type best, then its default type, then any
     /// type it converts to; anything else must unify.
     fn match_slot(&mut self, p: Type, have: Type, env: &mut Env) -> Option<i32> {
+        if let Term::Or(..) = self.types.term(p) {
+            return self.match_union(p, have, env);
+        }
         if self.types.is_literal(have) {
             return match self.types.term(p) {
                 Term::Var(v) => self.bind(v, have, env),
-                Term::Atom => Some(1),
-                _ if p == have => Some(4),
-                _ if self.accepts(p, have) => Some(if p == Self::default_of(have) { 2 } else { 1 }),
+                Term::Atom => Some(2),
+                _ if p == have => Some(8),
+                _ if self.accepts(p, have) => Some(if p == Self::default_of(have) { 4 } else { 2 }),
                 _ => None,
             };
         }
         self.unify(p, have, env)
+    }
+
+    /// A union matches as its best member does, and scores just below it, so
+    /// that a clause for that member alone is more specific.
+    fn match_union(&mut self, p: Type, have: Type, env: &mut Env) -> Option<i32> {
+        let mut best: Option<(i32, Env)> = None;
+        for m in self.types.members(p) {
+            let mut e = env.clone();
+            if let Some(s) = self.match_slot(m, have, &mut e)
+                && best.as_ref().is_none_or(|b| s > b.0)
+            {
+                best = Some((s, e));
+            }
+        }
+        let (s, e) = best?;
+        *env = e;
+        Some(s - 1)
     }
 
     fn bind(&mut self, v: u8, have: Type, env: &mut Env) -> Option<i32> {
@@ -835,24 +865,26 @@ impl Stage {
         }
     }
 
-    /// Scores 4 for each part of the pattern that is not a variable, and 2
-    /// where a vec stands for an array.
+    /// Scores 8 for each part of the pattern that is not a variable, 4 where
+    /// a vec stands for an array, 2 for an atom, and a union 1 less than its
+    /// best member.
     fn unify(&mut self, p: Type, have: Type, env: &mut Env) -> Option<i32> {
         match (self.types.term(p), self.types.term(have)) {
             (Term::Var(v), _) => self.bind(v, have, env),
+            (Term::Or(..), _) => self.match_union(p, have, env),
             // An atom: any type at run time that is not a container.
             (Term::Atom, Term::Base(b)) => {
-                (!matches!(b, Base::Type | Base::Symbol | Base::Quote)).then_some(1)
+                (!matches!(b, Base::Type | Base::Symbol | Base::Quote)).then_some(2)
             }
-            (Term::Base(a), Term::Base(b)) => (a == b).then_some(4),
-            (Term::Nat(a), Term::Nat(b)) => (a == b).then_some(4),
-            (Term::Ary(e), Term::Ary(f)) => Some(4 + self.unify(e, f, env)?),
-            (Term::Ary(e), Term::Vec(_, f)) => Some(2 + self.unify(e, f, env)?),
+            (Term::Base(a), Term::Base(b)) => (a == b).then_some(8),
+            (Term::Nat(a), Term::Nat(b)) => (a == b).then_some(8),
+            (Term::Ary(e), Term::Ary(f)) => Some(8 + self.unify(e, f, env)?),
+            (Term::Ary(e), Term::Vec(_, f)) => Some(4 + self.unify(e, f, env)?),
             (Term::Vec(n, e), Term::Vec(m, f)) => {
-                Some(4 + self.unify(n, m, env)? + self.unify(e, f, env)?)
+                Some(8 + self.unify(n, m, env)? + self.unify(e, f, env)?)
             }
             (Term::Map(k, v), Term::Map(k2, v2)) => {
-                Some(4 + self.unify(k, k2, env)? + self.unify(v, v2, env)?)
+                Some(8 + self.unify(k, k2, env)? + self.unify(v, v2, env)?)
             }
             _ => None,
         }
@@ -1036,7 +1068,7 @@ impl Stage {
         for (k, &p) in sig.ins.iter().enumerate() {
             let t = self.types.subst(p, env);
             if self.types.is_literal(self.stack[base + k].ty)
-                && !self.types.has_vars(t)
+                && !self.types.is_pattern(t)
                 && !(sig.value(k) && self.types.is_literal(t))
             {
                 self.annotate(base + k, t)?;
@@ -1562,7 +1594,7 @@ impl Stage {
         let outs = c.sig.as_ref()?.outs.clone()?;
         let outs: Vec<Type> = outs.iter().map(|&t| self.types.subst(t, &env)).collect();
         outs.iter()
-            .all(|&t| !self.types.has_vars(t))
+            .all(|&t| !self.types.is_pattern(t))
             .then_some(outs)
     }
 
@@ -1961,7 +1993,7 @@ impl Stage {
         }
         let typed = ins.is_some_and(|ins| {
             ins.iter()
-                .all(|&t| !self.types.has_vars(t) && !self.types.compile_time_only(t))
+                .all(|&t| !self.types.is_pattern(t) && !self.types.compile_time_only(t))
         });
         if typed && let Err(e) = self.check(name, &c) {
             self.word(name).clauses = before;
@@ -2216,6 +2248,13 @@ impl Stage {
                 let k = ty(self, items)?;
                 Term::Map(k, v)
             }
+            Con::Or => {
+                let b = ty(self, items)?;
+                let a = ty(self, items)?;
+                let t = self.types.union(a, b);
+                items.push(Part::Ty(t));
+                return Ok(());
+            }
         };
         items.push(Part::Ty(self.types.intern(t)));
         Ok(())
@@ -2250,9 +2289,29 @@ impl Stage {
                 let k = self.pop_type()?;
                 Term::Map(k, v)
             }
+            Con::Or => {
+                let b = self.pop_type()?;
+                let a = self.pop_type()?;
+                let t = self.types.union(a, b);
+                self.push(TYPE, Val::Type(t));
+                return Ok(());
+            }
         };
         let t = self.types.intern(t);
         self.push(TYPE, Val::Type(t));
+        Ok(())
+    }
+
+    /// `def` on a type: the name is a name for it, as `i64 f64 or. num def.`
+    /// names a class, in a bracket or applied to a value.
+    fn name_type(&mut self, name: &Rc<str>, t: Type) -> Result<()> {
+        let w = self.word(name);
+        if w.ty.is_some() || w.con.is_some() {
+            return Err(self.err(Kind::Mismatch, format!("`{name}` names a type already")));
+        }
+        w.ty = Some(t);
+        self.types.name_class(t, name);
+        self.instances.clear();
         Ok(())
     }
 
@@ -2509,8 +2568,19 @@ impl Stage {
             Prim::Def => {
                 let name = self.stack.pop().expect("matched");
                 let quote = self.stack.pop().expect("matched");
+                let typed = match &quote.val {
+                    Val::Type(t) => Some(*t),
+                    Val::Name(n, _) => self.words.get(n).and_then(|w| w.ty),
+                    _ => None,
+                };
+                if let (Val::Name(name, _), Some(t)) = (&name.val, typed) {
+                    return self.name_type(name, t);
+                }
                 let (Val::Name(name, _), Val::Quote(q)) = (name.val, quote.val) else {
-                    return Err(self.err(Kind::Mismatch, "`def` takes a quotation and a name"));
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        "`def` takes a quotation or a type, and a name",
+                    ));
                 };
                 let at = q.first().map_or(self.pos, |t| t.pos);
                 let (sig, body) = match q.first().map(|t| &t.tok) {

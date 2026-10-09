@@ -364,7 +364,7 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::FPow, "f64-pow", "< f64 f64 -- f64 >", &[P::FPow]),
     d(Prim::IPow, "i64-pow", "< i64 i64 -- i64 >", &[P::IPow]),
     d(Prim::IntPow, "int#-pow", "< int# int# -- int# >", &[]),
-    d(Prim::Def, "def", "< quote symbol -- >", &[]),
+    d(Prim::Def, "def", "< a symbol -- >", &[]),
 ];
 
 /// Whether the stage handles the primitive itself, rather than by its

@@ -70,6 +70,10 @@ pub enum Term {
     /// a literal (Thomas, 2026-10-09). A class of types, not a type: no value
     /// has it, and it binds nothing.
     Atom,
+    /// In a pattern, a union, `i64 f64 or`: any of its members
+    /// (doc/design/TYPES.md 3.6). Kept canonical, its members sorted, without
+    /// repeats and nested to the right, so equal unions are one type.
+    Or(Type, Type),
 }
 
 /// The constructors a bracket or `.` can apply.
@@ -78,11 +82,15 @@ pub enum Con {
     Ary,
     Vec,
     Map,
+    Or,
 }
 
 pub struct Types {
     terms: Vec<Term>,
     index: HashMap<Term, Type>,
+    /// The names `def` gave classes, which messages use: no value has a
+    /// class's type, so the name never hides a value's own.
+    classes: HashMap<Type, String>,
 }
 
 impl Default for Types {
@@ -96,6 +104,7 @@ impl Types {
         let mut t = Self {
             terms: Vec::new(),
             index: HashMap::new(),
+            classes: HashMap::new(),
         };
         for (b, _) in Base::ALL {
             t.intern(Term::Base(b));
@@ -121,19 +130,52 @@ impl Types {
     pub fn compile_time_only(&self, t: Type) -> bool {
         matches!(t, INT_LIT | DEC_LIT | TYPE | SYMBOL | QUOTE)
     }
-    pub fn has_vars(&self, t: Type) -> bool {
+    /// Whether `t` is a pattern rather than one type: it has a variable or a
+    /// class, `atom` or a union.
+    pub fn is_pattern(&self, t: Type) -> bool {
         match self.term(t) {
-            Term::Var(_) | Term::Atom => true,
+            Term::Var(_) | Term::Atom | Term::Or(..) => true,
             Term::Base(_) | Term::Nat(_) => false,
-            Term::Ary(e) => self.has_vars(e),
-            Term::Vec(n, e) | Term::Map(n, e) => self.has_vars(n) || self.has_vars(e),
+            Term::Ary(e) => self.is_pattern(e),
+            Term::Vec(n, e) | Term::Map(n, e) => self.is_pattern(n) || self.is_pattern(e),
         }
+    }
+    /// Whether `t` is a class: it matches types without binding them.
+    pub fn is_class(&self, t: Type) -> bool {
+        matches!(self.term(t), Term::Atom | Term::Or(..))
+    }
+    /// The union of two types: their members together, sorted, without
+    /// repeats. A union of one member is that type.
+    pub fn union(&mut self, a: Type, b: Type) -> Type {
+        let mut ms = self.members(a);
+        ms.extend(self.members(b));
+        ms.sort_unstable();
+        ms.dedup();
+        let mut t = ms.pop().expect("a member");
+        while let Some(m) = ms.pop() {
+            t = self.intern(Term::Or(m, t));
+        }
+        t
+    }
+    /// A union's members, or the type itself.
+    pub fn members(&self, mut t: Type) -> Vec<Type> {
+        let mut ms = Vec::new();
+        while let Term::Or(a, b) = self.term(t) {
+            ms.push(a);
+            t = b;
+        }
+        ms.push(t);
+        ms
     }
     /// The type with each bound variable replaced by its binding.
     pub fn subst(&mut self, t: Type, env: &Env) -> Type {
         match self.term(t) {
             Term::Var(v) => env.0[v as usize].unwrap_or(t),
             Term::Atom => t,
+            Term::Or(a, b) => {
+                let (a, b) = (self.subst(a, env), self.subst(b, env));
+                self.union(a, b)
+            }
             Term::Base(_) | Term::Nat(_) => t,
             Term::Ary(e) => {
                 let e = self.subst(e, env);
@@ -149,8 +191,17 @@ impl Types {
             }
         }
     }
+    /// Names a class, for messages.
+    pub fn name_class(&mut self, t: Type, name: &str) {
+        if self.is_class(t) {
+            self.classes.entry(t).or_insert_with(|| name.to_string());
+        }
+    }
     /// The type as a bracket writes it: `3 i64 vec`, `string i64 ary map`.
     pub fn name(&self, t: Type) -> String {
+        if let Some(n) = self.classes.get(&t) {
+            return n.clone();
+        }
         match self.term(t) {
             Term::Base(b) => Base::ALL.iter().find(|x| x.0 == b).unwrap().1.to_string(),
             Term::Nat(n) => n.to_string(),
@@ -159,6 +210,7 @@ impl Types {
             Term::Map(k, v) => format!("{} {} map", self.name(k), self.name(v)),
             Term::Var(v) => ((b'a' + v) as char).to_string(),
             Term::Atom => "atom".into(),
+            Term::Or(a, b) => format!("{} {} or", self.name(a), self.name(b)),
         }
     }
 }

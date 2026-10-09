@@ -208,6 +208,25 @@ fn value_patterns_choose_by_equality() {
     assert_eq!(show(&[z, "0 3", "z. swap. z."]), "<2> \"other\" \"zero\"");
     assert_eq!(cells(&[z, "0.0 z."]), Err(Kind::NoWord));
     assert_eq!(cells(&["[ < 1.5 i64. > ] b def."]), Err(Kind::Literal));
+    // Inside its clause the input is known to equal the value, so code
+    // there folds on it: `1 +.` on the 0 is the constant 1, its cell
+    // dropped. Passed through, it costs nothing.
+    let g = "[ < 0 > 1 +. ] g def. [ < i64 > 2 *. ] g def.";
+    assert_eq!(cells(&[g, "0 5", "g. swap. g."]).unwrap(), [10, 1]);
+    let c = code(&format!("{g} 5"), "g.");
+    assert!(
+        c.windows(2).any(|w| w
+            == [
+                march8::Op::Prim(march8::Primitive::Drop),
+                march8::Op::Lit(1)
+            ]),
+        "{c:?}"
+    );
+    let bye = "[ < \"quit\" > \"bye: \" swap. concat. ] cmd def. [ < string > ] cmd def.";
+    assert_eq!(
+        show(&[bye, "\"quit\" \"hi\"", "cmd. swap. cmd."]),
+        "<2> \"hi\" \"bye: quit\""
+    );
     // Patterns belong in signatures, and a value is not an output.
     assert_eq!(cells(&["1 < 1 >"]), Err(Kind::Syntax));
     assert_eq!(cells(&["[ < i64 -- 0 > ] b def."]), Err(Kind::Mismatch));

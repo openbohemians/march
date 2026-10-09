@@ -337,11 +337,11 @@ fn errors_say_where() {
     let mut s = Session::new();
     let e = s.eval("1 2 +\n  \"a\" + .").unwrap_err();
     assert_eq!(e.kind, Kind::NoWord);
-    assert_eq!(e.to_string(), "2:9: no word `+` for symbol string");
+    assert_eq!(e.to_string(), "2:7: no word `+` for symbol string");
     let e = s.eval("[ < i64 > \"x\" + . ] f def .").unwrap_err();
     assert_eq!(
         e.to_string(),
-        "1:17: no word `+` for i64 string\n  in `f`, defined at 1:3"
+        "1:15: no word `+` for i64 string\n  in `f`, defined at 1:3"
     );
 }
 

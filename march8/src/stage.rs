@@ -28,10 +28,15 @@ pub enum Val {
     Str(Rc<str>),
     /// A type, as a value.
     Type(Type),
-    /// A name not yet applied.
-    Name(Rc<str>),
+    /// A name not yet applied, and where it was written, where errors in
+    /// applying it are reported.
+    Name(Rc<str>, Pos),
     /// A quotation.
     Quote(Rc<[Token]>),
+    /// A value known at compile time whose cell is on the machine's stack:
+    /// an input a value pattern matched, inside its clause. Copied, it is the
+    /// known value; folded, its cell is dropped; else it stays as it is.
+    Pinned(Box<Val>),
     /// A run: zero or more values of the type, on the machine's stack, as
     /// many as the code inside an array literal left, counted only by its
     /// gather. Nothing reaches beneath a run.
@@ -48,7 +53,20 @@ impl Jdg {
     /// Whether the value is known at compile time, and so has no cell on
     /// the machine's stack yet.
     pub fn known(&self) -> bool {
-        !matches!(self.val, Val::Run | Val::Many)
+        !matches!(self.val, Val::Run | Val::Many | Val::Pinned(_))
+    }
+
+    /// A copy of the judgment that needs no cell, if its value is known:
+    /// a pinned value's copy is its known value.
+    fn known_copy(&self) -> Option<Jdg> {
+        match &self.val {
+            Val::Pinned(v) => Some(Jdg {
+                ty: self.ty,
+                val: (**v).clone(),
+            }),
+            _ if self.known() => Some(self.clone()),
+            _ => None,
+        }
     }
 }
 
@@ -509,7 +527,7 @@ impl Stage {
                     self.pull(t.pos)?;
                     i += 1;
                 }
-                Tok::Name(s) => self.push(SYMBOL, Val::Name(s.clone())),
+                Tok::Name(s) => self.push(SYMBOL, Val::Name(s.clone(), t.pos)),
                 Tok::Apply => self.apply()?,
                 Tok::Open(b'[') => {
                     let j = matching(toks, i);
@@ -547,7 +565,10 @@ impl Stage {
     fn apply(&mut self) -> Result<()> {
         let f = self.pop()?;
         match f.val {
-            Val::Name(n) => self.apply_word(&n),
+            Val::Name(n, at) => {
+                self.pos = at;
+                self.apply_word(&n)
+            }
             Val::Type(t) => {
                 self.need(1)?;
                 self.annotate(self.stack.len() - 1, t)
@@ -582,7 +603,7 @@ impl Stage {
         let typeish = self.stack.len() > self.floor
             && match &self.stack[self.stack.len() - 1].val {
                 Val::Type(_) => true,
-                Val::Name(n) => self.words.get(n).is_some_and(|w| w.ty.is_some()),
+                Val::Name(n, _) => self.words.get(n).is_some_and(|w| w.ty.is_some()),
                 _ => false,
             };
         if let Some(c) = w.con
@@ -611,9 +632,13 @@ impl Stage {
             Val::Float(x) => format!("{x:?} (f64)"),
             Val::Str(s) => format!("{s:?}"),
             Val::Type(t) => format!("the type `{}`", self.types.name(*t)),
-            Val::Name(n) => format!("the word `{n}`"),
+            Val::Name(n, _) => format!("the word `{n}`"),
             Val::Quote(_) => "a quotation".into(),
             Val::Many => format!("a run of {}", self.types.name(j.ty)),
+            Val::Pinned(v) => self.describe(&Jdg {
+                ty: j.ty,
+                val: (**v).clone(),
+            }),
         }
     }
 
@@ -1151,6 +1176,9 @@ impl Stage {
             self.code = outer;
             return Ok(Outcome::Dropped);
         }
+        if guarded && test.is_none() {
+            self.pin(c.sig.as_ref().expect("guarded"));
+        }
         let r = self.apply_clause(name, c, env.clone(), at);
         let code = std::mem::replace(&mut self.code, outer);
         let sure = guarded && test == Some(true);
@@ -1643,19 +1671,42 @@ impl Stage {
         Ok(certain.then_some(true))
     }
 
+    /// Inside a clause chosen by a value pattern tested at run time, its
+    /// input is known to equal the value: pinned to it, as the input's type.
+    fn pin(&mut self, sig: &Sig) {
+        let base = self.stack.len() - sig.ins.len();
+        for g in &sig.guards {
+            let Test::Equals(v) = &g.test else { continue };
+            let i = base + g.slot;
+            if self.stack[i].val != Val::Run {
+                continue;
+            }
+            let ty = self.stack[i].ty;
+            self.stack.push(v.clone());
+            let top = self.stack.len() - 1;
+            let r = self.annotate(top, ty);
+            let v = self.stack.pop().expect("pushed");
+            if r.is_ok() && v.known() {
+                self.stack[i].val = Val::Pinned(Box::new(v.val));
+            }
+        }
+    }
+
     /// Pushes a copy of the judgment at `i`: a known value is copied as it
     /// is, and a value at run time by copying it on the machine's stack.
     fn copy(&mut self, i: usize) -> Result<()> {
         let j = self.stack[i].clone();
-        if !j.known() {
-            let above = self.stack[i + 1..].iter().filter(|j| !j.known()).count();
-            match above {
-                0 => self.emit(Op::Prim(P::Dup)),
-                1 => self.emit(Op::Prim(P::Over)),
-                n => {
-                    self.emit(Op::Lit(n as u64));
-                    self.emit(Op::Prim(P::Pick));
-                }
+        if let Some(k) = j.known_copy() {
+            self.stack.push(k);
+            return Ok(());
+        }
+        let above = self.stack[i + 1..].iter().filter(|j| !j.known()).count();
+        match above {
+            0 => self.emit(Op::Prim(P::Dup)),
+            1 => self.emit(Op::Prim(P::Over)),
+            n => {
+                self.emit(Op::Lit(n as u64));
+                self.emit(Op::Prim(P::Pick));
             }
         }
         self.stack.push(j);
@@ -2158,7 +2209,7 @@ impl Stage {
         let j = self.pop()?;
         match &j.val {
             Val::Type(t) => Ok(*t),
-            Val::Name(n) if self.words.get(n).is_some_and(|w| w.ty.is_some()) => {
+            Val::Name(n, _) if self.words.get(n).is_some_and(|w| w.ty.is_some()) => {
                 Ok(self.words[n].ty.expect("checked"))
             }
             _ => Err(self.err(
@@ -2276,10 +2327,13 @@ impl Stage {
         match p {
             Prim::Dup => {
                 let j = self.stack[base].clone();
-                if !j.known() {
-                    self.emit(Op::Prim(P::Dup));
+                match j.known_copy() {
+                    Some(k) => self.stack.push(k),
+                    None => {
+                        self.emit(Op::Prim(P::Dup));
+                        self.stack.push(j);
+                    }
                 }
-                self.stack.push(j);
             }
             Prim::Drop => {
                 if !self.stack[base].known() {
@@ -2295,11 +2349,14 @@ impl Stage {
             }
             Prim::Over => {
                 let j = self.stack[base].clone();
-                if !j.known() {
-                    let top_runs = !self.stack[base + 1].known();
-                    self.emit(Op::Prim(if top_runs { P::Over } else { P::Dup }));
+                match j.known_copy() {
+                    Some(k) => self.stack.push(k),
+                    None => {
+                        let top_runs = !self.stack[base + 1].known();
+                        self.emit(Op::Prim(if top_runs { P::Over } else { P::Dup }));
+                        self.stack.push(j);
+                    }
                 }
-                self.stack.push(j);
             }
             Prim::Rot => {
                 let runs: Vec<bool> = self.stack[base..].iter().map(|j| !j.known()).collect();
@@ -2377,7 +2434,7 @@ impl Stage {
             Prim::Def => {
                 let name = self.stack.pop().expect("matched");
                 let quote = self.stack.pop().expect("matched");
-                let (Val::Name(name), Val::Quote(q)) = (name.val, quote.val) else {
+                let (Val::Name(name, _), Val::Quote(q)) = (name.val, quote.val) else {
                     return Err(self.err(Kind::Mismatch, "`def` takes a quotation and a name"));
                 };
                 let at = q.first().map_or(self.pos, |t| t.pos);
@@ -2408,9 +2465,25 @@ impl Stage {
                     .iter()
                     .map(|&t| self.types.subst(t, &env))
                     .collect();
-                let known = self.stack[base..].iter().all(Jdg::known);
+                let known = self.stack[base..]
+                    .iter()
+                    .all(|j| j.known() || matches!(j.val, Val::Pinned(_)));
                 if known && prims::foldable(p) {
-                    let args: Vec<Val> = self.stack.drain(base..).map(|j| j.val).collect();
+                    // A pinned input's cell goes: its value is known. They
+                    // are the only cells among the inputs, so on top.
+                    for j in &self.stack[base..] {
+                        if matches!(j.val, Val::Pinned(_)) {
+                            self.code.push(Ins::Op(Op::Prim(P::Drop)));
+                        }
+                    }
+                    let args: Vec<Val> = self
+                        .stack
+                        .drain(base..)
+                        .map(|j| match j.val {
+                            Val::Pinned(v) => *v,
+                            v => v,
+                        })
+                        .collect();
                     let vals = prims::fold(p, &args).map_err(|(k, m)| self.err(k, m))?;
                     for (val, ty) in vals.into_iter().zip(outs) {
                         self.push(ty, val);
@@ -2622,14 +2695,14 @@ impl Stage {
         let j = self.stack.pop().expect("matched");
         match j.val {
             Val::Quote(q) => Ok(q),
-            Val::Name(n) => Ok(vec![
+            Val::Name(n, at) => Ok(vec![
                 Token {
                     tok: Tok::Name(n),
-                    pos: self.pos,
+                    pos: at,
                 },
                 Token {
                     tok: Tok::Apply,
-                    pos: self.pos,
+                    pos: at,
                 },
             ]
             .into()),
@@ -2728,6 +2801,9 @@ impl Stage {
                 if self.stack[i].ty != t || self.stack[i].known() {
                     self.annotate(i, t)?;
                     self.materialize(i)?;
+                    changed = true;
+                } else if matches!(self.stack[i].val, Val::Pinned(_)) {
+                    self.stack[i].val = Val::Run;
                     changed = true;
                 }
             }

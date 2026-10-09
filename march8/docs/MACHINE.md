@@ -84,6 +84,7 @@ The machine runs the explicit form on a stack of **judgments** (TYPES.md
 | a type | a type, as a value |
 | a name, a quotation | a word not yet applied, a quotation |
 | nothing | a value at run time, on the machine's stack |
+| pinned | a value at run time known to equal a value: a value pattern's input, in its clause |
 
 **A known value has no code until a value at run time needs it.** When an
 operation that runs takes it, or the word ends, the value is
@@ -214,6 +215,13 @@ pattern**: the input must equal it (TYPES.md 2.12).
   The input keeps its own type. `< 0 i64. >` takes an i64 only, as `0 i64.`
   is an i64 in code.
 - **Strings too:** `< "quit" >`.
+- **Inside its clause the input is known to equal the value:** it is
+  *pinned*, a value known at compile time whose cell is still on the
+  machine's stack. Passed through, it costs nothing, so `fib`'s `< 0 > ;` is
+  no code; copied, the copy is the known value; folded, its cell is dropped
+  and the result is a constant, so `[ < 0 > 1 +. ] g def.` compiles that
+  clause to `drop 1`, and `< "quit" > "bye: " swap. concat.` to a drop and a
+  constant string.
 - Value patterns belong in signatures, among the inputs: one in a bracket
   in a body, or among the outputs, is an error.
 
@@ -498,11 +506,12 @@ from stdin to stdout, in code and comments but not strings.
 
 ## Errors
 
-Errors are found while compiling, with the line and column, and the words
-being applied:
+Errors are found while compiling, with the line and column of the word
+being applied, not its `.`, since a name remembers where it was written, and
+the words being applied:
 
 ```
-1:17: no word `+` for i64 string
+1:15: no word `+` for i64 string
   in `f`, defined at 1:3
 ```
 
@@ -577,8 +586,6 @@ running are the machine's.
   identities; or modules pinning what they import. To decide with images and
   modules (doc/design/TYPES.md, open question 2).
 - **OR between contexts.**
-- **What a value pattern tells its clause:** inside `< 0 >`, the input is
-  known to be 0, so code there could fold on it.
 - **Effects in signatures,** declared and checked like outputs, for words
   whose bodies the compiler cannot see; and domains besides `io`, such as
   the global store, with primitives that read.

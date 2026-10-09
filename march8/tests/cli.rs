@@ -31,7 +31,7 @@ fn the_repl_runs_each_line() {
     );
     assert_eq!(
         out,
-        "<1> 3\n<2> 3 \"xx\"\nError: 1:6: no word `foo`\ntypes shown\n\
+        "<1> 3\n<2> 3 \"xx\"\nError: 1:3: no word `foo`\ntypes shown\n\
          <3> 3 < i64 > \"xx\" < string > ( 1 3 6 ) < i64 ary >\n"
     );
 }

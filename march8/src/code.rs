@@ -145,7 +145,7 @@ pub enum Primitive {
     // ( n -- x ) A copy of the scratch cell n below the top, in this frame:
     // a loop's state, read as FORTH reads its indices.
     ScratchAt = 83,
-    // ( n -- a ) The array 0 to n-1; ( a -- a ) an array in reverse.
+    // ( n -- a ) The array 1 to n; ( a -- a ) an array in reverse.
     Range = 84,
     Reverse = 85,
     // ( j m -- x ) A copy of the cell j below the mark m from the innermost,
@@ -173,6 +173,10 @@ pub enum Primitive {
     FFloor = 96,
     FCeil = 97,
     FRound = 98,
+    // ( a x g -- a ) x inserted at the gap g, from 0, before the first
+    // element; ( a i -- a ) the element at i, from 0, removed.
+    VecInsert = 99,
+    VecRemove = 100,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -275,6 +279,8 @@ impl Primitive {
         (Self::FFloor, "f64-floor"),
         (Self::FCeil, "f64-ceil"),
         (Self::FRound, "f64-round"),
+        (Self::VecInsert, "vector-insert"),
+        (Self::VecRemove, "vector-remove"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

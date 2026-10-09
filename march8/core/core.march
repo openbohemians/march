@@ -170,10 +170,20 @@
 [ < string i64 i64 -- string > string-slice. ] slice def.
 [ < a ary i64 i64 -- a ary > ary-slice. ] slice def.
 
-[ < a ary -- a > 0 at. ] first def.
-[ < a ary -- a > dup. length. 1 -. at. ] last def.
-[ < a ary -- a ary > dup. length. 1 swap. slice. ] rest def.
-[ < a ary -- a ary > dup. length. 1 -. 0 swap. slice. ] most def.
+-- Elements count from 1, and from -1 at the end; gaps between them count
+-- from 0, before the first, each gap after its element, so -1 is after the
+-- last (Thomas, 2026-10-09). `slice` includes both its ends.
+
+[ < a ary -- a > 1 at. ] first def.
+[ < a ary -- a > -1 at. ] last def.
+[ < a ary -- a ary > 2 -1 slice. ] rest def.
+[ < a ary -- a ary > 1 -2 slice. ] most def.
+
+-- `xs v k insert` puts v in the gap after element k: 0 prepends and -1
+-- appends. `xs k remove` takes element k out.
+
+[ ary-insert. ] insert def.
+[ ary-remove. ] remove def.
 
 -- Loops. `each` applies a quotation to each element, from the first, and
 -- `each-right` from the last; the quotation takes its element and keeps the

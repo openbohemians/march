@@ -136,13 +136,13 @@ fn within_runs_a_word_on_the_end_of_an_array() {
     assert_eq!(show(&["( 5 6 7 )", "~ within."]), "<1> ( 5 7 6 )");
     // Too few elements: at compile time for a vec, at run time otherwise.
     assert_eq!(session(&["( 5 ) ~ within."]).err(), Some(Kind::Mismatch));
-    let short = "( ( 5 ) ( 6 7 ) ) 0 at.";
+    let short = "( ( 5 ) ( 6 7 ) ) 1 at.";
     assert_eq!(
         session(&[short, "~ within."]).err(),
         Some(Kind::Run(march8::machine::Error::User(2)))
     );
     assert_eq!(
-        show(&["( ( 5 6 ) ( 7 ) ) 0 at.", "~ within."]),
+        show(&["( ( 5 6 ) ( 7 ) ) 1 at.", "~ within."]),
         "<1> ( 6 5 )"
     );
 }
@@ -152,7 +152,7 @@ fn spread_puts_elements_on_the_stack() {
     assert_eq!(show(&["( 1 2 3 ) spread. +. +."]), "<1> 6");
     assert_eq!(show(&["( ( 1 2 3 ) spread. ~. )"]), "<1> ( 1 3 2 )");
     // Any array, inside a literal, spreads as a run.
-    let any = "( ( 4 5 ) ( 6 ) ) 0 at.";
+    let any = "( ( 4 5 ) ( 6 ) ) 1 at.";
     assert_eq!(show(&[any, "( _. spread. 7 )"]), "<1> ( 4 5 7 )");
     // Outside a literal it has nowhere to go.
     assert_eq!(session(&[any, "spread."]).err(), Some(Kind::Mismatch));
@@ -162,16 +162,47 @@ fn spread_puts_elements_on_the_stack() {
 fn negative_indices_count_from_the_end() {
     // -1 is the last, for arrays and strings, in `at` and `slice`.
     assert_eq!(
-        show(&["( 1 2 3 ) -1 at. \"héllo\" -1 at. ( 5 6 7 8 ) 1 -1 slice. \"héllo\" -2 -1 slice."]),
-        "<4> 3 111 ( 6 7 ) \"l\""
+        show(&["( 1 2 3 ) -1 at. \"héllo\" -1 at. ( 5 6 7 8 ) 2 -2 slice. \"héllo\" -2 -1 slice."]),
+        "<4> 3 111 ( 6 7 ) \"lo\""
     );
     // Known only at run time: the length is added when it is negative.
-    let any = "( ( 5 6 7 8 ) ) 0 at.";
+    let any = "( ( 5 6 7 8 ) ) 1 at.";
     assert_eq!(show(&[any, "dup. -1 at. swap. -2 at."]), "<2> 8 7");
     assert_eq!(show(&["( 5 6 7 ) -1", "at."]), "<1> 7");
-    assert_eq!(show(&[any, "-3 -1 slice."]), "<1> ( 6 7 )");
+    assert_eq!(show(&[any, "-3 -2 slice."]), "<1> ( 6 7 )");
     assert_eq!(show(&["\"abc\"", "-1 at."]), "<1> 99");
     // On a vec, checked at compile time from both ends.
     assert_eq!(session(&["( 1 2 3 ) -4 at."]).err(), Some(Kind::Mismatch));
-    assert_eq!(session(&["( 1 2 3 ) 3 at."]).err(), Some(Kind::Mismatch));
+    assert_eq!(session(&["( 1 2 3 ) 4 at."]).err(), Some(Kind::Mismatch));
+    assert_eq!(show(&["( 1 2 3 ) 3 at."]), "<1> 3");
+    // Elements count from 1: there is no element 0.
+    assert_eq!(session(&["( 1 2 3 ) 0 at."]).err(), Some(Kind::Mismatch));
+}
+
+#[test]
+fn insert_and_remove_by_gap_and_element() {
+    // Gap k is after element k: 0 prepends, -1 appends.
+    assert_eq!(
+        show(&[
+            "( 5 6 7 ) 9 0 insert. ( 5 6 7 ) 9 -1 insert. ( 5 6 7 ) 9 1 insert. ( 5 6 7 ) 9 -2 insert."
+        ]),
+        "<4> ( 9 5 6 7 ) ( 5 6 7 9 ) ( 5 9 6 7 ) ( 5 6 9 7 )"
+    );
+    assert_eq!(
+        show(&["( 5 6 7 ) 1 remove. ( 5 6 7 ) -1 remove. ( 5 6 7 ) 2 remove. length."]),
+        "<3> ( 6 7 ) ( 5 6 ) 2"
+    );
+    // At run time, from either end; a vec's new length is known.
+    let any = "( ( 5 6 7 8 ) ) 1 at.";
+    assert_eq!(show(&[any, "9 -1 insert. 2 remove."]), "<1> ( 5 7 8 9 )");
+    assert_eq!(show(&["( 5 6 7 ) 9 0 insert. length."]), "<1> 4");
+    // `first`, `last`, `rest`, `most`, and inclusive slices.
+    assert_eq!(
+        show(&["( 5 6 7 ) dup. first. over. last. rot. dup. rest. swap. most."]),
+        "<4> 5 7 ( 6 7 ) ( 5 6 )"
+    );
+    assert_eq!(
+        session(&["( 5 6 7 ) 9 5 insert."]).err(),
+        Some(Kind::Mismatch)
+    );
 }

@@ -71,12 +71,12 @@ fn folds_and_reductions_go_either_way() {
 
 #[test]
 fn ranges_and_repetition() {
-    assert_eq!(show(&["5 range."]), "<1> ( 0 1 2 3 4 )");
+    assert_eq!(show(&["5 range."]), "<1> ( 1 2 3 4 5 )");
     // A range of a known count is a vec, so its length is a constant.
     assert_eq!(show(&["5 range. length."]), "<1> 5");
-    assert_eq!(show(&["4", "range."]), "<1> ( 0 1 2 3 )");
+    assert_eq!(show(&["4", "range."]), "<1> ( 1 2 3 4 )");
     assert_eq!(printed("3 [ \"hi \" print. ] repeat."), "hi hi hi ");
-    assert_eq!(show(&["0 4 range. [ +. ] each."]), "<1> 6");
+    assert_eq!(show(&["0 4 range. [ +. ] each."]), "<1> 10");
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn arrays_in_parts() {
     );
     assert_eq!(show(&["( 1 2 3 ) most."]), "<1> ( 1 2 )");
     assert_eq!(show(&["( 1 2 3 ) count. \"abc\" count."]), "<2> 3 3");
-    assert_eq!(show(&["\"héllo\" 1 3 slice."]), "<1> \"él\"");
+    assert_eq!(show(&["\"héllo\" 1 3 slice."]), "<1> \"hél\"");
     // `sort`: numbers by value, strings by text; `keys` and `values` in one
     // order.
     assert_eq!(

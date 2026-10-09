@@ -40,7 +40,10 @@ fn each_inside_a_literal_collects() {
         "<1> ( 0 1 3 6 )"
     );
     assert_eq!(show(&["( 3 [ 7 ] repeat. )"]), "<1> ( 7 7 7 )");
-    assert_eq!(show(&["( 4 range. [ dup. *. ] each. )"]), "<1> ( 0 1 4 9 )");
+    assert_eq!(
+        show(&["( 4 range. [ dup. *. ] each. )"]),
+        "<1> ( 1 4 9 16 )"
+    );
     // With a count known only at run time, the result is an array of any
     // length.
     let s = session(&[KEEP, "( ( 1 5 ) keep each. ) length."]).unwrap();

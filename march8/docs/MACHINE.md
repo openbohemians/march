@@ -317,8 +317,19 @@ The rest are words in `core.march`:
 | `xs q reduce` | `fold` from the first element; `reduce-right`, `fold-right` from the last |
 | `xs q scan` | the running reductions from the left: `( 1 2 3 ) + scan.` is `( 1 3 6 )`, a comprehension |
 | `n q repeat` | `q` n times, as `each` over `n range` |
-| `first`, `last`, `rest`, `most`, `slice` | parts of an array, and `slice` of a string |
-| `at`, `slice` with a negative index | counted from the end: `-1 at.` is the last element of an array or string, `1 -1 slice.` all but the first and last; settled at compile time when the index is known, by one sign test when not |
+| `first`, `last`, `rest`, `most`, `slice` | parts of an array, and `slice` of a string, from element i to element j, both included |
+| `xs v k insert`, `xs k remove` | v put in the gap after element k: `0 insert` prepends, `-1 insert` appends; element k taken out |
+
+**Elements count from 1, gaps from 0** (Thomas, 2026-10-09). An array of n
+has elements 1 to n, and -1 to -n from the end; there is no element 0. Its
+n+1 gaps count from 0, before the first, each gap after the element of its
+number, so gap -1 is after the last. So `( 5 6 7 ) 1 at.` is 5 and `-1 at.`
+7; `2 -2 slice.` drops the first and the last; `0 insert` prepends and
+`-1 insert` appends, with no -0 needed; and `n range.` is 1 to n. Counting
+from 0, the gap before element k is k, so -1 cannot append (Python's
+`insert(-1, x)`); counting elements from 1 makes the ends symmetric. A known
+index is settled at compile time, and checked against a known length; one
+known only at run time is settled by a few instructions.
 | `xs q within` | `q` run with the array's last elements as its stack, as many as it takes, and what it leaves put in their place: `( 1 2 3 ) [ ~. ] within.` is `( 1 3 2 )`; `[ 4 ] within.` appends, `[ drop. ] within.` drops the last |
 | `spread` | an array's elements on the stack: a vec's each a value; any array's, in a literal, a run |
 | `sort` | an array in order: numbers by value, strings by text |
@@ -335,7 +346,7 @@ With `-` on `( 1 2 3 )`, `fold` from 0 is −6 and `fold-right` is 2, as APL's
 `-/`; for an associative word the two agree. A consumer takes a word as well
 as a quotation, so `( 1 2 3 4 ) + reduce.` is APL's `+/`, and in the surface,
 `'` will leave a word unapplied for it. `q r compose.` joins two quotations at
-compile time; `n range.` is the array 0 to n−1, a vec when n is known, and
+compile time; `n range.` is the array 1 to n, a vec when n is known, and
 `reverse` an array reversed.
 
 ### Comprehensions
@@ -584,11 +595,6 @@ running are the machine's.
   no array built (Thomas, 2026-10-08). That is rewriting, as GHC's rules, in
   March itself, with no views in Rust. Only pure words may be deferred, which
   the effects say; a rule's two forms are trusted to be equal.
-- **0-based or 1-based indexing.** March counts from 0, as march7 did:
-  indices are remainders modulo the length, so -1 is n-1 and wrapping with
-  the floored `mod` is exact, and slices are half-open. Counting from 1, as
-  mathematics writes sequences and matrices, gives 1 first and -1 last
-  (Thomas, 2026-10-09, open). Negative indices mean the same either way.
 - **`#` for `count`,** as J's tally, perhaps also meaning `each` on a
   quotation (`xs [ f. ] #.`), the literal then deciding what is collected
   (Thomas, 2026-10-08, noted). It needs headings to start lines, as in

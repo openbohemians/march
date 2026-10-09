@@ -84,6 +84,10 @@ pub enum Prim {
     Within,
     /// A vec's elements, each a value on the stack.
     VecSpread,
+    /// `xs v k ary-insert`: v at the gap after element k.
+    AryInsert,
+    /// `xs k ary-remove`: without element k.
+    AryRemove,
     FSqrt,
     FPow,
     FFloor,
@@ -319,6 +323,8 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::Compose, "compose", "< b c >", &[]),
     d(Prim::Within, "within", "< b c >", &[]),
     d(Prim::VecSpread, "vec-spread", "< n a vec >", &[]),
+    d(Prim::AryInsert, "ary-insert", "< b c i64 >", &[]),
+    d(Prim::AryRemove, "ary-remove", "< b i64 >", &[]),
     d(Prim::Dup, "dup", "< a -- a a >", &[]),
     d(Prim::Drop, "drop", "< a -- >", &[]),
     d(Prim::Swap, "swap", "< a b -- b a >", &[]),
@@ -376,6 +382,8 @@ pub fn custom(p: Prim) -> bool {
             | Compose
             | Within
             | VecSpread
+            | AryInsert
+            | AryRemove
             | Dup
             | Drop
             | Swap
@@ -706,10 +714,8 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         StrLength => Ok(vec![Val::Int(text(&a[0]).chars().count() as i128)]),
         StrAt => {
             let i = int(&a[1]);
-            // A negative index counts from the end.
             let n = text(&a[0]).chars().count() as i128;
-            usize::try_from(if i < 0 { i + n } else { i })
-                .ok()
+            element(i, n)
                 .and_then(|i| text(&a[0]).chars().nth(i))
                 .map(|c| vec![Val::Int(u32::from(c).into())])
                 .ok_or_else(|| (Kind::Mismatch, format!("index {i} is outside the string")))
@@ -717,17 +723,36 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         StrEq => flag(text(&a[0]) == text(&a[1])),
         StrSlice => {
             let chars: Vec<char> = text(&a[0]).chars().collect();
-            let from_end = |k: i128| if k < 0 { k + chars.len() as i128 } else { k };
-            let (i, j) = (from_end(int(&a[1])), from_end(int(&a[2])));
-            match (usize::try_from(i), usize::try_from(j)) {
-                (Ok(i), Ok(j)) if i <= j && j <= chars.len() => Ok(vec![Val::Str(
-                    chars[i..j].iter().collect::<String>().into(),
+            let n = chars.len() as i128;
+            let (i, j) = (int(&a[1]), int(&a[2]));
+            match (element(i, n), end(j, n)) {
+                (Some(s), Some(e)) if s <= e => Ok(vec![Val::Str(
+                    chars[s..e].iter().collect::<String>().into(),
                 )]),
                 _ => Err((Kind::Mismatch, format!("{i} to {j} is outside the string"))),
             }
         }
         _ => unreachable!("{p:?} is not folded"),
     }
+}
+
+/// Where element `k` of `n` is, from 0, if there is one: elements count
+/// from 1, and from -1 at the end (Thomas, 2026-10-09); there is no element 0.
+pub fn element(k: i128, n: i128) -> Option<usize> {
+    let i = match k {
+        0 => return None,
+        k if k > 0 => k - 1,
+        k => n + k,
+    };
+    usize::try_from(i).ok().filter(|&i| (i as i128) < n)
+}
+
+/// Where the gap after element `k` of `n` is, from 0, the gap before the
+/// first: gap 0 is before the first element and -1 after the last. A slice's
+/// end is the gap after its last element.
+pub fn end(k: i128, n: i128) -> Option<usize> {
+    let g = if k < 0 { n + k + 1 } else { k };
+    usize::try_from(g).ok().filter(|&g| (g as i128) <= n)
 }
 
 /// A decimal as it is written.

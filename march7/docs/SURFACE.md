@@ -339,6 +339,11 @@ Decided:
 - **Type names are sized:** `i64` (the checked signed arithmetic), `u64` (the
   wrapping `u`-words) and `f64`, all on the same 64-bit cell. A friendlier
   name is a role away: `int : i64 ;`.
+- **Elements count from 1, gaps from 0** (Thomas, 2026-10-09). An array's
+  elements are 1 to n, and -1 to -n from the end; its gaps are 0 to n, each
+  after the element of its number, so `0 insert` prepends and `-1 insert`
+  appends. Slices include both ends: `2 -2 slice` drops the first and last.
+  `n range` is 1 to n. (march7 counted from 0.)
 - **No implicit promotion between values.** Literals take their type from
   context, so `x 1 +` works for a float `x`. Conversions are explicit.
 - **`!` converts the top value to the type of the value below:** `5.0 5 !`

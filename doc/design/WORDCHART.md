@@ -14,7 +14,7 @@
 | exchange top         | `swap`     |  `~`   | `⍨`   | `:`   |        |
 | copy second          | `over`     |        |       |       |        |
 | third to top         | `rot`      |        |       |       |        |
-| length               | `len`      |  `⧻`   | `≢`   | `⧻`   | 0 index ? |
+| length               | `len`      |  `⧻`   | `≢`   | `⧻`   | or `count` ? |
 | count                | `count`    |   ?    | `≢`   | `⧻`   |        |
 | element at           | `at`       |  `⊡`   | `⌷`   | `⊡`   |        |
 | join                 | `concat`   |  `⊂`   | `,`   | `⊂`   |        |
@@ -25,10 +25,12 @@
 | all but first        | `rest`     |  `⫣`   | `1↓`  | `↘1`  |        |
 | all but last         | `most`     |  `⊩`   | `¯1↓` | `↘¯1` |        |
 | reverse              | `reverse`  |  `⇌`   | `⌽`   | `⇌`   | `flip` instead? |
-| 0 to n−1             | `range`    |  `⇡`   | `⍳`   | `⇡`   |        |
+| 1 to n               | `range`    |  `⇡`   | `⍳`   | `⇡`   |        |
 | sort                 | `sort`     |  `⍆`   | `⍋`   | `⍆`   |        |
 | word on array's end  | `within`   |        |       | `⍜`   | Uiua's under is nearest equivalent |
 | elements onto stack  | `spread`   |        |       |       |        |
+| insert in gap k      | `insert`   |        |       |       | 0 prepends, -1 appends |
+| remove element k     | `remove`   |        |       |       |        |
 | map keys             | `keys`     |        |       |       |        |
 | map values           | `values`   |        |       |       |        |
 | each, collect        | `map`      |  `∵`   | `¨`   | `∵`   |        |

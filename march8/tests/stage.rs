@@ -201,10 +201,10 @@ fn known_values_have_no_code_until_needed() {
 fn structured_types_follow_values_through_containers() {
     // The map's type says its values are arrays of i64, so `at` gives an
     // array, and `at` again an i64.
-    let h = "[ < string i64 ary map > \"k\" at . 0 at . 1 + . ] h def .";
+    let h = "[ < string i64 ary map > \"k\" at . 1 at . 1 + . ] h def .";
     assert_eq!(run(&format!("{h} {{ \"k\" ( 41 2 ) }} h .")).unwrap(), [42]);
     // Literals take their type from what the container holds.
-    let fl = "[ < string f64 ary map > \"k\" at . 0 at . 1 + . ] fl def .";
+    let fl = "[ < string f64 ary map > \"k\" at . 1 at . 1 + . ] fl def .";
     assert_eq!(show(&format!("{fl} {{ \"k\" ( 1.5 ) }} fl .")), "<1> 2.5");
     let m = "[ < string money map > \"fee\" at . 1.10 + . ] m def .";
     assert_eq!(
@@ -283,7 +283,7 @@ fn clauses_are_chosen_by_types() {
         "<2> 42 \"abab\""
     );
     // The most specific clause wins; a type variable matches anything.
-    let first = "[ < a ary > 0 at . ] first def . [ < i64 ary > 1 at . ] first def .";
+    let first = "[ < a ary > 1 at . ] first def . [ < i64 ary > 2 at . ] first def .";
     assert_eq!(
         show(&format!("{first} ( 5 6 ) first . ( 1.5 2.5 ) first .")),
         "<2> 6 1.5"

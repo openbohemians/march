@@ -1770,6 +1770,8 @@ impl Stage {
                 Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
                 Prim::Each | Prim::EachRight => (2, 0),
                 Prim::Within => (2, 1),
+                Prim::AryInsert => (3, 1),
+                Prim::AryRemove => (2, 1),
                 Prim::VecSpread => return None,
                 Prim::Range | Prim::Reverse => (1, 1),
                 Prim::Def => (2, 0),
@@ -2465,6 +2467,8 @@ impl Stage {
                 self.emit_ops(1, &[P::Reverse], &[t])?;
             }
             Prim::Within => self.within(name)?,
+            Prim::AryInsert => self.insert(name, base)?,
+            Prim::AryRemove => self.remove(name, base)?,
             Prim::VecSpread => {
                 let n = len(self, 13);
                 let e = env.0[0].expect("bound");
@@ -2869,45 +2873,36 @@ impl Stage {
         Ok(true)
     }
 
-    /// `at` on an array or a string: a negative index counts from the end,
-    /// -1 the last. A known index is settled now, and checked against a
-    /// length known now; one known only at run time has the length added
-    /// when it is negative.
+    /// `at` on an array or a string. Elements count from 1, and from -1 at
+    /// the end (Thomas, 2026-10-09). A known index is settled now, and
+    /// checked against a length known now; one known only at run time is
+    /// settled by `element_index`.
     fn at(&mut self, p: Prim, base: usize, out: Type, len: Option<u64>) -> Result<()> {
         if self.fold_now(p, base, &[out])? {
             return Ok(());
         }
-        let outside = |s: &Self, i: i128| {
-            s.err(
-                Kind::Mismatch,
-                format!("index {i} is outside a {}", s.types.name(s.stack[base].ty)),
-            )
-        };
         match self.stack[base + 1].val {
-            Val::Int(i) => {
-                let k = match (i < 0, len) {
-                    (true, Some(n)) => i + n as i128,
-                    _ => i,
-                };
-                if let Some(n) = len
-                    && (k < 0 || k >= n as i128)
-                {
-                    return Err(outside(self, i));
+            Val::Int(k) => {
+                let i = self.known_element(base, k, len)?;
+                match i {
+                    Some(i) => {
+                        self.stack[base + 1].val = Val::Int(i as i128);
+                        return self.emit_ops(2, &[P::VecAt], &[out]);
+                    }
+                    // From the end of an array of any length.
+                    None => {
+                        self.materialize(base)?;
+                        self.emit(Op::Prim(P::Dup));
+                        self.emit(Op::Prim(P::VecLen));
+                        self.emit(Op::Lit(k as i64 as u64));
+                        self.emit(Op::Prim(P::IAdd));
+                        self.emit(Op::Prim(P::VecAt));
+                    }
                 }
-                if k >= 0 {
-                    self.stack[base + 1].val = Val::Int(k);
-                    return self.emit_ops(2, &[P::VecAt], &[out]);
-                }
-                self.materialize(base)?;
-                self.emit(Op::Prim(P::Dup));
-                self.emit(Op::Prim(P::VecLen));
-                self.emit(Op::Lit(k as i64 as u64));
-                self.emit(Op::Prim(P::IAdd));
-                self.emit(Op::Prim(P::VecAt));
             }
             _ => {
                 self.materialize_top(2)?;
-                self.count_from_end(1);
+                self.element_index(1);
                 self.emit(Op::Prim(P::VecAt));
             }
         }
@@ -2916,40 +2911,198 @@ impl Stage {
         Ok(())
     }
 
-    /// `slice` on an array or a string, `i` to `j`, either counting from the
-    /// end when negative.
+    /// A known element index, from 0, if it can be known now: always for
+    /// one from the start, and from the end when the length is known.
+    fn known_element(&self, base: usize, k: i128, len: Option<u64>) -> Result<Option<usize>> {
+        let outside = || {
+            self.err(
+                Kind::Mismatch,
+                format!(
+                    "there is no element {k} in a {}{}",
+                    self.types.name(self.stack[base].ty),
+                    if k == 0 {
+                        ": elements count from 1"
+                    } else {
+                        ""
+                    }
+                ),
+            )
+        };
+        if k == 0 {
+            return Err(outside());
+        }
+        match len {
+            Some(n) => prims::element(k, n as i128).map(Some).ok_or_else(outside),
+            None if k > 0 => Ok(Some((k - 1) as usize)),
+            None => Ok(None),
+        }
+    }
+
+    /// `slice` on an array or a string: elements `i` to `j`, both included,
+    /// either counting from the end when negative, so `2 -2 slice` drops the
+    /// first and the last.
     fn slice(&mut self, p: Prim, base: usize, out: Type) -> Result<()> {
         if self.fold_now(p, base, &[out])? {
             return Ok(());
         }
-        let plain = |j: &Jdg| matches!(j.val, Val::Int(k) if k >= 0);
-        if plain(&self.stack[base + 1]) && plain(&self.stack[base + 2]) {
+        let (i, j) = (&self.stack[base + 1].val, &self.stack[base + 2].val);
+        if let (Val::Int(i), Val::Int(j)) = (i, j)
+            && *i > 0
+            && *j >= 0
+        {
+            let (i, j) = (*i, *j);
+            self.stack[base + 1].val = Val::Int(i - 1);
+            self.stack[base + 2].val = Val::Int(j);
             return self.emit_ops(3, &[P::Slice], &[out]);
+        }
+        if self.stack[base + 1].val == Val::Int(0) {
+            return Err(self.err(
+                Kind::Mismatch,
+                "there is no element 0: elements count from 1",
+            ));
         }
         self.materialize_top(3)?;
         self.emit(Op::Prim(P::ScratchPush));
-        self.count_from_end(1);
+        self.element_index(1);
         self.emit(Op::Prim(P::ScratchPop));
-        self.count_from_end(2);
+        self.gap_index(2);
         self.emit(Op::Prim(P::Slice));
         self.stack.truncate(base);
         self.push(out, Val::Run);
         Ok(())
     }
 
-    /// Code that adds the length of the array `depth` below the index on
-    /// top to the index, if the index is negative.
-    fn count_from_end(&mut self, depth: u64) {
-        let positive = self.label();
+    /// Code that turns the element index on top into one from 0: k-1 for
+    /// k from the start, n+k from the end, n the length of the array
+    /// `depth` below it.
+    fn element_index(&mut self, depth: u64) {
+        let (start, done) = (self.label(), self.label());
         self.emit(Op::Prim(P::Dup));
         self.emit(Op::Lit(0));
         self.emit(Op::Prim(P::ILt));
-        self.code.push(Ins::JumpZero(positive));
+        self.code.push(Ins::JumpZero(start));
         self.emit(Op::Lit(depth));
         self.emit(Op::Prim(P::Pick));
         self.emit(Op::Prim(P::VecLen));
         self.emit(Op::Prim(P::IAdd));
-        self.code.push(Ins::Label(positive));
+        self.code.push(Ins::Jump(done));
+        self.code.push(Ins::Label(start));
+        self.emit(Op::Lit(1));
+        self.emit(Op::Prim(P::ISub));
+        self.code.push(Ins::Label(done));
+    }
+
+    /// Code that turns the gap index on top into one from 0: k for k from
+    /// the start, n+k+1 from the end, the gap after element k.
+    fn gap_index(&mut self, depth: u64) {
+        let done = self.label();
+        self.emit(Op::Prim(P::Dup));
+        self.emit(Op::Lit(0));
+        self.emit(Op::Prim(P::ILt));
+        self.code.push(Ins::JumpZero(done));
+        self.emit(Op::Lit(depth));
+        self.emit(Op::Prim(P::Pick));
+        self.emit(Op::Prim(P::VecLen));
+        self.emit(Op::Prim(P::IAdd));
+        self.emit(Op::Lit(1));
+        self.emit(Op::Prim(P::IAdd));
+        self.code.push(Ins::Label(done));
+    }
+
+    /// The length a vec's type knows, and its element type, for an array.
+    fn array_of(&self, t: Type) -> Option<(Option<u64>, Type)> {
+        match self.types.term(t) {
+            Term::Ary(e) => Some((None, e)),
+            Term::Vec(n, e) => Some((
+                match self.types.term(n) {
+                    Term::Nat(n) => Some(n),
+                    _ => None,
+                },
+                e,
+            )),
+            _ => None,
+        }
+    }
+
+    /// `xs v k insert`: v at the gap after element k, so 0 prepends and -1
+    /// appends (Thomas, 2026-10-09).
+    fn insert(&mut self, name: &str, base: usize) -> Result<()> {
+        let Some((len, e)) = self.array_of(self.stack[base].ty) else {
+            return Err(self.err(
+                Kind::NoWord,
+                format!("no word `{name}` for {}", self.top_types(3)),
+            ));
+        };
+        self.annotate(base + 1, e)?;
+        let runtime = match (self.stack[base + 2].val.clone(), len) {
+            (Val::Int(k), Some(n)) => {
+                let g = prims::end(k, n as i128).ok_or_else(|| {
+                    self.err(
+                        Kind::Mismatch,
+                        format!(
+                            "there is no gap {k} in a {}",
+                            self.types.name(self.stack[base].ty)
+                        ),
+                    )
+                })?;
+                self.stack[base + 2].val = Val::Int(g as i128);
+                false
+            }
+            (Val::Int(k), None) => k < 0,
+            _ => true,
+        };
+        self.materialize_top(3)?;
+        if runtime {
+            self.gap_index(2);
+        }
+        self.emit(Op::Prim(P::VecInsert));
+        let ty = match len {
+            Some(n) => {
+                let n = self.types.intern(Term::Nat(n + 1));
+                Term::Vec(n, e)
+            }
+            None => Term::Ary(e),
+        };
+        let ty = self.types.intern(ty);
+        self.stack.truncate(base);
+        self.push(ty, Val::Run);
+        Ok(())
+    }
+
+    /// `xs k remove`: without element k.
+    fn remove(&mut self, name: &str, base: usize) -> Result<()> {
+        let Some((len, e)) = self.array_of(self.stack[base].ty) else {
+            return Err(self.err(
+                Kind::NoWord,
+                format!("no word `{name}` for {}", self.top_types(2)),
+            ));
+        };
+        let runtime = match self.stack[base + 1].val {
+            Val::Int(k) => match self.known_element(base, k, len)? {
+                Some(i) => {
+                    self.stack[base + 1].val = Val::Int(i as i128);
+                    false
+                }
+                None => true,
+            },
+            _ => true,
+        };
+        self.materialize_top(2)?;
+        if runtime {
+            self.element_index(1);
+        }
+        self.emit(Op::Prim(P::VecRemove));
+        let ty = match len {
+            Some(n) => {
+                let n = self.types.intern(Term::Nat(n - 1));
+                Term::Vec(n, e)
+            }
+            None => Term::Ary(e),
+        };
+        let ty = self.types.intern(ty);
+        self.stack.truncate(base);
+        self.push(ty, Val::Run);
+        Ok(())
     }
 
     /// Takes the code a consumer applies: a quotation, or a word, which is

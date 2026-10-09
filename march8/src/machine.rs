@@ -1305,7 +1305,7 @@ impl Machine {
                 if size > MAX_BYTES {
                     return Err(Error::Limit);
                 }
-                let r = self.allocate_vector((0..n as u64).collect())?;
+                let r = self.allocate_vector((1..=n as u64).collect())?;
                 self.push(r)?;
             }
             SortInts | SortFloats | SortTexts => {
@@ -1326,6 +1326,33 @@ impl Machine {
                     }
                 }
                 let r = self.allocate_vector(cells.into_iter().collect())?;
+                self.push(r)?;
+            }
+            VecInsert => {
+                let g = usize::try_from(self.pop()?).map_err(|_| Error::Memory)?;
+                let x = self.pop()?;
+                let a = self.pop()?;
+                let whole = self.array(a)?.whole();
+                if g > whole.len() {
+                    return Err(Error::Memory);
+                }
+                let one: merkle_champ::Sequence<u64> = std::iter::once(x).collect();
+                let v = whole
+                    .slice(0..g)
+                    .concat(&one)
+                    .concat(&whole.slice(g..whole.len()));
+                let r = self.allocate_vector(v)?;
+                self.push(r)?;
+            }
+            VecRemove => {
+                let i = usize::try_from(self.pop()?).map_err(|_| Error::Memory)?;
+                let a = self.pop()?;
+                let whole = self.array(a)?.whole();
+                if i >= whole.len() {
+                    return Err(Error::Memory);
+                }
+                let v = whole.slice(0..i).concat(&whole.slice(i + 1..whole.len()));
+                let r = self.allocate_vector(v)?;
                 self.push(r)?;
             }
             Reverse => {

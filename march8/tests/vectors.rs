@@ -73,3 +73,74 @@ fn outer_and_dot_products() {
     assert_eq!(show(&["( 1 2 3 ) ( 4 5 6 ) dot."]), "<1> 32");
     assert_eq!(show(&["( 1.5 2.0 ) ( 2.0 4.0 ) dot."]), "<1> 11.0");
 }
+
+#[test]
+fn tensors_of_any_rank() {
+    // A tensor and one of lower rank: element by element along the leading
+    // axis, so the lower broadcasts across the trailing axes. Shapes stay
+    // known.
+    let mut s = session(&["( ( 1 2 ) ( 3 4 ) ) 10 ⋅."]).unwrap();
+    assert_eq!(
+        s.show_typed(),
+        "<1> ( ( 10 20 ) ( 30 40 ) ) < 2 2 i64 vec vec >"
+    );
+    s = session(&["( ( 1 2 ) ( 3 4 ) ) ( 10 20 ) +."]).unwrap();
+    assert_eq!(
+        s.show_typed(),
+        "<1> ( ( 11 22 ) ( 13 24 ) ) < 2 2 i64 vec vec >"
+    );
+    assert_eq!(
+        show(&["( ( ( 1 2 ) ( 3 4 ) ) ) 1 +."]),
+        "<1> ( ( ( 2 3 ) ( 4 5 ) ) )"
+    );
+    assert_eq!(
+        show(&["10 ( ( 1 2 ) ( 3 4 ) ) -. ( 2.0 4.0 ) 2.0 ÷."]),
+        "<2> ( ( 9 8 ) ( 7 6 ) ) ( 1.0 2.0 )"
+    );
+}
+
+#[test]
+fn the_tensor_product_adds_ranks() {
+    let s = session(&["( ( 1 2 ) ( 3 4 ) ) ( ( 5 6 ) ( 7 8 ) ) ×."]).unwrap();
+    assert!(s.show_typed().ends_with("< 2 2 2 2 i64 vec vec vec vec >"));
+    assert_eq!(
+        show(&["( 1 2 ) ( 3 4 5 ) ×."]),
+        "<1> ( ( 3 4 5 ) ( 6 8 10 ) )"
+    );
+}
+
+#[test]
+fn dot_contracts_last_with_first() {
+    // Vector · vector, matrix · vector, matrix · matrix: the matrix product.
+    assert_eq!(
+        show(&[
+            "( 1 2 3 ) ( 4 5 6 ) dot. ( ( 1 2 ) ( 3 4 ) ) ( 5 6 ) dot. ( ( 1 2 ) ( 3 4 ) ) ( ( 5 6 ) ( 7 8 ) ) dot."
+        ]),
+        "<3> 32 ( 17 39 ) ( ( 19 22 ) ( 43 50 ) )"
+    );
+    // The contracted lengths must agree: a 2×3 by a 2×2 is refused before
+    // anything runs.
+    assert_eq!(
+        session(&["( ( 1 2 3 ) ( 4 5 6 ) ) ( ( 1 2 ) ( 3 4 ) ) dot."]).err(),
+        Some(Kind::Mismatch)
+    );
+    // At run time too.
+    assert_eq!(
+        show(&["( ( 1 2 ) ( 3 4 ) )", "( ( 5 6 ) ( 7 8 ) ) dot."]),
+        "<1> ( ( 19 22 ) ( 43 50 ) )"
+    );
+}
+
+#[test]
+fn transpose_swaps_indices() {
+    let s = session(&["( ( 1 2 3 ) ( 4 5 6 ) ) transpose."]).unwrap();
+    assert_eq!(
+        s.show_typed(),
+        "<1> ( ( 1 4 ) ( 2 5 ) ( 3 6 ) ) < 3 2 i64 vec vec >"
+    );
+    // A matrix times its transpose.
+    assert_eq!(
+        show(&["( ( 1 2 ) ( 3 4 ) ) dup. transpose. dot."]),
+        "<1> ( ( 5 11 ) ( 11 25 ) )"
+    );
+}

@@ -36,7 +36,7 @@
 | each, collect        | `map`      |  `∵`   | `¨`   | `∵`   |        |
 | each pair, in step   | `zip`      |        |       |       |        |
 | outer product        | `table`    |  `×`   | `∘.`  | `⊞`   | `×` is the table of products |
-| dot product          | `dot`      |  ?     | `+.×` |       | `⊙`? (Hadamard in math) |
+| dot product          | `dot`      |  ?     | `+.×` |       | contraction: matrix · matrix is the matrix product; `⊙`? (Hadamard in math) |
 | each, thread stack   | `each`     |        |       |       |        |
 | fold from left       | `fold`     |        |       | `∧`   |        |
 | fold from right      | `rfold`    |        | `/`   |       |        |
@@ -81,7 +81,7 @@
 | where                |           | `⊚`    | `⍸`   | `⊚`   |
 | shape                | `shape`   | `△`    | `⍴`   | `△`   |
 | reshape              |           | `↯`    | `⍴`   | `↯`   |
-| transpose            |           | `⍉`    | `⍉`   | `⍉`   |
+| transpose            | `transpose` | `⍉`  | `⍉`   | `⍉`   |
 | rotate               |           | `↻`    | `⌽`   | `↻`   |
 | grade up             |           | `⍏`    | `⍋`   | `⍏`   |
 | grade down           |           | `⍖`    | `⍒`   | `⍖`   |

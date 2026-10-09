@@ -418,31 +418,41 @@ input, short for `\[ _. ]` (march7/docs/STRINGS.md):
   2026-10-08), as the display sorts it. `print` writes any value, by
   `>string`.
 
-### Arrays as vectors
+### Arrays as tensors
 
-Arithmetic on two arrays works element by element, as it does on an array
-and a number (Thomas, 2026-10-09), so an array is a vector:
+Scalars, vectors and matrices are tensors of rank 0, 1 and 2 (Thomas,
+2026-10-09), and in March a tensor of rank n is arrays nested n deep. A vec
+type gives its shape at compile time: `2 3 i64 vec vec` is a 2×3 matrix.
 
 ```
-( 1 2 3 ) ( 10 20 30 ) +.        ( 11 22 33 )
-( 1 2 ) ( 3 4 ) ⋅.               ( 3 8 )
-( 1 2 3 ) ( 4 5 6 ) dot.         32, the dot product
-( 1 2 ) ( 10 20 30 ) ×.          ( ( 10 20 30 ) ( 20 40 60 ) ), the outer product
+( ( 1 2 ) ( 3 4 ) ) 10 ⋅.                 ( ( 10 20 ) ( 30 40 ) )
+( ( 1 2 ) ( 3 4 ) ) ( 10 20 ) +.          ( ( 11 22 ) ( 13 24 ) ): across each row
+( 1 2 3 ) ( 4 5 6 ) dot.                  32
+( ( 1 2 ) ( 3 4 ) ) ( ( 5 6 ) ( 7 8 ) ) dot.   ( ( 19 22 ) ( 43 50 ) ): the matrix product
+( 1 2 ) ( 3 4 5 ) ×.                      ( ( 3 4 5 ) ( 6 8 10 ) ): the outer product
+( ( 1 2 3 ) ( 4 5 6 ) ) transpose.        ( ( 1 4 ) ( 2 5 ) ( 3 6 ) ), a 3 2 i64 vec vec
 ```
 
-- **`xs ys q zip`** applies `q` to each pair of elements in step, and `+`, `-`,
-  `⋅` and `÷` on two arrays are clauses over it in `core.march`; nested arrays
-  add level by level. The arrays must be as long as each other: two vecs are
-  checked at compile time, others at run time. A vec stays a vec, its length
-  known.
-- **`xs ys q table`** applies `q` to every pair, a row for each element of
-  `xs`: APL's `∘.`, Uiua's `⊞`. `×`, the Cartesian product in mathematics, is
-  the outer product of numbers, the table of their products.
-- **`dot`** is the sum of the products. Its symbol is open: `⋅` multiplies
-  element by element, as everything else works, and `⊙`, a dot in a circle,
-  is the Hadamard product in mathematics.
-- A clause keeps a vec's length when its signature asks for an array, so
-  lengths reach the words that check them.
+- **Element by element.** `+`, `-`, `⋅` and `÷` on two tensors of one shape
+  pair their elements, by `xs ys q zip`, level by level. A tensor and one of
+  lower rank, a number or a row, pair along the leading axis, recursively,
+  so the lower broadcasts across the higher's trailing axes. A pattern cannot
+  say "not an array", so `core.march` has a clause for each rank up to 3 on
+  each side, which keeps them from tying.
+- **`×`, the outer or tensor product:** each element of A times all of B, so
+  ranks add: two matrices make a tensor of rank 4. `xs ys q table` applies
+  any word to every pair, as APL's `∘.` and Uiua's `⊞`.
+- **`dot` contracts A's last index with B's first:** vector · vector is a
+  number, matrix · vector a vector, matrix · matrix the matrix product. Its
+  symbol is open: `⋅` multiplies element by element, as everything else
+  works, and `⊙`, a dot in a circle, is the Hadamard product in mathematics.
+- **`transpose`** swaps a matrix's two indices, written in March with `map`
+  and `range`.
+- **Shapes are checked at compile time** when they are known: lengths paired
+  by `zip`, and so the contracted lengths of `dot`, a 2×3 by a 2×2 refused
+  before anything runs; at run time otherwise. A clause keeps a vec's length
+  when its signature asks for an array, so shapes reach the words that check
+  them.
 
 ### Recursion and instances
 

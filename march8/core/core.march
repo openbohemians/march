@@ -40,16 +40,41 @@
 [ < i64 i64 -- i64 > i64*. ] * def.
 [ < f64 f64 -- f64 > f64*. ] * def.
 
--- Arithmetic lifts over arrays: an array and a number, element by element
--- (TYPES.md 2.8). The number is read below each element; a literal takes
--- the elements' type.
+-- Arithmetic lifts over arrays: a tensor and one of lower rank, a number
+-- or a row, element by element along the leading axis, recursively, so the
+-- lower broadcasts across the higher's trailing axes (TYPES.md 2.8;
+-- Thomas, 2026-10-09: they are all tensors). A pattern cannot say "not an
+-- array", so a clause for each rank up to 3 keeps the two sides from tying.
+-- The other value is read below each element; a literal takes the
+-- elements' type.
 
-[ < a ary a -- a ary > swap. [ over. +. ] map. swap. drop. ] + def.
-[ < a a ary -- a ary > [ over. +. ] map. swap. drop. ] + def.
-[ < a ary a -- a ary > swap. [ over. -. ] map. swap. drop. ] - def.
-[ < a a ary -- a ary > [ over. swap. -. ] map. swap. drop. ] - def.
-[ < a ary a -- a ary > swap. [ over. *. ] map. swap. drop. ] * def.
-[ < a a ary -- a ary > [ over. *. ] map. swap. drop. ] * def.
+[ < a ary a > swap. [ over. +. ] map. swap. drop. ] + def.
+[ < a a ary > [ over. +. ] map. swap. drop. ] + def.
+[ < a ary ary a > swap. [ over. +. ] map. swap. drop. ] + def.
+[ < a a ary ary > [ over. +. ] map. swap. drop. ] + def.
+[ < a ary ary ary a > swap. [ over. +. ] map. swap. drop. ] + def.
+[ < a a ary ary ary > [ over. +. ] map. swap. drop. ] + def.
+
+[ < a ary a > swap. [ over. -. ] map. swap. drop. ] - def.
+[ < a a ary > [ over. swap. -. ] map. swap. drop. ] - def.
+[ < a ary ary a > swap. [ over. -. ] map. swap. drop. ] - def.
+[ < a a ary ary > [ over. swap. -. ] map. swap. drop. ] - def.
+[ < a ary ary ary a > swap. [ over. -. ] map. swap. drop. ] - def.
+[ < a a ary ary ary > [ over. swap. -. ] map. swap. drop. ] - def.
+
+[ < a ary a > swap. [ over. *. ] map. swap. drop. ] * def.
+[ < a a ary > [ over. *. ] map. swap. drop. ] * def.
+[ < a ary ary a > swap. [ over. *. ] map. swap. drop. ] * def.
+[ < a a ary ary > [ over. *. ] map. swap. drop. ] * def.
+[ < a ary ary ary a > swap. [ over. *. ] map. swap. drop. ] * def.
+[ < a a ary ary ary > [ over. *. ] map. swap. drop. ] * def.
+
+[ < a ary a > swap. [ over. div. ] map. swap. drop. ] div def.
+[ < a a ary > [ over. swap. div. ] map. swap. drop. ] div def.
+[ < a ary ary a > swap. [ over. div. ] map. swap. drop. ] div def.
+[ < a a ary ary > [ over. swap. div. ] map. swap. drop. ] div def.
+[ < a ary ary ary a > swap. [ over. div. ] map. swap. drop. ] div def.
+[ < a a ary ary ary > [ over. swap. div. ] map. swap. drop. ] div def.
 
 -- Two arrays, element by element (Thomas, 2026-10-09: as everything else
 -- is), as long as each other: checked at compile time when both lengths are
@@ -60,11 +85,20 @@
 [ < a ary a ary > [ *. ] zip. ] * def.
 
 -- `xs ys q table`: q on every pair, a row for each element of xs. `×` is the
--- outer product of numbers, the table of their products, and `dot` the dot
--- product, the sum of the products of each pair.
+-- outer product, the tensor product: each element of A times all of B, so
+-- ranks add.
 
-[ [ *. ] table. ] × def.
-[ *. 0 [ +. ] fold. ] dot def.
+[ < a b > *. ] × def.
+[ < a ary b > swap. [ over. ×. ] map. swap. drop. ] × def.
+
+-- `dot` contracts A's last index with B's first: vector · vector is a
+-- number, matrix · vector a vector, matrix · matrix the matrix product.
+-- `zip` checks that the contracted lengths agree, at compile time when both
+-- are known. `transpose` swaps a matrix's two indices.
+
+[ < a ary b ary > [ *. ] zip. + reduce. ] dot def.
+[ < a ary ary b ary > swap. [ over. dot. ] map. swap. drop. ] dot def.
+[ < a ary ary > dup. 1 at. length. range. [ over. [ over. at. ] map. swap. drop. ] map. swap. drop. ] transpose def.
 
 -- Multiplying is written `⋅`, the dot operator, as in algebra; `*` is its
 -- ASCII spelling, and `×` is kept for the outer product (Thomas, 2026-10-09:

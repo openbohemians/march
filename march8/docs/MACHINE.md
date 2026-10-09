@@ -447,7 +447,8 @@ march8 --code '5 fact.'      source:  5  tail fact-i64
 
 ## The core vocabulary
 
-`core/core.march` defines `+`, `-`, `*`, `/`, `mod`, the comparisons, `length`,
+`core/core.march` defines `+`, `-`, `*` (written `⋅`, mathematics first:
+march7/docs/SURFACE.md), `/`, `mod`, the comparisons, `length`,
 `at`, `concat`, `slice`, `print`, the folds, reductions and `repeat` as families
 of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
 `swap`, and doubled, `==` and `~~`, as FORTH's 2DUP and 2SWAP (`dup2`,

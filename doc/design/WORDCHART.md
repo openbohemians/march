@@ -2,7 +2,7 @@
 |----------------------|------------|--------|-------|-------|
 | add                  | `add`     |  `+`   | `+`   | `+`   |
 | subtract             | `sub`     |  `-`   | `-`   | `-`   |
-| multiply             | `mul`     |  `×`   | `×`   | `×`   |
+| multiply             | `mul`     |  `⋅`   | `×`   | `×`   |
 | divide               | `div`     |  `÷`   | `÷`   | `÷`   |
 | remainder            | `mod`     |  `◿`   | `\|`  | `◿`   |
 | div remainder        | `divmod`  |   ?    |       |       |
@@ -41,9 +41,6 @@
 | value as text        | `show`    | `⍕`    | `⍕`   |  —    |
 | write any value      | `print`   |        | `⎕←`  | `&p`  |
 | write a string       | `write`   |        | `⍞←`  | `&pf` |
-
-| **add to March**     |           |        |       |       |
-|----------------------|-----------|--------|-------|-------|
 | swap top two         | `swap2`   |  `~~`  |       |       |
 | dup top two          | `dup2`    |  `==`  |       |       |
 | absolute value       | `abs`     |  `⌵`   | `\|`  | `⌵`   |
@@ -51,6 +48,9 @@
 | maximum              | `max`     |  `↥`   | `⌈`   | `↥`   |
 | floor                | `floor`   |  `⌊`   | `⌊`   | `⌊`   |
 | ceiling              | `ceil`    |  `⌈`   | `⌈`   | `⌈`   |
+
+| **add to March**     |           |        |       |       |
+|----------------------|-----------|--------|-------|-------|
 | not                  | `not`     |  `¬`   | `~`   | `¬`   |
 | and                  | `and`     |  `∧`   | `∧`   |  —    |
 | or                   | `or`      |  `∨`   | `∨`   | `∨`   |
@@ -80,7 +80,7 @@
 | reshape              |           | `↯`    | `⍴`   | `↯`   |
 | transpose            |           | `⍉`    | `⍉`   | `⍉`   |
 | rotate               |           | `↻`    | `⌽`   | `↻`   |
-| outer product        |           | `⊞`    | `∘.`  | `⊞`   |
+| outer product        |           | `×`    | `∘.`  | `⊞`   |
 | grade up             |           | `⍏`    | `⍋`   | `⍏`   |
 | grade down           |           | `⍖`    | `⍒`   | `⍖`   |
 | dip                  |           | `⊙`    |  —    | `⊙`   |

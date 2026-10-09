@@ -117,6 +117,13 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         // `vec..` is `vec . .`. So no name ends in a dot.
         let stem = word.trim_end_matches('.');
         let applies = (word.len() - stem.len()) as u32;
+        // A middle dot or a bullet, alone, is the dot operator, `⋅`: they look
+        // alike, and some keyboards make one where `⋅` was meant. Inside a
+        // name, as Catalan's `l·l`, it stays.
+        let stem = match stem {
+            "·" | "∙" => "⋅",
+            s => s,
+        };
         let dots = Pos {
             line: pos.line,
             col: pos.col + stem.chars().count() as u32,

@@ -110,3 +110,13 @@ fn narrowing_says_how_it_rounds() {
         Some(Kind::Run(march8::machine::Error::Arithmetic))
     );
 }
+
+#[test]
+fn multiplying_is_the_dot_operator() {
+    // `⋅`, as in algebra; `*` is its ASCII spelling; it lifts as `*` does.
+    assert_eq!(show(&["2 3 ⋅. 2.5 2 ⋅. ( 1 2 ) 3 ⋅."]), "<3> 6 5.0 ( 3 6 )");
+    // A middle dot or a bullet alone reads as `⋅`; inside a name it stays.
+    assert_eq!(show(&["2 3 ·. 2 3 ∙."]), "<2> 6 6");
+    assert_eq!(show(&["[ 1 ] col·lecció def. col·lecció."]), "<1> 1");
+    assert_eq!(show(&["2 3 \\cdot."]), "<1> 6");
+}

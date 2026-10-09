@@ -51,6 +51,12 @@
 [ < a ary a -- a ary > swap. [ over. *. ] map. swap. drop. ] * def.
 [ < a a ary -- a ary > [ over. *. ] map. swap. drop. ] * def.
 
+-- Multiplying is written `⋅`, the dot operator, as in algebra; `*` is its
+-- ASCII spelling, and `×` is kept for the outer product (Thomas, 2026-10-09:
+-- mathematics first, programming's conventions second).
+
+[ *. ] ⋅ def.
+
 -- Division. `divmod` leaves the quotient and the remainder, floored: the
 -- quotient rounded down, the remainder with the divisor's sign, so that
 -- a = q b + r and `-7 3 divmod.` is -3 2 (Thomas, 2026-10-09). `div` and

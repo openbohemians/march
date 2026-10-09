@@ -18,8 +18,11 @@ impl fmt::Display for Pos {
 /// What went wrong. The first five are found while compiling.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// The text is not March: an unclosed bracket, a bad escape.
+    /// The text is not March: a bracket closing nothing, a bad escape.
     Syntax,
+    /// The text ends inside a bracket or a string: more may follow, as in
+    /// the REPL.
+    Unfinished,
     /// No word: a name with no definition, or a family with no clause for
     /// the values given (doc/design/TYPES.md 2.15, "no match is no word").
     NoWord,

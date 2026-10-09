@@ -108,6 +108,12 @@
 [ swap. dup. rest. swap. first. rot. fold. ] reduce def.
 [ swap. dup. most. swap. last. rot. fold-right. ] reduce-right def.
 
+-- `xs q scan`: the running reductions, from the left, as `reduce` gives
+-- the last of them: ( 1 2 3 ) + scan is ( 1 3 6 ). A comprehension: each
+-- turn reads the last value collected.
+
+[ ( _. dup. first. swap. rest. [ over. swap. ] _. compose. each. ) ] scan def.
+
 -- `n q times` runs q n times.
 
 [ swap. range. swap. [ drop. ] swap. compose. each. ] times def.

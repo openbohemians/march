@@ -14,6 +14,7 @@ cargo run --offline -- --eval '[ < money -- money > 1.10 +. ] fee def. 19.99 fee
 # <1> 21.09
 cargo run --offline -- --eval '[ dup. *. ] sq def. 2.5 sq. 3 sq.'
 # <2> 6.25 9
+cargo run --offline            # a REPL; :help for its commands
 ```
 
 | What | Where |

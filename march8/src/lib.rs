@@ -117,6 +117,18 @@ impl Session {
         out
     }
 
+    /// The values on the stack, each followed by its type in a bracket, so
+    /// the line reads back as March: `<2> 42 < i64 > "abab" < string >`.
+    pub fn show_typed(&self) -> String {
+        let mut out = format!("<{}>", self.types.len());
+        for (&v, &t) in self.machine.stack.iter().zip(&self.types) {
+            out.push(' ');
+            show::value(&self.machine, &self.stage.types, v, t, &mut out);
+            out.push_str(&format!(" < {} >", self.stage.types.name(t)));
+        }
+        out
+    }
+
     /// What the program has written since this was last asked.
     pub fn take_output(&mut self) -> Vec<u8> {
         self.machine.take_output()

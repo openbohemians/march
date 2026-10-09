@@ -135,7 +135,7 @@ pub fn read(src: &str, symbols: &Symbols) -> Result<Vec<Token>> {
     }
     if let Some((o, p)) = open.pop() {
         return Err(Error::new(
-            Kind::Syntax,
+            Kind::Unfinished,
             Some(p),
             format!("`{}` is never closed", o as char),
         ));
@@ -256,7 +256,7 @@ impl<'a> Reader<'a> {
                 Some(c) => s.push(c),
                 None => {
                     return Err(Error::new(
-                        Kind::Syntax,
+                        Kind::Unfinished,
                         Some(pos),
                         "a raw string is never closed",
                     ));
@@ -284,7 +284,7 @@ impl<'a> Reader<'a> {
             match self.bump() {
                 None => {
                     return Err(Error::new(
-                        Kind::Syntax,
+                        Kind::Unfinished,
                         Some(start),
                         "a string is never closed",
                     ));
@@ -314,7 +314,13 @@ impl<'a> Reader<'a> {
                                 .ok_or_else(|| bad(&format!("`\\{name};` is not an escape")))?,
                         );
                     }
-                    None => return Err(bad("a string is never closed")),
+                    None => {
+                        return Err(Error::new(
+                            Kind::Unfinished,
+                            Some(start),
+                            "a string is never closed",
+                        ));
+                    }
                 },
                 Some(c) => s.push(c),
             }

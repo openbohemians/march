@@ -307,6 +307,7 @@ The rest are words in `core.march`:
 | `xs x q fold` | from the left: ((x e0) e1) e2 |
 | `xs x q fold-right` | from the right: e0 (e1 (e2 x)), its quotation taking an element under the accumulator |
 | `xs q reduce` | `fold` from the first element; `reduce-right`, `fold-right` from the last |
+| `xs q scan` | the running reductions from the left: `( 1 2 3 ) + scan.` is `( 1 3 6 )`, a comprehension |
 | `n q times` | `q` n times, as `each` over `n range` |
 | `first`, `last`, `rest`, `most`, `slice` | parts of an array, and `slice` of a string |
 
@@ -450,7 +451,17 @@ stack are always known, and the display writes every value by its type:
 ```sh
 cargo run --offline -- --eval '[ < money > 1.10 +. ] fee def. 19.99 fee.'
 # <1> 21.09
+cargo run --offline -- --types --eval '{ "a" ( 1.5 ) } 2'
+# <2> { "a" ( 1.5 ) } < string 1 f64 vec map > 2 < i64 >
 ```
+
+With no arguments, `march8` is a REPL: each line is compiled and run, and
+the stack shown after it. A line ending inside a bracket or a string goes on
+to the next, and an error leaves the session as it was. Commands start with
+`:`, which March does not use: `:types` shows each value's type after it, in
+a bracket, so the line reads back as March; `:code SRC` shows the code SRC
+compiles to; `:quit`. `march8 fmt` rewrites `\name` escapes as their symbols,
+from stdin to stdout, in code and comments but not strings.
 
 ## Errors
 
@@ -513,7 +524,6 @@ running are the machine's.
   (Thomas, 2026-10-08, noted). It needs headings to start lines, as in
   Markdown, since SURFACE.md's headings are words that read what follows.
   For now the word is `count`, the same as `length`.
-- **Scan as a word,** beside the comprehension.
 - **Optional values outside collections,** "T or nothing" as the first sum
   type, a value and a tag, for FORTH's words that return a value or nothing.
 - **Glyphs:** APL's and Uiua's for these words, and whether `/` is reduce,

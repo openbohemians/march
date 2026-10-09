@@ -18,6 +18,15 @@
 [ < int# -- money > int#>money. ] money def.
 [ < dec# -- money > dec#>money. ] money def.
 [ < int# -- dec# > int#>dec#. ] dec# def.
+[ < int# -- bool > int#>bool. ] bool def.
+
+-- Truth (Thomas, 2026-10-09): `bool` is 0 and 1, Iverson's brackets, and so
+-- an i64 too: `mask + reduce.` counts. Comparisons leave one, and guards
+-- take one. `not`, `and` and `or` are 1 - x, the minimum and the maximum,
+-- which on values from 0 to 1 are also Zadeh's fuzzy connectives.
+
+[ 1 bool. ] true def.
+[ 0 bool. ] false def.
 
 -- Classes: a union in a pattern matches any of its types, a little less
 -- well than one of them alone (TYPES.md 3.6). `def` on a type names it.
@@ -119,18 +128,18 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ div. ] ÷ def.
 [ div. ] / def.
 
--- Comparisons leave a flag: 1 or 0, an i64.
+-- Comparisons leave a bool.
 
-[ < i64 i64 -- i64 > i64lt?. ] lt? def.
-[ < f64 f64 -- i64 > f64lt?. ] lt? def.
-[ < money money -- i64 > money-lt?. ] lt? def.
-[ < i64 i64 -- i64 > swap. i64lt?. ] gt? def.
-[ < f64 f64 -- i64 > swap. f64lt?. ] gt? def.
-[ < money money -- i64 > swap. money-lt?. ] gt? def.
-[ < i64 i64 -- i64 > i64eq?. ] eq? def.
-[ < f64 f64 -- i64 > f64eq?. ] eq? def.
-[ < money money -- i64 > money-eq?. ] eq? def.
-[ < string string -- i64 > string-eq?. ] eq? def.
+[ < i64 i64 -- bool > i64lt?. ] lt? def.
+[ < f64 f64 -- bool > f64lt?. ] lt? def.
+[ < money money -- bool > money-lt?. ] lt? def.
+[ < i64 i64 -- bool > swap. i64lt?. ] gt? def.
+[ < f64 f64 -- bool > swap. f64lt?. ] gt? def.
+[ < money money -- bool > swap. money-lt?. ] gt? def.
+[ < i64 i64 -- bool > i64eq?. ] eq? def.
+[ < f64 f64 -- bool > f64eq?. ] eq? def.
+[ < money money -- bool > money-eq?. ] eq? def.
+[ < string string -- bool > string-eq?. ] eq? def.
 
 -- Stack words. `=` is `dup` and `~` is `swap` (march7/docs/SURFACE.md,
 -- on trial since 2026-10-03); doubled, they act on two values at a time,
@@ -155,6 +164,10 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < a a -- a > swap. drop. ] min def.
 [ < a a gt? -- a > drop. ] max def.
 [ < a a -- a > swap. drop. ] max def.
+
+[ < bool -- bool > false. eq?. ] not def.
+[ < bool bool -- bool > min. ] and def.
+[ < bool bool -- bool > max. ] or def.
 
 -- Narrowing: a float to an integer, saying how it rounds: down, up, half
 -- away from zero, or toward zero. A float with no i64 is an error. On an
@@ -284,6 +297,8 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < f64 -- string > f64>text. ] show def.
 [ < money -- string > money>text. ] show def.
 [ < nil -- string > drop. "nil" ] show def.
+[ < 1 bool. -- string > drop. "true" ] show def.
+[ < bool -- string > drop. "false" ] show def.
 [ < tuple -- string > [ show. ] map. "(" swap. [ " " swap. concat. concat. ] each. " )" concat. ]
   show def.
 [ < a ary -- string > "(" swap. [ show. " " swap. concat. concat. ] each. " )" concat. ] show def.

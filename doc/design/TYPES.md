@@ -323,6 +323,41 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   or by guards at run time, it is the same error as an undefined word. The
   name is a word's outermost context; types and guards narrow it.
 
+### 2.16 Truth and nothing
+
+Decided 2026-10-09 (Thomas: "Iverson brackets it is").
+
+- **`bool` is 0 and 1,** Iverson's brackets: [P] is 1 when P holds and 0
+  when it does not, as APL has it and Knuth writes it, and as FORTH's -1
+  did not. So a bool is an i64 too, a subset: any word that takes an i64
+  takes it as it is, matched a little less well than an i64, so a clause
+  for `bool` is more specific. `mask + reduce.` counts and `mask xs ⋅.`
+  zeroes. That is no promotion: the value does not change, it is a member
+  of the larger set. A bool and an i64 join to an i64, and a variable bound
+  to one widens to the other.
+- **A type of its own,** as Haskell's `Bool` is: `true.` and `false.` are
+  its values, it shows as `true` and `false`, comparisons and predicates
+  leave it, and guards take it, or a literal 0 or 1. A count is not a
+  truth, so FORTH's flag that was a number is an error.
+- **`not`, `and` and `or`** are 1 - x, the minimum and the maximum. On
+  values from 0 to 1 those are also Zadeh's fuzzy connectives, so fuzzy
+  truth, when it comes, is an extension: its own type, with an α-cut,
+  `cut`, to make a bool where a guard must decide. The product and
+  Łukasiewicz logics, which differ only in `and` and `or`, would be types of
+  their own, the families choosing each one's algebra. An integer mapped
+  to 0 to 1 (graphics' UNORM) is a cheap exact representation for them.
+- **No truthiness.** `nil`, a 0 that is a number and the empty string are
+  not false; only a bool is tested. Absence is taken apart by clauses.
+- **One bit of 64:** a lone bool takes a cell, as an i64 does; an array of
+  them may be packed, a bit each, as APL implementations do, a choice of
+  representation by use (march8/docs/MACHINE.md, "Not yet").
+- **Nothing is `nil`,** a type with one value (3.6). Not `none`, which in
+  set-theoretic types is the empty set, the type with no values; not
+  `null`, which is a member of every type, so that anything might be
+  missing, where `nil` is a member only of its own and of a union that
+  names it; and no `unit`, since a word that returns nothing leaves
+  nothing.
+
 ## 3. Open
 
 1. **The stages:** how many, and what each lowers.

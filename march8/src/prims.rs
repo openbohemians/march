@@ -21,6 +21,7 @@ pub enum Prim {
     IntToF64,
     DecToF64,
     IntToMoney,
+    IntToBool,
     DecToMoney,
     // Numbers.
     I64Add,
@@ -150,6 +151,7 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::IntToF64, "int#>f64", "< int# -- f64 >", &[]),
     d(Prim::DecToF64, "dec#>f64", "< dec# -- f64 >", &[]),
     d(Prim::IntToMoney, "int#>money", "< int# -- money >", &[]),
+    d(Prim::IntToBool, "int#>bool", "< int# -- bool >", &[]),
     d(Prim::DecToMoney, "dec#>money", "< dec# -- money >", &[]),
     d(Prim::I64Add, "i64+", "< i64 i64 -- i64 >", &[P::IAdd]),
     d(Prim::I64Sub, "i64-", "< i64 i64 -- i64 >", &[P::ISub]),
@@ -168,14 +170,14 @@ pub const PRIMS: &[PrimDef] = &[
         "< int# int# -- int# int# >",
         &[],
     ),
-    d(Prim::I64Lt, "i64lt?", "< i64 i64 -- i64 >", &[P::ILt]),
-    d(Prim::I64Eq, "i64eq?", "< i64 i64 -- i64 >", &[P::Eq]),
+    d(Prim::I64Lt, "i64lt?", "< i64 i64 -- bool >", &[P::ILt]),
+    d(Prim::I64Eq, "i64eq?", "< i64 i64 -- bool >", &[P::Eq]),
     d(Prim::F64Add, "f64+", "< f64 f64 -- f64 >", &[P::FAdd]),
     d(Prim::F64Sub, "f64-", "< f64 f64 -- f64 >", &[P::FSub]),
     d(Prim::F64Mul, "f64*", "< f64 f64 -- f64 >", &[P::FMul]),
     d(Prim::F64Div, "f64/", "< f64 f64 -- f64 >", &[P::FDiv]),
-    d(Prim::F64Lt, "f64lt?", "< f64 f64 -- i64 >", &[P::FLt]),
-    d(Prim::F64Eq, "f64eq?", "< f64 f64 -- i64 >", &[P::FEq]),
+    d(Prim::F64Lt, "f64lt?", "< f64 f64 -- bool >", &[P::FLt]),
+    d(Prim::F64Eq, "f64eq?", "< f64 f64 -- bool >", &[P::FEq]),
     d(
         Prim::MoneyAdd,
         "money+",
@@ -191,13 +193,13 @@ pub const PRIMS: &[PrimDef] = &[
     d(
         Prim::MoneyLt,
         "money-lt?",
-        "< money money -- i64 >",
+        "< money money -- bool >",
         &[P::ILt],
     ),
     d(
         Prim::MoneyEq,
         "money-eq?",
-        "< money money -- i64 >",
+        "< money money -- bool >",
         &[P::Eq],
     ),
     d(
@@ -246,7 +248,7 @@ pub const PRIMS: &[PrimDef] = &[
     d(
         Prim::StrEq,
         "string-eq?",
-        "< string string -- i64 >",
+        "< string string -- bool >",
         &[P::Eq],
     ),
     d(
@@ -269,7 +271,7 @@ pub const PRIMS: &[PrimDef] = &[
         &[P::VecLen],
     ),
     d(Prim::MapAt, "map-at", "< k v map k -- v >", &[P::VecAt]),
-    d(Prim::MapHas, "map-has?", "< k v map k -- i64 >", &[P::Has]),
+    d(Prim::MapHas, "map-has?", "< k v map k -- bool >", &[P::Has]),
     d(
         Prim::MapPut,
         "map-put",
@@ -442,6 +444,7 @@ pub fn compile_time_only(p: Prim) -> bool {
             | IntToF64
             | DecToF64
             | IntToMoney
+            | IntToBool
             | DecToMoney
     )
 }
@@ -636,6 +639,10 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
             }
         }
         IntToF64 => Ok(vec![Val::Float(int(&a[0]) as f64)]),
+        IntToBool => match int(&a[0]) {
+            n @ (0 | 1) => Ok(vec![Val::Int(n)]),
+            n => Err((Kind::Literal, format!("{n} is not a bool: 0 or 1"))),
+        },
         DecToF64 => {
             let (d, s) = dec(&a[0]);
             let x: f64 = format!("{d}e-{s}")

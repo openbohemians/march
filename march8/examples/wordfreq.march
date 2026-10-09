@@ -2,15 +2,15 @@
 -- (2026-10-09). Run it with `march8 examples/wordfreq.march`.
 
 -- A separator: a space, a tab or a newline, by value patterns.
-[ < 32 > drop. 1 ] sep? def.
-[ < 9 > drop. 1 ] sep? def.
-[ < 10 > drop. 1 ] sep? def.
-[ < i64 > drop. 0 ] sep? def.
+[ < 32 > drop. true. ] sep? def.
+[ < 9 > drop. true. ] sep? def.
+[ < 10 > drop. true. ] sep? def.
+[ < i64 > drop. false. ] sep? def.
 
 -- Outside the text counts as a separator, so the words at its ends are
 -- found like the rest.
-[ < string i64 > dup. 1 lt?. rot. length. rot. lt?. +. ] outside? def.
-[ < string i64 outside? > drop. drop. 1 ] sep-at? def.
+[ < string i64 > dup. 1 lt?. rot. length. rot. lt?. or. ] outside? def.
+[ < string i64 outside? > drop. drop. true. ] sep-at? def.
 [ < string i64 > at. sep?. ] sep-at? def.
 
 -- Where the word that starts at i ends: recursion, a tail call.
@@ -18,9 +18,8 @@
 [ < string i64 next-sep? > swap. drop. ] end-of def.
 [ < string i64 > 1 +. end-of. ] end-of def.
 
--- Whether a word starts at i: a separator before it, and none at it.
-[ < string i64 > over. over. sep-at?. rot. rot. 1 -. sep-at?. swap. -. positive?. ]
-  starts? def.
+-- Whether a word starts at i: none at it, and a separator before it.
+[ < string i64 > over. over. sep-at?. not. rot. rot. 1 -. sep-at?. and. ] starts? def.
 
 -- The word at i, if one starts there; nothing otherwise.
 [ < string i64 starts? > over. over. end-of. slice. ] word-at def.

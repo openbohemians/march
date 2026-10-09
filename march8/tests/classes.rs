@@ -96,10 +96,12 @@ fn def_names_a_type() {
         show(&["i64 f64 or. whole def. [ < whole > drop. 1 ] w def. 2.0 f64. w."]),
         "<1> 1"
     );
-    // A name that is a type already, and `or` on what is not a type.
+    // A name that is a type already; and `or` on what is not a type is
+    // logical, so 2, not a bool, is no truth.
     assert_eq!(
         session(&["i64 f64 or. i64 def."]).err(),
         Some(Kind::Mismatch)
     );
-    assert_eq!(session(&["1 2 or."]).err(), Some(Kind::Mismatch));
+    assert_eq!(show(&["0 1 or."]), "<1> true");
+    assert_eq!(session(&["1 2 or."]).err(), Some(Kind::Literal));
 }

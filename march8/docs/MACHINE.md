@@ -126,6 +126,7 @@ equal types are equal numbers.
 | `a b or` | in patterns, a union: any of its types, `i64 f64 or`. Kept canonical, so order and repeats do not matter. It matches a little less well than one of its types alone, and better than `atom` |
 | `num` | the numbers: `i64 f64 or. money or. int# or. dec# or. num def.`, in `core.march` |
 | `nil` | the type with one value, `nil.`: nothing is there, as in `i64 nil or` |
+| `bool` | truth: 0 and 1, `false.` and `true.`, Iverson's brackets, so an i64 too (TYPES.md 2.16) |
 | `( i64 string )` | a tuple: fixed positions, a type each. Positions of one type are a vec, so `( a b )` takes `( 1 2 )` |
 | `tuple` | in patterns, any tuple: a class, as `atom` is |
 
@@ -168,7 +169,7 @@ A family applied chooses its clause by the values on top (TYPES.md 2.8):
 
 A word in a signature that is not a type is a **guard**: `< i64 positive? >`
 (TYPES.md 2.15). It looks at the inputs before it, as many as it takes,
-without taking them, and leaves a flag. How many it takes comes from its
+without taking them, and leaves a `bool` (TYPES.md 2.16). How many it takes comes from its
 definition, by a pass over its words: `positive?`, `[ 0 gt?. ]`, takes one,
 and `lt?` takes two, so `< i64 i64 lt? >` compares the two inputs. A word
 that does not leave one value cannot be a guard.
@@ -585,7 +586,9 @@ of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
 exact for two literals and checked for integers; and `divmod`, the quotient
 and remainder, floored (`-7 3 divmod.` is `-3 2`), with `div` and `mod` each
 taking one of them, so the three agree, and `/` as `div` for now; and
-`floor`, `ceil`, `round` and `trunc`, which narrow a float to an integer,
+`bool`, with `true` and `false`, which comparisons leave and guards take,
+and `not`, `and` and `or` as 1 - x, the minimum and the maximum (TYPES.md
+2.16); `floor`, `ceil`, `round` and `trunc`, which narrow a float to an integer,
 saying how it rounds (`round` halves away from zero), exact on a decimal
 literal, an error for a float with no i64. doc/design/WORDCHART.md
 charts the words beside APL's and Uiua's.
@@ -729,9 +732,10 @@ warning where a union is made (above, "Unions").
       a version nothing else holds, is the memory work deferred to 2.0.
     - **Still wanted:** a way to read input, so the text is not a literal;
       splitting and lower-casing text; `sort-by`, so ranking is not counts
-      × words; `not` and `and`, for which `starts?` uses arithmetic on
-      flags; and a word applied without its `.` is the easiest mistake to
-      make, though the error names it.
+      × words; and a word applied without its `.` is the easiest mistake to
+      make, though the error names it. `not` and `and` were wanted too, as
+      `starts?` did arithmetic on flags; `bool` brought them since (TYPES.md
+      2.16), and `starts?` reads `sep-at?. not. … sep-at?. and.`
 
 ## Not yet
 

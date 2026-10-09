@@ -28,10 +28,13 @@ pub enum Base {
     /// The type with one value, `nil`, which means nothing is there, as in
     /// `i64 nil or` (doc/design/TYPES.md 3.6).
     Nil,
+    /// Truth: 0 and 1, Iverson's brackets, so a subset of i64 (Thomas,
+    /// 2026-10-09). Shown as `false` and `true`.
+    Bool,
 }
 
 impl Base {
-    pub const ALL: [(Base, &'static str); 10] = [
+    pub const ALL: [(Base, &'static str); 11] = [
         (Base::I64, "i64"),
         (Base::F64, "f64"),
         (Base::Money, "money"),
@@ -42,6 +45,7 @@ impl Base {
         (Base::Symbol, "symbol"),
         (Base::Quote, "quote"),
         (Base::Nil, "nil"),
+        (Base::Bool, "bool"),
     ];
 }
 
@@ -56,6 +60,7 @@ pub const TYPE: Type = 6;
 pub const SYMBOL: Type = 7;
 pub const QUOTE: Type = 8;
 pub const NIL: Type = 9;
+pub const BOOL: Type = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Term {

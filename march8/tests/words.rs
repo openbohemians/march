@@ -35,7 +35,10 @@ fn signs_choose_clauses() {
     assert_eq!(show(&["-7", "abs."]), "<1> 7");
     assert_eq!(show(&["3 7 min. 3 7 max. 2.5 1.5 min."]), "<3> 3 7 1.5");
     assert_eq!(show(&["9 4", "min. 6 max."]), "<1> 6");
-    assert_eq!(show(&["0 zero?. 5 positive?. 5 negative?."]), "<3> 1 1 0");
+    assert_eq!(
+        show(&["0 zero?. 5 positive?. 5 negative?."]),
+        "<3> true true false"
+    );
 }
 
 #[test]

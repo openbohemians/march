@@ -118,6 +118,8 @@ fn value_text(j: &Jdg) -> String {
     match &j.val {
         Val::Int(n) if j.ty == MONEY => prims::show_dec(*n, 2),
         Val::Int(_) if j.ty == NIL => "nil".into(),
+        Val::Int(0) if j.ty == BOOL => "false".into(),
+        Val::Int(_) if j.ty == BOOL => "true".into(),
         Val::Int(n) => n.to_string(),
         Val::Dec(d, s) => prims::show_dec(*d, *s),
         Val::Float(x) => format!("{x:?}"),
@@ -649,6 +651,8 @@ impl Stage {
             Val::Run => self.types.name(j.ty),
             Val::Int(n) if j.ty == MONEY => format!("{} (money)", prims::show_dec(*n, 2)),
             Val::Int(_) if j.ty == NIL => "nil".into(),
+            Val::Int(0) if j.ty == BOOL => "false".into(),
+            Val::Int(_) if j.ty == BOOL => "true".into(),
             Val::Int(n) => format!("{n} ({})", self.types.name(j.ty)),
             Val::Dec(d, s) => format!("{} (dec#)", prims::show_dec(*d, *s)),
             Val::Float(x) => format!("{x:?} (f64)"),
@@ -767,6 +771,7 @@ impl Stage {
                 (Term::Ary(e), Term::Vec(_, f) | Term::Ary(f)) => self.forgets(e, f),
                 (Term::Vec(n, e), Term::Vec(m, f)) => n == m && self.forgets(e, f),
                 (Term::Map(k, v), Term::Map(k2, v2)) => self.forgets(k, k2) && self.forgets(v, v2),
+                (Term::Base(Base::I64), Term::Base(Base::Bool)) => true,
                 _ => false,
             }
     }
@@ -884,12 +889,28 @@ impl Stage {
                 Some(0)
             }
             Some(b) if b == have => Some(0),
-            // A variable bound to a literal takes a type the literal becomes.
+            // A variable bound to a literal takes a type the literal becomes,
+            // or the literal's own if that holds the other, as an i64 holds a
+            // bool: `3 true. max.` is 3.
             Some(b) if self.types.is_literal(b) && self.accepts(have, b) => {
+                let own = Self::default_of(b);
+                env.0[v] = Some(if self.forgets(own, have) { own } else { have });
+                Some(0)
+            }
+            Some(b) if self.types.is_literal(have) && self.accepts(b, have) => {
+                let own = Self::default_of(have);
+                if self.forgets(own, b) {
+                    env.0[v] = Some(own);
+                }
+                Some(0)
+            }
+            // One is the other less precisely known, a bool an i64: the
+            // variable takes the wider.
+            Some(b) if self.forgets(have, b) => {
                 env.0[v] = Some(have);
                 Some(0)
             }
-            Some(b) if self.types.is_literal(have) && self.accepts(b, have) => Some(0),
+            Some(b) if self.forgets(b, have) => Some(0),
             _ => None,
         }
     }
@@ -943,6 +964,8 @@ impl Stage {
                 let u = self.tuple_union(have);
                 Some(1 + self.unify(e, u, env)?)
             }
+            // A bool is an i64, 0 or 1: matched a little less well than one.
+            (Term::Base(Base::I64), Term::Base(Base::Bool)) => Some(6),
             (Term::Base(a), Term::Base(b)) => (a == b).then_some(8),
             (Term::Nat(a), Term::Nat(b)) => (a == b).then_some(8),
             (Term::Ary(e), Term::Ary(f)) => Some(8 + self.unify(e, f, env)?),
@@ -2029,18 +2052,21 @@ impl Stage {
             if self.stack.len() != depth + 1 {
                 return Err(self.err(Kind::Mismatch, format!("{} must leave one flag", g.name())));
             }
+            // A guard leaves a bool (Thomas, 2026-10-09), or a literal 0 or 1:
+            // a count is not a truth.
             let flag = self.stack.pop().expect("one");
+            let crisp = flag.ty == BOOL || flag.ty == INT_LIT;
             match flag.val {
-                Val::Int(0) => return Ok(Some(false)),
-                Val::Int(_) => {}
-                Val::Run if flag.ty == I64 => {
+                Val::Int(0) if crisp => return Ok(Some(false)),
+                Val::Int(1) if crisp => {}
+                Val::Run if flag.ty == BOOL => {
                     self.code.push(Ins::JumpZero(skip));
                     certain = false;
                 }
                 _ => {
                     return Err(self.err(
                         Kind::Mismatch,
-                        format!("{} leaves {}, not a flag", g.name(), self.describe(&flag)),
+                        format!("{} leaves {}, not a bool", g.name(), self.describe(&flag)),
                     ));
                 }
             }
@@ -4103,6 +4129,9 @@ impl Stage {
             t = Some(match t {
                 None => x,
                 Some(y) if y == x => y,
+                // One is the other, less precisely known: a bool is an i64.
+                Some(y) if self.forgets(y, x) => y,
+                Some(y) if self.forgets(x, y) => x,
                 Some(y) => match (self.types.term(y), self.types.term(x)) {
                     (Term::Vec(_, e) | Term::Ary(e), Term::Vec(_, f) | Term::Ary(f)) if e == f => {
                         self.types.intern(Term::Ary(e))

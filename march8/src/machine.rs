@@ -145,6 +145,10 @@ pub struct Machine {
     marks: Vec<u64>,
     /// Strings by the identity of their text, so equal text is one handle.
     strings: HashMap<merkle_champ::Identity, u64>,
+    /// Strings made by `text` from read-only bytes, by where the bytes are:
+    /// they cannot change, and making one chunks and hashes all of them, so
+    /// a literal in a loop is made once, not on every pass.
+    data_texts: HashMap<(u64, u64, usize), u64>,
     /// Text written by `write`, for the host to show.
     output: Vec<u8>,
     pub stats: Stats,
@@ -166,6 +170,7 @@ impl Machine {
             scratch: Vec::new(),
             marks: Vec::new(),
             strings: HashMap::new(),
+            data_texts: HashMap::new(),
             output: Vec::new(),
             stats: Stats::default(),
             blobs: image.blobs.clone(),
@@ -190,6 +195,7 @@ impl Machine {
             scratch: Vec::new(),
             marks: Vec::new(),
             strings: HashMap::new(),
+            data_texts: HashMap::new(),
             output: Vec::new(),
             stats: Stats::default(),
             blobs: BTreeMap::new(),
@@ -1058,10 +1064,23 @@ impl Machine {
             Text => {
                 let n = usize::try_from(self.pop()?).map_err(|_| Error::Memory)?;
                 let (r, o) = self.address()?;
-                let s = std::str::from_utf8(self.read(r, o, n)?).map_err(|_| Error::Memory)?;
-                let t = merkle_champ::Sequence::text(s);
-                let r = self.allocate_text(t)?;
-                self.push(r)?;
+                let fixed = self
+                    .region_slot(r)
+                    .ok()
+                    .and_then(|s| self.regions[s].region.as_ref())
+                    .is_some_and(|g| g.read_only);
+                let made = self.data_texts.get(&(r, o, n)).copied();
+                if fixed && let Some(t) = made.filter(|&t| self.text(t).is_ok()) {
+                    self.push(t)?;
+                } else {
+                    let s = std::str::from_utf8(self.read(r, o, n)?).map_err(|_| Error::Memory)?;
+                    let t = merkle_champ::Sequence::text(s);
+                    let t = self.allocate_text(t)?;
+                    if fixed {
+                        self.data_texts.insert((r, o, n), t);
+                    }
+                    self.push(t)?;
+                }
             }
             Concat => {
                 let b = self.pop()?;

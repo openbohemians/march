@@ -598,8 +598,9 @@ A primitive applied to values all known folds, unless it has an effect
 A few are handled by the stage itself, because their types are not a
 signature's: the stack words, which move judgments, the values at run time
 among them moving by the scratch stack only if their order changes; `vec-length`, a
-constant; `vec-at`, which checks a literal index against the length; and
-`vec-concat`, whose length is the sum.
+constant; `vec-at`, which checks a literal index against the length;
+`vec-concat`, whose length is the sum; the tuple words; and `empty`, whose
+type is the type it is given.
 
 ## Code
 
@@ -708,6 +709,29 @@ warning where a union is made (above, "Unions").
 9. **Waiting alternatives free the order of clauses.** The prototype needed
    a guarded base first; here any alternative that finishes types the
    recursion.
+10. **A real program runs** (2026-10-09). `examples/wordfreq.march` counts
+    the words of a text and lists them by word and by count, in about 40
+    lines of the explicit form: value patterns for separators, guards,
+    recursion with a tail call, a comprehension collecting each word or
+    nothing, `get`'s `i64 nil or` taken apart by clauses, `fold` and a
+    string with holes. Writing it found:
+    - **Missing words,** added: `put`, a map with a key set, and `empty`,
+      an empty array or map of a type, `string i64 map. empty.`, since `( )`
+      and `{ }` cannot say their types. `empty` is provisional.
+    - **A literal string in a loop was made again on every pass,** its bytes
+      chunked and hashed each time, which made the count quadratic: 4.6 s
+      for 1,000 words. The machine now makes a string from read-only bytes
+      once, by where they are: 0.2 s, 13 ms in a release build.
+    - **The memory limit stops it at scale.** Nothing is freed yet, and each
+      `put` is charged a whole map, though versions share their nodes, so
+      20,000 words pass the 16 MB limit. With the limit raised they take
+      0.3 s and agree with Python. Charging what a version adds, or freeing
+      a version nothing else holds, is the memory work deferred to 2.0.
+    - **Still wanted:** a way to read input, so the text is not a literal;
+      splitting and lower-casing text; `sort-by`, so ranking is not counts
+      × words; `not` and `and`, for which `starts?` uses arithmetic on
+      flags; and a word applied without its `.` is the easiest mistake to
+      make, though the error names it.
 
 ## Not yet
 

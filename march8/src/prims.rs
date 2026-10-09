@@ -59,6 +59,8 @@ pub enum Prim {
     MapLength,
     MapAt,
     MapHas,
+    MapPut,
+    Empty,
     TupleLength,
     TupleAt,
     TupleSpread,
@@ -268,6 +270,13 @@ pub const PRIMS: &[PrimDef] = &[
     ),
     d(Prim::MapAt, "map-at", "< k v map k -- v >", &[P::VecAt]),
     d(Prim::MapHas, "map-has?", "< k v map k -- i64 >", &[P::Has]),
+    d(
+        Prim::MapPut,
+        "map-put",
+        "< k v map k v -- k v map >",
+        &[P::Put],
+    ),
+    d(Prim::Empty, "empty", "< type >", &[]),
     d(
         Prim::MapKeys,
         "map-keys",
@@ -479,6 +488,8 @@ pub fn foldable(p: Prim) -> bool {
                 | Prim::MapLength
                 | Prim::MapAt
                 | Prim::MapHas
+                | Prim::MapPut
+                | Prim::Empty
                 | Prim::TupleLength
                 | Prim::TupleAt
                 | Prim::TupleSpread

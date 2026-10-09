@@ -2927,6 +2927,35 @@ impl Stage {
                 self.push(I64, Val::Int(n as i128));
             }
             Prim::TupleAt => self.tuple_at(base)?,
+            // An empty array or map of a type: `string i64 map. empty.`.
+            Prim::Empty => {
+                let Val::Type(t) = self.stack[base].val else {
+                    unreachable!("a type value")
+                };
+                let op = match self.types.term(t) {
+                    Term::Ary(_) => P::Gather,
+                    Term::Map(..) => P::MapGather,
+                    _ => {
+                        return Err(self.err(
+                            Kind::NoWord,
+                            format!("no word `{name}` for {}", self.types.name(t)),
+                        ));
+                    }
+                };
+                if self.types.is_pattern(t) {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!(
+                            "`{name}` needs a type, not the pattern {}",
+                            self.types.name(t)
+                        ),
+                    ));
+                }
+                self.stack.pop();
+                self.emit(Op::Prim(P::Mark));
+                self.emit(Op::Prim(op));
+                self.push(t, Val::Run);
+            }
             Prim::TupleSpread => {
                 let es = self
                     .types

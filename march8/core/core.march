@@ -206,6 +206,9 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < k v map k map-has? -- v nil or > map-at. ] get def.
 [ < k v map k -- v nil or > drop. drop. nil. ] get def.
 
+-- A map with a key set to a value: a new version, the old one unchanged.
+[ < k v map k v -- k v map > map-put. ] put def.
+
 [ < string string -- string > string-concat. ] concat def.
 [ < a ary a ary -- a ary > ary-concat. ] concat def.
 [ < n a vec m a vec > vec-concat. ] concat def.

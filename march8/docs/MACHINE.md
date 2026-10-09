@@ -564,7 +564,18 @@ running are the machine's.
 
 - **Mutual recursion** between instances, which would make a cycle of
   content identities; and words used before they are defined.
-- **Sharing large words** that are not recursive, as instances, to save code.
+- **Sharing large words** that are not recursive, as instances, to save code:
+  everything else is inlined, which is fast and folds constants, but grows
+  code. An instance keyed by its known inputs as well as its types, returning
+  its known results as judgments, means exactly what inlining means, so the
+  choice is only one of size and speed (2026-10-08).
+- **Definitions' identities.** A CID names compiled code: an instance, or a
+  piece of top-level code, with names, types and inlined words gone. A
+  definition has no identity yet. Open: its signature and words as written,
+  families resolved where it is used; pinned, as Unison, each name resolved
+  when it is defined to the family as it is then, so a new clause makes new
+  identities; or modules pinning what they import. To decide with images and
+  modules (doc/design/TYPES.md, open question 2).
 - **OR between contexts.**
 - **What a value pattern tells its clause:** inside `< 0 >`, the input is
   known to be 0, so code there could fold on it.

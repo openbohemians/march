@@ -455,7 +455,10 @@ of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
 `max` as clauses chosen by them, with no `if`; `sqrt`; `pow`, x to the y,
 exact for two literals and checked for integers; and `divmod`, the quotient
 and remainder, floored (`-7 3 divmod.` is `-3 2`), with `div` and `mod` each
-taking one of them, so the three agree, and `/` as `div` for now. doc/design/WORDCHART.md
+taking one of them, so the three agree, and `/` as `div` for now; and
+`floor`, `ceil`, `round` and `trunc`, which narrow a float to an integer,
+saying how it rounds (`round` halves away from zero), exact on a decimal
+literal, an error for a float with no i64. doc/design/WORDCHART.md
 charts the words beside APL's and Uiua's.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
@@ -476,13 +479,13 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with twenty-two primitives added: `pick`; checked
+The machine is march7's, with twenty-five primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
 `mark-pick`, which reads below an array literal's mark; `money>text` and
-`string-show`; `sort-ints`, `sort-floats` and `sort-texts`; and `f64-sqrt`,
-`f64-pow` and `i64-pow`.
+`string-show`; `sort-ints`, `sort-floats` and `sort-texts`; `f64-sqrt`,
+`f64-pow` and `i64-pow`; and `f64-floor`, `f64-ceil` and `f64-round`.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals

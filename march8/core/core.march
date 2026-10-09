@@ -103,6 +103,27 @@
 [ < a a gt? -- a > drop. ] max def.
 [ < a a -- a > swap. drop. ] max def.
 
+-- Narrowing: a float to an integer, saying how it rounds: down, up, half
+-- away from zero, or toward zero. A float with no i64 is an error. On an
+-- integer they change nothing, and on a decimal literal they are exact.
+
+[ < dec# -- int# > dec#-floor. ] floor def.
+[ < int# -- int# > ] floor def.
+[ < i64 -- i64 > ] floor def.
+[ < f64 -- i64 > f64-floor. ] floor def.
+[ < dec# -- int# > dec#-ceil. ] ceil def.
+[ < int# -- int# > ] ceil def.
+[ < i64 -- i64 > ] ceil def.
+[ < f64 -- i64 > f64-ceil. ] ceil def.
+[ < dec# -- int# > dec#-round. ] round def.
+[ < int# -- int# > ] round def.
+[ < i64 -- i64 > ] round def.
+[ < f64 -- i64 > f64-round. ] round def.
+[ < dec# -- int# > dec#-trunc. ] trunc def.
+[ < int# -- int# > ] trunc def.
+[ < i64 -- i64 > ] trunc def.
+[ < f64 -- i64 > f64-trunc. ] trunc def.
+
 -- Roots and powers. `pow` is x to the y; `exp`, e to the x, is kept for
 -- that. Two literals stay an exact literal.
 

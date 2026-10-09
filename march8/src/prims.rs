@@ -82,6 +82,14 @@ pub enum Prim {
     Compose,
     FSqrt,
     FPow,
+    FFloor,
+    FCeil,
+    FRound,
+    FTrunc,
+    DecFloor,
+    DecCeil,
+    DecRound,
+    DecTrunc,
     IPow,
     IntPow,
     // Stack words, which move judgments as the code moves values.
@@ -312,6 +320,29 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::Rot, "rot", "< a b c -- b c a >", &[]),
     d(Prim::Swap2, "swap2", "< a b c d -- c d a b >", &[]),
     d(Prim::FSqrt, "f64-sqrt", "< f64 -- f64 >", &[P::FSqrt]),
+    d(
+        Prim::FFloor,
+        "f64-floor",
+        "< f64 -- i64 >",
+        &[P::FFloor, P::FToI],
+    ),
+    d(
+        Prim::FCeil,
+        "f64-ceil",
+        "< f64 -- i64 >",
+        &[P::FCeil, P::FToI],
+    ),
+    d(
+        Prim::FRound,
+        "f64-round",
+        "< f64 -- i64 >",
+        &[P::FRound, P::FToI],
+    ),
+    d(Prim::FTrunc, "f64-trunc", "< f64 -- i64 >", &[P::FToI]),
+    d(Prim::DecFloor, "dec#-floor", "< dec# -- int# >", &[]),
+    d(Prim::DecCeil, "dec#-ceil", "< dec# -- int# >", &[]),
+    d(Prim::DecRound, "dec#-round", "< dec# -- int# >", &[]),
+    d(Prim::DecTrunc, "dec#-trunc", "< dec# -- int# >", &[]),
     d(Prim::FPow, "f64-pow", "< f64 f64 -- f64 >", &[P::FPow]),
     d(Prim::IPow, "i64-pow", "< i64 i64 -- i64 >", &[P::IPow]),
     d(Prim::IntPow, "int#-pow", "< int# int# -- int# >", &[]),
@@ -354,6 +385,10 @@ pub fn compile_time_only(p: Prim) -> bool {
             | IntMul
             | IntPow
             | IntDivMod
+            | DecFloor
+            | DecCeil
+            | DecRound
+            | DecTrunc
             | DecAdd
             | DecSub
             | DecMul
@@ -513,6 +548,33 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
             i64_of(small(int(&a[0])).checked_pow(e), "i64 power")
         }
         FSqrt => Ok(vec![Val::Float(float(&a[0]).sqrt())]),
+        FFloor | FCeil | FRound | FTrunc => {
+            let x = float(&a[0]);
+            let y = match p {
+                FFloor => x.floor(),
+                FCeil => x.ceil(),
+                FRound => x.round(),
+                _ => x.trunc(),
+            };
+            // As `f>i` checks: NaN, infinities and values outside i64.
+            if !(y > -9_223_372_036_854_777_856.0 && y < 9_223_372_036_854_775_808.0) {
+                return Err((Kind::Arithmetic, format!("{x:?} has no i64")));
+            }
+            Ok(vec![Val::Int((y as i64).into())])
+        }
+        DecFloor | DecCeil | DecRound | DecTrunc => {
+            let (d, s) = dec(&a[0]);
+            let unit = pow10(s).ok_or_else(|| overflow("a decimal literal"))?;
+            let (q, r) = (d / unit, d % unit);
+            let n = match p {
+                DecFloor => d.div_euclid(unit),
+                DecCeil => -(-d).div_euclid(unit),
+                DecTrunc => q,
+                _ if 2 * r.abs() >= unit => q + d.signum(),
+                _ => q,
+            };
+            Ok(vec![Val::Int(n)])
+        }
         FPow => Ok(vec![Val::Float(float(&a[0]).powf(float(&a[1])))]),
         IntToDec => Ok(vec![Val::Dec(int(&a[0]), 0)]),
         IntToI64 => {

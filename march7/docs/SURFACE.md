@@ -336,7 +336,9 @@ Decided:
 - **No implicit promotion between values.** Literals take their type from
   context, so `x 1 +` works for a float `x`. Conversions are explicit.
 - **`!` converts the top value to the type of the value below:** `5.0 5 !`
-  leaves `5.0 5.0`. Raw memory store and fetch move to the system track, as
+  leaves `5.0 5.0`. Retired 2026-10-09 (Thomas): literals take their type
+  from context in march8, and with types as values, converting is applying a
+  type or a word over one. Raw memory store and fetch move to the system track, as
   `!!`/`@@` or `store`/`fetch`, renamed together with module scoping because
   `!` is one of the words the bootstrap borrows.
 - **`+` is a family,** resolved by type at compile time. The `u`-words and

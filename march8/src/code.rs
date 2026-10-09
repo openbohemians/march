@@ -168,6 +168,11 @@ pub enum Primitive {
     // ( a b -- q r ) Floored division: q rounded down, r with the sign of b,
     // a = q·b + r; traps on division by zero and on overflow.
     IDivMod = 95,
+    // ( x -- y ) A float rounded to a whole float: down, up, or half away
+    // from zero. `f>i` then makes it an integer, checked.
+    FFloor = 96,
+    FCeil = 97,
+    FRound = 98,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -267,6 +272,9 @@ impl Primitive {
         (Self::FPow, "f64-pow"),
         (Self::IPow, "i64-pow"),
         (Self::IDivMod, "i64-divmod"),
+        (Self::FFloor, "f64-floor"),
+        (Self::FCeil, "f64-ceil"),
+        (Self::FRound, "f64-round"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

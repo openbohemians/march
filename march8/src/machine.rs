@@ -867,6 +867,15 @@ impl Machine {
                 self.push(q as u64)?;
                 self.push(r as u64)?;
             }
+            FFloor | FCeil | FRound => {
+                let a = f64::from_bits(self.pop()?);
+                let r = match p {
+                    FFloor => a.floor(),
+                    FCeil => a.ceil(),
+                    _ => a.round(),
+                };
+                self.push(float_bits(r))?;
+            }
             FSqrt => {
                 let a = f64::from_bits(self.pop()?);
                 self.push(float_bits(a.sqrt()))?;

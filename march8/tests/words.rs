@@ -86,3 +86,27 @@ fn divmod_is_floored() {
         Some(Kind::Run(march8::machine::Error::Arithmetic))
     );
 }
+
+#[test]
+fn narrowing_says_how_it_rounds() {
+    // Down, up, half away from zero, toward zero; on decimal literals,
+    // exactly, at compile time.
+    assert_eq!(
+        show(&["2.7 floor. -2.7 floor. 2.2 ceil. -2.2 ceil. 2.5 round. -2.5 round. -2.7 trunc."]),
+        "<7> 2 -3 3 -2 3 -3 -2"
+    );
+    // A literal's result stays a literal.
+    assert_eq!(show(&["2.7 floor. 0.5 +."]), "<1> 2.5");
+    // Floats at run time become integers; integers are unchanged.
+    assert_eq!(show(&["2.7 -2.5", "floor. swap. round."]), "<2> -3 3");
+    assert_eq!(show(&["7", "floor. ceil. round. trunc."]), "<1> 7");
+    // A float with no i64 is an error, at compile time or at run time.
+    assert_eq!(
+        session(&["10.0 300.0 pow. floor."]).err(),
+        Some(Kind::Arithmetic)
+    );
+    assert_eq!(
+        session(&["10.0 300.0 pow.", "floor."]).err(),
+        Some(Kind::Run(march8::machine::Error::Arithmetic))
+    );
+}

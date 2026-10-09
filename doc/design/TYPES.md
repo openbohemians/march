@@ -352,12 +352,14 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
      the type with no values, so `i64 or none` is `i64`. The value that
      means "nothing here" needs a name and a type of its own; `nil` is
      Elixir's.
-   - **A light warning** (Thomas, 2026-10-09): a slot that may hold more
-     than one concrete type at run time costs a branch wherever it is used,
-     and a copy of the code for each type. Proposed: a signature that names
-     the union (`-- i64 or nil`) states the intent and silences it. A family
-     whose uses each have one concrete type is not warned: its copies are
-     instances, chosen at compile time.
+   - **An informative warning** (Thomas, 2026-10-09): a slot that may hold
+     more than one concrete type at run time costs a branch wherever it is
+     used, and a copy of the code for each type. Informative is for what
+     programs can and often do, with a clear downside, that could be avoided
+     by writing it another way (march8/docs/MACHINE.md, "Errors").
+     Proposed: a signature that names the union (`-- i64 or nil`) states the
+     intent and silences it. Many instances of one family, chosen at compile
+     time, cost code size, and are informative too.
    - **Not taken from Elixir:** gradual typing (`dynamic()`), which serves
      an existing dynamic language on a VM that tags every value; and full
      semantic subtyping, with complements of function types. March starts
@@ -409,7 +411,7 @@ adopt the new types later, or never.
 6. **Kinds at run time for identity:** where a container is built, the
    compiler tells the machine its elements' kinds, so identities hash
    contents rather than handles.
-7. **Sums,** when needed.
+7. **Unions** (3.6), when needed.
 
 Each step would come with tests and a note in march7/docs, as the checker's
 slices did.

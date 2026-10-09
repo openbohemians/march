@@ -595,8 +595,17 @@ inside a core clause is reported where the clause was applied. Errors while
 running are the machine's.
 
 Warnings are planned, at three levels: informative, minor and severe
-(Thomas, 2026-10-09). The first will be a slot that may hold more than one
-type at run time (TYPES.md 3.6).
+(Thomas, 2026-10-09):
+
+- **Informative:** what programs can and often do, with a clear downside,
+  that could be avoided by writing it another way. A slot that may hold
+  more than one type at run time costs a branch where it is used (TYPES.md
+  3.6); many instances of one family cost code size.
+- **Minor:** probably a mistake, but harmless as written: a value computed
+  and then dropped, a name defined and never used.
+- **Severe:** almost certainly a bug that still compiles: a clause that can
+  never be chosen, since an earlier one always wins; a guard that is always
+  true.
 
 ## What it found
 

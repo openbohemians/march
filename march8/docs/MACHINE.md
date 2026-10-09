@@ -310,6 +310,8 @@ The rest are words in `core.march`:
 | `xs q scan` | the running reductions from the left: `( 1 2 3 ) + scan.` is `( 1 3 6 )`, a comprehension |
 | `n q times` | `q` n times, as `each` over `n range` |
 | `first`, `last`, `rest`, `most`, `slice` | parts of an array, and `slice` of a string |
+| `sort` | an array in order: numbers by value, strings by text |
+| `keys`, `values` | a map's keys and values, in one order, the map's own |
 
 With `-` on `( 1 2 3 )`, `fold` from 0 is −6 and `fold-right` is 2, as APL's
 `-/`; for an associative word the two agree. A consumer takes a word as well
@@ -383,7 +385,9 @@ input, short for `\[ _. ]` (march7/docs/STRINGS.md):
   no mark: nothing above its inputs is a run, so a pull is a plain copy.
 - **`show`,** in `core.march`, writes a value as the display does, so it
   reads back: a string quoted, money with its cents, an array in
-  parentheses, element by element. `print` writes any value, by `>string`.
+  parentheses, element by element, and a map in braces, sorted by key (Thomas,
+  2026-10-08), as the display sorts it. `print` writes any value, by
+  `>string`.
 
 ### Recursion and instances
 
@@ -456,12 +460,12 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with fifteen primitives added: `pick`; checked
+The machine is march7's, with eighteen primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64/` and `i64mod`, which trap on overflow
 and division by zero; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
-`mark-pick`, which reads below an array literal's mark; and `money>text` and
-`string-show`.
+`mark-pick`, which reads below an array literal's mark; `money>text` and
+`string-show`; and `sort-ints`, `sort-floats` and `sort-texts`.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals

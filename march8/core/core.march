@@ -85,6 +85,15 @@
 [ < a ary a ary -- a ary > ary-concat. ] concat def.
 [ < n a vec m a vec > vec-concat. ] concat def.
 
+[ < k v map -- k ary > map-keys. ] keys def.
+[ < k v map -- v ary > map-values. ] values def.
+
+-- `sort`: an array in order, numbers by value and strings by text.
+[ < i64 ary -- i64 ary > i64-sort. ] sort def.
+[ < f64 ary -- f64 ary > f64-sort. ] sort def.
+[ < money ary -- money ary > money-sort. ] sort def.
+[ < string ary -- string ary > string-sort. ] sort def.
+
 -- `count` is `length`, for now (Thomas, 2026-10-08: `#` may come later).
 [ length. ] count def.
 
@@ -128,6 +137,11 @@
 [ < f64 -- string > f64>text. ] show def.
 [ < money -- string > money>text. ] show def.
 [ < a ary -- string > "(" swap. [ show. " " swap. concat. concat. ] each. " )" concat. ] show def.
+[ < k v map -- string >
+  "{" swap. dup. keys. sort.
+  [ over. over. at. show. swap. show. " " swap. concat. " " concat. swap. concat.
+    rot. swap. concat. swap. ] each.
+  drop. " }" concat. ] show def.
 
 [ < string -- string > ] >string def.
 [ < a -- string > show. ] >string def.

@@ -1274,6 +1274,26 @@ impl Machine {
                 let r = self.allocate_vector((0..n as u64).collect())?;
                 self.push(r)?;
             }
+            SortInts | SortFloats | SortTexts => {
+                let a = self.pop()?;
+                let mut cells: Vec<u64> = self.array(a)?.whole().iter().copied().collect();
+                match p {
+                    SortInts => cells.sort_by_key(|&x| x as i64),
+                    SortFloats => {
+                        cells.sort_by(|x, y| f64::from_bits(*x).total_cmp(&f64::from_bits(*y)))
+                    }
+                    _ => {
+                        let mut texts = Vec::with_capacity(cells.len());
+                        for &c in &cells {
+                            texts.push((self.text(c)?.to_text().ok_or(Error::Memory)?, c));
+                        }
+                        texts.sort();
+                        cells = texts.into_iter().map(|t| t.1).collect();
+                    }
+                }
+                let r = self.allocate_vector(cells.into_iter().collect())?;
+                self.push(r)?;
+            }
             Reverse => {
                 let a = self.pop()?;
                 let whole = self.array(a)?.whole();

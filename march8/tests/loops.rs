@@ -90,6 +90,16 @@ fn arrays_in_parts() {
     assert_eq!(show(&["( 1 2 3 ) most."]), "<1> ( 1 2 )");
     assert_eq!(show(&["( 1 2 3 ) count. \"abc\" count."]), "<2> 3 3");
     assert_eq!(show(&["\"héllo\" 1 3 slice."]), "<1> \"él\"");
+    // `sort`: numbers by value, strings by text; `keys` and `values` in one
+    // order.
+    assert_eq!(
+        show(&["( 3 1 2 ) sort. ( \"pear\" \"apple\" ) sort. ( 2.5 -1.0 ) sort."]),
+        "<3> ( 1 2 3 ) ( \"apple\" \"pear\" ) ( -1.0 2.5 )"
+    );
+    assert_eq!(
+        show(&["{ \"b\" 2 \"a\" 1 } dup. keys. sort. swap. values. sort."]),
+        "<2> ( \"a\" \"b\" ) ( 1 2 )"
+    );
     // `compose` joins two quotations into one, at compile time.
     assert_eq!(show(&["3 [ 1 +. ] [ 2 *. ] compose. ."]), "<1> 8");
 }

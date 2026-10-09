@@ -56,6 +56,12 @@ pub enum Prim {
     AryConcat,
     MapLength,
     MapAt,
+    MapKeys,
+    MapValues,
+    SortInts,
+    SortFloats,
+    SortMoney,
+    SortTexts,
     VecLength,
     VecAt,
     VecConcat,
@@ -217,6 +223,42 @@ pub const PRIMS: &[PrimDef] = &[
         &[P::VecLen],
     ),
     d(Prim::MapAt, "map-at", "< k v map k -- v >", &[P::VecAt]),
+    d(
+        Prim::MapKeys,
+        "map-keys",
+        "< k v map -- k ary >",
+        &[P::Keys],
+    ),
+    d(
+        Prim::MapValues,
+        "map-values",
+        "< k v map -- v ary >",
+        &[P::Values],
+    ),
+    d(
+        Prim::SortInts,
+        "i64-sort",
+        "< i64 ary -- i64 ary >",
+        &[P::SortInts],
+    ),
+    d(
+        Prim::SortFloats,
+        "f64-sort",
+        "< f64 ary -- f64 ary >",
+        &[P::SortFloats],
+    ),
+    d(
+        Prim::SortMoney,
+        "money-sort",
+        "< money ary -- money ary >",
+        &[P::SortInts],
+    ),
+    d(
+        Prim::SortTexts,
+        "string-sort",
+        "< string ary -- string ary >",
+        &[P::SortTexts],
+    ),
     d(Prim::VecLength, "vec-length", "< n a vec -- i64 >", &[]),
     d(Prim::VecAt, "vec-at", "< n a vec i64 -- a >", &[P::VecAt]),
     d(
@@ -337,6 +379,12 @@ pub fn foldable(p: Prim) -> bool {
                 | Prim::AryConcat
                 | Prim::MapLength
                 | Prim::MapAt
+                | Prim::MapKeys
+                | Prim::MapValues
+                | Prim::SortInts
+                | Prim::SortFloats
+                | Prim::SortMoney
+                | Prim::SortTexts
         )
 }
 

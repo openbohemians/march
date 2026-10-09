@@ -155,6 +155,11 @@ pub enum Primitive {
     // reads back, quoted and escaped.
     MoneyText = 87,
     StringShow = 88,
+    // ( a -- a ) An array sorted: of integers by value, of floats by value
+    // (IEEE total order), of strings by text, code point by code point.
+    SortInts = 89,
+    SortFloats = 90,
+    SortTexts = 91,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -247,6 +252,9 @@ impl Primitive {
         (Self::MarkPick, "mark-pick"),
         (Self::MoneyText, "money>text"),
         (Self::StringShow, "string-show"),
+        (Self::SortInts, "sort-ints"),
+        (Self::SortFloats, "sort-floats"),
+        (Self::SortTexts, "sort-texts"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

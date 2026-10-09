@@ -44,10 +44,16 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
                     (s, key, x)
                 })
                 .collect();
-            if k == crate::types::I64 {
-                entries.sort_by_key(|e| e.1 as i64);
-            } else {
-                entries.sort();
+            // By key, as `sort` orders: numbers by value, strings by text.
+            match types.term(k) {
+                Term::Base(Base::I64 | Base::Money) => entries.sort_by_key(|e| e.1 as i64),
+                Term::Base(Base::F64) => {
+                    entries.sort_by(|x, y| f64::from_bits(x.1).total_cmp(&f64::from_bits(y.1)))
+                }
+                Term::Base(Base::String) => {
+                    entries.sort_by_cached_key(|e| m.text(e.1).ok().and_then(|t| t.to_text()))
+                }
+                _ => entries.sort(),
             }
             out.push('{');
             for (key, _, x) in entries.iter().take(SHOWN) {

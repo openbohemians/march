@@ -54,6 +54,21 @@ fn inputs_are_taken_in_reading_order() {
 }
 
 #[test]
+fn maps_are_written_sorted_by_key() {
+    assert_eq!(
+        show(&["\"\\[ { \"b\" 2 \"a\" 1 } ] \\[ { 10 \"x\" -2 \"y\" } ]\""]),
+        "<1> \"{ \\\"a\\\" 1 \\\"b\\\" 2 } { -2 \\\"y\\\" 10 \\\"x\\\" }\""
+    );
+    // The display agrees, numbers by value.
+    assert_eq!(show(&["{ 10.0 1 2.0 2 }"]), "<1> { 2.0 2 10.0 1 }");
+    let mut s = session(&["{ \"k\" ( 1 2 ) \"a\" ( 3 ) } print."]).unwrap();
+    assert_eq!(
+        String::from_utf8(s.take_output()).unwrap(),
+        "{ \"a\" ( 3 ) \"k\" ( 1 2 ) }"
+    );
+}
+
+#[test]
 fn print_writes_any_value() {
     let mut s = session(&["( 1 2 ) print. \" \" print. ( ( 1 ) ( 2 3 ) ) print."]).unwrap();
     assert_eq!(

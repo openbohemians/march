@@ -341,8 +341,8 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
   truth, so FORTH's flag that was a number is an error.
 - **`not`, `and` and `or`** are 1 - x, the minimum and the maximum. On
   values from 0 to 1 those are also Zadeh's fuzzy connectives, so fuzzy
-  truth, when it comes, is an extension: its own type, with an α-cut,
-  `cut`, to make a bool where a guard must decide. The product and
+  truth, when it comes, is an extension: its own type, with `decide` to
+  make a bool where a guard must choose (3.9). The product and
   Łukasiewicz logics, which differ only in `and` and `or`, would be types of
   their own, the families choosing each one's algebra. An integer mapped
   to 0 to 1 (graphics' UNORM) is a cheap exact representation for them.
@@ -436,6 +436,44 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
    call and caches the result. A JIT that prunes what it has not seen taken
    needs deoptimization to recover when wrong; staging prunes only what is
    known, so nothing is undone.
+9. **Fuzzy truth** (2026-10-09; Thomas is reading on fuzzy logic first).
+   - **`fbool`,** the numbers from 0 to 1, as f64 or UNORM, with `not`,
+     `and` and `or` as for `bool` (2.16), which embeds in it. Fuzzy truths
+     come mostly from membership functions, words that say how far a
+     measurement belongs to a fuzzy set: `[ < f64 -- fbool > 160.0 -. 30.0
+     ÷. 0.0 1.0 clamp. ] tall def.`, 175 cm being 0.5 tall.
+   - **Hedges,** Zadeh's modifiers: "very" is x², "somewhat" √x.
+   - **`decide`** (Thomas's word) makes a bool from a fuzzy truth, for a
+     guard: an α-cut, truth at least α, which underneath is the comparison
+     `x α ge?.`.
+   - **α as an ambient setting,** not written at each decision, so that
+     changing it changes every decision under it (Thomas). Lexical: a
+     section's heading sets α for its definitions, decided at compile time,
+     so decisions fold. Or dynamic: α in the global store, a quotation run
+     with it changed, as Racket's `parameterize`, and nested contexts
+     setting theirs relative to the enclosing one ("0.9 of the outer α").
+     Reading the store is a read effect, which a guard may have. Which, or
+     both, is open.
+   - **Fuzzy families,** perhaps the most March-like: rather than deciding
+     to choose one clause, every clause that matches applies to its degree
+     and the results are blended, weighted by truth, as fuzzy control does
+     (Mamdani; Takagi and Sugeno). No cliff at α.
+   - **To read:** Zadeh, "Fuzzy Sets" (1965); α-cuts and the decomposition
+     theorem, by which a fuzzy set is the stack of all its α-cuts, so
+     sweeping α moves through a family of crisp sets; possibility theory
+     (Zadeh 1978; Dubois and Prade), fuzzy logic's modal logic, whose
+     possibility and necessity measures are as ◇ and □.
+10. **`next`, a clause applying the one it overrides** (2026-10-09). Families
+    are open, so a module can add a more specific clause; with `next` that
+    clause could wrap the general one instead of replacing it, as a money
+    module's `show` adding the currency to what the general `show` writes.
+    It is OOP's `super` (Thomas), chosen by the family's order of specificity
+    rather than a class hierarchy, and over all the inputs, not only the
+    first: CLOS's `call-next-method`, Dylan's `next-method`, AspectJ's
+    `proceed` around advice, which grew from CLOS's method combination.
+    Open: the name, `next` or `super`; and which clause is next when
+    guards decide at run time, the next by score that matches, its guards
+    tested in turn, as a choice is now.
 
 ## 4. A way to build it (proposal)
 

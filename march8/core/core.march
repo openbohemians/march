@@ -85,6 +85,9 @@
 [ < a ary a ary -- a ary > ary-concat. ] concat def.
 [ < n a vec m a vec > vec-concat. ] concat def.
 
+-- `count` is `length`, for now (Thomas, 2026-10-08: `#` may come later).
+[ length. ] count def.
+
 [ < string i64 i64 -- string > string-slice. ] slice def.
 [ < a ary i64 i64 -- a ary > ary-slice. ] slice def.
 

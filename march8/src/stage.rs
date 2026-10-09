@@ -32,6 +32,10 @@ pub enum Val {
     Name(Rc<str>),
     /// A quotation.
     Quote(Rc<[Token]>),
+    /// A run: zero or more values of the type, on the machine's stack, as
+    /// many as the code inside an array literal left, counted only by its
+    /// gather. Nothing reaches beneath a run.
+    Many,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -41,8 +45,10 @@ pub struct Jdg {
 }
 
 impl Jdg {
+    /// Whether the value is known at compile time, and so has no cell on
+    /// the machine's stack yet.
     pub fn known(&self) -> bool {
-        self.val != Val::Run
+        !matches!(self.val, Val::Run | Val::Many)
     }
 }
 
@@ -99,6 +105,34 @@ fn value_text(j: &Jdg) -> String {
         Val::Str(s) => format!("{s:?}"),
         _ => "a value".into(),
     }
+}
+
+/// An open array or map literal: its bracket, where its elements start, the
+/// floor outside it, and where each `_.` that pulls a value from below it is
+/// written, in reading order; it takes as many inputs.
+struct Literal {
+    bracket: u8,
+    start: usize,
+    floor: usize,
+    pulls: Vec<Pos>,
+}
+
+/// Where each `_.` in a literal's words is, not counting those of literals
+/// inside it.
+fn pulls_in(toks: &[Token]) -> Vec<Pos> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < toks.len() {
+        match &toks[i].tok {
+            Tok::Open(b'(' | b'{') => i = matching(toks, i),
+            Tok::Name(n) if &**n == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) => {
+                out.push(toks[i].pos);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
 }
 
 /// A part of a bracket, while it is read: a type, or a value with where it
@@ -246,9 +280,8 @@ pub struct Stage {
     /// The judgments below this are out of reach: a signature's inputs or an
     /// array literal's start.
     floor: usize,
-    /// Open array and map literals: the bracket, where they start, and the
-    /// floor outside.
-    literals: Vec<(u8, usize, usize)>,
+    /// Open array and map literals.
+    literals: Vec<Literal>,
     /// Families being applied, with the types they were applied to, so that
     /// one applying itself to the same types is caught.
     active: Vec<Key>,
@@ -413,6 +446,15 @@ impl Stage {
     /// Checks that `n` values are within reach.
     fn need(&self, n: usize) -> Result<()> {
         let have = self.stack.len() - self.floor;
+        if self.stack[self.stack.len() - n.min(have)..]
+            .iter()
+            .any(|j| j.val == Val::Many)
+        {
+            return Err(self.err(
+                Kind::Mismatch,
+                "a run of values, left in an array literal, can only be gathered by it",
+            ));
+        }
         if have < n {
             return Err(self.err(
                 Kind::Mismatch,
@@ -448,6 +490,12 @@ impl Stage {
                 Tok::Int(n) => self.push(INT_LIT, Val::Int(*n)),
                 Tok::Dec(d, s) => self.push(DEC_LIT, Val::Dec(*d, *s)),
                 Tok::Str(s) => self.push(STRING, Val::Str(s.clone())),
+                Tok::Name(s)
+                    if &**s == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
+                {
+                    self.pull(t.pos)?;
+                    i += 1;
+                }
                 Tok::Name(s) => self.push(SYMBOL, Val::Name(s.clone())),
                 Tok::Apply => self.apply()?,
                 Tok::Open(b'[') => {
@@ -463,8 +511,15 @@ impl Stage {
                     i = j;
                 }
                 Tok::Open(b) => {
+                    let pulls = pulls_in(&toks[i + 1..matching(toks, i)]);
+                    self.need(pulls.len())?;
                     self.emit(Op::Prim(P::Mark));
-                    self.literals.push((*b, self.stack.len(), self.floor));
+                    self.literals.push(Literal {
+                        bracket: *b,
+                        start: self.stack.len(),
+                        floor: self.floor,
+                        pulls,
+                    });
                     self.floor = self.stack.len();
                 }
                 Tok::Close(b) => self.close_literal(*b)?,
@@ -545,6 +600,7 @@ impl Stage {
             Val::Type(t) => format!("the type `{}`", self.types.name(*t)),
             Val::Name(n) => format!("the word `{n}`"),
             Val::Quote(_) => "a quotation".into(),
+            Val::Many => format!("a run of {}", self.types.name(j.ty)),
         }
     }
 
@@ -1142,14 +1198,15 @@ impl Stage {
             self.stack = alt.stack.expect("returns");
             return Ok(());
         }
-        let below = &snapshot[..base];
-        let mut results: Option<Vec<Vec<Type>>> = None;
+        // What each alternative leaves above the values it cannot reach.
+        let mut lists: Vec<Vec<Type>> = Vec::new();
+        let mut runs = false;
         for alt in &alts {
             let Some(stack) = &alt.stack else { continue };
             let same_below = stack.len() >= base
                 && stack[..base]
                     .iter()
-                    .zip(below)
+                    .zip(&snapshot[..base])
                     .all(|(a, b)| a.ty == b.ty && a.val == b.val);
             if !same_below {
                 return Err(self.err(
@@ -1157,40 +1214,59 @@ impl Stage {
                     "the clauses chosen between at run time take different values",
                 ));
             }
-            let tys: Vec<Type> = stack[base..].iter().map(|j| j.ty).collect();
-            let r = results.get_or_insert_with(|| vec![Vec::new(); tys.len()]);
-            if r.len() != tys.len() {
+            runs |= stack[base..].iter().any(|j| j.val == Val::Many);
+            lists.push(stack[base..].iter().map(|j| j.ty).collect());
+        }
+        let varying = runs || lists.windows(2).any(|w| w[0].len() != w[1].len());
+        let mut below: Vec<Jdg> = snapshot[..base].to_vec();
+        // Inside an array literal, alternatives may leave different numbers
+        // of elements: together they are a run, whose count the gather finds.
+        let collect = match (varying, self.collecting(base)) {
+            (false, _) => None,
+            (true, Some(start)) => {
+                let all: Vec<Type> = lists.concat();
+                let Some(t) = self.join(&all) else {
+                    return Err(self.differ(&all));
+                };
+                // The literal's elements below the run become values at run
+                // time first, since nothing can be placed beneath a run.
+                self.stack = snapshot.to_vec();
+                for i in start..base {
+                    self.annotate(i, t)?;
+                    self.materialize(i)?;
+                }
+                below = self.stack[..base].to_vec();
+                Some(t)
+            }
+            (true, None) => {
                 return Err(self.err(
                     Kind::Mismatch,
                     "the clauses chosen between at run time leave different numbers of values",
                 ));
             }
-            for (slot, t) in r.iter_mut().zip(tys) {
-                slot.push(t);
-            }
-        }
+        };
         let mut joined = Vec::new();
-        for tys in results.unwrap_or_default() {
-            let Some(t) = self.join(&tys) else {
-                let all: Vec<_> = tys.iter().map(|&t| self.types.name(t)).collect();
-                return Err(self.err(
-                    Kind::Mismatch,
-                    format!(
-                        "the clauses chosen between at run time leave different types: {}",
-                        all.join(", ")
-                    ),
-                ));
-            };
-            joined.push(t);
+        if collect.is_none() {
+            for k in 0..lists.first().map_or(0, Vec::len) {
+                let tys: Vec<Type> = lists.iter().map(|l| l[k]).collect();
+                let Some(t) = self.join(&tys) else {
+                    return Err(self.differ(&tys));
+                };
+                joined.push(t);
+            }
         }
         let end = self.label();
         let last = alts.len() - 1;
         for (k, alt) in alts.into_iter().enumerate() {
             let outer = std::mem::replace(&mut self.code, alt.code);
             let r = match alt.stack {
-                Some(stack) => {
+                Some(mut stack) => {
+                    stack.splice(..base, below.iter().cloned());
                     self.stack = stack;
-                    self.settle_results(base, &joined)
+                    match collect {
+                        Some(t) => self.settle_run(base, t),
+                        None => self.settle_results(base, &joined),
+                    }
                 }
                 None => Ok(()),
             };
@@ -1205,11 +1281,45 @@ impl Stage {
             }
         }
         self.code.push(Ins::Label(end));
-        self.stack = below.to_vec();
-        for t in joined {
-            self.push(t, Val::Run);
+        self.stack = below;
+        match collect {
+            Some(t) => self.push(t, Val::Many),
+            None => {
+                for t in joined {
+                    self.push(t, Val::Run);
+                }
+            }
         }
         Ok(())
+    }
+
+    fn differ(&self, tys: &[Type]) -> Error {
+        let all: Vec<_> = tys.iter().map(|&t| self.types.name(t)).collect();
+        self.err(
+            Kind::Mismatch,
+            format!(
+                "the clauses chosen between at run time leave different types: {}",
+                all.join(", ")
+            ),
+        )
+    }
+
+    /// Gives every value an alternative leaves the element type of the run
+    /// they join, and makes them values at run time.
+    fn settle_run(&mut self, base: usize, t: Type) -> Result<()> {
+        for i in base..self.stack.len() {
+            self.annotate(i, t)?;
+            self.materialize(i)?;
+        }
+        Ok(())
+    }
+
+    /// Where the innermost literal starts, if it is an array literal that
+    /// the values from `base` up are elements of: a run may be collected
+    /// there.
+    fn collecting(&self, base: usize) -> Option<usize> {
+        let l = self.literals.last()?;
+        (l.bracket == b'(' && l.start <= base).then_some(l.start)
     }
 
     // ---- Instances and recursion ----
@@ -2070,6 +2180,12 @@ impl Stage {
                 ));
             }
         };
+        if self.stack[i + 1..].iter().any(|j| j.val == Val::Many) {
+            return Err(self.err(
+                Kind::Mismatch,
+                "a value cannot be placed beneath a run of values in an array literal",
+            ));
+        }
         let above = self.stack[i + 1..].iter().filter(|j| !j.known()).count();
         match above {
             0 => self.code.push(ins),
@@ -2403,7 +2519,7 @@ impl Stage {
             }
         };
         self.materialize(base)?;
-        self.invariant(base, e, &q, name)?;
+        let collect = self.invariant(base, e, &q, name)?;
         self.stack.pop();
         let (top, end) = (self.label(), self.label());
         self.emit(Op::Prim(P::ScratchPush));
@@ -2443,18 +2559,28 @@ impl Stage {
         let r = self.run(&q);
         self.depth -= 1;
         r?;
-        // What the body leaves takes the loop's shape again.
-        if self.stack.len() != below.len() {
-            return Err(self.loop_shape(name));
-        }
-        for (i, b) in below.iter().enumerate() {
-            if self.stack[i] != *b {
-                self.annotate(i, b.ty)?;
-                self.materialize(i)?;
+        if let Some(t) = collect {
+            // Collecting: the values it leaves above the loop's are elements,
+            // left on the machine's stack for the literal to gather.
+            if self.stack.len() < below.len() || self.stack[..below.len()] != below[..] {
+                return Err(self.loop_shape(name));
             }
-        }
-        if self.stack != below {
-            return Err(self.loop_shape(name));
+            self.settle_run(below.len(), t)?;
+            self.stack.truncate(below.len());
+        } else {
+            // What the body leaves takes the loop's shape again.
+            if self.stack.len() != below.len() {
+                return Err(self.loop_shape(name));
+            }
+            for (i, b) in below.iter().enumerate() {
+                if self.stack[i] != *b {
+                    self.annotate(i, b.ty)?;
+                    self.materialize(i)?;
+                }
+            }
+            if self.stack != below {
+                return Err(self.loop_shape(name));
+            }
         }
         if !backward {
             self.emit(Op::Prim(P::ScratchPop));
@@ -2466,6 +2592,9 @@ impl Stage {
         self.code.push(Ins::Label(end));
         for op in [P::ScratchPop, P::Drop, P::ScratchPop, P::Drop] {
             self.emit(Op::Prim(op));
+        }
+        if let Some(t) = collect {
+            self.push(t, Val::Many);
         }
         Ok(())
     }
@@ -2512,7 +2641,11 @@ impl Stage {
     /// changes becomes, before the loop, a value at run time of the type it
     /// keeps, a literal taking the body's type; then again, until nothing
     /// changes.
-    fn invariant(&mut self, base: usize, e: Type, q: &[Token], name: &str) -> Result<()> {
+    /// Inside an array literal, a body may leave values above the loop's, its
+    /// elements: the loop collects them, as a run, of one type with the
+    /// literal's elements before it, which become values at run time first.
+    /// Then the type is returned.
+    fn invariant(&mut self, base: usize, e: Type, q: &[Token], name: &str) -> Result<Option<Type>> {
         for _ in 0..4 {
             let below: Vec<Jdg> = self.stack[..base].to_vec();
             let saved = (
@@ -2531,6 +2664,32 @@ impl Stage {
             self.code = saved.0;
             self.effects = saved.2;
             r?;
+            if after.len() > below.len() && after[..below.len()] == below[..] {
+                let Some(start) = self.collecting(base) else {
+                    return Err(self.loop_shape(name));
+                };
+                let mut tys: Vec<Type> = self.stack[start..base].iter().map(|j| j.ty).collect();
+                tys.extend(after[below.len()..].iter().map(|j| j.ty));
+                let Some(t) = self.join(&tys) else {
+                    let all: Vec<_> = tys.iter().map(|&t| self.types.name(t)).collect();
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!("an array's elements differ in type: {}", all.join(", ")),
+                    ));
+                };
+                let mut changed = false;
+                for i in start..base {
+                    if self.stack[i].ty != t || self.stack[i].known() {
+                        self.annotate(i, t)?;
+                        self.materialize(i)?;
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    return Ok(Some(t));
+                }
+                continue;
+            }
             if after.len() != below.len() {
                 return Err(self.loop_shape(name));
             }
@@ -2556,7 +2715,7 @@ impl Stage {
                 }
             }
             if !changed {
-                return Ok(());
+                return Ok(None);
             }
         }
         Err(self.err(
@@ -2592,16 +2751,18 @@ impl Stage {
     }
 
     fn close_literal(&mut self, b: u8) -> Result<()> {
-        let (_, start, floor) = self.literals.pop().expect("the reader checks nesting");
+        let lit = self.literals.pop().expect("the reader checks nesting");
+        let start = lit.start;
         let n = self.stack.len() - start;
         let what = if b == b')' { "an array" } else { "a map" };
+        let runs = self.stack[start..].iter().any(|j| j.val == Val::Many);
         if n == 0 {
             return Err(self.err(
                 Kind::Mismatch,
                 format!("{what} with no elements has no type for them"),
             ));
         }
-        if b == b'}' && n % 2 == 1 {
+        if b == b'}' && (n % 2 == 1 || runs) {
             return Err(self.err(Kind::Mismatch, "a map needs a value for each key"));
         }
         let step = if b == b')' { 1 } else { 2 };
@@ -2623,15 +2784,68 @@ impl Stage {
             }
             parts.push(t);
         }
-        let ty = if b == b')' {
+        // With a run among them the count is known only at run time.
+        let ty = if b == b'}' {
+            self.types.intern(Term::Map(parts[0], parts[1]))
+        } else if runs {
+            self.types.intern(Term::Ary(parts[0]))
+        } else {
             let n = self.types.intern(Term::Nat(n as u64));
             self.types.intern(Term::Vec(n, parts[0]))
-        } else {
-            self.types.intern(Term::Map(parts[0], parts[1]))
         };
         let op = if b == b')' { P::Gather } else { P::MapGather };
-        self.emit_ops(n, &[op], &[ty])?;
-        self.floor = floor;
+        for i in start..self.stack.len() {
+            self.materialize(i)?;
+        }
+        for _ in start..self.stack.len() {
+            self.stack.pop();
+        }
+        self.emit(Op::Prim(op));
+        self.push(ty, Val::Run);
+        self.floor = lit.floor;
+        // The values it pulled are its inputs: it takes them.
+        for _ in 0..lit.pulls.len() {
+            let i = self.stack.len() - 2;
+            if !self.stack[i].known() {
+                self.emit(Op::Prim(P::Swap));
+                self.emit(Op::Prim(P::Drop));
+            }
+            self.stack.remove(i);
+        }
+        Ok(())
+    }
+
+    /// `_.` in a literal: a copy of one of the values below it, its inputs,
+    /// the first `_.` written taking the deepest. A value at run time is
+    /// found from the literal's mark, so the copy is exact even above a run.
+    fn pull(&mut self, pos: Pos) -> Result<()> {
+        let Some((li, k)) = self
+            .literals
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(li, l)| l.pulls.iter().position(|&p| p == pos).map(|k| (li, k)))
+        else {
+            return Err(self.err(
+                Kind::Syntax,
+                "`_` takes a value from below an array literal, and it is in none",
+            ));
+        };
+        let lit = &self.literals[li];
+        let (start, inputs) = (lit.start, lit.pulls.len());
+        let i = start - inputs + k;
+        let j = self.stack[i].clone();
+        if !j.known() {
+            let below = self.stack[i + 1..start]
+                .iter()
+                .filter(|j| !j.known())
+                .count();
+            let marks = self.literals.len() - 1 - li;
+            self.emit(Op::Lit(below as u64));
+            self.emit(Op::Lit(marks as u64));
+            self.emit(Op::Prim(P::MarkPick));
+        }
+        self.stack.push(j);
         Ok(())
     }
 }

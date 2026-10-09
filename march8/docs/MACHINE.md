@@ -45,7 +45,8 @@ runs to the end of the line, except inside `< >`.
 | `.` | applies the value on top |
 | `name.` | `name .`: each dot at the end of a word applies it (Thomas, 2026-10-08), so no name ends in a dot; `vec..` is `vec . .` |
 | `[ … ]` | a quotation: its words, unevaluated |
-| `( … )`, `{ … }` | an array and a map literal |
+| `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
+| `_.` | in a literal, a copy of a value from below it (Comprehensions) |
 | `< … >` | a bracket: a type expression |
 
 **`.` applies** whatever is on top:
@@ -316,6 +317,45 @@ as a quotation, so `( 1 2 3 4 ) + reduce.` is APL's `+/`, and in the surface,
 compile time; `n range.` is the array 0 to n−1, a vec when n is known, and
 `reverse` an array reversed.
 
+### Comprehensions
+
+Inside an array literal, whatever the code leaves is an element, as many as
+it leaves: `(` marks the machine's stack and `)` gathers what is above the
+mark (march7/docs/ARRAYS.md). So `each` and the literal together are map,
+filter, flat-map and scan, with one loop:
+
+```
+( xs [ 10 *. ] each. )            map
+( xs keep each. )                 filter: keep's clauses leave the element or nothing
+( xs [ dup. ] each. )             each element twice
+( 0 xs [ over. +. ] each. )       scan: ( 0 1 3 6 ), reading the last collected
+( 3 [ 7 ] times. )                ( 7 7 7 )
+```
+
+- **A run** is a new kind of judgment: zero or more values of one type,
+  counted only when the literal gathers them. A loop in a literal whose body
+  leaves values above the loop's is collecting, and leaves a run; clauses
+  chosen at run time that leave different numbers of values, the filter's
+  one or none, leave a run. The none is Thomas's mirror, and here it costs
+  nothing: the gather counts what is there. A literal with a run is an array
+  of any length, `T ary`; without one, a vec, as before.
+- **Nothing reaches beneath a run,** whose depth is not known: a run can only
+  be gathered, so adding to a filter's result is an error. The elements
+  before it become values at run time first, of the one element type.
+- **A collecting body may read the values below its element,** which are
+  elements already collected, of the element type, as a scan reads the last;
+  it may not take them.
+- **`_.` pulls a value from below the literal.** The first `_.` written takes
+  the deepest, so `1 2 ( _. _. /. )` is `( 1 2 /. )`, as march7 decided for
+  string holes; the literal takes what it pulls, its inputs. A pull copies,
+  so one in a loop reads the same value each pass, and it is found from the
+  literal's mark (`mark-pick`), exact even above a run:
+  `10 ( xs [ _. +. ] each. )` adds 10 to each element.
+
+Outside a literal the rules stay strict: a loop keeps its shape, and clauses
+chosen at run time leave as many values. A value that may be absent outside a
+collection needs an optional type, a sum.
+
 ### Recursion and instances
 
 A family is evaluated where it is applied, on the caller's judgments,
@@ -387,10 +427,11 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with twelve primitives added: `pick`; checked
+The machine is march7's, with thirteen primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64/` and `i64mod`, which trap on overflow
 and division by zero; signed `i64lt?`; `i64>text` and `f64>text`;
-`scratch-at`, which reads a loop's state; and `range` and `reverse`.
+`scratch-at`, which reads a loop's state; `range` and `reverse`; and
+`mark-pick`, which reads below an array literal's mark.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -467,10 +508,14 @@ running are the machine's.
   no array built (Thomas, 2026-10-08). That is rewriting, as GHC's rules, in
   March itself, with no views in Rust. Only pure words may be deferred, which
   the effects say; a rule's two forms are trusted to be equal.
-- **Scan,** the running reductions (APL's `\`).
-- **Optional values,** "T or nothing", with the mirror in a gather as the
-  case whose tag costs nothing: filters and comprehensions, and FORTH's words
-  that return a value or nothing.
+- **`#` for `count`,** as J's tally, perhaps also meaning `each` on a
+  quotation (`xs [ f. ] #.`), the literal then deciding what is collected
+  (Thomas, 2026-10-08, noted). It needs headings to start lines, as in
+  Markdown, since SURFACE.md's headings are words that read what follows.
+  For now the word is `count`, the same as `length`.
+- **Scan as a word,** beside the comprehension.
+- **Optional values outside collections,** "T or nothing" as the first sum
+  type, a value and a tag, for FORTH's words that return a value or nothing.
 - **Glyphs:** APL's and Uiua's for these words, and whether `/` is reduce,
   are deferred.
 

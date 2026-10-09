@@ -118,9 +118,7 @@ pub fn read(src: &str, symbols: &Symbols) -> Result<Vec<Token>> {
                     }
                 }
             }
-            w => Some(
-                number(w, pos)?.unwrap_or_else(|| Tok::Name(symbolize(w, symbols).into())),
-            ),
+            w => Some(number(w, pos)?.unwrap_or_else(|| Tok::Name(symbolize(w, symbols).into()))),
         };
         if let Some(tok) = tok {
             out.push(Token { tok, pos });
@@ -156,7 +154,9 @@ fn symbolize(w: &str, symbols: &Symbols) -> String {
         out.push_str(&rest[..i]);
         let after = &rest[i + 1..];
         let len = match after.chars().next() {
-            Some(c @ ('_' | '^')) => c.len_utf8() + after[1..].chars().next().map_or(0, char::len_utf8),
+            Some(c @ ('_' | '^')) => {
+                c.len_utf8() + after[1..].chars().next().map_or(0, char::len_utf8)
+            }
             _ => after.bytes().take_while(u8::is_ascii_alphabetic).count(),
         };
         match symbols.get(&after[..len]) {

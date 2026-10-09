@@ -305,6 +305,13 @@ ame` notation opens APL's character set to March, but
   the like) are not used: those words get other names, as `range` for `⍳`.
   The table keeps the Greek letters for typing them (`\alpha` is `α`), and
   programmers may define them as they like; they may suit type variables.
+- **Every built-in word has a word name** (proposed, Thomas, 2026-10-08), and
+  its symbol is typed by that name: if the table has `each ∵`, then `\each`
+  is `∵`, the core defines `∵` as `each`, and `march fmt` can turn either
+  form into the other throughout a file, as Uiua's formatter turns names into
+  glyphs. A symbol's table name is the name of the word it stands for. Names
+  must not clash: `\times` is already `×`, so the loop `times` would need
+  another name, as Uiua's `repeat`.
 
 ## Brackets
 

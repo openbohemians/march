@@ -88,6 +88,7 @@ fn arrays_in_parts() {
         "<3> 1 3 ( 2 3 )"
     );
     assert_eq!(show(&["( 1 2 3 ) most."]), "<1> ( 1 2 )");
+    assert_eq!(show(&["( 1 2 3 ) count. \"abc\" count."]), "<2> 3 3");
     assert_eq!(show(&["\"héllo\" 1 3 slice."]), "<1> \"él\"");
     // `compose` joins two quotations into one, at compile time.
     assert_eq!(show(&["3 [ 1 +. ] [ 2 *. ] compose. ."]), "<1> 8");

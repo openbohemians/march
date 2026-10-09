@@ -1282,12 +1282,18 @@ impl Machine {
                 let r = self.allocate_vector(cells.into_iter().collect())?;
                 self.push(r)?;
             }
-            IntText | FloatText => {
+            IntText | FloatText | MoneyText | StringShow => {
                 let x = self.pop()?;
-                let s = if p == IntText {
-                    (x as i64).to_string()
-                } else {
-                    format!("{:?}", f64::from_bits(x))
+                let s = match p {
+                    IntText => (x as i64).to_string(),
+                    FloatText => format!("{:?}", f64::from_bits(x)),
+                    MoneyText => crate::prims::show_dec((x as i64).into(), 2),
+                    _ => {
+                        let text = self.text(x)?.to_text().ok_or(Error::Memory)?;
+                        let mut out = String::new();
+                        crate::show::quoted(&text, &mut out);
+                        out
+                    }
                 };
                 let r = self.allocate_text(merkle_champ::Sequence::text(&s))?;
                 self.push(r)?;

@@ -43,6 +43,8 @@ pub enum Prim {
     // Text.
     I64Text,
     F64Text,
+    MoneyText,
+    StrShow,
     Write,
     StrConcat,
     StrLength,
@@ -157,6 +159,18 @@ pub const PRIMS: &[PrimDef] = &[
         "f64>text",
         "< f64 -- string >",
         &[P::FloatText],
+    ),
+    d(
+        Prim::MoneyText,
+        "money>text",
+        "< money -- string >",
+        &[P::MoneyText],
+    ),
+    d(
+        Prim::StrShow,
+        "string-show",
+        "< string -- string >",
+        &[P::StringShow],
     ),
     d(Prim::Write, "write", "< string -- >", &[P::Write]),
     d(
@@ -490,6 +504,12 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         F64Eq => flag(float(&a[0]) == float(&a[1])),
         I64Text => Ok(vec![Val::Str(int(&a[0]).to_string().into())]),
         F64Text => Ok(vec![Val::Str(format!("{:?}", float(&a[0])).into())]),
+        MoneyText => Ok(vec![Val::Str(show_dec(int(&a[0]), 2).into())]),
+        StrShow => {
+            let mut out = String::new();
+            crate::show::quoted(text(&a[0]), &mut out);
+            Ok(vec![Val::Str(out.into())])
+        }
         StrConcat => Ok(vec![Val::Str(
             format!("{}{}", text(&a[0]), text(&a[1])).into(),
         )]),

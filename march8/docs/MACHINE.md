@@ -39,7 +39,7 @@ runs to the end of the line, except inside `< >`.
 |---|---|
 | `1`, `-2` | an integer literal |
 | `1.10` | a decimal literal: exact digits until its type is known |
-| `"text"`, `'raw'` | a string, with march7's escapes (`\n;`, `\#x2603;`, `\times;`); holes are not built yet |
+| `"text"`, `'raw'` | a string, with march7's escapes (`\n;`, `\#x2603;`, `\times;`) and holes (`\[ code ]`, `\_`) |
 | `name` | a name, pushed as a value: it does nothing until applied |
 | `\name` | a symbol, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
 | `.` | applies the value on top |
@@ -357,6 +357,34 @@ Outside a literal the rules stay strict: a loop keeps its shape, and clauses
 chosen at run time leave as many values. A value that may be absent outside a
 collection needs an optional type, a sum.
 
+### Strings with holes
+
+A hole, `\[ code ]`, writes the value of its code into a string, and `\_` an
+input, short for `\[ _. ]` (march7/docs/STRINGS.md):
+
+```
+"1 + 2 = \[ 1 2 +. ]"           "1 + 2 = 3", a constant
+1 2 "\_ and \_"                 "1 and 2": the first input is the deepest
+[ "<\[ _. 1 +. ]>" ] f def.     5 f. is "<6>", 1.5 f. is "<2.5>"
+"H\_2;O"                        "H₂O": a subscript's name and `;` follow
+```
+
+- **The reader** reads a hole's code with its own words, to a `]` where a
+  word would start with the hole's own brackets closed, so text resumes right
+  after it (`"\[ n. ]apples"`), and strings nest.
+- **The stage** pushes each piece: the text, and each hole's value written
+  in by `>string`, a string's own text or any other value as `show` writes
+  it; and joins them with `concat`. On known values everything folds, and
+  the string is one constant. A hole leaves one value and reaches only what
+  it makes.
+- **`_.` in a hole** pulls an input from below the string, as in an array
+  literal, the first written taking the deepest, and the string takes its
+  inputs, so a word whose body is such a string takes them. A string makes
+  no mark: nothing above its inputs is a run, so a pull is a plain copy.
+- **`show`,** in `core.march`, writes a value as the display does, so it
+  reads back: a string quoted, money with its cents, an array in
+  parentheses, element by element. `print` writes any value, by `>string`.
+
 ### Recursion and instances
 
 A family is evaluated where it is applied, on the caller's judgments,
@@ -428,11 +456,12 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with thirteen primitives added: `pick`; checked
+The machine is march7's, with fifteen primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64/` and `i64mod`, which trap on overflow
 and division by zero; signed `i64lt?`; `i64>text` and `f64>text`;
-`scratch-at`, which reads a loop's state; `range` and `reverse`; and
-`mark-pick`, which reads below an array literal's mark.
+`scratch-at`, which reads a loop's state; `range` and `reverse`;
+`mark-pick`, which reads below an array literal's mark; and `money>text` and
+`string-show`.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -541,5 +570,5 @@ running are the machine's.
 - **Quotations at run time:** a quotation is always consumed at compile
   time, by `.`, `def` or `map`.
 - **The surface notation** and its lowering to this form.
-- **Saving** a session as an image; string holes; tuples, records and sums;
+- **Saving** a session as an image; tuples, records and sums;
   namespaces; showing types.

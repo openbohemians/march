@@ -10,7 +10,7 @@
 use crate::code::{Blob, Cid, Op, Primitive as P};
 use crate::error::{Error, Kind, Pos, Result};
 use crate::prims::{self, Effects, PRIMS, Prim};
-use crate::read::{Tok, Token};
+use crate::read::{Piece, Tok, Token};
 use crate::types::*;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -115,6 +115,18 @@ struct Literal {
     start: usize,
     floor: usize,
     pulls: Vec<Pos>,
+}
+
+/// Where each `_.` in a string's holes is.
+fn template_pulls(pieces: &[Piece]) -> Vec<Pos> {
+    pieces
+        .iter()
+        .filter_map(|p| match p {
+            Piece::Hole(toks) => Some(pulls_in(toks)),
+            Piece::Text(_) => None,
+        })
+        .flatten()
+        .collect()
 }
 
 /// Where each `_.` in a literal's words is, not counting those of literals
@@ -490,6 +502,7 @@ impl Stage {
                 Tok::Int(n) => self.push(INT_LIT, Val::Int(*n)),
                 Tok::Dec(d, s) => self.push(DEC_LIT, Val::Dec(*d, *s)),
                 Tok::Str(s) => self.push(STRING, Val::Str(s.clone())),
+                Tok::Template(pieces) => self.template(pieces, t.pos)?,
                 Tok::Name(s)
                     if &**s == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
                 {
@@ -1716,6 +1729,10 @@ impl Stage {
         while i < toks.len() {
             match &toks[i].tok {
                 Tok::Int(_) | Tok::Dec(..) | Tok::Str(_) => items.push(Item::Other),
+                Tok::Template(pieces) => {
+                    take(&mut items, &mut ins, template_pulls(pieces).len());
+                    items.push(Item::Other);
+                }
                 Tok::Name(s) => items.push(Item::Name(s.clone())),
                 Tok::Open(b'[') => {
                     let j = matching(toks, i);
@@ -2832,20 +2849,87 @@ impl Stage {
             ));
         };
         let lit = &self.literals[li];
-        let (start, inputs) = (lit.start, lit.pulls.len());
+        let (start, inputs, string) = (lit.start, lit.pulls.len(), lit.bracket == b'"');
         let i = start - inputs + k;
+        // A string makes no mark: nothing above its inputs is a run, so a copy
+        // finds them by counting.
+        if string {
+            return self.copy(i);
+        }
         let j = self.stack[i].clone();
         if !j.known() {
             let below = self.stack[i + 1..start]
                 .iter()
                 .filter(|j| !j.known())
                 .count();
-            let marks = self.literals.len() - 1 - li;
+            let marks = self.literals[li + 1..]
+                .iter()
+                .filter(|l| l.bracket != b'"')
+                .count();
             self.emit(Op::Lit(below as u64));
             self.emit(Op::Lit(marks as u64));
             self.emit(Op::Prim(P::MarkPick));
         }
         self.stack.push(j);
+        Ok(())
+    }
+
+    /// A string with holes: each hole's code runs, its value is written in
+    /// by `>string`, and the pieces are joined by `concat`, so on known values
+    /// the string is a constant. `_.` in a hole pulls an input from below the
+    /// string, as in an array literal, and the string takes its inputs.
+    fn template(&mut self, pieces: &[Piece], pos: Pos) -> Result<()> {
+        let pulls = template_pulls(pieces);
+        let n = pulls.len();
+        self.need(n)?;
+        self.literals.push(Literal {
+            bracket: b'"',
+            start: self.stack.len(),
+            floor: self.floor,
+            pulls,
+        });
+        let r = self.pieces(pieces, pos);
+        let lit = self.literals.pop().expect("pushed");
+        self.floor = lit.floor;
+        r?;
+        for _ in 0..n {
+            let i = self.stack.len() - 2;
+            if !self.stack[i].known() {
+                self.emit(Op::Prim(P::Swap));
+                self.emit(Op::Prim(P::Drop));
+            }
+            self.stack.remove(i);
+        }
+        Ok(())
+    }
+
+    fn pieces(&mut self, pieces: &[Piece], pos: Pos) -> Result<()> {
+        for (k, piece) in pieces.iter().enumerate() {
+            match piece {
+                Piece::Text(t) => self.push(STRING, Val::Str(t.clone())),
+                Piece::Hole(toks) => {
+                    // A hole reaches only what it makes.
+                    let depth = self.stack.len();
+                    self.floor = depth;
+                    self.run(toks)?;
+                    self.pos = pos;
+                    if self.stack.len() != depth + 1 {
+                        return Err(self.err(
+                            Kind::Mismatch,
+                            format!(
+                                "a hole leaves one value, to write in, and this one leaves {}",
+                                values(self.stack.len() - depth)
+                            ),
+                        ));
+                    }
+                    self.apply_word(&">string".into())?;
+                }
+            }
+            if k > 0 {
+                self.floor = self.stack.len() - 2;
+                self.apply_word(&"concat".into())?;
+            }
+        }
         Ok(())
     }
 }

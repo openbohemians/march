@@ -21,6 +21,16 @@ pub enum Tok {
     Close(u8),
     /// `--` inside `< >`, between inputs and outputs.
     Dashes,
+    /// A string with holes: text and code, in order.
+    Template(Rc<[Piece]>),
+}
+
+/// A part of a string with holes.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Piece {
+    Text(Rc<str>),
+    /// `\[ code ]`, whose value is written in; `\_` is `\[ _. ]`.
+    Hole(Rc<[Token]>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,18 +57,38 @@ pub fn read(src: &str, symbols: &Symbols) -> Result<Vec<Token>> {
         line: 1,
         col: 1,
     };
+    tokens(&mut r, symbols, None)
+}
+
+/// Reads tokens to the end, or, for a hole opened at `hole`, to the `]` that
+/// closes it: one where a word would start, with the hole's own brackets
+/// closed (march7/docs/STRINGS.md).
+fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<Token>> {
     let mut out = Vec::new();
     let mut open: Vec<(u8, Pos)> = Vec::new();
     loop {
         r.skip_space();
-        let Some(c) = r.peek() else { break };
+        let Some(c) = r.peek() else {
+            if let Some(p) = hole {
+                return Err(Error::new(
+                    Kind::Unfinished,
+                    Some(p),
+                    "a hole is never closed",
+                ));
+            }
+            break;
+        };
         let pos = r.pos();
+        if hole.is_some() && open.is_empty() && c == ']' {
+            r.bump();
+            if out.is_empty() {
+                return Err(Error::new(Kind::Syntax, hole, "a hole holds no code"));
+            }
+            return Ok(out);
+        }
         if c == '"' {
-            let s = r.string(symbols)?;
-            out.push(Token {
-                tok: Tok::Str(s.into()),
-                pos,
-            });
+            let tok = r.string(symbols, hole.is_some() && open.is_empty())?;
+            out.push(Token { tok, pos });
             continue;
         }
         let word = r.word();
@@ -272,12 +302,13 @@ impl<'a> Reader<'a> {
         }
         Ok(s)
     }
-    /// A string literal, from its opening `"`, with its escapes
-    /// (march7/docs/STRINGS.md). Holes are not built yet.
-    fn string(&mut self, symbols: &Symbols) -> Result<String> {
+    /// A string literal, from its opening `"`, with its escapes and holes
+    /// (march7/docs/STRINGS.md). In a hole, its `]` may follow at once.
+    fn string(&mut self, symbols: &Symbols, in_hole: bool) -> Result<Tok> {
         let start = self.pos();
         self.bump();
         let mut s = String::new();
+        let mut pieces: Vec<Piece> = Vec::new();
         loop {
             let here = self.pos();
             let bad = |msg: &str| Error::new(Kind::Syntax, Some(here), msg.to_string());
@@ -293,12 +324,37 @@ impl<'a> Reader<'a> {
                 Some('\\') => match self.bump() {
                     Some('\\') => s.push('\\'),
                     Some('"') => s.push('"'),
-                    Some('[') | Some('_') => {
-                        return Err(Error::new(
-                            Kind::Limit,
-                            Some(here),
-                            "holes in strings are not built yet",
-                        ));
+                    Some('[') => {
+                        let code = tokens(self, symbols, Some(here))?;
+                        pieces.push(Piece::Text(std::mem::take(&mut s).into()));
+                        pieces.push(Piece::Hole(code.into()));
+                    }
+                    // `\_` is an input, `\[ _. ]`, unless a subscript's name
+                    // and `;` follow: `\_1;` is `₁`.
+                    Some('_') => {
+                        let mut next = self.src[self.at..].chars();
+                        let sub = match (next.next(), next.next()) {
+                            (Some(c), Some(';')) => symbols.get(&format!("_{c}")),
+                            _ => None,
+                        };
+                        if let Some(sub) = sub {
+                            s.push_str(sub);
+                            self.bump();
+                            self.bump();
+                        } else {
+                            let pull = [
+                                Token {
+                                    tok: Tok::Name("_".into()),
+                                    pos: here,
+                                },
+                                Token {
+                                    tok: Tok::Apply,
+                                    pos: here,
+                                },
+                            ];
+                            pieces.push(Piece::Text(std::mem::take(&mut s).into()));
+                            pieces.push(Piece::Hole(pull.into()));
+                        }
                     }
                     Some(c) => {
                         let mut name = String::from(c);
@@ -325,14 +381,22 @@ impl<'a> Reader<'a> {
                 Some(c) => s.push(c),
             }
         }
-        if self.peek().is_some_and(|c| !c.is_whitespace()) {
+        if self
+            .peek()
+            .is_some_and(|c| !(c.is_whitespace() || in_hole && c == ']'))
+        {
             return Err(Error::new(
                 Kind::Syntax,
                 Some(self.pos()),
                 "text runs on after a string's closing `\"`",
             ));
         }
-        Ok(s)
+        if pieces.is_empty() {
+            return Ok(Tok::Str(s.into()));
+        }
+        pieces.push(Piece::Text(s.into()));
+        pieces.retain(|p| !matches!(p, Piece::Text(t) if t.is_empty()));
+        Ok(Tok::Template(pieces.into()))
     }
 }
 

@@ -151,6 +151,10 @@ pub enum Primitive {
     // ( j m -- x ) A copy of the cell j below the mark m from the innermost,
     // in this frame: what an array literal pulls from below it with `_`.
     MarkPick = 86,
+    // Money as text, from its cents: `21.09`; a string as a literal that
+    // reads back, quoted and escaped.
+    MoneyText = 87,
+    StringShow = 88,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -241,6 +245,8 @@ impl Primitive {
         (Self::Range, "range"),
         (Self::Reverse, "reverse"),
         (Self::MarkPick, "mark-pick"),
+        (Self::MoneyText, "money>text"),
+        (Self::StringShow, "string-show"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

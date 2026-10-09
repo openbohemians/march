@@ -118,8 +118,21 @@
 
 [ swap. range. swap. [ drop. ] swap. compose. each. ] times def.
 
+-- Values as text. `show` writes a value as the display does, so it reads
+-- back: a string quoted, an array in parentheses. `>string` is a string's
+-- own text, and any other value shown; a string's holes write values in
+-- with it (march7/docs/STRINGS.md).
+
+[ < string -- string > string-show. ] show def.
+[ < i64 -- string > i64>text. ] show def.
+[ < f64 -- string > f64>text. ] show def.
+[ < money -- string > money>text. ] show def.
+[ < a ary -- string > "(" swap. [ show. " " swap. concat. concat. ] each. " )" concat. ] show def.
+
+[ < string -- string > ] >string def.
+[ < a -- string > show. ] >string def.
+
 -- Writing.
 
 [ < string > write. ] print def.
-[ < i64 > i64>text. write. ] print def.
-[ < f64 > f64>text. write. ] print def.
+[ < a > >string. write. ] print def.

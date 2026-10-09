@@ -88,6 +88,10 @@ pub enum Prim {
     AryInsert,
     /// `xs k ary-remove`: without element k.
     AryRemove,
+    /// `xs ys q zip`: q on each pair of elements, in step.
+    Zip,
+    /// `xs ys q table`: q on every pair, as rows.
+    Table,
     FSqrt,
     FPow,
     FFloor,
@@ -325,6 +329,8 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::VecSpread, "vec-spread", "< n a vec >", &[]),
     d(Prim::AryInsert, "ary-insert", "< b c i64 >", &[]),
     d(Prim::AryRemove, "ary-remove", "< b i64 >", &[]),
+    d(Prim::Zip, "zip", "< b c d >", &[]),
+    d(Prim::Table, "table", "< b c d >", &[]),
     d(Prim::Dup, "dup", "< a -- a a >", &[]),
     d(Prim::Drop, "drop", "< a -- >", &[]),
     d(Prim::Swap, "swap", "< a b -- b a >", &[]),
@@ -384,6 +390,8 @@ pub fn custom(p: Prim) -> bool {
             | VecSpread
             | AryInsert
             | AryRemove
+            | Zip
+            | Table
             | Dup
             | Drop
             | Swap

@@ -97,6 +97,7 @@ impl From<crate::machine::Error> for Error {
             crate::machine::Error::User(2) => {
                 "`within`: the array has fewer elements than its quotation takes".into()
             }
+            crate::machine::Error::User(3) => "`zip`: the arrays are not as long".into(),
             other => format!("{other}"),
         };
         Error::new(Kind::Run(e), None, msg)

@@ -34,6 +34,9 @@
 | map keys             | `keys`     |        |       |       |        |
 | map values           | `values`   |        |       |       |        |
 | each, collect        | `map`      |  `∵`   | `¨`   | `∵`   |        |
+| each pair, in step   | `zip`      |        |       |       |        |
+| outer product        | `table`    |  `×`   | `∘.`  | `⊞`   | `×` is the table of products |
+| dot product          | `dot`      |  ?     | `+.×` |       | `⊙`? (Hadamard in math) |
 | each, thread stack   | `each`     |        |       |       |        |
 | fold from left       | `fold`     |        |       | `∧`   |        |
 | fold from right      | `rfold`    |        | `/`   |       |        |
@@ -60,10 +63,6 @@
 | and                  | `and`     |  `∧`   | `∧`   |  —    |
 | or                   | `or`      |  `∨`   | `∨`   | `∨`   |
 | square root          | `sqrt`    |  `√`   | `*.5` | `√`   |
-| swap subtract        | `subadd`  |  `-+`  |       |       |
-| subtract             | `addsub`  |  `+-`  |       |       |
-| swap divide          | `divmul`  |  `÷×`  |       |       |
-| divide               | `muldiv`  |  `×÷`  |       |       |
 
 | **not yet in March** |           |        |       |       |
 |----------------------|-----------|--------|-------|-------|
@@ -84,14 +83,17 @@
 | reshape              |           | `↯`    | `⍴`   | `↯`   |
 | transpose            |           | `⍉`    | `⍉`   | `⍉`   |
 | rotate               |           | `↻`    | `⌽`   | `↻`   |
-| outer product        |           | `×`    | `∘.`  | `⊞`   |
 | grade up             |           | `⍏`    | `⍋`   | `⍏`   |
 | grade down           |           | `⍖`    | `⍒`   | `⍖`   |
 | dip                  |           | `⊙`    |  —    | `⊙`   |
 | under                |           | `⍜`    |  —    | `⍜`   |
 
-| **not needed**       |              |        |       |       |
-|----------------------|--------------|--------|-------|-------|
-| text of a value      | `>string`    |        | `⍕`   |       |
-| same, from last      | `each-right` |        |       |       |
+| **not needed**       |              |        |       |       | NOTES  |
+|----------------------|--------------|--------|-------|-------|--------|
+| swap subtract        | `subadd`  |  `-+`  |       |       | `~ -` |
+| subtract             | `addsub`  |  `+-`  |       |       | `-` |
+| swap divide          | `divmul`  |  `÷×`  |       |       | `~ ÷` |
+| divide               | `muldiv`  |  `×÷`  |       |       | `÷` |
+| text of a value      | `>string`    |        | `⍕`   |       |        |
+| same, from last      | `each-right` |        |       |       |        |
 

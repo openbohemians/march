@@ -418,6 +418,32 @@ input, short for `\[ _. ]` (march7/docs/STRINGS.md):
   2026-10-08), as the display sorts it. `print` writes any value, by
   `>string`.
 
+### Arrays as vectors
+
+Arithmetic on two arrays works element by element, as it does on an array
+and a number (Thomas, 2026-10-09), so an array is a vector:
+
+```
+( 1 2 3 ) ( 10 20 30 ) +.        ( 11 22 33 )
+( 1 2 ) ( 3 4 ) ⋅.               ( 3 8 )
+( 1 2 3 ) ( 4 5 6 ) dot.         32, the dot product
+( 1 2 ) ( 10 20 30 ) ×.          ( ( 10 20 30 ) ( 20 40 60 ) ), the outer product
+```
+
+- **`xs ys q zip`** applies `q` to each pair of elements in step, and `+`, `-`,
+  `⋅` and `÷` on two arrays are clauses over it in `core.march`; nested arrays
+  add level by level. The arrays must be as long as each other: two vecs are
+  checked at compile time, others at run time. A vec stays a vec, its length
+  known.
+- **`xs ys q table`** applies `q` to every pair, a row for each element of
+  `xs`: APL's `∘.`, Uiua's `⊞`. `×`, the Cartesian product in mathematics, is
+  the outer product of numbers, the table of their products.
+- **`dot`** is the sum of the products. Its symbol is open: `⋅` multiplies
+  element by element, as everything else works, and `⊙`, a dot in a circle,
+  is the Hadamard product in mathematics.
+- A clause keeps a vec's length when its signature asks for an array, so
+  lengths reach the words that check them.
+
 ### Recursion and instances
 
 A family is evaluated where it is applied, on the caller's judgments,
@@ -600,6 +626,9 @@ running are the machine's.
   (Thomas, 2026-10-08, noted). It needs headings to start lines, as in
   Markdown, since SURFACE.md's headings are words that read what follows.
   For now the word is `count`, the same as `length`.
+- **Array literals typed by what follows.** `( 2 4 )` settles at its `)`, to
+  integers, so `( 6.0 8.0 ) ( 2 4 ) ÷.` is no word; written `( 2.0 4.0 )` it
+  works.
 - **Optional values outside collections,** "T or nothing" as the first sum
   type, a value and a tag, for FORTH's words that return a value or nothing.
 - **Glyphs:** APL's and Uiua's for these words, and whether `/` is reduce,

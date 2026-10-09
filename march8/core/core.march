@@ -51,6 +51,21 @@
 [ < a ary a -- a ary > swap. [ over. *. ] map. swap. drop. ] * def.
 [ < a a ary -- a ary > [ over. *. ] map. swap. drop. ] * def.
 
+-- Two arrays, element by element (Thomas, 2026-10-09: as everything else
+-- is), as long as each other: checked at compile time when both lengths are
+-- known. `zip` pairs elements for any word.
+
+[ < a ary a ary > [ +. ] zip. ] + def.
+[ < a ary a ary > [ -. ] zip. ] - def.
+[ < a ary a ary > [ *. ] zip. ] * def.
+
+-- `xs ys q table`: q on every pair, a row for each element of xs. `×` is the
+-- outer product of numbers, the table of their products, and `dot` the dot
+-- product, the sum of the products of each pair.
+
+[ [ *. ] table. ] × def.
+[ *. 0 [ +. ] fold. ] dot def.
+
 -- Multiplying is written `⋅`, the dot operator, as in algebra; `*` is its
 -- ASCII spelling, and `×` is kept for the outer product (Thomas, 2026-10-09:
 -- mathematics first, programming's conventions second).
@@ -70,6 +85,8 @@
 [ < f64 f64 -- f64 > f64/. ] div def.
 [ < int# int# -- int# > divmod. swap. drop. ] mod def.
 [ < i64 i64 -- i64 > divmod. swap. drop. ] mod def.
+[ < a ary a ary > [ div. ] zip. ] div def.
+[ div. ] ÷ def.
 [ div. ] / def.
 
 -- Comparisons leave a flag: 1 or 0, an i64.

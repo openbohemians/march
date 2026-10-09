@@ -857,9 +857,13 @@ impl Stage {
         let base = self.stack.len() - sig.ins.len();
         for (k, &p) in sig.ins.iter().enumerate() {
             let t = self.types.subst(p, env);
-            if !(sig.value(k) && self.types.is_literal(t)) {
-                self.annotate(base + k, t)?;
+            let have = self.stack[base + k].ty;
+            // A vec given where an array is wanted keeps its length, which
+            // the body may use: it is an array, more precisely known.
+            if (sig.value(k) && self.types.is_literal(t)) || (have != t && self.forgets(t, have)) {
+                continue;
             }
+            self.annotate(base + k, t)?;
         }
         Ok(())
     }
@@ -1770,7 +1774,7 @@ impl Stage {
                 Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
                 Prim::Each | Prim::EachRight => (2, 0),
                 Prim::Within => (2, 1),
-                Prim::AryInsert => (3, 1),
+                Prim::AryInsert | Prim::Zip | Prim::Table => (3, 1),
                 Prim::AryRemove => (2, 1),
                 Prim::VecSpread => return None,
                 Prim::Range | Prim::Reverse => (1, 1),
@@ -2468,6 +2472,8 @@ impl Stage {
             }
             Prim::Within => self.within(name)?,
             Prim::AryInsert => self.insert(name, base)?,
+            Prim::Zip => self.zip(name)?,
+            Prim::Table => self.table(name)?,
             Prim::AryRemove => self.remove(name, base)?,
             Prim::VecSpread => {
                 let n = len(self, 13);
@@ -3022,6 +3028,237 @@ impl Stage {
             )),
             _ => None,
         }
+    }
+
+    /// Compiles a pair loop's body once, on an element of each array: it
+    /// may read the values below but must leave them, and leave one value,
+    /// a value at run time; its type is returned.
+    fn pair_body(&mut self, name: &str, q: &[Token], a: Type, b: Type) -> Result<Type> {
+        let below = self.stack.clone();
+        self.push(a, Val::Run);
+        self.push(b, Val::Run);
+        self.enter()?;
+        let r = self.run(q);
+        self.depth -= 1;
+        r?;
+        let kept = self.stack.len() == below.len() + 1
+            && self.stack[..below.len()]
+                .iter()
+                .zip(&below)
+                .all(|(x, y)| x.ty == y.ty && x.val == y.val);
+        if !kept {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "`{name}`'s quotation must take its two elements and leave one value, \
+                     keeping the values below"
+                ),
+            ));
+        }
+        self.materialize(below.len())?;
+        Ok(self.stack.pop().expect("one").ty)
+    }
+
+    /// The two arrays on top, for a pair loop: each's known length and
+    /// element type.
+    fn two_arrays(&self, name: &str) -> Result<[(Option<u64>, Type); 2]> {
+        let n = self.stack.len();
+        match (
+            self.array_of(self.stack[n - 2].ty),
+            self.array_of(self.stack[n - 1].ty),
+        ) {
+            (Some(a), Some(b)) => Ok([a, b]),
+            _ => Err(self.err(
+                Kind::NoWord,
+                format!("no word `{name}` for {} quote", self.top_types(2)),
+            )),
+        }
+    }
+
+    /// `xs ys q zip`: q applied to each pair of elements, in step, and
+    /// collected. The arrays must be as long as each other: checked at
+    /// compile time when both lengths are known, at run time otherwise.
+    /// Arithmetic on two arrays is `zip` (core/core.march).
+    fn zip(&mut self, name: &str) -> Result<()> {
+        let q = self.words_of(name)?;
+        let [(la, ea), (lb, eb)] = self.two_arrays(name)?;
+        if let (Some(a), Some(b)) = (la, lb)
+            && a != b
+        {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!("`{name}` pairs arrays of {a} and {b} elements: they must be as long"),
+            ));
+        }
+        let base = self.stack.len() - 2;
+        self.materialize_top(2)?;
+        if la.is_none() || lb.is_none() {
+            let (bad, ok) = (self.label(), self.label());
+            for op in [P::Over, P::VecLen, P::Over, P::VecLen, P::Eq] {
+                self.emit(Op::Prim(op));
+            }
+            self.code.push(Ins::JumpZero(bad));
+            self.code.push(Ins::Jump(ok));
+            self.code.push(Ins::Label(bad));
+            self.emit(Op::Lit(3));
+            self.emit(Op::Prim(P::Trap));
+            self.code.push(Ins::Label(ok));
+        }
+        self.stack.truncate(base);
+        // The scratch stack: ys, xs, the new array, the index.
+        for op in [
+            P::ScratchPush,
+            P::ScratchPush,
+            P::Mark,
+            P::Gather,
+            P::ScratchPush,
+        ] {
+            self.emit(Op::Prim(op));
+        }
+        self.emit(Op::Lit(0));
+        self.emit(Op::Prim(P::ScratchPush));
+        let (top, end) = (self.label(), self.label());
+        self.code.push(Ins::Label(top));
+        self.emit(Op::Prim(P::ScratchPeek));
+        self.emit(Op::Lit(2));
+        for op in [P::ScratchAt, P::VecLen, P::ILt] {
+            self.emit(Op::Prim(op));
+        }
+        self.code.push(Ins::JumpZero(end));
+        for depth in [2, 3] {
+            self.emit(Op::Lit(depth));
+            for op in [P::ScratchAt, P::ScratchPeek, P::VecAt] {
+                self.emit(Op::Prim(op));
+            }
+        }
+        let r = self.pair_body(name, &q, ea, eb)?;
+        self.emit(Op::Lit(1));
+        for op in [P::ScratchAt, P::Swap, P::VecPush, P::Drop, P::ScratchPop] {
+            self.emit(Op::Prim(op));
+        }
+        self.emit(Op::Lit(1));
+        self.emit(Op::Prim(P::IAdd));
+        self.emit(Op::Prim(P::ScratchPush));
+        self.code.push(Ins::Jump(top));
+        self.code.push(Ins::Label(end));
+        for op in [
+            P::ScratchPop,
+            P::Drop,
+            P::ScratchPop,
+            P::ScratchPop,
+            P::Drop,
+            P::ScratchPop,
+            P::Drop,
+        ] {
+            self.emit(Op::Prim(op));
+        }
+        let out = match la.or(lb) {
+            Some(n) => {
+                let n = self.types.intern(Term::Nat(n));
+                Term::Vec(n, r)
+            }
+            None => Term::Ary(r),
+        };
+        let out = self.types.intern(out);
+        self.push(out, Val::Run);
+        Ok(())
+    }
+
+    /// `xs ys q table`: q applied to every pair, an element of xs with an
+    /// element of ys, as rows, one for each element of xs: the outer
+    /// product, APL's `∘.`, Uiua's `⊞`.
+    fn table(&mut self, name: &str) -> Result<()> {
+        let q = self.words_of(name)?;
+        let [(la, ea), (lb, eb)] = self.two_arrays(name)?;
+        let base = self.stack.len() - 2;
+        self.materialize_top(2)?;
+        self.stack.truncate(base);
+        // The scratch stack: ys, xs, the rows, i; in a row, the row and j.
+        for op in [
+            P::ScratchPush,
+            P::ScratchPush,
+            P::Mark,
+            P::Gather,
+            P::ScratchPush,
+        ] {
+            self.emit(Op::Prim(op));
+        }
+        self.emit(Op::Lit(0));
+        self.emit(Op::Prim(P::ScratchPush));
+        let (top_i, end_i, top_j, end_j) = (self.label(), self.label(), self.label(), self.label());
+        self.code.push(Ins::Label(top_i));
+        self.emit(Op::Prim(P::ScratchPeek));
+        self.emit(Op::Lit(2));
+        for op in [P::ScratchAt, P::VecLen, P::ILt] {
+            self.emit(Op::Prim(op));
+        }
+        self.code.push(Ins::JumpZero(end_i));
+        for op in [P::Mark, P::Gather, P::ScratchPush] {
+            self.emit(Op::Prim(op));
+        }
+        self.emit(Op::Lit(0));
+        self.emit(Op::Prim(P::ScratchPush));
+        self.code.push(Ins::Label(top_j));
+        self.emit(Op::Prim(P::ScratchPeek));
+        self.emit(Op::Lit(5));
+        for op in [P::ScratchAt, P::VecLen, P::ILt] {
+            self.emit(Op::Prim(op));
+        }
+        self.code.push(Ins::JumpZero(end_j));
+        // x is xs at i, y is ys at j.
+        self.emit(Op::Lit(4));
+        self.emit(Op::Prim(P::ScratchAt));
+        self.emit(Op::Lit(2));
+        self.emit(Op::Prim(P::ScratchAt));
+        self.emit(Op::Prim(P::VecAt));
+        self.emit(Op::Lit(5));
+        for op in [P::ScratchAt, P::ScratchPeek, P::VecAt] {
+            self.emit(Op::Prim(op));
+        }
+        let r = self.pair_body(name, &q, ea, eb)?;
+        self.emit(Op::Lit(1));
+        for op in [P::ScratchAt, P::Swap, P::VecPush, P::Drop, P::ScratchPop] {
+            self.emit(Op::Prim(op));
+        }
+        self.emit(Op::Lit(1));
+        self.emit(Op::Prim(P::IAdd));
+        self.emit(Op::Prim(P::ScratchPush));
+        self.code.push(Ins::Jump(top_j));
+        self.code.push(Ins::Label(end_j));
+        for op in [P::ScratchPop, P::Drop, P::ScratchPop] {
+            self.emit(Op::Prim(op));
+        }
+        self.emit(Op::Lit(1));
+        for op in [P::ScratchAt, P::Swap, P::VecPush, P::Drop, P::ScratchPop] {
+            self.emit(Op::Prim(op));
+        }
+        self.emit(Op::Lit(1));
+        self.emit(Op::Prim(P::IAdd));
+        self.emit(Op::Prim(P::ScratchPush));
+        self.code.push(Ins::Jump(top_i));
+        self.code.push(Ins::Label(end_i));
+        for op in [
+            P::ScratchPop,
+            P::Drop,
+            P::ScratchPop,
+            P::ScratchPop,
+            P::Drop,
+            P::ScratchPop,
+            P::Drop,
+        ] {
+            self.emit(Op::Prim(op));
+        }
+        let mut sized = |n: Option<u64>, e: Type| -> Type {
+            let t = match n {
+                Some(n) => Term::Vec(self.types.intern(Term::Nat(n)), e),
+                None => Term::Ary(e),
+            };
+            self.types.intern(t)
+        };
+        let row = sized(lb, r);
+        let out = sized(la, row);
+        self.push(out, Val::Run);
+        Ok(())
     }
 
     /// `xs v k insert`: v at the gap after element k, so 0 prepends and -1

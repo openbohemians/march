@@ -1671,6 +1671,41 @@ impl Stage {
         Ok(certain.then_some(true))
     }
 
+    /// Reorders the judgments from `base`: output k is input `order[k]`.
+    /// Known values move for nothing; the values at run time among them,
+    /// if their order changes, go to the scratch stack, the deepest ending
+    /// on top, and are copied back in the new order.
+    fn permute(&mut self, base: usize, order: &[usize]) {
+        let present: Vec<usize> = (0..order.len())
+            .filter(|&k| !self.stack[base + k].known())
+            .collect();
+        let after: Vec<usize> = order
+            .iter()
+            .copied()
+            .filter(|k| present.contains(k))
+            .collect();
+        if after != present {
+            for _ in 0..present.len() {
+                self.emit(Op::Prim(P::ScratchPush));
+            }
+            for k in &after {
+                let depth = present.iter().position(|p| p == k).expect("present");
+                self.emit(Op::Lit(depth as u64));
+                self.emit(Op::Prim(P::ScratchAt));
+            }
+            for _ in 0..present.len() {
+                self.emit(Op::Prim(P::ScratchPop));
+                self.emit(Op::Prim(P::Drop));
+            }
+        }
+        let moved: Vec<Jdg> = order
+            .iter()
+            .map(|&k| self.stack[base + k].clone())
+            .collect();
+        self.stack.truncate(base);
+        self.stack.extend(moved);
+    }
+
     /// Inside a clause chosen by a value pattern tested at run time, its
     /// input is known to equal the value: pinned to it, as the input's type.
     fn pin(&mut self, sig: &Sig) {
@@ -1731,6 +1766,7 @@ impl Stage {
                 Prim::Swap => (2, 2),
                 Prim::Over => (2, 3),
                 Prim::Rot => (3, 3),
+                Prim::Swap2 => (4, 4),
                 Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
                 Prim::Each | Prim::EachRight => (2, 0),
                 Prim::Range | Prim::Reverse => (1, 1),
@@ -2368,6 +2404,7 @@ impl Stage {
                 let a = self.stack.remove(base);
                 self.stack.push(a);
             }
+            Prim::Swap2 => self.permute(base, &[2, 3, 0, 1]),
             Prim::VecLength => {
                 let k = len(self, 13);
                 if !self.stack[base].known() {

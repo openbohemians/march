@@ -316,7 +316,7 @@ The rest are words in `core.march`:
 | `xs x q fold-right` | from the right: e0 (e1 (e2 x)), its quotation taking an element under the accumulator |
 | `xs q reduce` | `fold` from the first element; `reduce-right`, `fold-right` from the last |
 | `xs q scan` | the running reductions from the left: `( 1 2 3 ) + scan.` is `( 1 3 6 )`, a comprehension |
-| `n q times` | `q` n times, as `each` over `n range` |
+| `n q repeat` | `q` n times, as `each` over `n range` |
 | `first`, `last`, `rest`, `most`, `slice` | parts of an array, and `slice` of a string |
 | `sort` | an array in order: numbers by value, strings by text |
 | `keys`, `values` | a map's keys and values, in one order, the map's own |
@@ -340,7 +340,7 @@ filter, flat-map and scan, with one loop:
 ( xs keep each. )                 filter: keep's clauses leave the element or nothing
 ( xs [ dup. ] each. )             each element twice
 ( 0 xs [ over. +. ] each. )       scan: ( 0 1 3 6 ), reading the last collected
-( 3 [ 7 ] times. )                ( 7 7 7 )
+( 3 [ 7 ] repeat. )               ( 7 7 7 )
 ```
 
 - **A run** is a new kind of judgment: zero or more values of one type,
@@ -448,8 +448,15 @@ march8 --code '5 fact.'      source:  5  tail fact-i64
 ## The core vocabulary
 
 `core/core.march` defines `+`, `-`, `*`, `/`, `mod`, the comparisons, `length`,
-`at`, `concat`, `slice`, `print`, the folds, reductions and `times` as families
-of clauses over primitives, in March.
+`at`, `concat`, `slice`, `print`, the folds, reductions and `repeat` as families
+of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
+`swap`, and doubled, `==` and `~~`, as FORTH's 2DUP and 2SWAP (`dup2`,
+`swap2`); the guards `zero?`, `positive?` and `negative?`, and `abs`, `min` and
+`max` as clauses chosen by them, with no `if`; `sqrt`; `pow`, x to the y,
+exact for two literals and checked for integers; and `divmod`, the quotient
+and remainder, floored (`-7 3 divmod.` is `-3 2`), with `div` and `mod` each
+taking one of them, so the three agree, and `/` as `div` for now. doc/design/WORDCHART.md
+charts the words beside APL's and Uiua's.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`) exist only at compile time.
@@ -457,7 +464,8 @@ A primitive applied to values all known folds, unless it has an effect
 (`write`).
 
 A few are handled by the stage itself, because their types are not a
-signature's: the stack words, which move judgments; `vec-length`, a
+signature's: the stack words, which move judgments, the values at run time
+among them moving by the scratch stack only if their order changes; `vec-length`, a
 constant; `vec-at`, which checks a literal index against the length; and
 `vec-concat`, whose length is the sum.
 
@@ -468,12 +476,13 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with eighteen primitives added: `pick`; checked
-signed `i64+`, `i64-`, `i64*`, `i64/` and `i64mod`, which trap on overflow
-and division by zero; signed `i64lt?`; `i64>text` and `f64>text`;
+The machine is march7's, with twenty-two primitives added: `pick`; checked
+signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
+overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
 `mark-pick`, which reads below an array literal's mark; `money>text` and
-`string-show`; and `sort-ints`, `sort-floats` and `sort-texts`.
+`string-show`; `sort-ints`, `sort-floats` and `sort-texts`; and `f64-sqrt`,
+`f64-pow` and `i64-pow`.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals

@@ -51,9 +51,20 @@
 [ < a ary a -- a ary > swap. [ over. *. ] map. swap. drop. ] * def.
 [ < a a ary -- a ary > [ over. *. ] map. swap. drop. ] * def.
 
-[ < i64 i64 -- i64 > i64/. ] / def.
-[ < f64 f64 -- f64 > f64/. ] / def.
-[ < i64 i64 -- i64 > i64mod. ] mod def.
+-- Division. `divmod` leaves the quotient and the remainder, floored: the
+-- quotient rounded down, the remainder with the divisor's sign, so that
+-- a = q b + r and `-7 3 divmod.` is -3 2 (Thomas, 2026-10-09). `div` and
+-- `mod` take one of them, so the three always agree; `div` of floats is
+-- their quotient, and `/` is `div`, for now. Two literals divide exactly.
+
+[ < int# int# -- int# int# > int#-divmod. ] divmod def.
+[ < i64 i64 -- i64 i64 > i64-divmod. ] divmod def.
+[ < int# int# -- int# > divmod. drop. ] div def.
+[ < i64 i64 -- i64 > divmod. drop. ] div def.
+[ < f64 f64 -- f64 > f64/. ] div def.
+[ < int# int# -- int# > divmod. swap. drop. ] mod def.
+[ < i64 i64 -- i64 > divmod. swap. drop. ] mod def.
+[ div. ] / def.
 
 -- Comparisons leave a flag: 1 or 0, an i64.
 
@@ -67,6 +78,38 @@
 [ < f64 f64 -- i64 > f64eq?. ] eq? def.
 [ < money money -- i64 > money-eq?. ] eq? def.
 [ < string string -- i64 > string-eq?. ] eq? def.
+
+-- Stack words. `=` is `dup` and `~` is `swap` (march7/docs/SURFACE.md,
+-- on trial since 2026-10-03); doubled, they act on two values at a time,
+-- as FORTH's 2DUP and 2SWAP (Thomas, 2026-10-08).
+
+[ dup. ] = def.
+[ swap. ] ~ def.
+[ over. over. ] dup2 def.
+[ dup2. ] == def.
+[ swap2. ] ~~ def.
+
+-- Signs, as guards, and what they choose between. These clauses have no
+-- `if`: a guard picks the clause (doc/design/TYPES.md 2.12).
+
+[ 0 eq?. ] zero? def.
+[ 0 gt?. ] positive? def.
+[ 0 lt?. ] negative? def.
+
+[ < a negative? -- a > 0 swap. -. ] abs def.
+[ < a -- a > ] abs def.
+[ < a a lt? -- a > drop. ] min def.
+[ < a a -- a > swap. drop. ] min def.
+[ < a a gt? -- a > drop. ] max def.
+[ < a a -- a > swap. drop. ] max def.
+
+-- Roots and powers. `pow` is x to the y; `exp`, e to the x, is kept for
+-- that. Two literals stay an exact literal.
+
+[ < f64 -- f64 > f64-sqrt. ] sqrt def.
+[ < int# int# -- int# > int#-pow. ] pow def.
+[ < i64 i64 -- i64 > i64-pow. ] pow def.
+[ < f64 f64 -- f64 > f64-pow. ] pow def.
 
 -- Containers, typed by their structure. A vec knows its length at compile
 -- time, so its length is a constant.
@@ -123,9 +166,9 @@
 
 [ ( _. dup. first. swap. rest. [ over. swap. ] _. compose. each. ) ] scan def.
 
--- `n q times` runs q n times.
+-- `n q repeat` runs q n times.
 
-[ swap. range. swap. [ drop. ] swap. compose. each. ] times def.
+[ swap. range. swap. [ drop. ] swap. compose. each. ] repeat def.
 
 -- Values as text. `show` writes a value as the display does, so it reads
 -- back: a string quoted, an array in parentheses. `>string` is a string's

@@ -160,6 +160,14 @@ pub enum Primitive {
     SortInts = 89,
     SortFloats = 90,
     SortTexts = 91,
+    // ( x -- √x ), ( x y -- xʸ ) for floats; ( x y -- xʸ ) for integers,
+    // checked, y at least 0.
+    FSqrt = 92,
+    FPow = 93,
+    IPow = 94,
+    // ( a b -- q r ) Floored division: q rounded down, r with the sign of b,
+    // a = q·b + r; traps on division by zero and on overflow.
+    IDivMod = 95,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -241,8 +249,8 @@ impl Primitive {
         (Self::IAdd, "i64+"),
         (Self::ISub, "i64-"),
         (Self::IMul, "i64*"),
-        (Self::IDiv, "i64/"),
-        (Self::IMod, "i64mod"),
+        (Self::IDiv, "i64-quot"),
+        (Self::IMod, "i64-rem"),
         (Self::ILt, "i64lt?"),
         (Self::IntText, "i64>text"),
         (Self::FloatText, "f64>text"),
@@ -255,6 +263,10 @@ impl Primitive {
         (Self::SortInts, "sort-ints"),
         (Self::SortFloats, "sort-floats"),
         (Self::SortTexts, "sort-texts"),
+        (Self::FSqrt, "f64-sqrt"),
+        (Self::FPow, "f64-pow"),
+        (Self::IPow, "i64-pow"),
+        (Self::IDivMod, "i64-divmod"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

@@ -860,6 +860,31 @@ impl Machine {
                 };
                 self.push(n)?;
             }
+            IDivMod => {
+                let b = self.pop()? as i64;
+                let a = self.pop()? as i64;
+                let (q, r) = floored(a, b).ok_or(Error::Arithmetic)?;
+                self.push(q as u64)?;
+                self.push(r as u64)?;
+            }
+            FSqrt => {
+                let a = f64::from_bits(self.pop()?);
+                self.push(float_bits(a.sqrt()))?;
+            }
+            FPow => {
+                let b = f64::from_bits(self.pop()?);
+                let a = f64::from_bits(self.pop()?);
+                self.push(float_bits(a.powf(b)))?;
+            }
+            IPow => {
+                let b = self.pop()? as i64;
+                let a = self.pop()? as i64;
+                let n = u32::try_from(b)
+                    .ok()
+                    .and_then(|b| a.checked_pow(b))
+                    .ok_or(Error::Arithmetic)?;
+                self.push(n as u64)?;
+            }
             IToF => {
                 let a = self.pop()? as i64;
                 self.push(float_bits(a as f64))?;
@@ -1325,6 +1350,17 @@ impl Machine {
         }
         Ok(())
     }
+}
+
+/// Floored division: the quotient rounded down and the remainder with the
+/// divisor's sign; none on division by zero or overflow.
+pub fn floored(a: i64, b: i64) -> Option<(i64, i64)> {
+    let (mut q, mut r) = (a.checked_div(b)?, a.checked_rem(b)?);
+    if r != 0 && (r < 0) != (b < 0) {
+        q -= 1;
+        r += b;
+    }
+    Some((q, r))
 }
 
 /// The bits of `x`, with every NaN mapped to one canonical pattern.

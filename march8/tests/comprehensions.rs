@@ -39,7 +39,7 @@ fn each_inside_a_literal_collects() {
         show(&["( 0 ( 1 2 3 ) [ over. +. ] each. )"]),
         "<1> ( 0 1 3 6 )"
     );
-    assert_eq!(show(&["( 3 [ 7 ] times. )"]), "<1> ( 7 7 7 )");
+    assert_eq!(show(&["( 3 [ 7 ] repeat. )"]), "<1> ( 7 7 7 )");
     assert_eq!(show(&["( 4 range. [ dup. *. ] each. )"]), "<1> ( 0 1 4 9 )");
     // With a count known only at run time, the result is an array of any
     // length.

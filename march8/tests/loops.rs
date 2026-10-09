@@ -1,5 +1,5 @@
 //! Loops (docs/MACHINE.md): `each` and `each-right`, the folds and
-//! reductions written on them in March, `times` and `range`.
+//! reductions written on them in March, `repeat` and `range`.
 use march8::{Kind, Session};
 
 fn session(pieces: &[&str]) -> Result<Session, Kind> {
@@ -75,7 +75,7 @@ fn ranges_and_repetition() {
     // A range of a known count is a vec, so its length is a constant.
     assert_eq!(show(&["5 range. length."]), "<1> 5");
     assert_eq!(show(&["4", "range."]), "<1> ( 0 1 2 3 )");
-    assert_eq!(printed("3 [ \"hi \" print. ] times."), "hi hi hi ");
+    assert_eq!(printed("3 [ \"hi \" print. ] repeat."), "hi hi hi ");
     assert_eq!(show(&["0 4 range. [ +. ] each."]), "<1> 6");
 }
 

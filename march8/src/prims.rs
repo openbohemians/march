@@ -26,8 +26,10 @@ pub enum Prim {
     I64Add,
     I64Sub,
     I64Mul,
-    I64Div,
-    I64Mod,
+    I64Quot,
+    I64Rem,
+    I64DivMod,
+    IntDivMod,
     I64Lt,
     I64Eq,
     F64Add,
@@ -78,12 +80,18 @@ pub enum Prim {
     StrSlice,
     /// `q r compose`: one quotation, q's words then r's.
     Compose,
+    FSqrt,
+    FPow,
+    IPow,
+    IntPow,
     // Stack words, which move judgments as the code moves values.
     Dup,
     Drop,
     Swap,
     Over,
     Rot,
+    /// `a b c d -- c d a b`: FORTH's 2SWAP.
+    Swap2,
     // Compile time.
     Def,
 }
@@ -120,8 +128,20 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::I64Add, "i64+", "< i64 i64 -- i64 >", &[P::IAdd]),
     d(Prim::I64Sub, "i64-", "< i64 i64 -- i64 >", &[P::ISub]),
     d(Prim::I64Mul, "i64*", "< i64 i64 -- i64 >", &[P::IMul]),
-    d(Prim::I64Div, "i64/", "< i64 i64 -- i64 >", &[P::IDiv]),
-    d(Prim::I64Mod, "i64mod", "< i64 i64 -- i64 >", &[P::IMod]),
+    d(Prim::I64Quot, "i64-quot", "< i64 i64 -- i64 >", &[P::IDiv]),
+    d(Prim::I64Rem, "i64-rem", "< i64 i64 -- i64 >", &[P::IMod]),
+    d(
+        Prim::I64DivMod,
+        "i64-divmod",
+        "< i64 i64 -- i64 i64 >",
+        &[P::IDivMod],
+    ),
+    d(
+        Prim::IntDivMod,
+        "int#-divmod",
+        "< int# int# -- int# int# >",
+        &[],
+    ),
     d(Prim::I64Lt, "i64lt?", "< i64 i64 -- i64 >", &[P::ILt]),
     d(Prim::I64Eq, "i64eq?", "< i64 i64 -- i64 >", &[P::Eq]),
     d(Prim::F64Add, "f64+", "< f64 f64 -- f64 >", &[P::FAdd]),
@@ -290,6 +310,11 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::Swap, "swap", "< a b -- b a >", &[]),
     d(Prim::Over, "over", "< a b -- a b a >", &[]),
     d(Prim::Rot, "rot", "< a b c -- b c a >", &[]),
+    d(Prim::Swap2, "swap2", "< a b c d -- c d a b >", &[]),
+    d(Prim::FSqrt, "f64-sqrt", "< f64 -- f64 >", &[P::FSqrt]),
+    d(Prim::FPow, "f64-pow", "< f64 f64 -- f64 >", &[P::FPow]),
+    d(Prim::IPow, "i64-pow", "< i64 i64 -- i64 >", &[P::IPow]),
+    d(Prim::IntPow, "int#-pow", "< int# int# -- int# >", &[]),
     d(Prim::Def, "def", "< quote symbol -- >", &[]),
 ];
 
@@ -313,6 +338,7 @@ pub fn custom(p: Prim) -> bool {
             | Swap
             | Over
             | Rot
+            | Swap2
             | Def
     )
 }
@@ -326,6 +352,8 @@ pub fn compile_time_only(p: Prim) -> bool {
         IntAdd
             | IntSub
             | IntMul
+            | IntPow
+            | IntDivMod
             | DecAdd
             | DecSub
             | DecMul
@@ -466,6 +494,26 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
             let ((x, s), (y, t)) = (dec(&a[0]), dec(&a[1]));
             decimal(x.checked_mul(y).zip(s.checked_add(t)))
         }
+        IntPow => {
+            let e = u32::try_from(int(&a[1])).map_err(|_| {
+                (
+                    Kind::Arithmetic,
+                    "a negative power of an integer".to_string(),
+                )
+            })?;
+            lit(int(&a[0]).checked_pow(e), "an integer literal")
+        }
+        IPow => {
+            let e = u32::try_from(int(&a[1])).map_err(|_| {
+                (
+                    Kind::Arithmetic,
+                    "a negative power of an integer".to_string(),
+                )
+            })?;
+            i64_of(small(int(&a[0])).checked_pow(e), "i64 power")
+        }
+        FSqrt => Ok(vec![Val::Float(float(&a[0]).sqrt())]),
+        FPow => Ok(vec![Val::Float(float(&a[0]).powf(float(&a[1])))]),
         IntToDec => Ok(vec![Val::Dec(int(&a[0]), 0)]),
         IntToI64 => {
             let n = int(&a[0]);
@@ -530,17 +578,37 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
             small(int(&a[0])).checked_mul(small(int(&a[1]))),
             "i64 multiplication",
         ),
-        I64Div | I64Mod => {
+        I64Quot | I64Rem => {
             let (x, y) = (small(int(&a[0])), small(int(&a[1])));
             if y == 0 {
                 return Err((Kind::Arithmetic, "division by zero".into()));
             }
-            let r = if p == I64Div {
+            let r = if p == I64Quot {
                 x.checked_div(y)
             } else {
                 x.checked_rem(y)
             };
             i64_of(r, "i64 division")
+        }
+        I64DivMod => {
+            let (x, y) = (small(int(&a[0])), small(int(&a[1])));
+            if y == 0 {
+                return Err((Kind::Arithmetic, "division by zero".into()));
+            }
+            let (q, r) = crate::machine::floored(x, y).ok_or_else(|| overflow("i64 division"))?;
+            Ok(vec![Val::Int(q.into()), Val::Int(r.into())])
+        }
+        IntDivMod => {
+            let (x, y) = (int(&a[0]), int(&a[1]));
+            if y == 0 {
+                return Err((Kind::Arithmetic, "division by zero".into()));
+            }
+            let (mut q, mut r) = (x / y, x % y);
+            if r != 0 && (r < 0) != (y < 0) {
+                q -= 1;
+                r += y;
+            }
+            Ok(vec![Val::Int(q), Val::Int(r)])
         }
         I64Lt | MoneyLt => flag(int(&a[0]) < int(&a[1])),
         I64Eq | MoneyEq => flag(int(&a[0]) == int(&a[1])),

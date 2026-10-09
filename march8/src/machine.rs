@@ -1250,6 +1250,26 @@ impl Machine {
                 };
                 self.push(n.ok_or(Error::Arithmetic)? as u64)?;
             }
+            Range => {
+                let n = self.pop()? as i64;
+                if n < 0 {
+                    return Err(Error::Arithmetic);
+                }
+                let size = (n as usize).checked_mul(8).ok_or(Error::Limit)?;
+                if size > MAX_BYTES {
+                    return Err(Error::Limit);
+                }
+                let r = self.allocate_vector((0..n as u64).collect())?;
+                self.push(r)?;
+            }
+            Reverse => {
+                let a = self.pop()?;
+                let whole = self.array(a)?.whole();
+                let mut cells: Vec<u64> = whole.iter().copied().collect();
+                cells.reverse();
+                let r = self.allocate_vector(cells.into_iter().collect())?;
+                self.push(r)?;
+            }
             IntText | FloatText => {
                 let x = self.pop()?;
                 let s = if p == IntText {

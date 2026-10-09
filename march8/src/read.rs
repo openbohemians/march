@@ -118,13 +118,9 @@ pub fn read(src: &str, symbols: &Symbols) -> Result<Vec<Token>> {
                     }
                 }
             }
-            w => Some(number(w, pos)?.unwrap_or_else(|| {
-                let name = w
-                    .strip_prefix('\\')
-                    .and_then(|n| symbols.get(n))
-                    .unwrap_or(w);
-                Tok::Name(name.into())
-            })),
+            w => Some(
+                number(w, pos)?.unwrap_or_else(|| Tok::Name(symbolize(w, symbols).into())),
+            ),
         };
         if let Some(tok) = tok {
             out.push(Token { tok, pos });
@@ -147,6 +143,30 @@ pub fn read(src: &str, symbols: &Symbols) -> Result<Vec<Token>> {
         ));
     }
     Ok(out)
+}
+
+/// A word with its symbol escapes rewritten (march7/docs/SURFACE.md): after
+/// `\`, a name is `_` or `^` with the character after it, or the longest run
+/// of ASCII letters, so `\infty` is not `\in` and `fty`. `x\_1` is `x₁`, and
+/// `\times` is `×`. An escape whose name is not in the table stays as it is.
+fn symbolize(w: &str, symbols: &Symbols) -> String {
+    let mut out = String::new();
+    let mut rest = w;
+    while let Some(i) = rest.find('\\') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        let len = match after.chars().next() {
+            Some(c @ ('_' | '^')) => c.len_utf8() + after[1..].chars().next().map_or(0, char::len_utf8),
+            _ => after.bytes().take_while(u8::is_ascii_alphabetic).count(),
+        };
+        match symbols.get(&after[..len]) {
+            Some(sym) if len > 0 => out.push_str(sym),
+            _ => out.push_str(&rest[i..i + 1 + len]),
+        }
+        rest = &after[len..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A number, if the word is one: digits with an optional `-`, and for a
@@ -392,6 +412,23 @@ mod tests {
         let t = read("a  sq..", &Symbols::standard()).unwrap();
         assert_eq!(t[2].pos, Pos { line: 1, col: 6 });
         assert_eq!(t[3].pos, Pos { line: 1, col: 7 });
+    }
+
+    #[test]
+    fn symbols_inside_words() {
+        let n = |s: &str| Tok::Name(s.into());
+        assert_eq!(
+            toks("x\\_1 \\times a\\times\\times \\infty \\foo y\\^2."),
+            [
+                n("x₁"),
+                n("×"),
+                n("a××"),
+                n("∞"),
+                n("\\foo"),
+                n("y²"),
+                Tok::Apply
+            ]
+        );
     }
 
     #[test]

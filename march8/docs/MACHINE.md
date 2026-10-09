@@ -41,6 +41,7 @@ runs to the end of the line, except inside `< >`.
 | `1.10` | a decimal literal: exact digits until its type is known |
 | `"text"`, `'raw'` | a string, with march7's escapes (`\n;`, `\#x2603;`, `\times;`); holes are not built yet |
 | `name` | a name, pushed as a value: it does nothing until applied |
+| `\name` | a symbol, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
 | `.` | applies the value on top |
 | `name.` | `name .`: each dot at the end of a word applies it (Thomas, 2026-10-08), so no name ends in a dot; `vec..` is `vec . .` |
 | `[ … ]` | a quotation: its words, unevaluated |
@@ -278,6 +279,43 @@ exactly, and stay literals, so `1 2 +. 3.5 +.` is the decimal 6.5. A
 literal takes its default type, i64 or f64, only when it must be a value at
 run time.
 
+### Loops: `each`, folds and reductions
+
+`ary q each.` applies `q` to each element in turn, from the first;
+`each-right` from the last. The quotation takes its element and may change
+the values below it, an accumulator, but must leave as many as there were,
+of the same types, since the next turn starts from them: the loop's
+**invariant**.
+
+```
+0 ( 1 2 3 ) [ +. ] each.          → 6
+0 ( 1.5 2.5 ) [ +. ] each.        → 4.0: the literal 0 becomes an f64
+```
+
+The stage compiles the body once to see what it leaves, and throws that code
+away. A value it changes becomes, before the loop, a value at run time of the
+type it keeps, a literal taking the body's type as the ghost of a recursion
+does; then the body is compiled again, until nothing changes. So the 0 above
+is the i64 0, under the array, and the body is one `i64+`. The array and an
+index are on the scratch stack.
+
+The rest are words in `core.march`:
+
+| Word | Means |
+|---|---|
+| `xs x q fold` | from the left: ((x e0) e1) e2 |
+| `xs x q fold-right` | from the right: e0 (e1 (e2 x)), its quotation taking an element under the accumulator |
+| `xs q reduce` | `fold` from the first element; `reduce-right`, `fold-right` from the last |
+| `n q times` | `q` n times, as `each` over `n range` |
+| `first`, `last`, `rest`, `most`, `slice` | parts of an array, and `slice` of a string |
+
+With `-` on `( 1 2 3 )`, `fold` from 0 is −6 and `fold-right` is 2, as APL's
+`-/`; for an associative word the two agree. A consumer takes a word as well
+as a quotation, so `( 1 2 3 4 ) + reduce.` is APL's `+/`, and in the surface,
+`'` will leave a word unapplied for it. `q r compose.` joins two quotations at
+compile time; `n range.` is the array 0 to n−1, a vec when n is known, and
+`reverse` an array reversed.
+
 ### Recursion and instances
 
 A family is evaluated where it is applied, on the caller's judgments,
@@ -329,7 +367,8 @@ march8 --code '5 fact.'      source:  5  tail fact-i64
 ## The core vocabulary
 
 `core/core.march` defines `+`, `-`, `*`, `/`, `mod`, the comparisons, `length`,
-`at`, `concat` and `print` as families of clauses over primitives, in March.
+`at`, `concat`, `slice`, `print`, the folds, reductions and `times` as families
+of clauses over primitives, in March.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`) exist only at compile time.
@@ -348,10 +387,10 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with ten primitives added: `pick`; checked
+The machine is march7's, with twelve primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64/` and `i64mod`, which trap on overflow
-and division by zero; signed `i64lt?`; `i64>text` and `f64>text`; and
-`scratch-at`, which reads a loop's state.
+and division by zero; signed `i64lt?`; `i64>text` and `f64>text`;
+`scratch-at`, which reads a loop's state; and `range` and `reverse`.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -419,6 +458,21 @@ running are the machine's.
    recursion.
 
 ## Not yet
+
+- **Deferred terms and rewriting clauses.** `range` and `reverse` build
+  arrays. Since everything is a value until `.` applies it, applying a pure
+  word could leave a term, "`reverse` of this array", made code only when
+  something forces it, and a clause could match the term's form: `fold` on a
+  `reverse` would be a loop backwards and `n range each` a counted loop, with
+  no array built (Thomas, 2026-10-08). That is rewriting, as GHC's rules, in
+  March itself, with no views in Rust. Only pure words may be deferred, which
+  the effects say; a rule's two forms are trusted to be equal.
+- **Scan,** the running reductions (APL's `\`).
+- **Optional values,** "T or nothing", with the mirror in a gather as the
+  case whose tag costs nothing: filters and comprehensions, and FORTH's words
+  that return a value or nothing.
+- **Glyphs:** APL's and Uiua's for these words, and whether `/` is reduce,
+  are deferred.
 
 - **Mutual recursion** between instances, which would make a cycle of
   content identities; and words used before they are defined.

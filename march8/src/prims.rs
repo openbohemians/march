@@ -59,6 +59,17 @@ pub enum Prim {
     VecConcat,
     /// `ary quote map`: the quotation applied to each element, in a loop.
     Map,
+    /// `ary quote each`: the quotation applied to each element in turn, from
+    /// the first; `each-right` from the last.
+    Each,
+    EachRight,
+    /// `n range`: the array 0 to n-1.
+    Range,
+    Reverse,
+    ArySlice,
+    StrSlice,
+    /// `q r compose`: one quotation, q's words then r's.
+    Compose,
     // Stack words, which move judgments as the code moves values.
     Dup,
     Drop,
@@ -200,7 +211,24 @@ pub const PRIMS: &[PrimDef] = &[
         "< n a vec m a vec >",
         &[P::Concat],
     ),
-    d(Prim::Map, "map", "< b quote >", &[]),
+    d(Prim::Map, "map", "< b c >", &[]),
+    d(Prim::Each, "each", "< b c >", &[]),
+    d(Prim::EachRight, "each-right", "< b c >", &[]),
+    d(Prim::Range, "range", "< i64 >", &[P::Range]),
+    d(Prim::Reverse, "reverse", "< b >", &[P::Reverse]),
+    d(
+        Prim::ArySlice,
+        "ary-slice",
+        "< a ary i64 i64 -- a ary >",
+        &[P::Slice],
+    ),
+    d(
+        Prim::StrSlice,
+        "string-slice",
+        "< string i64 i64 -- string >",
+        &[P::Slice],
+    ),
+    d(Prim::Compose, "compose", "< b c >", &[]),
     d(Prim::Dup, "dup", "< a -- a a >", &[]),
     d(Prim::Drop, "drop", "< a -- >", &[]),
     d(Prim::Swap, "swap", "< a b -- b a >", &[]),
@@ -215,7 +243,21 @@ pub fn custom(p: Prim) -> bool {
     use Prim::*;
     matches!(
         p,
-        VecLength | VecAt | VecConcat | Map | Dup | Drop | Swap | Over | Rot | Def
+        VecLength
+            | VecAt
+            | VecConcat
+            | Map
+            | Each
+            | EachRight
+            | Range
+            | Reverse
+            | Compose
+            | Dup
+            | Drop
+            | Swap
+            | Over
+            | Rot
+            | Def
     )
 }
 
@@ -275,7 +317,12 @@ pub fn foldable(p: Prim) -> bool {
     effects(p) == 0
         && !matches!(
             p,
-            Prim::AryLength | Prim::AryAt | Prim::AryConcat | Prim::MapLength | Prim::MapAt
+            Prim::AryLength
+                | Prim::ArySlice
+                | Prim::AryAt
+                | Prim::AryConcat
+                | Prim::MapLength
+                | Prim::MapAt
         )
 }
 
@@ -456,6 +503,16 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
                 .ok_or_else(|| (Kind::Mismatch, format!("index {i} is outside the string")))
         }
         StrEq => flag(text(&a[0]) == text(&a[1])),
+        StrSlice => {
+            let (i, j) = (int(&a[1]), int(&a[2]));
+            let chars: Vec<char> = text(&a[0]).chars().collect();
+            match (usize::try_from(i), usize::try_from(j)) {
+                (Ok(i), Ok(j)) if i <= j && j <= chars.len() => Ok(vec![Val::Str(
+                    chars[i..j].iter().collect::<String>().into(),
+                )]),
+                _ => Err((Kind::Mismatch, format!("{i} to {j} is outside the string"))),
+            }
+        }
         _ => unreachable!("{p:?} is not folded"),
     }
 }

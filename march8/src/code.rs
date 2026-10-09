@@ -145,6 +145,9 @@ pub enum Primitive {
     // ( n -- x ) A copy of the scratch cell n below the top, in this frame:
     // a loop's state, read as FORTH reads its indices.
     ScratchAt = 83,
+    // ( n -- a ) The array 0 to n-1; ( a -- a ) an array in reverse.
+    Range = 84,
+    Reverse = 85,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -232,6 +235,8 @@ impl Primitive {
         (Self::IntText, "i64>text"),
         (Self::FloatText, "f64>text"),
         (Self::ScratchAt, "scratch-at"),
+        (Self::Range, "range"),
+        (Self::Reverse, "reverse"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

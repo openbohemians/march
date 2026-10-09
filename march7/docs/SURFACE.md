@@ -294,6 +294,17 @@ names, as Julia, Lean and Agda editors do.
 - **Symbols mean nothing until defined.** The table only makes them typeable.
   Which symbols the core library defines, and as what (`× : * ;`,
   `≤ : lte? ;`, `→` wherever `->` is accepted), is still to be decided.
+- **APL's glyphs join the table as words are defined for them** (Thomas,
+  2026-10-08): the `
+ame` notation opens APL's character set to March, but
+  a glyph is added only when it has a definition.
+- **Greek letters are letters, never core symbols** (Thomas, 2026-10-08).
+  They belong to a living language, and a Greek speaker should be free to
+  name a word `ρ` without it meaning something already. So the core defines
+  no Greek letter, and APL's glyphs drawn from Greek (`⍳`, `⍴`, `⍺`, `⍵` and
+  the like) are not used: those words get other names, as `range` for `⍳`.
+  The table keeps the Greek letters for typing them (`\alpha` is `α`), and
+  programmers may define them as they like; they may suit type variables.
 
 ## Brackets
 

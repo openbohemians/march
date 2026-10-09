@@ -85,6 +85,30 @@
 [ < a ary a ary -- a ary > ary-concat. ] concat def.
 [ < n a vec m a vec > vec-concat. ] concat def.
 
+[ < string i64 i64 -- string > string-slice. ] slice def.
+[ < a ary i64 i64 -- a ary > ary-slice. ] slice def.
+
+[ < a ary -- a > 0 at. ] first def.
+[ < a ary -- a > dup. length. 1 -. at. ] last def.
+[ < a ary -- a ary > dup. length. 1 swap. slice. ] rest def.
+[ < a ary -- a ary > dup. length. 1 -. 0 swap. slice. ] most def.
+
+-- Loops. `each` applies a quotation to each element, from the first, and
+-- `each-right` from the last; the quotation takes its element and keeps the
+-- values below it, as an accumulator. A fold starts from a value: `fold`
+-- combines from the left, ((x e0) e1) e2, and `fold-right` from the right,
+-- e0 (e1 (e2 x)), its quotation taking an element under the accumulator.
+-- A reduction starts from the first element, or the last.
+
+[ rot. swap. each. ] fold def.
+[ rot. swap. [ swap. ] swap. compose. each-right. ] fold-right def.
+[ swap. dup. rest. swap. first. rot. fold. ] reduce def.
+[ swap. dup. most. swap. last. rot. fold-right. ] reduce-right def.
+
+-- `n q times` runs q n times.
+
+[ swap. range. swap. [ drop. ] swap. compose. each. ] times def.
+
 -- Writing.
 
 [ < string > write. ] print def.

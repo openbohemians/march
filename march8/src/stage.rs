@@ -1557,7 +1557,9 @@ impl Stage {
                 Prim::Swap => (2, 2),
                 Prim::Over => (2, 3),
                 Prim::Rot => (3, 3),
-                Prim::VecConcat | Prim::Map => (2, 1),
+                Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
+                Prim::Each | Prim::EachRight => (2, 0),
+                Prim::Range | Prim::Reverse => (1, 1),
                 Prim::Def => (2, 0),
                 _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
             });
@@ -2208,6 +2210,37 @@ impl Stage {
                 self.emit_ops(2, &[P::Concat], &[t])?;
             }
             Prim::Map => self.map(name)?,
+            Prim::Each => self.each(name, false)?,
+            Prim::EachRight => self.each(name, true)?,
+            Prim::Range => {
+                let ty = match self.stack[base].val {
+                    Val::Int(k) if k < 0 => {
+                        return Err(self.err(Kind::Mismatch, format!("a range of {k} values")));
+                    }
+                    Val::Int(k) => {
+                        let n = self.types.intern(Term::Nat(k as u64));
+                        self.types.intern(Term::Vec(n, I64))
+                    }
+                    _ => self.types.intern(Term::Ary(I64)),
+                };
+                self.emit_ops(1, &[P::Range], &[ty])?;
+            }
+            Prim::Reverse => {
+                let t = self.stack[base].ty;
+                if !matches!(self.types.term(t), Term::Ary(_) | Term::Vec(..)) {
+                    return Err(self.err(
+                        Kind::NoWord,
+                        format!("no word `{name}` for {}", self.types.name(t)),
+                    ));
+                }
+                self.emit_ops(1, &[P::Reverse], &[t])?;
+            }
+            Prim::Compose => {
+                let r = self.words_of(name)?;
+                let q = self.words_of(name)?;
+                let words: Vec<Token> = q.iter().chain(r.iter()).cloned().collect();
+                self.push(QUOTE, Val::Quote(words.into()));
+            }
             Prim::Def => {
                 let name = self.stack.pop().expect("matched");
                 let quote = self.stack.pop().expect("matched");
@@ -2271,10 +2304,7 @@ impl Stage {
     /// the new array and an index, is on the scratch stack. A vec maps to a
     /// vec as long.
     fn map(&mut self, name: &str) -> Result<()> {
-        let quote = self.stack.pop().expect("matched");
-        let Val::Quote(q) = quote.val else {
-            unreachable!("a quotation's value is its words")
-        };
+        let q = self.words_of(name)?;
         let base = self.stack.len() - 1;
         let (len, e) = match self.types.term(self.stack[base].ty) {
             Term::Ary(e) => (None, e),
@@ -2352,6 +2382,187 @@ impl Stage {
         let out = self.types.intern(out);
         self.push(out, Val::Run);
         Ok(())
+    }
+
+    /// `each` and `each-right`: an array and a quotation, applied to each
+    /// element in turn, from the first or from the last. The quotation takes
+    /// its element and may change the values below it, as an accumulator, but
+    /// leaves as many as there were, of the same types, since the next turn
+    /// starts from them (the loop's invariant). The loop's state, the array
+    /// and an index, is on the scratch stack.
+    fn each(&mut self, name: &str, backward: bool) -> Result<()> {
+        let q = self.words_of(name)?;
+        let base = self.stack.len() - 1;
+        let e = match self.types.term(self.stack[base].ty) {
+            Term::Ary(e) | Term::Vec(_, e) => e,
+            _ => {
+                return Err(self.err(
+                    Kind::NoWord,
+                    format!("no word `{name}` for {} quote", self.top_types(1)),
+                ));
+            }
+        };
+        self.materialize(base)?;
+        self.invariant(base, e, &q, name)?;
+        self.stack.pop();
+        let (top, end) = (self.label(), self.label());
+        self.emit(Op::Prim(P::ScratchPush));
+        if backward {
+            self.emit(Op::Lit(0));
+            self.emit(Op::Prim(P::ScratchAt));
+            self.emit(Op::Prim(P::VecLen));
+        } else {
+            self.emit(Op::Lit(0));
+        }
+        self.emit(Op::Prim(P::ScratchPush));
+        self.code.push(Ins::Label(top));
+        if backward {
+            self.emit(Op::Lit(0));
+            self.emit(Op::Prim(P::ScratchPeek));
+            self.emit(Op::Prim(P::ILt));
+            self.code.push(Ins::JumpZero(end));
+            self.emit(Op::Prim(P::ScratchPop));
+            self.emit(Op::Lit(1));
+            self.emit(Op::Prim(P::ISub));
+            self.emit(Op::Prim(P::ScratchPush));
+        } else {
+            self.emit(Op::Prim(P::ScratchPeek));
+            self.emit(Op::Lit(1));
+            for op in [P::ScratchAt, P::VecLen, P::ILt] {
+                self.emit(Op::Prim(op));
+            }
+            self.code.push(Ins::JumpZero(end));
+        }
+        self.emit(Op::Lit(1));
+        for op in [P::ScratchAt, P::ScratchPeek, P::VecAt] {
+            self.emit(Op::Prim(op));
+        }
+        let below = self.stack.clone();
+        self.push(e, Val::Run);
+        self.enter()?;
+        let r = self.run(&q);
+        self.depth -= 1;
+        r?;
+        // What the body leaves takes the loop's shape again.
+        if self.stack.len() != below.len() {
+            return Err(self.loop_shape(name));
+        }
+        for (i, b) in below.iter().enumerate() {
+            if self.stack[i] != *b {
+                self.annotate(i, b.ty)?;
+                self.materialize(i)?;
+            }
+        }
+        if self.stack != below {
+            return Err(self.loop_shape(name));
+        }
+        if !backward {
+            self.emit(Op::Prim(P::ScratchPop));
+            self.emit(Op::Lit(1));
+            self.emit(Op::Prim(P::IAdd));
+            self.emit(Op::Prim(P::ScratchPush));
+        }
+        self.code.push(Ins::Jump(top));
+        self.code.push(Ins::Label(end));
+        for op in [P::ScratchPop, P::Drop, P::ScratchPop, P::Drop] {
+            self.emit(Op::Prim(op));
+        }
+        Ok(())
+    }
+
+    /// Takes the code a consumer applies: a quotation, or a word, which is
+    /// applied as `[ word. ]` is.
+    fn words_of(&mut self, name: &str) -> Result<Rc<[Token]>> {
+        let j = self.stack.pop().expect("matched");
+        match j.val {
+            Val::Quote(q) => Ok(q),
+            Val::Name(n) => Ok(vec![
+                Token {
+                    tok: Tok::Name(n),
+                    pos: self.pos,
+                },
+                Token {
+                    tok: Tok::Apply,
+                    pos: self.pos,
+                },
+            ]
+            .into()),
+            _ => Err(self.err(
+                Kind::NoWord,
+                format!(
+                    "no word `{name}` for {}: it takes a quotation or a word",
+                    self.describe(&j)
+                ),
+            )),
+        }
+    }
+
+    fn loop_shape(&self, name: &str) -> Error {
+        self.err(
+            Kind::Mismatch,
+            format!(
+                "`{name}`'s quotation must take its element and leave the values \
+                 below it, as many as there were, of the same types"
+            ),
+        )
+    }
+
+    /// Makes the values below a loop's array fit its invariant: the body is
+    /// compiled to see what it leaves, and its code thrown away; a value it
+    /// changes becomes, before the loop, a value at run time of the type it
+    /// keeps, a literal taking the body's type; then again, until nothing
+    /// changes.
+    fn invariant(&mut self, base: usize, e: Type, q: &[Token], name: &str) -> Result<()> {
+        for _ in 0..4 {
+            let below: Vec<Jdg> = self.stack[..base].to_vec();
+            let saved = (
+                std::mem::take(&mut self.code),
+                self.stack.clone(),
+                self.effects,
+            );
+            self.stack.truncate(base);
+            self.push(e, Val::Run);
+            let r = self.enter().and_then(|()| {
+                let r = self.run(q);
+                self.depth -= 1;
+                r
+            });
+            let after = std::mem::replace(&mut self.stack, saved.1);
+            self.code = saved.0;
+            self.effects = saved.2;
+            r?;
+            if after.len() != below.len() {
+                return Err(self.loop_shape(name));
+            }
+            let mut changed = false;
+            for i in 0..base {
+                if after[i] == below[i] {
+                    continue;
+                }
+                let Some(t) = self.join(&[below[i].ty, after[i].ty]) else {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!(
+                            "`{name}`'s quotation changes a value's type: {} becomes {}",
+                            self.types.name(below[i].ty),
+                            self.types.name(after[i].ty)
+                        ),
+                    ));
+                };
+                if self.stack[i].ty != t || self.stack[i].known() {
+                    self.annotate(i, t)?;
+                    self.materialize(i)?;
+                    changed = true;
+                }
+            }
+            if !changed {
+                return Ok(());
+            }
+        }
+        Err(self.err(
+            Kind::Mismatch,
+            format!("the values `{name}`'s loop changes do not settle"),
+        ))
     }
 
     // ---- Array and map literals ----

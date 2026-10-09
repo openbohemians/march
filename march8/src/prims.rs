@@ -80,6 +80,10 @@ pub enum Prim {
     StrSlice,
     /// `q r compose`: one quotation, q's words then r's.
     Compose,
+    /// `xs q within`: q run on the array's last elements as its stack.
+    Within,
+    /// A vec's elements, each a value on the stack.
+    VecSpread,
     FSqrt,
     FPow,
     FFloor,
@@ -313,6 +317,8 @@ pub const PRIMS: &[PrimDef] = &[
         &[P::Slice],
     ),
     d(Prim::Compose, "compose", "< b c >", &[]),
+    d(Prim::Within, "within", "< b c >", &[]),
+    d(Prim::VecSpread, "vec-spread", "< n a vec >", &[]),
     d(Prim::Dup, "dup", "< a -- a a >", &[]),
     d(Prim::Drop, "drop", "< a -- >", &[]),
     d(Prim::Swap, "swap", "< a b -- b a >", &[]),
@@ -357,6 +363,10 @@ pub fn custom(p: Prim) -> bool {
         p,
         VecLength
             | VecAt
+            | AryAt
+            | StrAt
+            | ArySlice
+            | StrSlice
             | VecConcat
             | Map
             | Each
@@ -364,6 +374,8 @@ pub fn custom(p: Prim) -> bool {
             | Range
             | Reverse
             | Compose
+            | Within
+            | VecSpread
             | Dup
             | Drop
             | Swap
@@ -694,7 +706,9 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         StrLength => Ok(vec![Val::Int(text(&a[0]).chars().count() as i128)]),
         StrAt => {
             let i = int(&a[1]);
-            usize::try_from(i)
+            // A negative index counts from the end.
+            let n = text(&a[0]).chars().count() as i128;
+            usize::try_from(if i < 0 { i + n } else { i })
                 .ok()
                 .and_then(|i| text(&a[0]).chars().nth(i))
                 .map(|c| vec![Val::Int(u32::from(c).into())])
@@ -702,8 +716,9 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         }
         StrEq => flag(text(&a[0]) == text(&a[1])),
         StrSlice => {
-            let (i, j) = (int(&a[1]), int(&a[2]));
             let chars: Vec<char> = text(&a[0]).chars().collect();
+            let from_end = |k: i128| if k < 0 { k + chars.len() as i128 } else { k };
+            let (i, j) = (from_end(int(&a[1])), from_end(int(&a[2])));
             match (usize::try_from(i), usize::try_from(j)) {
                 (Ok(i), Ok(j)) if i <= j && j <= chars.len() => Ok(vec![Val::Str(
                     chars[i..j].iter().collect::<String>().into(),

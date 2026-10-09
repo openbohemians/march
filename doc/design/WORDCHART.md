@@ -1,53 +1,56 @@
-| Meaning              | March Word | March  | APL   | Uiua  |
-|----------------------|------------|--------|-------|-------|
-| add                  | `add`     |  `+`   | `+`   | `+`   |
-| subtract             | `sub`     |  `-`   | `-`   | `-`   |
-| multiply             | `mul`     |  `⋅`   | `×`   | `×`   |
-| divide               | `div`     |  `÷`   | `÷`   | `÷`   |
-| remainder            | `mod`     |  `◿`   | `\|`  | `◿`   |
-| div remainder        | `divmod`  |   ?    |       |       |
-| less than            | `lt?`     |   ?    | `<`   | `<`   |
-| greater than         | `gt?`     |   ?    | `>`   | `>`   |
-| equal                | `eq?`     |  `≡`   | `≡`   | `≍`   |
-| copy top             | `dup`     |  `=`   |       | `.`   |
-| discard top          | `drop`    |  `◌`   |       | `◌`   |
-| exchange top         | `swap`    |  `~`   | `⍨`   | `:`   |
-| copy second          | `over`    |        |       |       |
-| third to top         | `rot`     |        |       |       |
-| count                | `len`     |  `⧻`   | `≢`   | `⧻`   |
-| count                | `count`   |  `⧻`   | `≢`   | `⧻`   |
-| element at           | `at`      |  `⊡`   | `⌷`   | `⊡`   |
-| join                 | `concat`  |  `⊂`   | `,`   | `⊂`   |
-| elements i->j        | `slice`   |        | `↑`   | `↙`   |
-| elements j->i        |  —        |        | `↓`   | `↘`   |
-| first                | `first`   |  `⊢`   | `⊃`   | `⊢`   |
-| last                 | `last`    |  `⊣`   | `⊃⌽`  | `⊣`   |
-| all but first        | `rest`    |        | `1↓`  | `↘1`  |
-| all but last         | `most`    |        | `¯1↓` | `↘¯1` |
-| reverse              | `reverse` |  `⇌`   | `⌽`   | `⇌`   |
-| 0 to n−1             | `range`   |  `⇡`   | `⍳`   | `⇡`   |
-| sort                 | `sort`    |  `⍆`   | `⍋`   | `⍆`   |
-| map keys             | `keys`    |        |       |       |
-| map values           | `values`  |        |       |       |
-| each, collect        | `map`     |  `∵`   | `¨`   | `∵`   |
-| each, thread stack   | `each`    |        |       |       |
-| fold from left       | `fold`    |        |       | `∧`   |
-| fold from right      | `fold-right` |     | `/`   |       |
-| reduce from left     | `reduce`  | `/` ?  |       | `/`   |
-| reduce from right    | `reduce-right` |   | `/`   |       |
-| running reductions   | `scan`    |  ?     | `\`   | `\`   |
-| repeat n times       | `repeat`  | `⍥`    | `⍣`   | `⍥`   |
-| compose quotations   | `compose` | `∘`    | `∘`   |  —    |
-| value as text        | `show`    | `⍕`    | `⍕`   |  —    |
-| write any value      | `print`   |        | `⎕←`  | `&p`  |
-| write a string       | `write`   |        | `⍞←`  | `&pf` |
-| swap top two         | `swap2`   |  `~~`  |       |       |
-| dup top two          | `dup2`    |  `==`  |       |       |
-| absolute value       | `abs`     |  `⌵`   | `\|`  | `⌵`   |
-| minimum              | `min`     |  `↧`   | `⌊`   | `↧`   |
-| maximum              | `max`     |  `↥`   | `⌈`   | `↥`   |
-| floor                | `floor`   |  `⌊`   | `⌊`   | `⌊`   |
-| ceiling              | `ceil`    |  `⌈`   | `⌈`   | `⌈`   |
+| Meaning              | March Word | March  | APL   | Uiua  | NOTES  |
+|----------------------|------------|--------|-------|-------|--------|
+| add                  | `add`      |  `+`   | `+`   | `+`   |        |
+| subtract             | `sub`      |  `-`   | `-`   | `-`   |        |
+| multiply             | `mul`      |  `⋅`   | `×`   | `×`   |        |
+| divide               | `div`      |  `÷`   | `÷`   | `÷`   |        |
+| remainder            | `mod`      |  `◿`   | `\|`  | `◿`   |        |
+| div remainder        | `divmod`   |   ?    |       |       |        |
+| less than            | `lt?`      |   ?    | `<`   | `<`   |        |
+| greater than         | `gt?`      |   ?    | `>`   | `>`   |        |
+| equal                | `eq?`      |  `≡`   | `≡`   | `≍`   |        |
+| copy top             | `dup`      |  `=`   |       | `.`   |        |
+| discard top          | `drop`     |  `◌`   |       | `◌`   |        |
+| exchange top         | `swap`     |  `~`   | `⍨`   | `:`   |        |
+| copy second          | `over`     |        |       |       |        |
+| third to top         | `rot`      |        |       |       |        |
+| length               | `len`      |  `⧻`   | `≢`   | `⧻`   | 0 index ? |
+| count                | `count`    |   ?    | `≢`   | `⧻`   |        |
+| element at           | `at`       |  `⊡`   | `⌷`   | `⊡`   |        |
+| join                 | `concat`   |  `⊂`   | `,`   | `⊂`   |        |
+| elements i->j        | `slice`    |        | `↑`   | `↙`   |        |
+| elements j->i        |  —         |        | `↓`   | `↘`   |        |
+| first                | `first`    |  `⊢`   | `⊃`   | `⊢`   |        |
+| last                 | `last`     |  `⊣`   | `⊃⌽`  | `⊣`   |        |
+| all but first        | `rest`     |  `⫣`   | `1↓`  | `↘1`  |        |
+| all but last         | `most`     |  `⊩`   | `¯1↓` | `↘¯1` |        |
+| reverse              | `reverse`  |  `⇌`   | `⌽`   | `⇌`   | `flip` instead? |
+| 0 to n−1             | `range`    |  `⇡`   | `⍳`   | `⇡`   |        |
+| sort                 | `sort`     |  `⍆`   | `⍋`   | `⍆`   |        |
+| word on array's end  | `within`   |        |       | `⍜`   | Uiua's under is nearest equivalent |
+| elements onto stack  | `spread`   |        |       |       |        |
+| map keys             | `keys`     |        |       |       |        |
+| map values           | `values`   |        |       |       |        |
+| each, collect        | `map`      |  `∵`   | `¨`   | `∵`   |        |
+| each, thread stack   | `each`     |        |       |       |        |
+| fold from left       | `fold`     |        |       | `∧`   |        |
+| fold from right      | `rfold`    |        | `/`   |       |        |
+| reduce from left     | `reduce`   | `/` ?  |       | `/`   |        |
+| reduce from right    | `rreduce`  |        | `/`   |       |        |
+| running reductions   | `scan`     |  ?     | `\`   | `\`   |        |
+| repeat n times       | `repeat`   | `⍥`    | `⍣`   | `⍥`   |        |
+| compose quotations   | `compose`  | `∘`    | `∘`   |  —    |        |
+| value as text        | `show`     | `⍕`    | `⍕`   |  —    |        |
+| write any value      | `print`    |        | `⎕←`  | `&p`  |        |
+| write a string       | `write`    |        | `⍞←`  | `&pf` |        |
+| swap top two         | `swap2`    |  `~~`  |       |       |        |
+| dup top two          | `dup2`     |  `==`  |       |       |        |
+| absolute value       | `abs`      |  `⌵`   | `\|`  | `⌵`   |        |
+| minimum              | `min`      |  `↧`   | `⌊`   | `↧`   |        |
+| maximum              | `max`      |  `↥`   | `⌈`   | `↥`   |        |
+| floor                | `floor`    |  `⌊`   | `⌊`   | `⌊`   |        |
+| ceiling              | `ceil`     |  `⌈`   | `⌈`   | `⌈`   |        |
+| power                | `pow`      |  `ⁿ`   | `*`   | `ⁿ`   |        |
 
 | **add to March**     |           |        |       |       |
 |----------------------|-----------|--------|-------|-------|
@@ -55,7 +58,6 @@
 | and                  | `and`     |  `∧`   | `∧`   |  —    |
 | or                   | `or`      |  `∨`   | `∨`   | `∨`   |
 | square root          | `sqrt`    |  `√`   | `*.5` | `√`   |
-| power                | `pow` ?   |  `ⁿ`   | `*`   | `ⁿ`   |
 | swap subtract        | `subadd`  |  `-+`  |       |       |
 | subtract             | `addsub`  |  `+-`  |       |       |
 | swap divide          | `divmul`  |  `÷×`  |       |       |

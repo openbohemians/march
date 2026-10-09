@@ -318,8 +318,18 @@ The rest are words in `core.march`:
 | `xs q scan` | the running reductions from the left: `( 1 2 3 ) + scan.` is `( 1 3 6 )`, a comprehension |
 | `n q repeat` | `q` n times, as `each` over `n range` |
 | `first`, `last`, `rest`, `most`, `slice` | parts of an array, and `slice` of a string |
+| `at`, `slice` with a negative index | counted from the end: `-1 at.` is the last element of an array or string, `1 -1 slice.` all but the first and last; settled at compile time when the index is known, by one sign test when not |
+| `xs q within` | `q` run with the array's last elements as its stack, as many as it takes, and what it leaves put in their place: `( 1 2 3 ) [ ~. ] within.` is `( 1 3 2 )`; `[ 4 ] within.` appends, `[ drop. ] within.` drops the last |
+| `spread` | an array's elements on the stack: a vec's each a value; any array's, in a literal, a run |
 | `sort` | an array in order: numbers by value, strings by text |
 | `keys`, `values` | a map's keys and values, in one order, the map's own |
+
+`within` is an adverb in J's sense (Thomas, 2026-10-09): it takes a word
+that acts on the stack and makes it act on the end of an array, as Joy's
+`infra` and Factor's `with-datastack` do. How many elements it takes comes
+from the effect pass; only those are loaded, and the rest of the array is
+kept by a slice and joined to what the word leaves, so it costs what the word
+does, not the array's length. A vec's new length is known.
 
 With `-` on `( 1 2 3 )`, `fold` from 0 is −6 and `fold-right` is 2, as APL's
 `-/`; for an associative word the two agree. A consumer takes a word as well
@@ -574,6 +584,11 @@ running are the machine's.
   no array built (Thomas, 2026-10-08). That is rewriting, as GHC's rules, in
   March itself, with no views in Rust. Only pure words may be deferred, which
   the effects say; a rule's two forms are trusted to be equal.
+- **0-based or 1-based indexing.** March counts from 0, as march7 did:
+  indices are remainders modulo the length, so -1 is n-1 and wrapping with
+  the floored `mod` is exact, and slices are half-open. Counting from 1, as
+  mathematics writes sequences and matrices, gives 1 first and -1 last
+  (Thomas, 2026-10-09, open). Negative indices mean the same either way.
 - **`#` for `count`,** as J's tally, perhaps also meaning `each` on a
   quotation (`xs [ f. ] #.`), the literal then deciding what is collected
   (Thomas, 2026-10-08, noted). It needs headings to start lines, as in

@@ -193,6 +193,14 @@
 
 [ ( _. dup. first. swap. rest. [ over. swap. ] _. compose. each. ) ] scan def.
 
+-- `xs q within`: q run with the array's last elements as its stack, as many
+-- as it takes, and what it leaves put in their place: `( 1 2 3 ) [ ~. ]
+-- within.` is `( 1 3 2 )`. `spread` puts an array's elements on the stack:
+-- a vec's each a value, and any array's, inside an array literal, a run.
+
+[ < n a vec > vec-spread. ] spread def.
+[ < a ary > [ ] each. ] spread def.
+
 -- `n q repeat` runs q n times.
 
 [ swap. range. swap. [ drop. ] swap. compose. each. ] repeat def.

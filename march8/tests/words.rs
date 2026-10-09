@@ -120,3 +120,58 @@ fn multiplying_is_the_dot_operator() {
     assert_eq!(show(&["[ 1 ] col·lecció def. col·lecció."]), "<1> 1");
     assert_eq!(show(&["2 3 \\cdot."]), "<1> 6");
 }
+
+#[test]
+fn within_runs_a_word_on_the_end_of_an_array() {
+    // The array's last elements are the quotation's stack: swap, add,
+    // append, drop.
+    assert_eq!(
+        show(&[
+            "( 1 2 3 ) [ ~. ] within. ( 1 2 3 ) [ +. ] within. ( 1 2 3 ) [ 4 ] within. ( 1 2 3 ) [ drop. ] within."
+        ]),
+        "<4> ( 1 3 2 ) ( 1 5 ) ( 1 2 3 4 ) ( 1 2 )"
+    );
+    // A vec's new length is known; a word works as a quotation does.
+    assert_eq!(show(&["( 1 2 3 ) [ +. ] within. length."]), "<1> 2");
+    assert_eq!(show(&["( 5 6 7 )", "~ within."]), "<1> ( 5 7 6 )");
+    // Too few elements: at compile time for a vec, at run time otherwise.
+    assert_eq!(session(&["( 5 ) ~ within."]).err(), Some(Kind::Mismatch));
+    let short = "( ( 5 ) ( 6 7 ) ) 0 at.";
+    assert_eq!(
+        session(&[short, "~ within."]).err(),
+        Some(Kind::Run(march8::machine::Error::User(2)))
+    );
+    assert_eq!(
+        show(&["( ( 5 6 ) ( 7 ) ) 0 at.", "~ within."]),
+        "<1> ( 6 5 )"
+    );
+}
+
+#[test]
+fn spread_puts_elements_on_the_stack() {
+    assert_eq!(show(&["( 1 2 3 ) spread. +. +."]), "<1> 6");
+    assert_eq!(show(&["( ( 1 2 3 ) spread. ~. )"]), "<1> ( 1 3 2 )");
+    // Any array, inside a literal, spreads as a run.
+    let any = "( ( 4 5 ) ( 6 ) ) 0 at.";
+    assert_eq!(show(&[any, "( _. spread. 7 )"]), "<1> ( 4 5 7 )");
+    // Outside a literal it has nowhere to go.
+    assert_eq!(session(&[any, "spread."]).err(), Some(Kind::Mismatch));
+}
+
+#[test]
+fn negative_indices_count_from_the_end() {
+    // -1 is the last, for arrays and strings, in `at` and `slice`.
+    assert_eq!(
+        show(&["( 1 2 3 ) -1 at. \"héllo\" -1 at. ( 5 6 7 8 ) 1 -1 slice. \"héllo\" -2 -1 slice."]),
+        "<4> 3 111 ( 6 7 ) \"l\""
+    );
+    // Known only at run time: the length is added when it is negative.
+    let any = "( ( 5 6 7 8 ) ) 0 at.";
+    assert_eq!(show(&[any, "dup. -1 at. swap. -2 at."]), "<2> 8 7");
+    assert_eq!(show(&["( 5 6 7 ) -1", "at."]), "<1> 7");
+    assert_eq!(show(&[any, "-3 -1 slice."]), "<1> ( 6 7 )");
+    assert_eq!(show(&["\"abc\"", "-1 at."]), "<1> 99");
+    // On a vec, checked at compile time from both ends.
+    assert_eq!(session(&["( 1 2 3 ) -4 at."]).err(), Some(Kind::Mismatch));
+    assert_eq!(session(&["( 1 2 3 ) 3 at."]).err(), Some(Kind::Mismatch));
+}

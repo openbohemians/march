@@ -94,6 +94,9 @@ impl From<crate::machine::Error> for Error {
             crate::machine::Error::Arithmetic => "arithmetic overflow, or division by zero".into(),
             crate::machine::Error::Fuel => "step budget exhausted".into(),
             crate::machine::Error::User(1) => "no word: no clause's guard holds".into(),
+            crate::machine::Error::User(2) => {
+                "`within`: the array has fewer elements than its quotation takes".into()
+            }
             other => format!("{other}"),
         };
         Error::new(Kind::Run(e), None, msg)

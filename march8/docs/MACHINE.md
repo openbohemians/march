@@ -125,6 +125,7 @@ equal types are equal numbers.
 | `atom` | in patterns, any type that is not a container: a number, a string, a literal. A class, not a type: it binds nothing, so `< atom atom >` takes two of different types |
 | `a b or` | in patterns, a union: any of its types, `i64 f64 or`. Kept canonical, so order and repeats do not matter. It matches a little less well than one of its types alone, and better than `atom` |
 | `num` | the numbers: `i64 f64 or. money or. int# or. dec# or. num def.`, in `core.march` |
+| `nil` | the type with one value, `nil.`: nothing is there, as in `i64 nil or` |
 
 **An array literal is a vec:** `( 7 8 9 )` is a `3 i64 vec`, so its length
 is a constant. A vec is accepted where an array of the same elements is
@@ -186,7 +187,7 @@ When some clauses that match have guards, the choice has two phases:
 - **Every alternative starts from the same judgments** and is compiled into
   code of its own. Its results then take the types all the alternatives
   share, literals taking the others' type as in an array literal, or else
-  the choice is an error (TYPES.md 2.9). Then the code is laid out: each test
+  their union ("Unions", below; TYPES.md 2.9). Then the code is laid out: each test
   branches past its clause when it fails, and each clause jumps to the end.
 
 ```
@@ -459,6 +460,40 @@ type gives its shape at compile time: `2 3 i64 vec vec` is a 2×3 matrix.
   when its signature asks for an array, so shapes reach the words that check
   them.
 
+### Unions
+
+A value whose type is decided only at run time has a union type, as
+`i64 nil or` (TYPES.md 3.6). `nil` is a type with one value, `nil.`, which
+means nothing is there.
+
+```
+{ "a" 1 } "a" get.               1, of i64 nil or
+{ "a" 1 } "z" get.               nil, of i64 nil or
+[ < i64 > 10 *. ] port def.
+[ < nil > drop. 80 ] port def.
+m "z" get. port.                 80, by the clause the tag chooses
+m "a" get. 1 +.                  no word `+` for nil: each type needs a clause
+```
+
+- **Made where clauses chosen at run time leave different types** (TYPES.md
+  2.9). At the join each alternative's value is tagged with its type, and
+  the result has their union. A choice made at compile time, a guard on
+  known values, makes none: the value has its one type. Each union made is
+  noted by an informative warning, unless the clauses' outputs name a union,
+  as `get`'s do, `-- v nil or`.
+- **Taken apart by clauses.** A family applied to a union value is applied
+  to each of its types in code of its own, chosen by the tag, the last with
+  no test, and the results merge, into a union again if they differ. It
+  takes the union whole when one clause is best for every type: stack
+  words, a type variable, `atom`, a union that holds it. A type with a
+  better clause of its own is applied apart, so `>string` of a string is
+  its text. A type with no clause is no word, found while compiling.
+- **One cell.** A union value is a small array of its type's tag and its
+  value (`union-make`, `union-tag`, `union-value`), so a value is still one
+  cell on the stack. The tag is the type's own number, so a value of one
+  union is a value of any union that holds its types, as it is. Arrays
+  hold union values: `( 1 nil )` is a `2 i64 nil or vec`.
+
 ### Recursion and instances
 
 A family is evaluated where it is applied, on the caller's judgments,
@@ -542,13 +577,15 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with twenty-five primitives added: `pick`; checked
+The machine is march7's, with thirty primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
 `mark-pick`, which reads below an array literal's mark; `money>text` and
 `string-show`; `sort-ints`, `sort-floats` and `sort-texts`; `f64-sqrt`,
-`f64-pow` and `i64-pow`; and `f64-floor`, `f64-ceil` and `f64-round`.
+`f64-pow` and `i64-pow`; `f64-floor`, `f64-ceil` and `f64-round`;
+`vector-insert` and `vector-remove`; and `union-make`, `union-tag` and
+`union-value`.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -597,8 +634,10 @@ found at compile time; an effect where none is allowed; a limit. An error
 inside a core clause is reported where the clause was applied. Errors while
 running are the machine's.
 
-Warnings are planned, at three levels: informative, minor and severe
-(Thomas, 2026-10-09):
+Warnings have three levels: informative, minor and severe (Thomas,
+2026-10-09). The session collects them, and `march8` writes them to
+standard error, `1:1: informative: …`. One is built so far, the informative
+warning where a union is made (above, "Unions").
 
 - **Informative:** what programs can and often do, with a clear downside,
   that could be avoided by writing it another way. A slot that may hold
@@ -657,9 +696,6 @@ Warnings are planned, at three levels: informative, minor and severe
 - **Array literals typed by what follows.** `( 2 4 )` settles at its `)`, to
   integers, so `( 6.0 8.0 ) ( 2 4 ) ÷.` is no word; written `( 2.0 4.0 )` it
   works.
-- **Unions,** set-theoretic (TYPES.md 3.6): `a or nil` first, a value and a
-  tag, for FORTH's words that return a value or nothing; clauses split on
-  the tag, with a light warning where a slot may hold more than one type.
 - **Glyphs:** APL's and Uiua's for these words, and whether `/` is reduce,
   are deferred.
 
@@ -680,13 +716,18 @@ Warnings are planned, at three levels: informative, minor and severe
 - **OR between whole contexts.** A union is one slot's: `< num num >` takes
   an i64 and an f64 together, and `< i64 i64 >` or `< f64 f64 >` as one
   context is not built.
-- **Values of a union type,** with tags, clauses splitting on them, and the
-  informative warning (TYPES.md 3.6).
+- **More of unions.** An array literal of mixed types, `( 1 "a" )`, is an
+  error: a tuple, as TYPES.md 2.5 has it, or an array of a union, is open.
+  A union made and taken apart at once is still tagged and untagged; the
+  stage could carry each alternative on into the use instead. A recursive
+  word applied to a union may not wait for its results' types inside the
+  split. Tags are this session's type numbers, until types have identities.
+  `text>integer` still leaves a value and a flag, not `i64 nil or`.
 - **Effects in signatures,** declared and checked like outputs, for words
   whose bodies the compiler cannot see; and domains besides `io`, such as
   the global store, with primitives that read.
 - **Quotations at run time:** a quotation is always consumed at compile
   time, by `.`, `def` or `map`.
 - **The surface notation** and its lowering to this form.
-- **Saving** a session as an image; tuples, records and unions;
+- **Saving** a session as an image; tuples and records;
   namespaces; showing types.

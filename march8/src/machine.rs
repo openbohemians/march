@@ -1355,6 +1355,18 @@ impl Machine {
                 let r = self.allocate_vector(v)?;
                 self.push(r)?;
             }
+            UnionMake => {
+                let t = self.pop()?;
+                let x = self.pop()?;
+                let r = self.allocate_vector([t, x].into_iter().collect())?;
+                self.push(r)?;
+            }
+            UnionTag | UnionValue => {
+                let u = self.pop()?;
+                let k = if p == UnionTag { 0 } else { 1 };
+                let x = self.array(u)?.get(k).ok_or(Error::Memory)?;
+                self.push(x)?;
+            }
             Reverse => {
                 let a = self.pop()?;
                 let whole = self.array(a)?.whole();

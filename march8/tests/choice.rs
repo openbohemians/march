@@ -65,16 +65,29 @@ fn guards_on_known_values_are_decided_now() {
 }
 
 #[test]
-fn clauses_chosen_at_run_time_leave_the_same_types() {
-    let bad = "[ 0 gt?. ] positive? def.
+fn clauses_chosen_at_run_time_join_their_types() {
+    // Different types make a union, with an informative warning
+    // (doc/design/TYPES.md 2.9, 3.6).
+    let two = "[ 0 gt?. ] positive? def.
         [ < i64 positive? > drop. \"yes\" ] b def.
         [ < i64 > drop. 1 i64. ] b def.";
-    assert_eq!(cells(&[bad, "3", "b."]), Err(Kind::Mismatch));
-    // A literal must become the type the others leave.
+    let mut s = session(&[two, "3 -3"]).unwrap();
+    s.eval("b. swap. b.").unwrap();
+    assert_eq!(
+        s.show_typed(),
+        "<2> 1 < i64 string or > \"yes\" < i64 string or >"
+    );
+    let w = s.take_warnings();
+    assert_eq!(w.len(), 2, "{w:?}");
+    assert!(
+        w[0].to_string()
+            .contains("informative: this leaves a value of `i64 string or`")
+    );
+    // A literal that cannot become the others' type takes its default.
     let lit = "[ 0 gt?. ] positive? def.
         [ < i64 positive? > drop. \"yes\" ] b def.
         [ < i64 > drop. 1 ] b def.";
-    assert_eq!(cells(&[lit, "3", "b."]), Err(Kind::Literal));
+    assert_eq!(show(&[lit, "3", "b."]), "<1> \"yes\"");
     // Literals take the type the alternatives share, as in an array literal.
     let lit = "[ 0 gt?. ] positive? def.
         [ < i64 positive? > drop. 1.5 ] b def.

@@ -3,6 +3,9 @@ use std::io::{BufRead, IsTerminal, Write};
 
 /// Writes what the program has printed so far.
 fn flush(s: &mut Session) {
+    for w in s.take_warnings() {
+        eprintln!("{w}");
+    }
     let out = s.take_output();
     if !out.is_empty() {
         let mut stdout = std::io::stdout();

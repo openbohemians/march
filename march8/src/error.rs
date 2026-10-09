@@ -88,6 +88,41 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// How much a warning matters (Thomas, 2026-10-09; docs/MACHINE.md,
+/// "Errors").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    /// What programs can and often do, with a clear downside, that could be
+    /// avoided by writing it another way.
+    Informative,
+    /// Probably a mistake, but harmless as written.
+    Minor,
+    /// Almost certainly a bug that still compiles.
+    Severe,
+}
+
+/// Something found while compiling that is not an error.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Warning {
+    pub level: Level,
+    pub pos: Option<Pos>,
+    pub msg: String,
+}
+
+impl fmt::Display for Warning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(p) = self.pos {
+            write!(f, "{p}: ")?;
+        }
+        let level = match self.level {
+            Level::Informative => "informative",
+            Level::Minor => "minor",
+            Level::Severe => "severe",
+        };
+        write!(f, "{level}: {}", self.msg)
+    }
+}
+
 impl From<crate::machine::Error> for Error {
     fn from(e: crate::machine::Error) -> Self {
         let msg = match &e {

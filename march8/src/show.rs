@@ -12,6 +12,16 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
         Term::Base(Base::I64) => out.push_str(&(v as i64).to_string()),
         Term::Base(Base::F64) => out.push_str(&format!("{:?}", f64::from_bits(v))),
         Term::Base(Base::Money) => out.push_str(&show_dec((v as i64).into(), 2)),
+        Term::Base(Base::Nil) => out.push_str("nil"),
+        // A union's value, by the type its tag names.
+        Term::Or(..) => match m.sequence(v) {
+            Ok(seq) if seq.len() == 2 => {
+                let mut cells = seq.iter();
+                let (&tag, &x) = (cells.next().expect("two"), cells.next().expect("two"));
+                value(m, types, x, tag as Type, out)
+            }
+            _ => out.push_str(&format!("<union {v}>")),
+        },
         Term::Base(Base::String) => match m.text(v).ok().and_then(|t| t.to_text()) {
             Some(s) => quoted(&s, out),
             None => out.push_str(&format!("<string {v}>")),

@@ -58,6 +58,7 @@ pub enum Prim {
     AryConcat,
     MapLength,
     MapAt,
+    MapHas,
     MapKeys,
     MapValues,
     SortInts,
@@ -263,6 +264,7 @@ pub const PRIMS: &[PrimDef] = &[
         &[P::VecLen],
     ),
     d(Prim::MapAt, "map-at", "< k v map k -- v >", &[P::VecAt]),
+    d(Prim::MapHas, "map-has?", "< k v map k -- i64 >", &[P::Has]),
     d(
         Prim::MapKeys,
         "map-keys",
@@ -470,6 +472,7 @@ pub fn foldable(p: Prim) -> bool {
                 | Prim::AryConcat
                 | Prim::MapLength
                 | Prim::MapAt
+                | Prim::MapHas
                 | Prim::MapKeys
                 | Prim::MapValues
                 | Prim::SortInts

@@ -183,8 +183,8 @@ an error.
 - A choice made at compile time, by type, may differ in result type.
 - A choice made at run time, by value (`if`, a value pattern, a guard),
   whose alternatives give different types gives their union (3.6), with a
-  light warning (Thomas, 2026-10-09, leaning; it was an error unless the
-  result was a declared sum). Until unions exist it stays an error.
+  informative warning (Thomas, 2026-10-09; it was an error unless the result
+  was a declared sum). Built in march8 (march8/docs/MACHINE.md, "Unions").
 
 ### 2.10 Literals
 
@@ -361,10 +361,13 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
      Proposed: a signature that names the union (`-- i64 or nil`) states the
      intent and silences it. Many instances of one family, chosen at compile
      time, cost code size, and are informative too.
-   - **Built so far** (2026-10-09, march8): unions in patterns, `or` and
-     `num`, and `def` naming a type. A union matches as its best member
-     does, a little less well, so a clause for one type beats one for a
-     union, which beats `atom`. Values of a union type come next.
+   - **Built** (2026-10-09, march8): unions in patterns, `or` and `num`,
+     and `def` naming a type. A union matches as its best member does, a
+     little less well, so a clause for one type beats one for a union,
+     which beats `atom`. Then values of a union type: `nil`, `get`, unions
+     made where run-time choices differ, families split by tag, a union
+     value as one cell of tag and value, and the informative warning
+     (march8/docs/MACHINE.md, "Unions").
    - **Not taken from Elixir:** gradual typing (`dynamic()`), which serves
      an existing dynamic language on a VM that tags every value; and full
      semantic subtyping, with complements of function types. March starts

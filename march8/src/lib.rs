@@ -14,7 +14,7 @@ pub mod symbols;
 pub mod types;
 
 pub use code::{Blob, Cid, Op, Primitive};
-pub use error::{Error, Kind, Pos};
+pub use error::{Error, Kind, Level, Pos, Warning};
 pub use image::Image;
 pub use machine::{Machine, Stats};
 
@@ -127,6 +127,11 @@ impl Session {
             out.push_str(&format!(" < {} >", self.stage.types.name(t)));
         }
         out
+    }
+
+    /// The warnings found since this was last asked.
+    pub fn take_warnings(&mut self) -> Vec<Warning> {
+        std::mem::take(&mut self.stage.warnings)
     }
 
     /// What the program has written since this was last asked.

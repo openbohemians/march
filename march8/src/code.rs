@@ -177,6 +177,12 @@ pub enum Primitive {
     // element; ( a i -- a ) the element at i, from 0, removed.
     VecInsert = 99,
     VecRemove = 100,
+    // ( x t -- u ) A value of a union type (doc/design/TYPES.md 3.6): x and
+    // t, the tag of x's type, as one cell; ( u -- t ) its tag; ( u -- x )
+    // its value.
+    UnionMake = 101,
+    UnionTag = 102,
+    UnionValue = 103,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -281,6 +287,9 @@ impl Primitive {
         (Self::FRound, "f64-round"),
         (Self::VecInsert, "vector-insert"),
         (Self::VecRemove, "vector-remove"),
+        (Self::UnionMake, "union-make"),
+        (Self::UnionTag, "union-tag"),
+        (Self::UnionValue, "union-value"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

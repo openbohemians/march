@@ -8,7 +8,7 @@
 //! code holds only what must happen at run time.
 
 use crate::code::{Blob, Cid, Op, Primitive as P};
-use crate::error::{Error, Kind, Pos, Result};
+use crate::error::{Error, Kind, Level, Pos, Result, Warning};
 use crate::prims::{self, Effects, PRIMS, Prim};
 use crate::read::{Piece, Tok, Token};
 use crate::types::*;
@@ -117,6 +117,7 @@ impl Guard {
 fn value_text(j: &Jdg) -> String {
     match &j.val {
         Val::Int(n) if j.ty == MONEY => prims::show_dec(*n, 2),
+        Val::Int(_) if j.ty == NIL => "nil".into(),
         Val::Int(n) => n.to_string(),
         Val::Dec(d, s) => prims::show_dec(*d, *s),
         Val::Float(x) => format!("{x:?}"),
@@ -331,6 +332,8 @@ pub struct Stage {
     depth: u32,
     /// Set while the core vocabulary is read.
     pub core: bool,
+    /// Warnings found, for the session to report.
+    pub warnings: Vec<Warning>,
 }
 
 impl Default for Stage {
@@ -404,6 +407,7 @@ impl Stage {
             instances: HashMap::new(),
             blobs: Vec::new(),
             effects: 0,
+            warnings: Vec::new(),
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
             let name: Rc<str> = (*name).into();
@@ -619,6 +623,10 @@ impl Stage {
             self.construct(c)
         } else if let Some((p, sig)) = w.prim.clone() {
             self.prim(name, p, &sig)
+        } else if w.ty == Some(NIL) {
+            // `nil` is its own value.
+            self.push(NIL, Val::Int(0));
+            Ok(())
         } else if let Some(t) = w.ty {
             self.need(1)?;
             self.annotate(self.stack.len() - 1, t)
@@ -634,6 +642,7 @@ impl Stage {
         match &j.val {
             Val::Run => self.types.name(j.ty),
             Val::Int(n) if j.ty == MONEY => format!("{} (money)", prims::show_dec(*n, 2)),
+            Val::Int(_) if j.ty == NIL => "nil".into(),
             Val::Int(n) => format!("{n} ({})", self.types.name(j.ty)),
             Val::Dec(d, s) => format!("{} (dec#)", prims::show_dec(*d, *s)),
             Val::Float(x) => format!("{x:?} (f64)"),
@@ -833,6 +842,15 @@ impl Stage {
     /// A union matches as its best member does, and scores just below it, so
     /// that a clause for that member alone is more specific.
     fn match_union(&mut self, p: Type, have: Type, env: &mut Env) -> Option<i32> {
+        // A value of a union type matches when each of its types does, and
+        // as well as the worst.
+        if self.is_union(have) {
+            let mut worst = i32::MAX;
+            for h in self.types.members(have) {
+                worst = worst.min(self.match_union(p, h, env)?);
+            }
+            return Some(worst);
+        }
         let mut best: Option<(i32, Env)> = None;
         for m in self.types.members(p) {
             let mut e = env.clone();
@@ -875,6 +893,13 @@ impl Stage {
             // An atom: any type at run time that is not a container.
             (Term::Atom, Term::Base(b)) => {
                 (!matches!(b, Base::Type | Base::Symbol | Base::Quote)).then_some(2)
+            }
+            (Term::Atom, Term::Or(..)) => {
+                let atoms = self.types.members(have).into_iter().all(|m| {
+                    matches!(self.types.term(m),
+                        Term::Base(b) if !matches!(b, Base::Type | Base::Symbol | Base::Quote))
+                });
+                atoms.then_some(2)
             }
             (Term::Base(a), Term::Base(b)) => (a == b).then_some(8),
             (Term::Nat(a), Term::Nat(b)) => (a == b).then_some(8),
@@ -988,6 +1013,11 @@ impl Stage {
     fn resolve(&mut self, name: &Rc<str>, arity: usize, at: Pos, top: bool) -> Result<()> {
         let clauses = self.words[name].clauses.clone();
         let mut cands = self.candidates(&clauses);
+        if let Some(i) = self.union_input(arity)
+            && self.must_split(&clauses, &cands, i)
+        {
+            return self.split(name, i, arity);
+        }
         if cands.is_empty() {
             let fewest = clauses
                 .iter()
@@ -1090,7 +1120,8 @@ impl Stage {
     /// The choice at run time: for each guarded clause, in order, a test of
     /// its guards and its body; then the best clause without guards, or no
     /// word. Each alternative starts from the same judgments, in code of its
-    /// own, and all must leave the same types (TYPES.md 2.9). A guard on known
+    /// own; where their results' types differ, the result has their union
+    /// (TYPES.md 2.9, 3.6). A guard on known
     /// values is decided now, so an alternative may be dropped, or taken for
     /// certain.
     ///
@@ -1186,7 +1217,19 @@ impl Stage {
                 }
             }
         }
-        self.merge(alts.into_iter().flatten().collect(), &snapshot, base)
+        // A union its clauses' outputs name is meant, and not warned of.
+        let declared = order.iter().all(|(c, _)| {
+            c.1.sig
+                .as_ref()
+                .and_then(|s| s.outs.as_ref())
+                .is_some_and(|o| o.iter().any(|&t| self.is_union(t)))
+        });
+        self.merge(
+            alts.into_iter().flatten().collect(),
+            &snapshot,
+            base,
+            !declared,
+        )
     }
 
     /// One alternative of a choice, compiled from the saved judgments into
@@ -1268,7 +1311,11 @@ impl Stage {
     /// and judgments. Otherwise every alternative's results take the types
     /// they share and become values at run time, each in its own code, and
     /// the alternatives are laid out with their branches.
-    fn merge(&mut self, alts: Vec<Alt>, snapshot: &[Jdg], base: usize) -> Result<()> {
+    ///
+    /// Results whose types differ have their union (TYPES.md 2.9, 3.6): each
+    /// alternative's value is tagged with its type, and `warn` says to note
+    /// that each use of it will branch.
+    fn merge(&mut self, alts: Vec<Alt>, snapshot: &[Jdg], base: usize, warn: bool) -> Result<()> {
         if let [
             Alt {
                 skip: None,
@@ -1333,9 +1380,17 @@ impl Stage {
         if collect.is_none() {
             for k in 0..lists.first().map_or(0, Vec::len) {
                 let tys: Vec<Type> = lists.iter().map(|l| l[k]).collect();
-                let Some(t) = self.join(&tys) else {
-                    return Err(self.differ(&tys));
-                };
+                let t = self.join_union(&tys);
+                if warn && self.is_union(t) && tys.iter().any(|&x| x != t) {
+                    self.warn(
+                        Level::Informative,
+                        format!(
+                            "this leaves a value of `{}`, its type chosen at run time, \
+                             so each use of it branches",
+                            self.types.name(t)
+                        ),
+                    );
+                }
                 joined.push(t);
             }
         }
@@ -1648,9 +1703,184 @@ impl Stage {
     /// makes them values at run time.
     fn settle_results(&mut self, base: usize, joined: &[Type]) -> Result<()> {
         for (i, &t) in joined.iter().enumerate() {
-            self.annotate(base + i, t)?;
+            if self.is_union(t) {
+                self.inject(base + i, t)?;
+            } else {
+                self.annotate(base + i, t)?;
+            }
         }
         self.materialize_top(joined.len())
+    }
+
+    // ---- Unions ----
+
+    fn is_union(&self, t: Type) -> bool {
+        matches!(self.types.term(t), Term::Or(..))
+    }
+
+    /// The deepest of the values a word of this arity takes whose type is a
+    /// union, if any.
+    fn union_input(&self, arity: usize) -> Option<usize> {
+        let reach = arity.min(self.stack.len() - self.floor);
+        (self.stack.len() - reach..self.stack.len()).find(|&i| self.is_union(self.stack[i].ty))
+    }
+
+    /// Whether a family is applied to each type of the union at `i` apart:
+    /// when no clause takes the union whole, or some type of it has a
+    /// better clause of its own, as a string has `>string`'s.
+    fn must_split(&mut self, clauses: &[Rc<Clause>], whole: &[Candidate], i: usize) -> bool {
+        let Some((_, best, _)) = primary(whole) else {
+            return true;
+        };
+        let u = self.stack[i].ty;
+        let mut apart = false;
+        for m in self.types.members(u) {
+            self.stack[i].ty = m;
+            let cands = self.candidates(clauses);
+            apart = !primary(&cands).is_some_and(|c| Rc::ptr_eq(&c.1, &best));
+            if apart {
+                break;
+            }
+        }
+        self.stack[i].ty = u;
+        apart
+    }
+
+    /// Applies a word to each type of the union at `i`, in code of its own,
+    /// chosen by the value's tag at run time, the last with no test; the
+    /// results are merged (TYPES.md 3.6). Inside each, the value is untagged:
+    /// it has that type.
+    fn split(&mut self, name: &Rc<str>, i: usize, arity: usize) -> Result<()> {
+        let snapshot = self.stack.clone();
+        let base = snapshot.len() - arity.min(snapshot.len() - self.floor);
+        let u = snapshot[i].ty;
+        let members = self.types.members(u);
+        let at = self.pos;
+        let mut alts = Vec::new();
+        for (k, &m) in members.iter().enumerate() {
+            self.stack = snapshot.clone();
+            let outer = std::mem::take(&mut self.code);
+            let skip = (k + 1 < members.len()).then(|| self.label());
+            let r = self.split_arm(name, i, m, skip);
+            self.pos = at;
+            let code = std::mem::replace(&mut self.code, outer);
+            r.map_err(|mut e| {
+                e.trace.push(format!(
+                    "where the value of `{}` is {}",
+                    self.types.name(u),
+                    self.types.name(m)
+                ));
+                e
+            })?;
+            alts.push(Alt {
+                code,
+                stack: Some(self.stack.clone()),
+                skip,
+            });
+        }
+        self.merge(alts, &snapshot, base, false)
+    }
+
+    fn split_arm(&mut self, name: &Rc<str>, i: usize, m: Type, skip: Option<u32>) -> Result<()> {
+        if let Some(skip) = skip {
+            self.copy(i)?;
+            self.stack.pop();
+            self.emit(Op::Prim(P::UnionTag));
+            self.emit(Op::Lit(m as u64));
+            self.emit(Op::Prim(P::Eq));
+            self.code.push(Ins::JumpZero(skip));
+        }
+        self.in_place(i, &[Op::Prim(P::UnionValue)], m)?;
+        self.apply_word(name)
+    }
+
+    /// Makes the value at `i` a value of the union `u`, which has its type:
+    /// tagged with that type, unless it is a union already, whose tags are
+    /// its types' own, so it is one of `u`'s as it is.
+    fn inject(&mut self, i: usize, u: Type) -> Result<()> {
+        let have = self.stack[i].ty;
+        if have == u {
+            return Ok(());
+        }
+        if self.is_union(have) {
+            self.stack[i].ty = u;
+            return Ok(());
+        }
+        // A literal takes its default type.
+        self.materialize(i)?;
+        let t = self.stack[i].ty;
+        let Some(m) = self
+            .types
+            .members(u)
+            .into_iter()
+            .find(|&m| m == t || self.forgets(m, t))
+        else {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "expected {}, found {}",
+                    self.types.name(u),
+                    self.types.name(t)
+                ),
+            ));
+        };
+        self.in_place(i, &[Op::Lit(m as u64), Op::Prim(P::UnionMake)], u)
+    }
+
+    /// Emits `ops` on the value at `i` where it lies, which leaves a value
+    /// of type `ty` there: brought to the top, if it is not there, and put
+    /// back.
+    fn in_place(&mut self, i: usize, ops: &[Op], ty: Type) -> Result<()> {
+        self.materialize(i)?;
+        let n = self.stack.len() - i;
+        let up: Vec<usize> = (1..n).chain([0]).collect();
+        self.permute(i, &up);
+        for op in ops {
+            self.emit(op.clone());
+        }
+        self.stack.last_mut().expect("brought up").ty = ty;
+        let down: Vec<usize> = std::iter::once(n - 1).chain(0..n - 1).collect();
+        self.permute(i, &down);
+        Ok(())
+    }
+
+    /// The type values of these types share, as `join` finds it, or else
+    /// their union, literals taking their defaults (TYPES.md 2.9).
+    fn join_union(&mut self, tys: &[Type]) -> Type {
+        if let Some(t) = self.join(tys)
+            && tys.iter().all(|&x| {
+                x == t || self.forgets(t, x) || (self.types.is_literal(x) && self.accepts(t, x))
+            })
+        {
+            return t;
+        }
+        let mut u: Option<Type> = None;
+        for &x in tys {
+            let x = if self.types.is_literal(x) {
+                Self::default_of(x)
+            } else {
+                x
+            };
+            u = Some(match u {
+                None => x,
+                Some(y) => self.types.union(y, x),
+            });
+        }
+        u.expect("a type")
+    }
+
+    fn warn(&mut self, level: Level, msg: String) {
+        if self.core {
+            return;
+        }
+        let w = Warning {
+            level,
+            pos: Some(self.pos),
+            msg,
+        };
+        if !self.warnings.contains(&w) {
+            self.warnings.push(w);
+        }
     }
 
     /// Tests a clause's guards on copies of its inputs: `Some(true)` if they
@@ -1820,6 +2050,9 @@ impl Stage {
                 Prim::Def => (2, 0),
                 _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
             });
+        }
+        if w.ty == Some(NIL) {
+            return Some((0, 1));
         }
         if w.ty.is_some() {
             return Some((1, 1));
@@ -2418,6 +2651,9 @@ impl Stage {
         let n = sig.ins.len();
         self.need(n)?;
         let Some((_, env)) = self.match_sig(sig) else {
+            if let Some(i) = self.union_input(n) {
+                return self.split(&name.into(), i, n);
+            }
             let want: Vec<_> = sig.ins.iter().map(|&t| self.types.name(t)).collect();
             return Err(self.err(
                 Kind::NoWord,

@@ -25,10 +25,13 @@ pub enum Base {
     Symbol,
     /// The type of a quotation, `[ … ]`.
     Quote,
+    /// The type with one value, `nil`, which means nothing is there, as in
+    /// `i64 nil or` (doc/design/TYPES.md 3.6).
+    Nil,
 }
 
 impl Base {
-    pub const ALL: [(Base, &'static str); 9] = [
+    pub const ALL: [(Base, &'static str); 10] = [
         (Base::I64, "i64"),
         (Base::F64, "f64"),
         (Base::Money, "money"),
@@ -38,6 +41,7 @@ impl Base {
         (Base::Type, "type"),
         (Base::Symbol, "symbol"),
         (Base::Quote, "quote"),
+        (Base::Nil, "nil"),
     ];
 }
 
@@ -51,6 +55,7 @@ pub const DEC_LIT: Type = 5;
 pub const TYPE: Type = 6;
 pub const SYMBOL: Type = 7;
 pub const QUOTE: Type = 8;
+pub const NIL: Type = 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Term {

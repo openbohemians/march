@@ -121,6 +121,7 @@ equal types are equal numbers.
 | `3 a vec` | an array of exactly 3: the length is known at compile time |
 | `k v map` | a map |
 | `a` to `z` | type variables, in patterns |
+| `atom` | in patterns, any type that is not a container: a number, a string, a literal. A class, not a type: it binds nothing, so `< atom atom >` takes two of different types |
 
 **An array literal is a vec:** `( 7 8 9 )` is a `3 i64 vec`, so its length
 is a constant. A vec is accepted where an array of the same elements is
@@ -436,9 +437,10 @@ type gives its shape at compile time: `2 3 i64 vec vec` is a 2×3 matrix.
 - **Element by element.** `+`, `-`, `⋅` and `÷` on two tensors of one shape
   pair their elements, by `xs ys q zip`, level by level. A tensor and one of
   lower rank, a number or a row, pair along the leading axis, recursively,
-  so the lower broadcasts across the higher's trailing axes. A pattern cannot
-  say "not an array", so `core.march` has a clause for each rank up to 3 on
-  each side, which keeps them from tying.
+  so the lower broadcasts across the higher's trailing axes. A number goes
+  into a tensor of any rank: `atom` in a pattern matches any type that is
+  not a container ("Types as data"), so four clauses an operation cover every rank.
+  A tensor and a row two or more ranks lower do not pair yet.
 - **`×`, the outer or tensor product:** each element of A times all of B, so
   ranks add: two matrices make a tensor of rank 4. `xs ys q table` applies
   any word to every pair, as APL's `∘.` and Uiua's `⊞`.

@@ -160,6 +160,13 @@ an error.
   ```
 
   Lifting stops being a special case of the checker and becomes a clause.
+- **Classes in patterns** (Thomas, 2026-10-09). `atom` matches any type
+  that is not a container: a number, a string, a literal, but not an array,
+  a map, a quotation, a type or a name. It is a class, not a type: no value
+  has it, it binds nothing, and a clause using it is specialized for each
+  type that arrives. It lets one clause lift a number into a tensor of any
+  rank (march8/docs/MACHINE.md, "Arrays as tensors"). Named classes such as
+  `number` (or `num`) are expected later, by OR between patterns.
 - **Families are open:** other code, such as a money module, may add
   clauses, scoped by namespaces and modules.
 - **The most specific clause wins; a tie is an error** for now. ("The

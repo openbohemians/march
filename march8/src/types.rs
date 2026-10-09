@@ -66,6 +66,10 @@ pub enum Term {
     Map(Type, Type),
     /// A type variable in a pattern, `a` to `z`, numbered 0 to 25.
     Var(u8),
+    /// In a pattern, any type that is not a container: a number, a string,
+    /// a literal (Thomas, 2026-10-09). A class of types, not a type: no value
+    /// has it, and it binds nothing.
+    Atom,
 }
 
 /// The constructors a bracket or `.` can apply.
@@ -119,7 +123,7 @@ impl Types {
     }
     pub fn has_vars(&self, t: Type) -> bool {
         match self.term(t) {
-            Term::Var(_) => true,
+            Term::Var(_) | Term::Atom => true,
             Term::Base(_) | Term::Nat(_) => false,
             Term::Ary(e) => self.has_vars(e),
             Term::Vec(n, e) | Term::Map(n, e) => self.has_vars(n) || self.has_vars(e),
@@ -129,6 +133,7 @@ impl Types {
     pub fn subst(&mut self, t: Type, env: &Env) -> Type {
         match self.term(t) {
             Term::Var(v) => env.0[v as usize].unwrap_or(t),
+            Term::Atom => t,
             Term::Base(_) | Term::Nat(_) => t,
             Term::Ary(e) => {
                 let e = self.subst(e, env);
@@ -153,6 +158,7 @@ impl Types {
             Term::Vec(n, e) => format!("{} {} vec", self.name(n), self.name(e)),
             Term::Map(k, v) => format!("{} {} map", self.name(k), self.name(v)),
             Term::Var(v) => ((b'a' + v) as char).to_string(),
+            Term::Atom => "atom".into(),
         }
     }
 }

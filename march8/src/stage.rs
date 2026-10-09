@@ -413,6 +413,8 @@ impl Stage {
         for (con, name) in [(Con::Ary, "ary"), (Con::Vec, "vec"), (Con::Map, "map")] {
             s.word(&name.into()).con = Some(con);
         }
+        let atom = s.types.intern(Term::Atom);
+        s.word(&"atom".into()).ty = Some(atom);
         let none = crate::symbols::Symbols::parse("").expect("an empty table");
         for p in PRIMS {
             let toks = crate::read::read(p.sig, &none).expect("a primitive's signature reads");
@@ -806,6 +808,7 @@ impl Stage {
         if self.types.is_literal(have) {
             return match self.types.term(p) {
                 Term::Var(v) => self.bind(v, have, env),
+                Term::Atom => Some(1),
                 _ if p == have => Some(4),
                 _ if self.accepts(p, have) => Some(if p == Self::default_of(have) { 2 } else { 1 }),
                 _ => None,
@@ -837,6 +840,10 @@ impl Stage {
     fn unify(&mut self, p: Type, have: Type, env: &mut Env) -> Option<i32> {
         match (self.types.term(p), self.types.term(have)) {
             (Term::Var(v), _) => self.bind(v, have, env),
+            // An atom: any type at run time that is not a container.
+            (Term::Atom, Term::Base(b)) => {
+                (!matches!(b, Base::Type | Base::Symbol | Base::Quote)).then_some(1)
+            }
             (Term::Base(a), Term::Base(b)) => (a == b).then_some(4),
             (Term::Nat(a), Term::Nat(b)) => (a == b).then_some(4),
             (Term::Ary(e), Term::Ary(f)) => Some(4 + self.unify(e, f, env)?),

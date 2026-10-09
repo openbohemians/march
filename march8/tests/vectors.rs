@@ -97,6 +97,20 @@ fn tensors_of_any_rank() {
         show(&["10 ( ( 1 2 ) ( 3 4 ) ) -. ( 2.0 4.0 ) 2.0 ÷."]),
         "<2> ( ( 9 8 ) ( 7 6 ) ) ( 1.0 2.0 )"
     );
+    // An atom, anything not a container, at any rank, on either side.
+    s = session(&["( ( ( ( 1 2 ) ) ) ) 10 ⋅."]).unwrap();
+    assert_eq!(
+        s.show_typed(),
+        "<1> ( ( ( ( 10 20 ) ) ) ) < 1 1 1 2 i64 vec vec vec vec >"
+    );
+    assert_eq!(
+        show(&["( ( ( ( ( 8 ) ) ) ) ) 2 div. 3 ( ( ( 1 2 ) ) ) ×."]),
+        "<2> ( ( ( ( ( 4 ) ) ) ) ) ( ( ( 3 6 ) ) )"
+    );
+    // A quotation, a type or a name is not an atom.
+    for bad in ["( 1 2 ) [ 3 ] +.", "i64 ( 1 2 ) +.", "( 1 2 ) \\x ⋅."] {
+        assert_eq!(session(&[bad]).err(), Some(Kind::NoWord), "{bad}");
+    }
 }
 
 #[test]

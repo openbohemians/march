@@ -111,14 +111,16 @@ Runtime values in types would make inference undecidable. So:
   tuple when it must").
 - **Fixed keys make a record:** `{ "port" 8080 "host" "x" }`, each field
   typed.
-- **Genuinely variable mixtures need sums,** such as "i64 or string". Sums
-  are explicit (declared), carry a runtime tag (the alternative's index,
-  like a Rust enum's discriminant), and a family applied to one compiles to
-  a branch on the tag. Inside a container the tags are stored per element,
-  which also gives stable identities.
-- **Sums come later,** at the first real need, most likely JSON or errors.
-  Until then, failure and absence use traps, sentinels, or a value with a
-  flag, as `text>integer` does.
+- **Genuinely variable mixtures need unions,** such as "i64 or string": a
+  value whose type is one of several, decided only at run time, so it
+  carries a tag, and a family applied to one compiles to a branch on the
+  tag. Inside a container the tags are stored per element, which also gives
+  stable identities. Planned as set-theoretic unions (3.6, 2026-10-09),
+  in place of the declared sums first written here.
+- **Unions come later,** at the first real need, most likely JSON, errors,
+  or FORTH's words that leave a value or nothing. Until then, failure and
+  absence use traps, sentinels, or a value with a flag, as `text>integer`
+  does.
 - **No `any` type for now.** Its tag would have to name any type at all,
   which brings back dynamic typing. It can come later if wanted.
 
@@ -179,7 +181,9 @@ an error.
 
 - A choice made at compile time, by type, may differ in result type.
 - A choice made at run time, by value (`if`, a value pattern, a guard),
-  must give the same type in every alternative, or a declared sum.
+  whose alternatives give different types gives their union (3.6), with a
+  light warning (Thomas, 2026-10-09, leaning; it was an error unless the
+  result was a declared sum). Until unions exist it stays an error.
 
 ### 2.10 Literals
 
@@ -319,12 +323,65 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
    patterns and guards.
 4. **Literal type names** (`lit#`, and the integer and decimal types).
 5. **Precise numbers** for money: a decimal type, or rationals.
-6. **Declared sums,** when the first need comes.
+6. **Unions, set-theoretic** (proposed 2026-10-09, after Elixir's type
+   system: Castagna, Duboc and Valim, "The Design Principles of the Elixir
+   Type System", 2023). A type is a set of values; `or`, `and` and `not`
+   are union, intersection and complement.
+   - **Families are intersections already.** Elixir types a function of
+     several clauses as the intersection of their arrows, which is a
+     family. `atom` is a complement, everything that is not a container,
+     and `number` would be a union: classes are sets, not a notion of
+     their own.
+   - **`or` has one meaning, union.** Whether a tag exists depends on what
+     the stage knows about a value, not on the pattern. Known to be an i64,
+     the clause is specialized and there is no tag; known only to be in
+     `i64 or nil`, the code branches on the tag. A tag is materialized late,
+     as everything else is: when a union-typed value is stored, or passes
+     through code not specialized for its type.
+   - **Clauses take unions apart,** with no `match`. Clauses on `< i64 >` and
+     `< nil >` applied to an `i64 or nil` compile to a branch on the tag,
+     each arm specialized for its type (splitting). A clause that does not
+     match narrows the rest to `T and not i64`, so the stage can report a
+     member no clause handles.
+   - **Structural, not declared.** A tag comes from the member type's
+     identity, so `i64 or nil` is one type in any order, anywhere, with no
+     declaration. Names are aliases: `a maybe` for `a or nil`. Alternatives
+     with one representation, Celsius and Fahrenheit, are told apart as
+     distinct types (roles), not by position.
+   - **`nil`, not `none`.** In set-theoretic types `none` is the empty set,
+     the type with no values, so `i64 or none` is `i64`. The value that
+     means "nothing here" needs a name and a type of its own; `nil` is
+     Elixir's.
+   - **A light warning** (Thomas, 2026-10-09): a slot that may hold more
+     than one concrete type at run time costs a branch wherever it is used,
+     and a copy of the code for each type. Proposed: a signature that names
+     the union (`-- i64 or nil`) states the intent and silences it. A family
+     whose uses each have one concrete type is not warned: its copies are
+     instances, chosen at compile time.
+   - **Not taken from Elixir:** gradual typing (`dynamic()`), which serves
+     an existing dynamic language on a VM that tags every value; and full
+     semantic subtyping, with complements of function types. March starts
+     with unions and complements over base types and constructors, which
+     are sets of type numbers.
 7. **Recursion by syntax alone?** Thomas suspects a simpler way than ghosts,
    by syntactic analysis. Part of it already is syntactic: a clause that
    does not call its word, directly or through a cycle of words, is a base
    case, so base clauses can be typed first and the others checked against
    them.
+8. **Ahead of time, with run-time staging later** (2026-10-09). Thomas
+   wants compiling ahead of time, with the one part of a JIT that helps:
+   pruning branches, and compiling for types once they are decided. The
+   stage does both ahead of time with what is known then: known values
+   fold, a guard on a known value is decided, each word gets an instance
+   for each set of types, and unions split (6). Knowledge that exists only
+   at run time could come later in two ways, neither speculative: compiling
+   again with a profile of the branches and types that occurred, keyed by
+   CID; or the stage as a word a program applies to a quotation and the
+   values now known, its code cached by CID so that a later run loads it,
+   as Julia compiles a method for its concrete argument types on the first
+   call and caches the result. A JIT that prunes what it has not seen taken
+   needs deoptimization to recover when wrong; staging prunes only what is
+   known, so nothing is undone.
 
 ## 4. A way to build it (proposal)
 

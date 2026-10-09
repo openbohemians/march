@@ -387,7 +387,7 @@ filter, flat-map and scan, with one loop:
 
 Outside a literal the rules stay strict: a loop keeps its shape, and clauses
 chosen at run time leave as many values. A value that may be absent outside a
-collection needs an optional type, a sum.
+collection needs a union with nothing, `a or nil` (TYPES.md 3.6).
 
 ### Strings with holes
 
@@ -594,6 +594,10 @@ found at compile time; an effect where none is allowed; a limit. An error
 inside a core clause is reported where the clause was applied. Errors while
 running are the machine's.
 
+Warnings are planned, at three levels: informative, minor and severe
+(Thomas, 2026-10-09). The first will be a slot that may hold more than one
+type at run time (TYPES.md 3.6).
+
 ## What it found
 
 1. **Most of the language fits in March.** Arithmetic, comparisons,
@@ -641,8 +645,9 @@ running are the machine's.
 - **Array literals typed by what follows.** `( 2 4 )` settles at its `)`, to
   integers, so `( 6.0 8.0 ) ( 2 4 ) ÷.` is no word; written `( 2.0 4.0 )` it
   works.
-- **Optional values outside collections,** "T or nothing" as the first sum
-  type, a value and a tag, for FORTH's words that return a value or nothing.
+- **Unions,** set-theoretic (TYPES.md 3.6): `a or nil` first, a value and a
+  tag, for FORTH's words that return a value or nothing; clauses split on
+  the tag, with a light warning where a slot may hold more than one type.
 - **Glyphs:** APL's and Uiua's for these words, and whether `/` is reduce,
   are deferred.
 
@@ -667,5 +672,5 @@ running are the machine's.
 - **Quotations at run time:** a quotation is always consumed at compile
   time, by `.`, `def` or `map`.
 - **The surface notation** and its lowering to this form.
-- **Saving** a session as an image; tuples, records and sums;
+- **Saving** a session as an image; tuples, records and unions;
   namespaces; showing types.

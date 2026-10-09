@@ -310,14 +310,15 @@ fn clauses_are_chosen_by_types() {
 }
 
 #[test]
-fn array_literals_share_one_type() {
+fn array_literals_share_one_type_or_are_tuples() {
     assert_eq!(show("( 1 2 3 )"), "<1> ( 1 2 3 )");
     assert_eq!(show("( 1 2.5 )"), "<1> ( 1.0 2.5 )");
     assert_eq!(run("( ( 1 2 ) ( 3 ) ) length .").unwrap(), [2]);
     assert_eq!(show("( ( 1 2 ) ( 3 ) )"), "<1> ( ( 1 2 ) ( 3 ) )");
     assert_eq!(fails("( )"), Kind::Mismatch);
-    assert_eq!(fails("( 1 \"a\" )"), Kind::Literal);
-    assert_eq!(fails("( 1 i64 . \"a\" )"), Kind::Mismatch);
+    // Elements of different types are a tuple (doc/design/TYPES.md 2.5).
+    assert_eq!(show("( 1 \"a\" )"), "<1> ( 1 \"a\" )");
+    assert_eq!(show("( 1 i64 . \"a\" ) length ."), "<1> 2");
     // An element may not take values from outside its literal.
     assert_eq!(fails("1 ( 2 + . )"), Kind::Mismatch);
 }

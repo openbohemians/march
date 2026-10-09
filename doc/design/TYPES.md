@@ -109,8 +109,17 @@ Runtime values in types would make inference undecidable. So:
 - **Fixed positions make a tuple:** `( "a" 2 )` is a string and an i64,
   as march7/docs/SURFACE.md already decided ("an array when it can be, a
   tuple when it must").
+- **A tuple forgets its positions where an array is wanted** (Thomas,
+  2026-10-09), as a vec forgets its length: `( 1 "a" )` given to `sort`,
+  `map` or any clause that asks for `a ary` becomes an
+  `i64 string or ary`, an array of the union of its types. So positions
+  are precise and free while the tuple is a tuple, and every array word
+  still works on it. Unlike a vec's, this forgetting costs: each element
+  is tagged then, a union made, with its informative warning (3.6). Built
+  in march8 (march8/docs/MACHINE.md, "Tuples"); records are not yet.
 - **Fixed keys make a record:** `{ "port" 8080 "host" "x" }`, each field
-  typed.
+  typed. A record forgets its keys' types the same way where a map is
+  wanted, into a map of the union of its values' types.
 - **Genuinely variable mixtures need unions,** such as "i64 or string": a
   value whose type is one of several, decided only at run time, so it
   carries a tag, and a family applied to one compiles to a branch on the

@@ -191,12 +191,14 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < string -- i64 > string-length. ] length def.
 [ < a ary -- i64 > ary-length. ] length def.
 [ < n a vec -- i64 > vec-length. ] length def.
+[ < tuple -- i64 > tuple-length. ] length def.
 [ < k v map -- i64 > map-length. ] length def.
 
 [ < string i64 -- i64 > string-at. ] at def.
 [ < a ary i64 -- a > ary-at. ] at def.
 [ < n a vec i64 -- a > vec-at. ] at def.
 [ < k v map k -- v > map-at. ] at def.
+[ < tuple i64 > tuple-at. ] at def.
 
 -- A map's value at a key, or nil where it has none: `v nil or`, decided at
 -- run time unless the map and key are known (TYPES.md 3.6). Its outputs
@@ -262,6 +264,7 @@ i64 f64 or. money or. int# or. dec# or. num def.
 -- a vec's each a value, and any array's, inside an array literal, a run.
 
 [ < n a vec > vec-spread. ] spread def.
+[ < tuple > tuple-spread. ] spread def.
 [ < a ary > [ ] each. ] spread def.
 
 -- `n q repeat` runs q n times.
@@ -278,6 +281,8 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < f64 -- string > f64>text. ] show def.
 [ < money -- string > money>text. ] show def.
 [ < nil -- string > drop. "nil" ] show def.
+[ < tuple -- string > [ show. ] map. "(" swap. [ " " swap. concat. concat. ] each. " )" concat. ]
+  show def.
 [ < a ary -- string > "(" swap. [ show. " " swap. concat. concat. ] each. " )" concat. ] show def.
 [ < k v map -- string >
   "{" swap. dup. keys. sort.

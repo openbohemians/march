@@ -79,6 +79,11 @@ pub enum Term {
     /// (doc/design/TYPES.md 3.6). Kept canonical, its members sorted, without
     /// repeats and nested to the right, so equal unions are one type.
     Or(Type, Type),
+    /// Fixed positions with a type each, `( i64 string )` (TYPES.md 2.5): a
+    /// row of the table's rows. Positions of one type are a vec instead.
+    Tuple(u32),
+    /// In a pattern, any tuple: a class, as `atom` is.
+    AnyTuple,
 }
 
 /// The constructors a bracket or `.` can apply.
@@ -96,6 +101,9 @@ pub struct Types {
     /// The names `def` gave classes, which messages use: no value has a
     /// class's type, so the name never hides a value's own.
     classes: HashMap<Type, String>,
+    /// Tuples' types by position, each row once.
+    rows: Vec<Vec<Type>>,
+    row_index: HashMap<Vec<Type>, u32>,
 }
 
 impl Default for Types {
@@ -110,6 +118,8 @@ impl Types {
             terms: Vec::new(),
             index: HashMap::new(),
             classes: HashMap::new(),
+            rows: Vec::new(),
+            row_index: HashMap::new(),
         };
         for (b, _) in Base::ALL {
             t.intern(Term::Base(b));
@@ -139,15 +149,43 @@ impl Types {
     /// class, `atom` or a union.
     pub fn is_pattern(&self, t: Type) -> bool {
         match self.term(t) {
-            Term::Var(_) | Term::Atom | Term::Or(..) => true,
+            Term::Var(_) | Term::Atom | Term::Or(..) | Term::AnyTuple => true,
             Term::Base(_) | Term::Nat(_) => false,
+            Term::Tuple(r) => self.rows[r as usize].iter().any(|&e| self.is_pattern(e)),
             Term::Ary(e) => self.is_pattern(e),
             Term::Vec(n, e) | Term::Map(n, e) => self.is_pattern(n) || self.is_pattern(e),
         }
     }
     /// Whether `t` is a class: it matches types without binding them.
     pub fn is_class(&self, t: Type) -> bool {
-        matches!(self.term(t), Term::Atom | Term::Or(..))
+        matches!(self.term(t), Term::Atom | Term::Or(..) | Term::AnyTuple)
+    }
+    /// The type of fixed positions of these types: a vec when they are all
+    /// one type, a tuple otherwise.
+    pub fn tuple(&mut self, elems: Vec<Type>) -> Type {
+        if let Some(&e) = elems.first()
+            && elems.iter().all(|&t| t == e)
+        {
+            let n = self.intern(Term::Nat(elems.len() as u64));
+            return self.intern(Term::Vec(n, e));
+        }
+        let r = match self.row_index.get(&elems) {
+            Some(&r) => r,
+            None => {
+                let r = self.rows.len() as u32;
+                self.rows.push(elems.clone());
+                self.row_index.insert(elems, r);
+                r
+            }
+        };
+        self.intern(Term::Tuple(r))
+    }
+    /// A tuple's types, by position.
+    pub fn elements(&self, t: Type) -> Option<&[Type]> {
+        match self.term(t) {
+            Term::Tuple(r) => Some(&self.rows[r as usize]),
+            _ => None,
+        }
     }
     /// The union of two types: their members together, sorted, without
     /// repeats. A union of one member is that type.
@@ -176,7 +214,12 @@ impl Types {
     pub fn subst(&mut self, t: Type, env: &Env) -> Type {
         match self.term(t) {
             Term::Var(v) => env.0[v as usize].unwrap_or(t),
-            Term::Atom => t,
+            Term::Atom | Term::AnyTuple => t,
+            Term::Tuple(r) => {
+                let es = self.rows[r as usize].clone();
+                let es = es.into_iter().map(|e| self.subst(e, env)).collect();
+                self.tuple(es)
+            }
             Term::Or(a, b) => {
                 let (a, b) = (self.subst(a, env), self.subst(b, env));
                 self.union(a, b)
@@ -216,6 +259,14 @@ impl Types {
             Term::Var(v) => ((b'a' + v) as char).to_string(),
             Term::Atom => "atom".into(),
             Term::Or(a, b) => format!("{} {} or", self.name(a), self.name(b)),
+            Term::Tuple(r) => {
+                let es: Vec<String> = self.rows[r as usize]
+                    .iter()
+                    .map(|&e| self.name(e))
+                    .collect();
+                format!("( {} )", es.join(" "))
+            }
+            Term::AnyTuple => "tuple".into(),
         }
     }
 }

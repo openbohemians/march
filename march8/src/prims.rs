@@ -59,6 +59,9 @@ pub enum Prim {
     MapLength,
     MapAt,
     MapHas,
+    TupleLength,
+    TupleAt,
+    TupleSpread,
     MapKeys,
     MapValues,
     SortInts,
@@ -329,6 +332,9 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::Compose, "compose", "< b c >", &[]),
     d(Prim::Within, "within", "< b c >", &[]),
     d(Prim::VecSpread, "vec-spread", "< n a vec >", &[]),
+    d(Prim::TupleLength, "tuple-length", "< tuple -- i64 >", &[]),
+    d(Prim::TupleAt, "tuple-at", "< tuple i64 >", &[]),
+    d(Prim::TupleSpread, "tuple-spread", "< tuple >", &[]),
     d(Prim::AryInsert, "ary-insert", "< b c i64 >", &[]),
     d(Prim::AryRemove, "ary-remove", "< b i64 >", &[]),
     d(Prim::Zip, "zip", "< b c d >", &[]),
@@ -473,6 +479,9 @@ pub fn foldable(p: Prim) -> bool {
                 | Prim::MapLength
                 | Prim::MapAt
                 | Prim::MapHas
+                | Prim::TupleLength
+                | Prim::TupleAt
+                | Prim::TupleSpread
                 | Prim::MapKeys
                 | Prim::MapValues
                 | Prim::SortInts

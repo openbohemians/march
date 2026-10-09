@@ -334,6 +334,9 @@ pub struct Stage {
     pub core: bool,
     /// Warnings found, for the session to report.
     pub warnings: Vec<Warning>,
+    /// Where the program applied the core clause being evaluated, if one
+    /// is: its warnings are reported there, as its errors are.
+    site: Option<Pos>,
 }
 
 impl Default for Stage {
@@ -408,6 +411,7 @@ impl Stage {
             blobs: Vec::new(),
             effects: 0,
             warnings: Vec::new(),
+            site: None,
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
             let name: Rc<str> = (*name).into();
@@ -424,6 +428,8 @@ impl Stage {
         }
         let atom = s.types.intern(Term::Atom);
         s.word(&"atom".into()).ty = Some(atom);
+        let tuple = s.types.intern(Term::AnyTuple);
+        s.word(&"tuple".into()).ty = Some(tuple);
         let none = crate::symbols::Symbols::parse("").expect("an empty table");
         for p in PRIMS {
             let toks = crate::read::read(p.sig, &none).expect("a primitive's signature reads");
@@ -702,6 +708,11 @@ impl Stage {
         if have == t || (self.types.is_class(t) && fits(self)) {
             return Ok(());
         }
+        // A union is a type of values too, so a tuple forgets its positions
+        // into an array of one before patterns are let through.
+        if self.forget_tuple(i, t)? {
+            return Ok(());
+        }
         if self.types.is_pattern(t) && !self.types.is_class(t) {
             return Ok(());
         }
@@ -900,6 +911,37 @@ impl Stage {
                         Term::Base(b) if !matches!(b, Base::Type | Base::Symbol | Base::Quote))
                 });
                 atoms.then_some(2)
+            }
+            (Term::Tuple(_), Term::Tuple(_)) => {
+                let ps = self.types.elements(p).expect("a tuple").to_vec();
+                let hs = self.types.elements(have).expect("a tuple").to_vec();
+                if ps.len() != hs.len() {
+                    return None;
+                }
+                let mut s = 8;
+                for (p, h) in ps.into_iter().zip(hs) {
+                    s += self.unify(p, h, env)?;
+                }
+                Some(s)
+            }
+            // A vec is a tuple whose types are one.
+            (Term::Tuple(_), Term::Vec(n, e)) => {
+                let ps = self.types.elements(p).expect("a tuple").to_vec();
+                if self.types.term(n) != Term::Nat(ps.len() as u64) {
+                    return None;
+                }
+                let mut s = 8;
+                for p in ps {
+                    s += self.unify(p, e, env)?;
+                }
+                Some(s)
+            }
+            (Term::AnyTuple, Term::Tuple(_)) => Some(4),
+            // A tuple where an array is wanted forgets its positions, at a
+            // cost: an array of the union of its types (TYPES.md 2.5).
+            (Term::Ary(e), Term::Tuple(_)) => {
+                let u = self.tuple_union(have);
+                Some(1 + self.unify(e, u, env)?)
             }
             (Term::Base(a), Term::Base(b)) => (a == b).then_some(8),
             (Term::Nat(a), Term::Nat(b)) => (a == b).then_some(8),
@@ -1109,7 +1151,12 @@ impl Stage {
 
     /// Evaluates a clause of a family, noting the family in its errors.
     fn apply_clause(&mut self, name: &str, c: &Rc<Clause>, env: Env, at: Pos) -> Result<()> {
+        let outer = self.site;
+        if c.core && outer.is_none() {
+            self.site = Some(at);
+        }
         let r = self.clause(c, env);
+        self.site = outer;
         self.pos = at;
         r.map_err(|e| match c.core {
             true => self.blame(c, e, at),
@@ -1844,6 +1891,63 @@ impl Stage {
         Ok(())
     }
 
+    /// The union of a tuple's types.
+    fn tuple_union(&mut self, t: Type) -> Type {
+        let es = self.types.elements(t).expect("a tuple").to_vec();
+        es.into_iter()
+            .reduce(|a, b| self.types.union(a, b))
+            .expect("a tuple has types")
+    }
+
+    /// Where an array is wanted, a tuple at `i` forgets its positions: its
+    /// elements, each tagged with its type, gathered into an array of their
+    /// union (TYPES.md 2.5). Whether it did.
+    fn forget_tuple(&mut self, i: usize, t: Type) -> Result<bool> {
+        let have = self.stack[i].ty;
+        let (Term::Ary(e), Some(es)) = (self.types.term(t), self.types.elements(have)) else {
+            return Ok(false);
+        };
+        let es = es.to_vec();
+        let u = self.tuple_union(have);
+        let fits = e == u
+            || (self.is_union(e)
+                && self
+                    .types
+                    .members(u)
+                    .iter()
+                    .all(|m| self.types.members(e).contains(m)));
+        if !fits {
+            return Ok(false);
+        }
+        let mut ops = vec![Op::Prim(P::ScratchPush), Op::Prim(P::Mark)];
+        for (k, &x) in es.iter().enumerate() {
+            ops.extend([
+                Op::Lit(0),
+                Op::Prim(P::ScratchAt),
+                Op::Lit(k as u64),
+                Op::Prim(P::VecAt),
+            ]);
+            if !self.is_union(x) {
+                ops.extend([Op::Lit(x as u64), Op::Prim(P::UnionMake)]);
+            }
+        }
+        ops.extend([
+            Op::Prim(P::Gather),
+            Op::Prim(P::ScratchPop),
+            Op::Prim(P::Drop),
+        ]);
+        self.in_place(i, &ops, t)?;
+        self.warn(
+            Level::Informative,
+            format!(
+                "this makes an array of `{}` from a tuple: each element is tagged, \
+                 and each use of one branches",
+                self.types.name(e)
+            ),
+        );
+        Ok(true)
+    }
+
     /// The type values of these types share, as `join` finds it, or else
     /// their union, literals taking their defaults (TYPES.md 2.9).
     fn join_union(&mut self, tys: &[Type]) -> Type {
@@ -1875,7 +1979,7 @@ impl Stage {
         }
         let w = Warning {
             level,
-            pos: Some(self.pos),
+            pos: Some(self.site.unwrap_or(self.pos)),
             msg,
         };
         if !self.warnings.contains(&w) {
@@ -2045,7 +2149,7 @@ impl Stage {
                 Prim::Within => (2, 1),
                 Prim::AryInsert | Prim::Zip | Prim::Table => (3, 1),
                 Prim::AryRemove => (2, 1),
-                Prim::VecSpread => return None,
+                Prim::VecSpread | Prim::TupleSpread => return None,
                 Prim::Range | Prim::Reverse => (1, 1),
                 Prim::Def => (2, 0),
                 _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
@@ -2140,8 +2244,11 @@ impl Stage {
     /// How many types a bracket in a body leaves.
     fn bracket_size(&self, toks: &[Token]) -> usize {
         let mut n: usize = 0;
+        let mut opens = Vec::new();
         for t in toks {
             match &t.tok {
+                Tok::Open(b'(') => opens.push(n),
+                Tok::Close(b')') => n = opens.pop().unwrap_or(0) + 1,
                 Tok::Int(_) => n += 1,
                 Tok::Name(s) => match self.words.get(s) {
                     Some(w) if w.ty.is_some() => n += 1,
@@ -2288,10 +2395,35 @@ impl Stage {
         let mut items: Vec<Part> = Vec::new();
         let mut guards = Vec::new();
         let mut dashes = None;
+        // Where each open `(` of a tuple type began.
+        let mut opens: Vec<usize> = Vec::new();
         for t in toks {
             self.pos = t.pos;
             let lit = |ty, val| Part::Val(Jdg { ty, val }, t.pos);
             match &t.tok {
+                Tok::Open(b'(') => opens.push(items.len()),
+                Tok::Close(b')') => {
+                    let start = opens.pop().expect("the reader checks nesting");
+                    let mut elems = Vec::new();
+                    for part in items.drain(start..) {
+                        match part {
+                            Part::Ty(t) => elems.push(t),
+                            Part::Val(j, _) => {
+                                return Err(self.err(
+                                    Kind::Mismatch,
+                                    format!(
+                                        "a tuple type holds types, and {} is a value",
+                                        value_text(&j)
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                    if elems.is_empty() {
+                        return Err(self.err(Kind::Mismatch, "a tuple type with no types"));
+                    }
+                    items.push(Part::Ty(self.types.tuple(elems)));
+                }
                 Tok::Int(n) => items.push(lit(INT_LIT, Val::Int(*n))),
                 Tok::Dec(d, p) => items.push(lit(DEC_LIT, Val::Dec(*d, *p))),
                 Tok::Str(v) => items.push(lit(STRING, Val::Str(v.clone()))),
@@ -2306,8 +2438,10 @@ impl Stage {
                     } else if w.is_none() && s.len() == 1 && s.as_bytes()[0].is_ascii_lowercase() {
                         let v = self.types.intern(Term::Var(s.as_bytes()[0] - b'a'));
                         items.push(Part::Ty(v));
-                    } else if w.is_some() {
+                    } else if w.is_some() && opens.is_empty() {
                         guards.push(self.guard(s, items.len(), dashes.is_some(), t.pos)?);
+                    } else if w.is_some() {
+                        return Err(self.err(Kind::Mismatch, format!("`{s}` is not a type")));
                     } else {
                         return Err(self.err(Kind::NoWord, format!("no type `{s}`")));
                     }
@@ -2763,8 +2897,11 @@ impl Stage {
                 self.emit_ops(1, &[P::Range], &[ty])?;
             }
             Prim::Reverse => {
-                let t = self.stack[base].ty;
-                if !matches!(self.types.term(t), Term::Ary(_) | Term::Vec(..)) {
+                let mut t = self.stack[base].ty;
+                if let Some(es) = self.types.elements(t) {
+                    let es = es.iter().rev().copied().collect();
+                    t = self.types.tuple(es);
+                } else if !matches!(self.types.term(t), Term::Ary(_) | Term::Vec(..)) {
                     return Err(self.err(
                         Kind::NoWord,
                         format!("no word `{name}` for {}", self.types.name(t)),
@@ -2777,6 +2914,38 @@ impl Stage {
             Prim::Zip => self.zip(name)?,
             Prim::Table => self.table(name)?,
             Prim::AryRemove => self.remove(name, base)?,
+            Prim::TupleLength => {
+                let n = self
+                    .types
+                    .elements(self.stack[base].ty)
+                    .expect("a tuple")
+                    .len();
+                if !self.stack[base].known() {
+                    self.emit(Op::Prim(P::Drop));
+                }
+                self.stack.pop();
+                self.push(I64, Val::Int(n as i128));
+            }
+            Prim::TupleAt => self.tuple_at(base)?,
+            Prim::TupleSpread => {
+                let es = self
+                    .types
+                    .elements(self.stack[base].ty)
+                    .expect("a tuple")
+                    .to_vec();
+                self.materialize(base)?;
+                self.stack.pop();
+                self.emit(Op::Prim(P::ScratchPush));
+                for (k, &e) in es.iter().enumerate() {
+                    self.emit(Op::Lit(0));
+                    self.emit(Op::Prim(P::ScratchAt));
+                    self.emit(Op::Lit(k as u64));
+                    self.emit(Op::Prim(P::VecAt));
+                    self.push(e, Val::Run);
+                }
+                self.emit(Op::Prim(P::ScratchPop));
+                self.emit(Op::Prim(P::Drop));
+            }
             Prim::VecSpread => {
                 let n = len(self, 13);
                 let e = env.0[0].expect("bound");
@@ -2893,6 +3062,10 @@ impl Stage {
     fn map(&mut self, name: &str) -> Result<()> {
         let q = self.words_of(name)?;
         let base = self.stack.len() - 1;
+        if let Some(es) = self.types.elements(self.stack[base].ty) {
+            let es = es.to_vec();
+            return self.map_tuple(name, &q, es);
+        }
         let (len, e) = match self.types.term(self.stack[base].ty) {
             Term::Ary(e) => (None, e),
             Term::Vec(n, e) => (Some(n), e),
@@ -2980,6 +3153,10 @@ impl Stage {
     fn each(&mut self, name: &str, backward: bool) -> Result<()> {
         let q = self.words_of(name)?;
         let base = self.stack.len() - 1;
+        if let Some(es) = self.types.elements(self.stack[base].ty) {
+            let es = es.to_vec();
+            return self.each_tuple(&q, es, backward);
+        }
         let e = match self.types.term(self.stack[base].ty) {
             Term::Ary(e) | Term::Vec(_, e) => e,
             _ => {
@@ -3068,6 +3245,105 @@ impl Stage {
             self.push(t, Val::Many);
         }
         Ok(())
+    }
+
+    /// `map` on a tuple: the quotation is compiled for each position, on its
+    /// type, so each result keeps its own: a tuple, or a vec when the
+    /// results are one type. The tuple and the new array are on the scratch
+    /// stack.
+    fn map_tuple(&mut self, name: &str, q: &[Token], es: Vec<Type>) -> Result<()> {
+        let base = self.stack.len() - 1;
+        self.materialize(base)?;
+        self.stack.pop();
+        for op in [P::ScratchPush, P::Mark, P::Gather, P::ScratchPush] {
+            self.emit(Op::Prim(op));
+        }
+        let mut outs = Vec::new();
+        for (k, &e) in es.iter().enumerate() {
+            self.emit(Op::Lit(1));
+            self.emit(Op::Prim(P::ScratchAt));
+            self.emit(Op::Lit(k as u64));
+            self.emit(Op::Prim(P::VecAt));
+            let below = self.stack.clone();
+            self.push(e, Val::Run);
+            self.enter()?;
+            let r = self.run(q);
+            self.depth -= 1;
+            r?;
+            let kept = self.stack.len() == below.len() + 1
+                && self.stack[..below.len()]
+                    .iter()
+                    .zip(&below)
+                    .all(|(a, b)| a.ty == b.ty && a.val == b.val);
+            if !kept {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "`{name}`'s quotation must take its element and leave one value, \
+                         keeping the values below"
+                    ),
+                ));
+            }
+            self.materialize(below.len())?;
+            outs.push(self.stack.pop().expect("one").ty);
+            self.emit(Op::Lit(0));
+            for op in [P::ScratchAt, P::Swap, P::VecPush, P::Drop] {
+                self.emit(Op::Prim(op));
+            }
+        }
+        for op in [P::ScratchPop, P::ScratchPop, P::Drop] {
+            self.emit(Op::Prim(op));
+        }
+        let t = self.types.tuple(outs);
+        self.push(t, Val::Run);
+        Ok(())
+    }
+
+    /// `each` on a tuple, unrolled: the quotation is compiled for each
+    /// position in turn, on its type, so the values it threads may change
+    /// type from one to the next. The tuple is on the scratch stack.
+    fn each_tuple(&mut self, q: &[Token], es: Vec<Type>, backward: bool) -> Result<()> {
+        let base = self.stack.len() - 1;
+        self.materialize(base)?;
+        self.stack.pop();
+        self.emit(Op::Prim(P::ScratchPush));
+        let mut order: Vec<usize> = (0..es.len()).collect();
+        if backward {
+            order.reverse();
+        }
+        for k in order {
+            self.emit(Op::Lit(0));
+            self.emit(Op::Prim(P::ScratchAt));
+            self.emit(Op::Lit(k as u64));
+            self.emit(Op::Prim(P::VecAt));
+            self.push(es[k], Val::Run);
+            self.enter()?;
+            let r = self.run(q);
+            self.depth -= 1;
+            r?;
+        }
+        self.emit(Op::Prim(P::ScratchPop));
+        self.emit(Op::Prim(P::Drop));
+        Ok(())
+    }
+
+    /// `at` on a tuple. With the index known, the element has its
+    /// position's type; otherwise the tuple forgets its positions, and the
+    /// element is of their union.
+    fn tuple_at(&mut self, base: usize) -> Result<()> {
+        let t = self.stack[base].ty;
+        let es = self.types.elements(t).expect("a tuple").to_vec();
+        if let Val::Int(k) = self.stack[base + 1].val {
+            let i = self
+                .known_element(base, k, Some(es.len() as u64))?
+                .expect("the length is known");
+            self.stack[base + 1].val = Val::Int(i as i128);
+            return self.emit_ops(2, &[P::VecAt], &[es[i]]);
+        }
+        let u = self.tuple_union(t);
+        let ary = self.types.intern(Term::Ary(u));
+        self.annotate(base, ary)?;
+        self.at(Prim::AryAt, base, u, None)
     }
 
     /// `within`: an array and a quotation, run with the array's last
@@ -3826,7 +4102,25 @@ impl Stage {
         }
         let step = if b == b')' { 1 } else { 2 };
         let mut parts = Vec::new();
-        for first in 0..step {
+        // An array's elements of different types, at fixed positions, are a
+        // tuple (TYPES.md 2.5); each literal among them takes its default.
+        if b == b')' && !runs {
+            let tys: Vec<Type> = self.stack[start..].iter().map(|j| j.ty).collect();
+            let shared = self.join(&tys).filter(|&t| {
+                tys.iter().all(|&x| {
+                    x == t || self.forgets(t, x) || (self.types.is_literal(x) && self.accepts(t, x))
+                })
+            });
+            if shared.is_none() {
+                for i in start..self.stack.len() {
+                    self.materialize(i)?;
+                }
+                let elems = self.stack[start..].iter().map(|j| j.ty).collect();
+                parts.push(self.types.tuple(elems));
+            }
+        }
+        let tuple = !parts.is_empty();
+        for first in (0..step).filter(|_| !tuple) {
             let tys: Vec<Type> = (start + first..self.stack.len())
                 .step_by(step)
                 .map(|i| self.stack[i].ty)
@@ -3846,6 +4140,8 @@ impl Stage {
         // With a run among them the count is known only at run time.
         let ty = if b == b'}' {
             self.types.intern(Term::Map(parts[0], parts[1]))
+        } else if tuple {
+            parts[0]
         } else if runs {
             self.types.intern(Term::Ary(parts[0]))
         } else {

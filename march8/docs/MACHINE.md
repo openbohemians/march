@@ -126,6 +126,8 @@ equal types are equal numbers.
 | `a b or` | in patterns, a union: any of its types, `i64 f64 or`. Kept canonical, so order and repeats do not matter. It matches a little less well than one of its types alone, and better than `atom` |
 | `num` | the numbers: `i64 f64 or. money or. int# or. dec# or. num def.`, in `core.march` |
 | `nil` | the type with one value, `nil.`: nothing is there, as in `i64 nil or` |
+| `( i64 string )` | a tuple: fixed positions, a type each. Positions of one type are a vec, so `( a b )` takes `( 1 2 )` |
+| `tuple` | in patterns, any tuple: a class, as `atom` is |
 
 **An array literal is a vec:** `( 7 8 9 )` is a `3 i64 vec`, so its length
 is a constant. A vec is accepted where an array of the same elements is
@@ -494,6 +496,35 @@ m "a" get. 1 +.                  no word `+` for nil: each type needs a clause
   union is a value of any union that holds its types, as it is. Arrays
   hold union values: `( 1 nil )` is a `2 i64 nil or vec`.
 
+### Tuples
+
+An array literal whose elements differ in type is a **tuple**, typed by
+position (TYPES.md 2.5): `( 1 "a" )` is a `( i64 string )`. At run time it
+is an array's cells; only its type differs.
+
+```
+( 1 "a" 2.5 ) 2 at.               "a", a string
+( 1 "a" ) spread.                 1 "a", an i64 and a string
+( 1 "a" ) [ show. ] map.          ( "1" "\"a\"" ), a 2 string vec
+0 ( 1 "ab" ) [ show. length. +. ] each.     5
+( 1 "a" ) ( 2 "b" ) concat.       ( 1 "a" 2 "b" ), an i64 string or ary
+```
+
+- **Positions are precise and free.** `at` with an index known at compile
+  time has its position's type, from either end; `length` is a constant;
+  `spread`, `reverse` and `show` keep each position's type.
+- **`map` and `each` are unrolled:** the quotation is compiled for each
+  position on its type, so `map`'s results keep theirs, a tuple or a vec,
+  and what `each` threads may change type from one position to the next.
+- **A tuple forgets its positions where an array is wanted,** as a vec
+  forgets its length: given to a clause that asks for `a ary`, as
+  `concat`'s, or `at` with an index known only at run time, it becomes an
+  array of the union of its types, each element tagged, with an
+  informative warning. Only where the union fits: `sort` has no clause
+  for `i64 string or ary`. A clause for `tuple` is preferred, so the
+  forgetting is the last resort.
+- **In brackets,** `( i64 string )` is a tuple type, and `tuple` any tuple.
+
 ### Recursion and instances
 
 A family is evaluated where it is applied, on the caller's judgments,
@@ -716,8 +747,24 @@ warning where a union is made (above, "Unions").
 - **OR between whole contexts.** A union is one slot's: `< num num >` takes
   an i64 and an f64 together, and `< i64 i64 >` or `< f64 f64 >` as one
   context is not built.
-- **More of unions.** An array literal of mixed types, `( 1 "a" )`, is an
-  error: a tuple, as TYPES.md 2.5 has it, or an array of a union, is open.
+- **Representations chosen by use** (2026-10-09). A tuple forgets its
+  positions where a clause asks for an array, at that use, each time it
+  runs, and twice for two copies; the forgetting changes its type. The
+  type should say what a value is and the compiler choose how it is held,
+  from what is done with it where it is made (indexed, appended, iterated,
+  shared, as effects on values) and whether anything else can see it, which
+  a stack language shows by `dup`, `over` and `pick`. A tuple used mostly as
+  an array would then be built tagged, its positions still known, read with
+  no test; and a flat array, a persistent tree, or an update in place chosen
+  the same way. Some of it at run time, by size or by a check that a value
+  is unshared, as Koka's Perceus does. A project of its own, beside memory
+  management (2.0).
+- **More of tuples, and records.** `rest`, `most`, `slice` and `concat` on
+  tuples forget their positions, where they could make tuples; `eq?` has no
+  clause for them. A literal with a run among mixed elements is still an
+  error. Records, maps with fixed keys typed each, forgetting into a map of
+  a union, are not built (TYPES.md 2.5).
+- **More of unions.**
   A union made and taken apart at once is still tagged and untagged; the
   stage could carry each alternative on into the use instead. A recursive
   word applied to a union may not wait for its results' types inside the

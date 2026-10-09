@@ -41,6 +41,19 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
             }
             out.push_str(" )");
         }
+        Term::Tuple(_) => {
+            let es = types.elements(t).expect("a tuple").to_vec();
+            let Ok(seq) = m.sequence(v) else {
+                out.push_str(&format!("<tuple {v}>"));
+                return;
+            };
+            out.push('(');
+            for (&x, e) in seq.iter().zip(es) {
+                out.push(' ');
+                value(m, types, x, e, out);
+            }
+            out.push_str(" )");
+        }
         Term::Map(k, val) => {
             let Ok(map) = m.map(v) else {
                 out.push_str(&format!("<map {v}>"));

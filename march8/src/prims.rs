@@ -72,6 +72,12 @@ pub enum Prim {
     GradeDownMoney,
     GradeDownTexts,
     AryKeep,
+    StrSplit,
+    StrLines,
+    StrWords,
+    StrLower,
+    StrUpper,
+    Parse,
     TupleAt,
     TupleSpread,
     MapKeys,
@@ -378,6 +384,37 @@ pub const PRIMS: &[PrimDef] = &[
         "< a ary bool ary -- a ary >",
         &[P::Keep],
     ),
+    d(
+        Prim::StrSplit,
+        "string-split",
+        "< string string -- string ary >",
+        &[P::Split],
+    ),
+    d(
+        Prim::StrLines,
+        "string-lines",
+        "< string -- string ary >",
+        &[P::Lines],
+    ),
+    d(
+        Prim::StrWords,
+        "string-words",
+        "< string -- string ary >",
+        &[P::Words],
+    ),
+    d(
+        Prim::StrLower,
+        "string-lower",
+        "< string -- string >",
+        &[P::Lower],
+    ),
+    d(
+        Prim::StrUpper,
+        "string-upper",
+        "< string -- string >",
+        &[P::Upper],
+    ),
+    d(Prim::Parse, "parse", "< string a -- b >", &[]),
     d(Prim::VecLength, "vec-length", "< n a vec -- i64 >", &[]),
     d(Prim::VecAt, "vec-at", "< n a vec i64 -- a >", &[P::VecAt]),
     d(
@@ -571,6 +608,10 @@ pub fn foldable(p: Prim) -> bool {
                 | Prim::GradeDownMoney
                 | Prim::GradeDownTexts
                 | Prim::AryKeep
+                | Prim::StrSplit
+                | Prim::StrLines
+                | Prim::StrWords
+                | Prim::Parse
                 | Prim::SortFloats
                 | Prim::SortMoney
                 | Prim::SortTexts
@@ -818,6 +859,8 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
             crate::show::quoted(text(&a[0]), &mut out);
             Ok(vec![Val::Str(out.into())])
         }
+        StrLower => Ok(vec![Val::Str(text(&a[0]).to_lowercase().into())]),
+        StrUpper => Ok(vec![Val::Str(text(&a[0]).to_uppercase().into())]),
         StrConcat => Ok(vec![Val::Str(
             format!("{}{}", text(&a[0]), text(&a[1])).into(),
         )]),

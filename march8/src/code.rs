@@ -195,6 +195,19 @@ pub enum Primitive {
     GradeDownInts = 108,
     GradeDownFloats = 109,
     GradeDownTexts = 110,
+    // ( s sep -- a ) A string's parts between separators, or its characters
+    // for an empty one; ( s -- a ) its lines, or its words, the parts between
+    // runs of white space.
+    Split = 111,
+    Lines = 112,
+    Words = 113,
+    // ( s -- s ) A string in lower case, or upper.
+    Lower = 114,
+    Upper = 115,
+    // ( s -- x 1 ) The integer or the float a string writes, white space
+    // around it allowed; ( s -- 0 0 ) if it writes none.
+    ParseInt = 116,
+    ParseFloat = 117,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -309,6 +322,13 @@ impl Primitive {
         (Self::GradeDownInts, "grade-down-ints"),
         (Self::GradeDownFloats, "grade-down-floats"),
         (Self::GradeDownTexts, "grade-down-texts"),
+        (Self::Split, "split"),
+        (Self::Lines, "lines"),
+        (Self::Words, "words"),
+        (Self::Lower, "lower"),
+        (Self::Upper, "upper"),
+        (Self::ParseInt, "parse-int"),
+        (Self::ParseFloat, "parse-float"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

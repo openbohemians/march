@@ -609,7 +609,14 @@ and `skip`, all but those (`drop` being the stack's); `thru`, the integers
 from a to b, both included, counting down when a is the larger, its glyph
 `‥` (two dots as one character, since `.` applies);
 `sum` and `prod`, with their glyphs `∑` and `∏`, a fold from 0 and from 1;
-and `⊤` and `⊥` for `true` and `false`.
+and `⊤` and `⊥` for `true` and `false`. Text: `split` at a separator
+(between characters, for ""), `lines`, `words` at white space, as
+Haskell's are, and `lower` and `upper`, element by element over arrays of
+strings. `parse` reads a number from its text, the type given as a value,
+`"42" i64 parse.`: `i64 nil or`, the value tagged at run time or nil, and
+on a known string the value or nil itself. `le?`, `ge?` and `neq?`, with
+`≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that
+NaN is at most and at least nothing.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`) exist only at compile time.
@@ -630,7 +637,7 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with thirty-seven primitives added: `pick`; checked
+The machine is march7's, with forty-four primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
@@ -639,7 +646,8 @@ overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>
 `f64-pow` and `i64-pow`; `f64-floor`, `f64-ceil` and `f64-round`;
 `vector-insert` and `vector-remove`; `union-make`, `union-tag` and
 `union-value`; `grade-ints`, `grade-floats` and `grade-texts`, and their
-`grade-down-` forms; and `vector-keep`.
+`grade-down-` forms; `vector-keep`; `split`, `lines`, `words`, `lower` and
+`upper`; and `parse-int` and `parse-float`, which leave a value and a flag.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -750,11 +758,10 @@ warning where a union is made (above, "Unions").
       0.3 s and agree with Python. Charging what a version adds, or freeing
       a version nothing else holds, is the memory work deferred to 2.0.
     - **Still wanted:** a way to read input, so the text is not a literal;
-      splitting and lower-casing text; `sort-by`, so ranking is not counts
-      × words; and a word applied without its `.` is the easiest mistake to
-      make, though the error names it. `not` and `and` were wanted too, as
-      `starts?` did arithmetic on flags; `bool` brought them since (TYPES.md
-      2.16), and `starts?` reads `sep-at?. not. … sep-at?. and.`
+      and a word applied without its `.` is the easiest mistake to
+      make, though the error names it. Wanted then and since built:
+      `not` and `and` (`bool`, TYPES.md 2.16), `sort-by`, and `words` and
+      `lower`, which the example now uses in place of its own splitting.
 
 ## Not yet
 

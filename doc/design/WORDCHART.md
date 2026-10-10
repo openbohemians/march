@@ -12,6 +12,9 @@
 | less than            | `lt?`      |   ?    | `<`   | `<`   |        |
 | greater than         | `gt?`      |   ?    | `>`   | `>`   |        |
 | equal                | `eq?`      |  `≡`   | `≡`   | `≍`   |        |
+| at most              | `le?`      |  `≤`   | `≤`   | `≤`   | less, or equal: NaN is at most nothing |
+| at least             | `ge?`      |  `≥`   | `≥`   | `≥`   |        |
+| not equal            | `neq?`     |  `≠`   | `≠`   | `≠`   |        |
 | copy top             | `dup`      |  `=`   |       | `.`   |        |
 | discard top          | `drop`     |  `◌`   |       | `◌`   |        |
 | exchange top         | `swap`     |  `~`   | `⍨`   | `:`   |        |
@@ -58,6 +61,10 @@
 | repeat n times       | `repeat`   | `⍥`    | `⍣`   | `⍥`   |        |
 | compose quotations   | `compose`  | `∘`    | `∘`   |  —    |        |
 | value as text        | `show`     | `⍕`    | `⍕`   |  —    |        |
+| number from text     | `parse`    |        | `⍎`   | `⋕`   | `"42" i64 parse`: `i64 nil or` |
+| split at a separator | `split`    |        |       | `⊜`   | "" splits between characters |
+| lines, words         | `lines` `words` |   |       |       | as Haskell's |
+| lower, upper case    | `lower` `upper` |   |       |       | element by element over arrays |
 | write any value      | `print`    |        | `⎕←`  | `&p`  |        |
 | write a string       | `write`    |        | `⍞←`  | `&pf` |        |
 | swap top two         | `swap2`    |  `~~`  |       |       |        |
@@ -79,9 +86,6 @@
 | **not yet in March** |           |        |       |       |
 |----------------------|-----------|--------|-------|-------|
 | convert to match     |  ?        |  ?     |       |       | `!` retired; `to`, `type-of` open |
-| at most              |           | `≤`    | `≤`   | `≤`   |
-| at least             |           | `≥`    | `≥`   | `≥`   |
-| not equal            | `neq`     | `≠`    | `≠`   | `≠`   |
 | member of            |           | `∈`    | `∊`   | `∊`   |
 | index of             | `index`   | `⊗`    | `⍳`   | `⊗`   |
 | unique               | `uniq`    | `◴`    | `∪`   | `◴`   |

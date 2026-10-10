@@ -166,6 +166,17 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < money money -- bool > money-eq?. ] eq? def.
 [ < string string -- bool > string-eq?. ] eq? def.
 
+-- At most, at least, not equal: `≤`, `≥` and `≠`. "Less, or equal" rather
+-- than "not greater", so that a float that is no number, NaN, is at most
+-- nothing and at least nothing, but not equal to anything, itself included.
+
+[ < a a > over. over. lt?. rot. rot. eq?. or. ] le? def.
+[ < a a > over. over. gt?. rot. rot. eq?. or. ] ge? def.
+[ eq?. not. ] neq? def.
+[ le?. ] ≤ def.
+[ ge?. ] ≥ def.
+[ neq?. ] ≠ def.
+
 -- Stack words. `=` is `dup` and `~` is `swap` (march7/docs/SURFACE.md,
 -- on trial since 2026-10-03); doubled, they act on two values at a time,
 -- as FORTH's 2DUP and 2SWAP (Thomas, 2026-10-08).
@@ -298,6 +309,17 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < a ary string or i64 negative? > -. over. length. min. over. length. swap. -+. 1 swap. slice. ]
   skip def.
 [ < a ary string or i64 > over. length. min. 1 +. over. length. slice. ] skip def.
+
+-- Text: `split` at each separator (between characters, for ""), `lines`,
+-- and `words` at runs of white space, as Haskell's are; `lower` and `upper`,
+-- element by element over an array of strings.
+[ < string string -- string ary > string-split. ] split def.
+[ < string -- string ary > string-lines. ] lines def.
+[ < string -- string ary > string-words. ] words def.
+[ < string -- string > string-lower. ] lower def.
+[ < string -- string > string-upper. ] upper def.
+[ < string ary > [ lower. ] map. ] lower def.
+[ < string ary > [ upper. ] map. ] upper def.
 
 -- `thru`: the integers from a to b, both included, counting down when a is
 -- the larger (SYMBOL's `..`); `‥`, two dots as one character, is its glyph.

@@ -314,3 +314,49 @@ fn skip_and_thru() {
     );
     assert_eq!(show(&["4", "1 thru."]), "<1> ( 4 3 2 1 )");
 }
+
+#[test]
+fn text_words() {
+    assert_eq!(
+        show(&["\"a,b,,c\" \",\" split. \"abc\" \"\" split. \"line 1\\n;line 2\\n;\" lines."]),
+        "<3> ( \"a\" \"b\" \"\" \"c\" ) ( \"a\" \"b\" \"c\" ) ( \"line 1\" \"line 2\" )"
+    );
+    assert_eq!(
+        show(&["\"  the  cat sat \" words. \"Hello\" lower. ( \"a\" \"b\" ) upper."]),
+        "<3> ( \"the\" \"cat\" \"sat\" ) \"hello\" ( \"A\" \"B\" )"
+    );
+    // At run time too.
+    assert_eq!(
+        show(&["\"x y\"", "words. \"ÉTÉ\"", "lower."]),
+        "<2> ( \"x\" \"y\" ) \"été\""
+    );
+}
+
+#[test]
+fn parse_leaves_a_value_or_nil() {
+    // A known string is parsed now: the value, or nil.
+    let mut s = Session::new();
+    s.eval("\"42\" i64 parse. \" 2.5 \" f64 parse. \"x\" i64 parse.")
+        .unwrap();
+    assert_eq!(s.show_typed(), "<3> 42 < i64 > 2.5 < f64 > nil < nil >");
+    // At run time, `i64 nil or`, for clauses to take apart.
+    let n = "[ < i64 > ] n def. [ < nil > drop. 0 ] n def.";
+    assert_eq!(
+        show(&[n, "\"42\" \"nope\"", "i64 parse. n. swap. i64 parse. n."]),
+        "<2> 0 42"
+    );
+    assert_eq!(session(&["\"1\" string parse."]).err(), Some(Kind::NoWord));
+}
+
+#[test]
+fn at_most_at_least_not_equal() {
+    assert_eq!(
+        show(&["3 5 le?. 5 5 ≤. 5 3 ge?. 3 5 neq?. 3 3 ≠."]),
+        "<5> true true true true false"
+    );
+    // NaN is at most nothing and at least nothing, and equal to nothing.
+    assert_eq!(
+        show(&["0.0 0.0 /*. dup. le?. 0.0 0.0 /*. dup. ge?. 0.0 0.0 /*. dup. neq?."]),
+        "<3> false false true"
+    );
+}

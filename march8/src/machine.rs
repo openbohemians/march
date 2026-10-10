@@ -1400,6 +1400,53 @@ impl Machine {
                 let r = self.allocate_vector(order.into_iter().map(|i| i as u64 + 1).collect())?;
                 self.push(r)?;
             }
+            Split | Lines | Words => {
+                let sep = if p == Split { Some(self.pop()?) } else { None };
+                let s = self.pop()?;
+                let text = self.text(s)?.to_text().ok_or(Error::Memory)?;
+                let parts: Vec<String> = match sep {
+                    Some(sep) => {
+                        let sep = self.text(sep)?.to_text().ok_or(Error::Memory)?;
+                        if sep.is_empty() {
+                            text.chars().map(String::from).collect()
+                        } else {
+                            text.split(sep.as_str()).map(String::from).collect()
+                        }
+                    }
+                    None if p == Lines => text.lines().map(String::from).collect(),
+                    None => text.split_whitespace().map(String::from).collect(),
+                };
+                let mut cells = Vec::with_capacity(parts.len());
+                for part in parts {
+                    cells.push(self.allocate_text(merkle_champ::Sequence::text(&part))?);
+                }
+                let r = self.allocate_vector(cells.into_iter().collect())?;
+                self.push(r)?;
+            }
+            Lower | Upper => {
+                let s = self.pop()?;
+                let text = self.text(s)?.to_text().ok_or(Error::Memory)?;
+                let out = if p == Lower {
+                    text.to_lowercase()
+                } else {
+                    text.to_uppercase()
+                };
+                let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
+                self.push(r)?;
+            }
+            ParseInt | ParseFloat => {
+                let s = self.pop()?;
+                let text = self.text(s)?.to_text().ok_or(Error::Memory)?;
+                let t = text.trim();
+                let parsed = if p == ParseInt {
+                    t.parse::<i64>().ok().map(|n| n as u64)
+                } else {
+                    t.parse::<f64>().ok().map(f64::to_bits)
+                };
+                let (x, ok) = parsed.map_or((0, 0), |x| (x, 1));
+                self.push(x)?;
+                self.push(ok)?;
+            }
             Keep => {
                 let m = self.pop()?;
                 let a = self.pop()?;

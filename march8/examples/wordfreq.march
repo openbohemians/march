@@ -1,34 +1,9 @@
 -- Word frequencies: march8's first real program, in the explicit form
 -- (2026-10-09). Run it with `march8 examples/wordfreq.march`.
 
--- A separator: a space, a tab or a newline, by value patterns.
-[ < 32 > drop. true. ] sep? def.
-[ < 9 > drop. true. ] sep? def.
-[ < 10 > drop. true. ] sep? def.
-[ < i64 > drop. false. ] sep? def.
-
--- Outside the text counts as a separator, so the words at its ends are
--- found like the rest.
-[ < string i64 > dup. 1 lt?. rot. length. rot. lt?. or. ] outside? def.
-[ < string i64 outside? > drop. drop. true. ] sep-at? def.
-[ < string i64 > at. sep?. ] sep-at? def.
-
--- Where the word that starts at i ends: recursion, a tail call.
-[ 1 +. sep-at?. ] next-sep? def.
-[ < string i64 next-sep? > swap. drop. ] end-of def.
-[ < string i64 > 1 +. end-of. ] end-of def.
-
--- Whether a word starts at i: none at it, and a separator before it.
-[ < string i64 > over. over. sep-at?. not. rot. rot. 1 -+. sep-at?. and. ] starts? def.
-
--- The word at i, if one starts there; nothing otherwise.
-[ < string i64 starts? > over. over. end-of. slice. ] word-at def.
-[ < string i64 > drop. drop. ] word-at def.
-
--- A text's words, in order: a comprehension over its positions, each
--- leaving a word or nothing.
-[ < string -- string ary > dup. ( _. length. range. [ _. swap. word-at. ] each. ) ]
-  words def.
+-- The words come from core's `words`, split at white space, and `lower`,
+-- so "The" and "the" count together. (The first version split the text
+-- itself, by value patterns, recursion and a comprehension: commit f7ce8a0.)
 
 -- Counting: a word's count so far is `i64 nil or`, nil before its first.
 [ < i64 > 1 +. ] tally def.
@@ -50,5 +25,5 @@
 [ < string i64 map > dup. values. sort. last. range. reverse. [ over. swap. with-count. ] each. drop. ]
   ranked def.
 
-"the cat and the hat
-and the bat sat on the mat" words. frequencies. dup. report. "--\n;" write. ranked.
+"The cat and the hat
+and the bat sat on the mat" words. lower. frequencies. dup. report. "--\n;" write. ranked.

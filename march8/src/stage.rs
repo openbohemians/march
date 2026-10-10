@@ -2953,6 +2953,7 @@ impl Stage {
                 self.push(I64, Val::Int(n as i128));
             }
             Prim::TupleAt => self.tuple_at(base)?,
+            Prim::Parse => self.parse(name, base)?,
             // An empty array or map of a type: `string i64 map. empty.`.
             Prim::Empty => {
                 let Val::Type(t) = self.stack[base].val else {
@@ -3379,6 +3380,59 @@ impl Stage {
         }
         self.emit(Op::Prim(P::ScratchPop));
         self.emit(Op::Prim(P::Drop));
+        Ok(())
+    }
+
+    /// `parse`: the value of a type that a string writes, `"42" i64 parse.`,
+    /// or nil: `i64 nil or`, the value tagged with its type at run time. A
+    /// known string is parsed now, and is the value or nil itself.
+    fn parse(&mut self, name: &str, base: usize) -> Result<()> {
+        let t = match &self.stack[base + 1].val {
+            Val::Type(t) => Some(*t),
+            Val::Name(n, _) => self.words.get(n).and_then(|w| w.ty),
+            _ => None,
+        };
+        let (t, op) = match t {
+            Some(I64) => (I64, P::ParseInt),
+            Some(F64) => (F64, P::ParseFloat),
+            _ => {
+                return Err(self.err(
+                    Kind::NoWord,
+                    format!("no word `{name}` for {}", self.top_types(2)),
+                ));
+            }
+        };
+        if let Val::Str(s) = &self.stack[base].val {
+            let s = s.trim();
+            let v = if t == I64 {
+                s.parse::<i64>().ok().map(|n| Val::Int(n.into()))
+            } else {
+                s.parse::<f64>().ok().map(Val::Float)
+            };
+            self.stack.truncate(base);
+            match v {
+                Some(v) => self.push(t, v),
+                None => self.push(NIL, Val::Int(0)),
+            }
+            return Ok(());
+        }
+        self.stack.pop();
+        self.materialize(base)?;
+        self.stack.pop();
+        let (fail, end) = (self.label(), self.label());
+        self.emit(Op::Prim(op));
+        self.code.push(Ins::JumpZero(fail));
+        self.emit(Op::Lit(t as u64));
+        self.emit(Op::Prim(P::UnionMake));
+        self.code.push(Ins::Jump(end));
+        self.code.push(Ins::Label(fail));
+        self.emit(Op::Prim(P::Drop));
+        self.emit(Op::Lit(0));
+        self.emit(Op::Lit(NIL as u64));
+        self.emit(Op::Prim(P::UnionMake));
+        self.code.push(Ins::Label(end));
+        let u = self.types.union(t, NIL);
+        self.push(u, Val::Run);
         Ok(())
     }
 

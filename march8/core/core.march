@@ -310,6 +310,15 @@ i64 f64 or. money or. int# or. dec# or. num def.
   skip def.
 [ < a ary string or i64 > over. length. min. 1 +. over. length. slice. ] skip def.
 
+-- Files (Thomas, 2026-10-09). `file` applied to a string makes a file, a
+-- path said to be one, `"data.csv" file.`, so text is never taken for a
+-- path. `read` reads its text when the program runs, an effect; `embed`
+-- reads it while compiling, so that what follows can fold on it, as a macro
+-- would, the text going into the code as data. Paths are from where march8
+-- runs.
+[ < string -- file > string>file. ] file def.
+[ < file -- string > file-read. ] read def.
+
 -- Text: `split` at each separator (between characters, for ""), `lines`,
 -- and `words` at runs of white space, as Haskell's are; `lower` and `upper`,
 -- element by element over an array of strings.
@@ -400,6 +409,7 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < f64 -- string > f64>text. ] show def.
 [ < money -- string > money>text. ] show def.
 [ < nil -- string > drop. "nil" ] show def.
+[ < file -- string > file-path. string-show. " file" concat. ] show def.
 [ < 1 bool. -- string > drop. "true" ] show def.
 [ < bool -- string > drop. "false" ] show def.
 [ < tuple -- string > [ show. ] map. "(" swap. [ " " swap. concat. concat. ] each. " )" concat. ]

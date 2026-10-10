@@ -208,6 +208,8 @@ pub enum Primitive {
     // around it allowed; ( s -- 0 0 ) if it writes none.
     ParseInt = 116,
     ParseFloat = 117,
+    // ( path -- text ) A file's text, read now; an error says why not.
+    ReadFile = 118,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -329,6 +331,7 @@ impl Primitive {
         (Self::Upper, "upper"),
         (Self::ParseInt, "parse-int"),
         (Self::ParseFloat, "parse-float"),
+        (Self::ReadFile, "read-file"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

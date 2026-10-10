@@ -16,6 +16,8 @@ pub enum Error {
     Fuel,
     Limit,
     User(u64),
+    /// Input or output failed, and why.
+    Io(String),
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1433,6 +1435,14 @@ impl Machine {
                 };
                 let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
                 self.push(r)?;
+            }
+            ReadFile => {
+                let r = self.pop()?;
+                let path = self.text(r)?.to_text().ok_or(Error::Memory)?;
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| Error::Io(format!("cannot read {path:?}: {e}")))?;
+                let t = self.allocate_text(merkle_champ::Sequence::text(&text))?;
+                self.push(t)?;
             }
             ParseInt | ParseFloat => {
                 let s = self.pop()?;

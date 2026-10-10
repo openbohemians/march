@@ -31,10 +31,13 @@ pub enum Base {
     /// Truth: 0 and 1, Iverson's brackets, so a subset of i64 (Thomas,
     /// 2026-10-09). Shown as `false` and `true`.
     Bool,
+    /// A file: a path said to be one, so that text is never taken for a
+    /// path. Held as a string, until March has roles.
+    File,
 }
 
 impl Base {
-    pub const ALL: [(Base, &'static str); 11] = [
+    pub const ALL: [(Base, &'static str); 12] = [
         (Base::I64, "i64"),
         (Base::F64, "f64"),
         (Base::Money, "money"),
@@ -46,6 +49,7 @@ impl Base {
         (Base::Quote, "quote"),
         (Base::Nil, "nil"),
         (Base::Bool, "bool"),
+        (Base::File, "file"),
     ];
 }
 
@@ -61,6 +65,7 @@ pub const SYMBOL: Type = 7;
 pub const QUOTE: Type = 8;
 pub const NIL: Type = 9;
 pub const BOOL: Type = 10;
+pub const FILE: Type = 11;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Term {

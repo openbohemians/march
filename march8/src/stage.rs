@@ -637,7 +637,19 @@ impl Stage {
             Ok(())
         } else if let Some(t) = w.ty {
             self.need(1)?;
-            self.annotate(self.stack.len() - 1, t)
+            let i = self.stack.len() - 1;
+            let have = self.stack[i].ty;
+            // A type applied to a value of another converts it, if the type
+            // has a clause for that: `"data.csv" file.`. Only when applied: a
+            // clause that wants a file is never given a string.
+            if have != t
+                && !self.types.is_literal(have)
+                && let Some(c) = self.conversion(t, have)
+            {
+                let at = self.pos;
+                return self.apply_clause(name, &c, Env::default(), at);
+            }
+            self.annotate(i, t)
         } else if !w.clauses.is_empty() {
             self.family(name)
         } else {
@@ -2954,6 +2966,21 @@ impl Stage {
             }
             Prim::TupleAt => self.tuple_at(base)?,
             Prim::Parse => self.parse(name, base)?,
+            // A file's text read while compiling, a known string, so what
+            // follows folds on it: macros by staging. The text goes into the
+            // code as data, so the code's identity follows the file.
+            Prim::Embed => {
+                let Val::Str(path) = self.stack[base].val.clone() else {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!("`{name}` reads while compiling, so its file must be known then"),
+                    ));
+                };
+                let text = std::fs::read_to_string(&*path)
+                    .map_err(|e| self.err(Kind::Io, format!("cannot embed {path:?}: {e}")))?;
+                self.stack.pop();
+                self.push(STRING, Val::Str(text.into()));
+            }
             // An empty array or map of a type: `string i64 map. empty.`.
             Prim::Empty => {
                 let Val::Type(t) = self.stack[base].val else {

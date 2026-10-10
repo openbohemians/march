@@ -67,6 +67,9 @@
 | lower, upper case    | `lower` `upper` |   |       |       | element by element over arrays |
 | write any value      | `print`    |        | `⎕←`  | `&p`  |        |
 | write a string       | `write`    |        | `⍞←`  | `&pf` |        |
+| a file, from a path  | `file`     |        |       |       | `"data.csv" file`: a path said to be one |
+| read a file          | `read`     |        | `⎕NGET` | `&fras` | when the program runs |
+| read while compiling | `embed`    |        |       |       | the text is known, so what follows folds |
 | swap top two         | `swap2`    |  `~~`  |       |       |        |
 | dup top two          | `dup2`     |  `==`  |       |       |        |
 | absolute value       | `abs`      |  `⌵`   | `\|`  | `⌵`   |        |

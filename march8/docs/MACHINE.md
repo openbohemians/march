@@ -44,6 +44,7 @@ runs to the end of the line, except inside `< >`.
 | `\name` | a symbol, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
 | `.` | applies the value on top |
 | `name.` | `name .`: each dot at the end of a word applies it (Thomas, 2026-10-08), so no name ends in a dot; `vec..` is `vec . .` |
+| `a.b.` | `a. b.`: dots between names chain them, each applying the name before it, as uniform call syntax reads (Thomas, 2026-10-09): `"data.csv" file.read.lines.`. Literals stand apart: `2.5` is a number, `2.i64` no chain |
 | `[ … ]` | a quotation: its words, unevaluated |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
 | `_.` | in a literal, a copy of a value from below it (Comprehensions) |
@@ -616,7 +617,12 @@ strings. `parse` reads a number from its text, the type given as a value,
 `"42" i64 parse.`: `i64 nil or`, the value tagged at run time or nil, and
 on a known string the value or nil itself. `le?`, `ge?` and `neq?`, with
 `≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that
-NaN is at most and at least nothing.
+NaN is at most and at least nothing. Files: `file`, applied to a string,
+makes a file, a path said to be one, `"data.csv" file.`, so that text is
+never taken for a path (a type applied to a value of another converts it
+when the type has a clause for that, and only when applied); `read` reads
+it when the program runs, an effect, and `embed` while compiling, so what
+follows folds on its text (TYPES.md 2.15).
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`) exist only at compile time.
@@ -637,7 +643,7 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with forty-four primitives added: `pick`; checked
+The machine is march7's, with forty-five primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
@@ -647,7 +653,8 @@ overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>
 `vector-insert` and `vector-remove`; `union-make`, `union-tag` and
 `union-value`; `grade-ints`, `grade-floats` and `grade-texts`, and their
 `grade-down-` forms; `vector-keep`; `split`, `lines`, `words`, `lower` and
-`upper`; and `parse-int` and `parse-float`, which leave a value and a flag.
+`upper`; `parse-int` and `parse-float`, which leave a value and a flag; and
+`read-file`, whose failure is an `Io` error with the system's reason.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -824,6 +831,15 @@ warning where a union is made (above, "Unions").
   `< … >` as the mathematical angle brackets `⟨ … ⟩` (U+27E8, U+27E9,
   LaTeX's `\langle` and `\rangle`). The reader then reads `⟨ ⟩` as `< >`,
   so either form reads back, and the way back is the same rewrite.
+- **More of files.** `stdin. read.`, standard input as a source of its
+  own, as `read` is a family; writing a file, which cannot be another
+  `write` clause, since `write` takes one string and a family's clauses
+  take as many; `string error or` from `read` once there is an error type;
+  paths from the source's own place, not where march8 runs.
+- **Known arrays.** An array is always made at run time, so words that make
+  one, `words`, `split`, `lines`, `range`, do not fold on known values, and
+  `embed`'s text folds only through words that make scalars: a YAML file
+  read into data while compiling needs arrays and maps the stage knows.
 - **TODO: list edits by arrows,** from SYMBOL (Thomas, 2026-10-09: to think
   on). Its ASCII pairs point the way the elements move: `+>` and `<+` add an
   element at the front and the end, `->` and `<-` remove a suffix and a

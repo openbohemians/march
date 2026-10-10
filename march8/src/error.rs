@@ -44,6 +44,8 @@ pub enum Kind {
     /// inside its own application, unwinding to that application, the
     /// `n`th, to make it an instance.
     Again(usize),
+    /// A file that could not be read while compiling, for `embed`.
+    Io,
     /// An error while running.
     Run(crate::machine::Error),
 }
@@ -136,6 +138,7 @@ impl From<crate::machine::Error> for Error {
             crate::machine::Error::User(4) => {
                 "`keep`: the array and its mask are not as long".into()
             }
+            crate::machine::Error::Io(why) => why.clone(),
             other => format!("{other}"),
         };
         Error::new(Kind::Run(e), None, msg)

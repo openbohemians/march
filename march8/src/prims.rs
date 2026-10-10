@@ -78,6 +78,10 @@ pub enum Prim {
     StrLower,
     StrUpper,
     Parse,
+    StrToFile,
+    FilePath,
+    FileRead,
+    Embed,
     TupleAt,
     TupleSpread,
     MapKeys,
@@ -415,6 +419,15 @@ pub const PRIMS: &[PrimDef] = &[
         &[P::Upper],
     ),
     d(Prim::Parse, "parse", "< string a -- b >", &[]),
+    d(Prim::StrToFile, "string>file", "< string -- file >", &[]),
+    d(Prim::FilePath, "file-path", "< file -- string >", &[]),
+    d(
+        Prim::FileRead,
+        "file-read",
+        "< file -- string >",
+        &[P::ReadFile],
+    ),
+    d(Prim::Embed, "embed", "< file -- string >", &[]),
     d(Prim::VecLength, "vec-length", "< n a vec -- i64 >", &[]),
     d(Prim::VecAt, "vec-at", "< n a vec i64 -- a >", &[P::VecAt]),
     d(
@@ -561,6 +574,7 @@ pub const WRITES: Effects = IO_WRITE;
 pub fn effects(p: Prim) -> Effects {
     match p {
         Prim::Write => IO_WRITE,
+        Prim::FileRead => IO_READ,
         _ => 0,
     }
 }
@@ -612,6 +626,7 @@ pub fn foldable(p: Prim) -> bool {
                 | Prim::StrLines
                 | Prim::StrWords
                 | Prim::Parse
+                | Prim::Embed
                 | Prim::SortFloats
                 | Prim::SortMoney
                 | Prim::SortTexts
@@ -860,6 +875,8 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
             Ok(vec![Val::Str(out.into())])
         }
         StrLower => Ok(vec![Val::Str(text(&a[0]).to_lowercase().into())]),
+        // A file is its path's text, retyped.
+        StrToFile | FilePath => Ok(vec![a[0].clone()]),
         StrUpper => Ok(vec![Val::Str(text(&a[0]).to_uppercase().into())]),
         StrConcat => Ok(vec![Val::Str(
             format!("{}{}", text(&a[0]), text(&a[1])).into(),

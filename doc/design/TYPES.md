@@ -59,7 +59,12 @@ every application is marked:
 - **A dot at the end of a word applies it** (Thomas, 2026-10-08): `sq.` is
   `sq .`, so `1 i64. 1 i64. +.` reads more easily. By that convention no
   name ends in a dot, and the reader enforces it. Each dot applies once:
-  `x 100 i64 vec..` builds a type and annotates `x` with it.
+  `x 100 i64 vec..` builds a type and annotates `x` with it. Dots between
+  names chain them, each applying the name before it (Thomas, 2026-10-09):
+  `"data.csv" file.read.lines.` is `file. read. lines.`, as uniform call
+  syntax reads (Nim's, D's): a concatenative program was a method chain all
+  along. Literals stand apart: a number keeps its point, `2.5`, `2.i64` is
+  no chain, and a string is followed by a space. So no name holds a dot.
 - **A type is a value until it is applied, and applying a type annotates.**
   - `1 i64 .` annotates 1 as an i64.
   - `100 i64 vec .` builds a type: `i64` unapplied is a type value, and
@@ -319,6 +324,12 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   it applies: for each domain, whether it reads and whether it writes, the
   effect rows of march5. Its run-time effect tokens are not needed while
   code runs in order.
+- **An effect runs while compiling only when asked** (Thomas, 2026-10-09).
+  `read` reads a file when the program runs, even when its path is known;
+  `embed` reads it while compiling, so what follows folds on its text:
+  macros by staging, as Crystal's `read_file` or Rust's `include_str!`, a
+  YAML file read into values, even types, with no macro language. The text
+  is data in the code, so the code's identity follows the file.
 - **No match is no word.** When no clause matches, by types at compile time
   or by guards at run time, it is the same error as an undefined word. The
   name is a word's outermost context; types and guards narrow it.

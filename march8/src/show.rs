@@ -13,6 +13,13 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
         Term::Base(Base::F64) => out.push_str(&format!("{:?}", f64::from_bits(v))),
         Term::Base(Base::Money) => out.push_str(&show_dec((v as i64).into(), 2)),
         Term::Base(Base::Nil) => out.push_str("nil"),
+        Term::Base(Base::File) => match m.text(v).ok().and_then(|t| t.to_text()) {
+            Some(s) => {
+                quoted(&s, out);
+                out.push_str(" file");
+            }
+            None => out.push_str(&format!("<file {v}>")),
+        },
         Term::Base(Base::Bool) => out.push_str(if v == 0 { "false" } else { "true" }),
         // A union's value, by the type its tag names.
         Term::Or(..) => match m.sequence(v) {

@@ -307,10 +307,20 @@ ame` notation opens APL's character set to March, but
   programmers may define them as they like; they may suit type variables.
 - **Mathematics first, programming's conventions second** (Thomas,
   2026-10-09): where the two differ, a symbol means what it means in
-  mathematics. So multiplying is `⋅`, the dot operator of algebra (`\cdot`),
-  with `*` its ASCII spelling, and `×`, the Cartesian product, is kept for
-  the outer product of arrays. A lone `·` or `∙`, which look alike, reads as
-  `⋅`.
+  mathematics, and `×`, the Cartesian product, is kept for the outer product
+  of arrays. But what is typed every day must be typeable: multiplying is
+  written `*`, and `⋅`, the dot operator of algebra (`\cdot`), is its glyph,
+  for `fmt` to render ("mathize") when wanted. A lone `·` or `∙`, which look
+  alike, reads as `⋅`.
+- **An inverse is a word** (Thomas, 2026-10-09). `-` negates and `/` is the
+  reciprocal (its glyph `÷`), as APL's monadic `-` and `÷` are, so each has
+  one meaning. Subtracting is negating and adding, and dividing is the
+  reciprocal and the product: `-+` and `/*`, each one word until the
+  compiler fuses the pair, a pair's word read as its parts in order. On a
+  stack, left and right division are then the order of `*`'s operands:
+  `a b / *` is a⋅b⁻¹, `b / a *` b⁻¹⋅a. Integers have no reciprocal; their
+  division is `div`, `mod` and `divmod`, floored. `^` is power, as LaTeX
+  writes it.
 - **Every built-in word has a word name** (proposed, Thomas, 2026-10-08), and
   its symbol is typed by that name: if the table has `each ∵`, then `\each`
   is `∵`, the core defines `∵` as `each`, and `march fmt` can turn either

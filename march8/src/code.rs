@@ -183,6 +183,13 @@ pub enum Primitive {
     UnionMake = 101,
     UnionTag = 102,
     UnionValue = 103,
+    // ( a -- p ) The positions, from 1, that would put an array in order:
+    // its grade, stable, as APL's `⍋`, by integer, float or text.
+    GradeInts = 104,
+    GradeFloats = 105,
+    GradeTexts = 106,
+    // ( a m -- a ) The elements whose mask cell is not 0: APL's compress.
+    Keep = 107,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -290,6 +297,10 @@ impl Primitive {
         (Self::UnionMake, "union-make"),
         (Self::UnionTag, "union-tag"),
         (Self::UnionValue, "union-value"),
+        (Self::GradeInts, "grade-ints"),
+        (Self::GradeFloats, "grade-floats"),
+        (Self::GradeTexts, "grade-texts"),
+        (Self::Keep, "vector-keep"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

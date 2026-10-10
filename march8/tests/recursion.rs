@@ -24,7 +24,7 @@ fn code(pieces: &[&str], src: &str) -> Vec<Op> {
 
 const FACT: &str = "[ 0 eq?. ] zero? def.
     [ < i64 zero? > drop. 1 ] fact def.
-    [ < i64 > dup. 1 -. fact. *. ] fact def.";
+    [ < i64 > dup. 1 -+. fact. *. ] fact def.";
 
 #[test]
 fn families_recurse_through_their_instances() {
@@ -47,11 +47,11 @@ fn families_recurse_through_their_instances() {
     let fib = "[ 0 eq?. ] zero? def. [ 1 eq?. ] one? def.
         [ < i64 zero? > ] fib def.
         [ < i64 one? > ] fib def.
-        [ < i64 > dup. 1 -. fib. swap. 2 -. fib. +. ] fib def.";
+        [ < i64 > dup. 1 -+. fib. swap. 2 -+. fib. +. ] fib def.";
     assert_eq!(cells(&[fib, "15 fib."]).unwrap(), [610]);
     // With value patterns, no helper words: 0 and 1 are their own results.
     let fib = "[ < 0 > ] fib def. [ < 1 > ] fib def.
-        [ < n > dup. 1 -. fib. swap. 2 -. fib. +. ] fib def.";
+        [ < n > dup. 1 -+. fib. swap. 2 -+. fib. +. ] fib def.";
     assert_eq!(cells(&[fib, "15 fib.", "20", "fib."]).unwrap(), [610, 6765]);
     let s = session(&[fib, "10.0 fib."]).unwrap();
     assert_eq!(s.show(), "<1> 55.0");
@@ -62,7 +62,7 @@ fn instances_are_compiled_once_and_shared() {
     // Two words applying `fact` to an i64 call one instance.
     let words = "[ fact. ] a def. [ 1 +. fact. ] b def.";
     let a = code(&[FACT, words, "7"], "a.");
-    let b = code(&[FACT, words, "7"], "1 -. b.");
+    let b = code(&[FACT, words, "7"], "1 -+. b.");
     assert_eq!(a.last(), Some(&Op::Return));
     assert_eq!(a[a.len() - 2], b[b.len() - 2]);
     assert!(matches!(a[a.len() - 2], Op::Tail(_)));
@@ -81,7 +81,7 @@ fn a_recursive_clause_may_come_before_the_base() {
     // finishes first while compiling, and types the recursion.
     let down = "[ 0 gt?. ] positive? def.
         [ < i64 > ] down def.
-        [ < i64 positive? > 1 -. down. ] down def.";
+        [ < i64 positive? > 1 -+. down. ] down def.";
     assert_eq!(cells(&[down, "5 down.", "3", "down."]).unwrap(), [0, 0]);
 }
 
@@ -90,7 +90,7 @@ fn tail_calls_run_in_constant_space() {
     // A million levels would exhaust the machine's 16384 return frames.
     let sumto = "[ 0 eq?. ] zero? def.
         [ < i64 i64 zero? > drop. ] sumto def.
-        [ < i64 i64 > swap. over. +. swap. 1 -. sumto. ] sumto def.";
+        [ < i64 i64 > swap. over. +. swap. 1 -+. sumto. ] sumto def.";
     let mut s = session(&[sumto]).unwrap();
     s.fuel = 50_000_000;
     s.eval("0 1000000 sumto.").unwrap();

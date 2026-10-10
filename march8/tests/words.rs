@@ -81,8 +81,8 @@ fn divmod_is_floored() {
         s.compile("-7 3 divmod.").unwrap().0,
         s.compile("-3 2").unwrap().0
     );
-    // Floats divide; `/` is `div`.
-    assert_eq!(show(&["7.0 2 div. 7 2 /. 1.0 4 /."]), "<3> 3.5 3 0.25");
+    // Floats divide, by `div` or by `/*`, the reciprocal and the product.
+    assert_eq!(show(&["7.0 2 div. 7 2 div. 1.0 4 /*."]), "<3> 3.5 3 0.25");
     assert_eq!(session(&["7 0 divmod."]).err(), Some(Kind::Arithmetic));
     assert_eq!(
         session(&["7", "0 mod."]).err(),
@@ -207,5 +207,51 @@ fn insert_and_remove_by_gap_and_element() {
     assert_eq!(
         session(&["( 5 6 7 ) 9 5 insert."]).err(),
         Some(Kind::Mismatch)
+    );
+}
+
+#[test]
+fn an_inverse_is_a_word() {
+    // `-` negates and `/` is the reciprocal; `-+` and `/*` subtract and
+    // divide (Thomas, 2026-10-09). Now and at run time, over arrays too.
+    assert_eq!(
+        show(&["5 -. 2.5 -. 7 3 -+. 7.0 0.5 -+. ( 1 2 ) -."]),
+        "<5> -5 -2.5 4 6.5 ( -1 -2 )"
+    );
+    assert_eq!(
+        show(&["2 /. 7 2 /*. ( 2.0 4.0 ) /. 4 ÷."]),
+        "<4> 0.5 3.5 ( 0.5 0.25 ) 0.25"
+    );
+    assert_eq!(show(&["7 3", "-+. -. 8.0 2.0", "/*. /."]), "<2> -4 0.25");
+    // `^` is power; `⋅` is `*`'s glyph.
+    assert_eq!(show(&["2 10 ^. 3 4 ⋅."]), "<2> 1024 12");
+    // An integer has no reciprocal among the integers: its division is `div`.
+    assert_eq!(session(&["7 i64.", "/."]).err(), Some(Kind::NoWord));
+    assert_eq!(
+        session(&["-9223372036854775807 i64. 1 -+.", "-."]).err(),
+        Some(Kind::Run(march8::machine::Error::Arithmetic))
+    );
+}
+
+#[test]
+fn grade_keep_and_positions() {
+    // The positions that order an array, stable; an array at positions; the
+    // elements a mask keeps.
+    assert_eq!(
+        show(&["( 30 10 20 10 ) grade. ( \"pear\" \"fig\" \"apple\" ) grade. ( 2.5 -1.0 ) grade."]),
+        "<3> ( 2 4 3 1 ) ( 3 2 1 ) ( 2 1 )"
+    );
+    assert_eq!(
+        show(&["( 10 20 30 ) ( 3 1 ) at. ( 1 2 3 4 ) ( true. false. true. false. ) keep."]),
+        "<2> ( 30 10 ) ( 1 3 )"
+    );
+    // A sort by any key: the keys graded, and the array read in their order.
+    assert_eq!(
+        show(&["( \"pear\" \"fig\" \"apple\" ) [ length. ] sort-by. ( 3 -5 2 ) abs sort-by."]),
+        "<2> ( \"fig\" \"pear\" \"apple\" ) ( 2 3 -5 )"
+    );
+    assert_eq!(
+        session(&["( 1 2 3 )", "( true. false. ) keep."]).err(),
+        Some(Kind::Run(march8::machine::Error::User(4)))
     );
 }

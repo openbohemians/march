@@ -54,8 +54,8 @@ fn each_inside_a_literal_collects() {
 fn pulls_take_values_from_below() {
     // The first `_.` takes the deepest, so the literal reads as the code it
     // replaces; the literal takes what it pulls.
-    assert_eq!(show(&["1 2 ( _. _. /. )"]), "<1> ( 0 )");
-    assert_eq!(show(&["1.0 2 ( _. _. /. )"]), "<1> ( 0.5 )");
+    assert_eq!(show(&["1 2 ( _. _. div. )"]), "<1> ( 0 )");
+    assert_eq!(show(&["1.0 2 ( _. _. div. )"]), "<1> ( 0.5 )");
     // A pull in a loop reads the same value each time, known or not.
     assert_eq!(
         show(&["10 ( ( 1 2 3 ) [ _. +. ] each. )"]),

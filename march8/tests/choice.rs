@@ -159,7 +159,7 @@ fn arithmetic_lifts_over_arrays() {
     );
     assert_eq!(show(&["( 1 2 ) 10 *."]), "<1> ( 10 20 )");
     assert_eq!(
-        show(&["10 ( 1 2 3 ) -.", "( 1 2 3 ) 1 -."]),
+        show(&["10 ( 1 2 3 ) -+.", "( 1 2 3 ) 1 -+."]),
         "<2> ( 9 8 7 ) ( 0 1 2 )"
     );
     // Money is not multiplied, lifted or not.
@@ -190,7 +190,7 @@ fn guards_must_not_write() {
     // included: `cd` writes as it counts down.
     let cd = "[ 0 eq?. ] zero? def.
         [ < i64 zero? > ] cd def.
-        [ < i64 > dup. print. 1 -. cd. ] cd def.
+        [ < i64 > dup. print. 1 -+. cd. ] cd def.
         [ cd. 0 eq?. ] done? def.";
     assert_eq!(cells(&[cd, "[ < i64 done? > ] g def."]), Err(Kind::Effect));
     // Writing in a clause's body is fine.

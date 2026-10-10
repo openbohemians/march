@@ -60,7 +60,7 @@ fn the_stack_with_its_types_reads_as_march() {
 #[test]
 fn scan_gives_the_running_reductions() {
     let mut s = Session::new();
-    s.eval("( 1 2 3 ) + scan. ( 1 2 3 ) - scan.").unwrap();
+    s.eval("( 1 2 3 ) + scan. ( 1 2 3 ) -+ scan.").unwrap();
     assert_eq!(s.show(), "<2> ( 1 3 6 ) ( 1 -1 -4 )");
     s.eval("( 5 6 )").unwrap();
     s.eval("+ scan.").unwrap();

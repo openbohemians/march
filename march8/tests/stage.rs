@@ -164,7 +164,10 @@ fn brackets_annotate_and_stack_words_move_judgments() {
         [300]
     );
     assert_eq!(fails("1 2 < money i64 > + ."), Kind::NoWord);
-    assert_eq!(run("[ < i64 > 10 swap . - . ] s def . 3 s .").unwrap(), [7]);
+    assert_eq!(
+        run("[ < i64 > 10 swap . -+ . ] s def . 3 s .").unwrap(),
+        [7]
+    );
     // A literal dropped leaves no code.
     assert_eq!(code("[ 1 2 drop . ] k def .", "k ."), code("", "1"));
     // `dup` copies a literal as a literal, so `1.5 dup +` folds exactly.
@@ -172,7 +175,7 @@ fn brackets_annotate_and_stack_words_move_judgments() {
     // Products of decimals stay exact: 1.10 × 1.10 is 1.2100, 121 cents.
     assert_eq!(run("1.10 1.10 * . money .").unwrap(), [121]);
     assert_eq!(show("[ < f64 f64 > * . ] a def . 2.0 3.5 a ."), "<1> 7.0");
-    assert_eq!(run("10 3 - .").unwrap(), [7]);
+    assert_eq!(run("10 3 -+ .").unwrap(), [7]);
     // Money is added, not multiplied.
     assert_eq!(fails("[ < money money > * . ] b def ."), Kind::NoWord);
     // Types are values: `.` builds them and applies them.
@@ -187,7 +190,7 @@ fn known_values_have_no_code_until_needed() {
     // placed under them only when an operation needs both.
     let mut s = Session::new();
     s.eval("5").unwrap();
-    s.eval("1 swap . - .").unwrap();
+    s.eval("1 swap . -+ .").unwrap();
     assert_eq!(s.machine.stack, [(-4i64) as u64]);
     s.eval("10 20 rot .").unwrap();
     assert_eq!(s.show(), "<3> 10 20 -4");

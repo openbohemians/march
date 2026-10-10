@@ -43,11 +43,22 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < f64 f64 -- f64 > f64+. ] + def.
 [ < money money -- money > money+. ] + def.
 
-[ < int# int# -- int# > int#-. ] - def.
-[ < dec# dec# -- dec# > dec#-. ] - def.
-[ < i64 i64 -- i64 > i64-. ] - def.
-[ < f64 f64 -- f64 > f64-. ] - def.
-[ < money money -- money > money-. ] - def.
+-- `-` is one value's negative, and `-+` subtracts, negating and adding in
+-- one word until the compiler fuses the two (Thomas, 2026-10-09): `a b -+`
+-- is a + (-b). So `-` has one meaning, as in APL.
+
+[ < int# int# -- int# > int#-. ] -+ def.
+[ < dec# dec# -- dec# > dec#-. ] -+ def.
+[ < i64 i64 -- i64 > i64-. ] -+ def.
+[ < f64 f64 -- f64 > f64-. ] -+ def.
+[ < money money -- money > money-. ] -+ def.
+
+[ < int# -- int# > 0 swap. -+. ] - def.
+[ < dec# -- dec# > 0 swap. -+. ] - def.
+[ < i64 -- i64 > 0 swap. -+. ] - def.
+[ < f64 -- f64 > -1.0 f64*. ] - def.
+[ < money -- money > 0 swap. -+. ] - def.
+[ < a ary > [ -. ] map. ] - def.
 
 [ < int# int# -- int# > int#*. ] * def.
 [ < dec# dec# -- dec# > dec#*. ] * def.
@@ -66,10 +77,10 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < a ary a > swap. [ over. +. ] map. swap. drop. ] + def.
 [ < a a ary > [ over. +. ] map. swap. drop. ] + def.
 
-[ < a ary atom > swap. [ over. -. ] map. swap. drop. ] - def.
-[ < atom a ary > [ over. swap. -. ] map. swap. drop. ] - def.
-[ < a ary a > swap. [ over. -. ] map. swap. drop. ] - def.
-[ < a a ary > [ over. swap. -. ] map. swap. drop. ] - def.
+[ < a ary atom > swap. [ over. -+. ] map. swap. drop. ] -+ def.
+[ < atom a ary > [ over. swap. -+. ] map. swap. drop. ] -+ def.
+[ < a ary a > swap. [ over. -+. ] map. swap. drop. ] -+ def.
+[ < a a ary > [ over. swap. -+. ] map. swap. drop. ] -+ def.
 
 [ < a ary atom > swap. [ over. *. ] map. swap. drop. ] * def.
 [ < atom a ary > [ over. *. ] map. swap. drop. ] * def.
@@ -81,12 +92,17 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < a ary a > swap. [ over. div. ] map. swap. drop. ] div def.
 [ < a a ary > [ over. swap. div. ] map. swap. drop. ] div def.
 
+[ < a ary atom > swap. [ over. /*. ] map. swap. drop. ] /* def.
+[ < atom a ary > [ over. swap. /*. ] map. swap. drop. ] /* def.
+[ < a ary a > swap. [ over. /*. ] map. swap. drop. ] /* def.
+[ < a a ary > [ over. swap. /*. ] map. swap. drop. ] /* def.
+
 -- Two arrays, element by element (Thomas, 2026-10-09: as everything else
 -- is), as long as each other: checked at compile time when both lengths are
 -- known. `zip` pairs elements for any word.
 
 [ < a ary a ary > [ +. ] zip. ] + def.
-[ < a ary a ary > [ -. ] zip. ] - def.
+[ < a ary a ary > [ -+. ] zip. ] -+ def.
 [ < a ary a ary > [ *. ] zip. ] * def.
 
 -- `xs ys q table`: q on every pair, a row for each element of xs. `×` is the
@@ -105,17 +121,20 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < a ary ary b ary > swap. [ over. dot. ] map. swap. drop. ] dot def.
 [ < a ary ary > dup. 1 at. length. range. [ over. [ over. at. ] map. swap. drop. ] map. swap. drop. ] transpose def.
 
--- Multiplying is written `⋅`, the dot operator, as in algebra; `*` is its
--- ASCII spelling, and `×` is kept for the outer product (Thomas, 2026-10-09:
--- mathematics first, programming's conventions second).
+-- Multiplying is written `*`, which is typed; `⋅`, the dot operator, is its
+-- glyph, as in algebra, and `×` is kept for the outer product (Thomas,
+-- 2026-10-09: mathematics first, but `\cdot` at every product is too much).
 
 [ *. ] ⋅ def.
 
--- Division. `divmod` leaves the quotient and the remainder, floored: the
--- quotient rounded down, the remainder with the divisor's sign, so that
--- a = q b + r and `-7 3 divmod.` is -3 2 (Thomas, 2026-10-09). `div` and
--- `mod` take one of them, so the three always agree; `div` of floats is
--- their quotient, and `/` is `div`, for now. Two literals divide exactly.
+-- Division. `/` is one over a value, its reciprocal, and `/*` divides, the
+-- reciprocal and the product in one word until the compiler fuses the two
+-- (Thomas, 2026-10-09): `a b /*` is a ⋅ 1/b, as `-` and `-+` are. `÷` is
+-- `/`'s glyph. An integer has no reciprocal among the integers: its
+-- division is `divmod`, floored, the quotient rounded down and the
+-- remainder with the divisor's sign, so that a = q b + r and `-7 3
+-- divmod.` is -3 2. `div` and `mod` take one of them, so the three always
+-- agree; `div` of floats is their quotient. Two literals divide exactly.
 
 [ < int# int# -- int# int# > int#-divmod. ] divmod def.
 [ < i64 i64 -- i64 i64 > i64-divmod. ] divmod def.
@@ -125,8 +144,12 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < int# int# -- int# > divmod. swap. drop. ] mod def.
 [ < i64 i64 -- i64 > divmod. swap. drop. ] mod def.
 [ < a ary a ary > [ div. ] zip. ] div def.
-[ div. ] ÷ def.
-[ div. ] / def.
+
+[ < f64 -- f64 > 1.0 swap. f64/. ] / def.
+[ < a ary > [ /. ] map. ] / def.
+[ < f64 f64 -- f64 > f64/. ] /* def.
+[ < a ary a ary > [ /*. ] zip. ] /* def.
+[ /. ] ÷ def.
 
 -- Comparisons leave a bool.
 
@@ -158,7 +181,7 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ 0 gt?. ] positive? def.
 [ 0 lt?. ] negative? def.
 
-[ < a negative? -- a > 0 swap. -. ] abs def.
+[ < a negative? -- a > -. ] abs def.
 [ < a -- a > ] abs def.
 [ < a a lt? -- a > drop. ] min def.
 [ < a a -- a > swap. drop. ] min def.
@@ -190,13 +213,15 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < i64 -- i64 > ] trunc def.
 [ < f64 -- i64 > f64-trunc. ] trunc def.
 
--- Roots and powers. `pow` is x to the y; `exp`, e to the x, is kept for
--- that. Two literals stay an exact literal.
+-- Roots and powers. `pow` is x to the y, written `^` as LaTeX writes it
+-- (Thomas, 2026-10-09); `exp`, e to the x, is kept for that. Two literals
+-- stay an exact literal.
 
 [ < f64 -- f64 > f64-sqrt. ] sqrt def.
 [ < int# int# -- int# > int#-pow. ] pow def.
 [ < i64 i64 -- i64 > i64-pow. ] pow def.
 [ < f64 f64 -- f64 > f64-pow. ] pow def.
+[ pow. ] ^ def.
 
 -- Containers, typed by their structure. A vec knows its length at compile
 -- time, so its length is a constant.
@@ -212,6 +237,8 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < n a vec i64 -- a > vec-at. ] at def.
 [ < k v map k -- v > map-at. ] at def.
 [ < tuple i64 > tuple-at. ] at def.
+-- At an array of positions, an array: the element at each, as APL indexes.
+[ < a ary i64 ary > [ over. swap. at. ] map. swap. drop. ] at def.
 
 -- A map's value at a key, or nil where it has none: `v nil or`, decided at
 -- run time unless the map and key are known (TYPES.md 3.6). Its outputs
@@ -234,6 +261,20 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < f64 ary -- f64 ary > f64-sort. ] sort def.
 [ < money ary -- money ary > money-sort. ] sort def.
 [ < string ary -- string ary > string-sort. ] sort def.
+
+-- `grade`: the positions that would put an array in order, as APL's `⍋`,
+-- so that `xs dup. grade. at.` is `xs sort.`; stable, equal elements keeping
+-- their order. With `at` taking an array of positions, `sort-by` sorts by
+-- any key: the keys made, graded, and the array read in their order (Thomas,
+-- 2026-10-09: five words are long enough to keep).
+[ < i64 ary -- i64 ary > i64-grade. ] grade def.
+[ < f64 ary -- i64 ary > f64-grade. ] grade def.
+[ < money ary -- i64 ary > money-grade. ] grade def.
+[ < string ary -- i64 ary > string-grade. ] grade def.
+[ over. swap. map. grade. at. ] sort-by def.
+
+-- `keep`: the elements whose mask is true, APL's compress.
+[ < a ary bool ary -- a ary > ary-keep. ] keep def.
 
 -- `count` is `length`, for now (Thomas, 2026-10-08: `#` may come later).
 [ length. ] count def.

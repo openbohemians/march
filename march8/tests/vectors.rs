@@ -21,7 +21,7 @@ fn show(pieces: &[&str]) -> String {
 fn two_arrays_element_by_element() {
     assert_eq!(
         show(&[
-            "( 1 2 3 ) ( 10 20 30 ) +. ( 1 2 ) ( 3 4 ) ⋅. ( 6.0 8.0 ) ( 2.0 4.0 ) ÷. ( 5 6 ) ( 1 1 ) -."
+            "( 1 2 3 ) ( 10 20 30 ) +. ( 1 2 ) ( 3 4 ) ⋅. ( 6.0 8.0 ) ( 2.0 4.0 ) /*. ( 5 6 ) ( 1 1 ) -+."
         ]),
         "<4> ( 11 22 33 ) ( 3 8 ) ( 3.0 2.0 ) ( 4 5 )"
     );
@@ -32,7 +32,7 @@ fn two_arrays_element_by_element() {
     );
     assert_eq!(show(&["( 1 2 3 ) ( 4 5 6 ) +. length."]), "<1> 3");
     // At run time too.
-    assert_eq!(show(&["( 6 7 ) ( 4 5 )", "-."]), "<1> ( 2 2 )");
+    assert_eq!(show(&["( 6 7 ) ( 4 5 )", "-+."]), "<1> ( 2 2 )");
     // No promotion: integers and floats do not mix.
     assert_eq!(
         session(&["( 1 2 ) ( 1.5 2.5 ) +."]).err(),
@@ -94,7 +94,7 @@ fn tensors_of_any_rank() {
         "<1> ( ( ( 2 3 ) ( 4 5 ) ) )"
     );
     assert_eq!(
-        show(&["10 ( ( 1 2 ) ( 3 4 ) ) -. ( 2.0 4.0 ) 2.0 ÷."]),
+        show(&["10 ( ( 1 2 ) ( 3 4 ) ) -+. ( 2.0 4.0 ) 2.0 /*."]),
         "<2> ( ( 9 8 ) ( 7 6 ) ) ( 1.0 2.0 )"
     );
     // An atom, anything not a container, at any rank, on either side.

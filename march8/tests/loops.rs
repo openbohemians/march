@@ -57,10 +57,10 @@ fn each_has_an_invariant() {
 #[test]
 fn folds_and_reductions_go_either_way() {
     // Left: ((0 - 1) - 2) - 3. Right: 1 - (2 - (3 - 0)), as APL's `-/`.
-    assert_eq!(show(&["( 1 2 3 ) 0 [ -. ] fold."]), "<1> -6");
-    assert_eq!(show(&["( 1 2 3 ) 0 [ -. ] fold-right."]), "<1> 2");
-    assert_eq!(show(&["( 1 2 3 ) [ -. ] reduce."]), "<1> -4");
-    assert_eq!(show(&["( 1 2 3 ) [ -. ] reduce-right."]), "<1> 2");
+    assert_eq!(show(&["( 1 2 3 ) 0 [ -+. ] fold."]), "<1> -6");
+    assert_eq!(show(&["( 1 2 3 ) 0 [ -+. ] fold-right."]), "<1> 2");
+    assert_eq!(show(&["( 1 2 3 ) [ -+. ] reduce."]), "<1> -4");
+    assert_eq!(show(&["( 1 2 3 ) [ -+. ] reduce-right."]), "<1> 2");
     // A consumer takes a word as well as a quotation: APL's `+/`.
     assert_eq!(show(&["( 1 2 3 4 ) + reduce."]), "<1> 10");
     assert_eq!(

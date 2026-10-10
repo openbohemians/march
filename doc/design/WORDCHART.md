@@ -1,9 +1,12 @@
 | Meaning              | March Word | March  | APL   | Uiua  | NOTES  |
 |----------------------|------------|--------|-------|-------|--------|
 | add                  | `add`      |  `+`   | `+`   | `+`   |        |
-| subtract             | `sub`      |  `-`   | `-`   | `-`   |        |
-| multiply             | `mul`      |  `⋅`   | `×`   | `×`   |        |
-| divide               | `div`      |  `÷`   | `÷`   | `÷`   |        |
+| negate               | `neg`      |  `-`   | `-`   | `¯`   | APL's monadic `-` |
+| subtract             | `sub`      |  `-+`  | `-`   | `-`   | negate, then add: `a b -+` is a − b |
+| multiply             | `mul`      |  `*`   | `×`   | `×`   | glyph `⋅` |
+| reciprocal           | `recip`    |  `/`   | `÷`   |  —    | APL's monadic `÷`; glyph `÷`; no integer has one |
+| divide               |  —         |  `/*`  | `÷`   | `÷`   | reciprocal, then multiply: `a b /*` is a ÷ b |
+| quotient, floored    | `div`      |        | `⌊÷`  |       | integers; of floats, their quotient |
 | remainder            | `mod`      |  `◿`   | `\|`  | `◿`   |        |
 | div remainder        | `divmod`   |   ?    |       |       |        |
 | less than            | `lt?`      |   ?    | `<`   | `<`   |        |
@@ -16,7 +19,7 @@
 | third to top         | `rot`      |        |       |       |        |
 | length               | `len`      |  `⧻`   | `≢`   | `⧻`   | or `count` ? |
 | count                | `count`    |   ?    | `≢`   | `⧻`   |        |
-| element at           | `at`       |  `⊡`   | `⌷`   | `⊡`   |        |
+| element at           | `at`       |  `⊡`   | `⌷`   | `⊡`   | at an array of positions, an array |
 | join                 | `concat`   |  `⊂`   | `,`   | `⊂`   |        |
 | elements i->j        | `slice`    |        | `↑`   | `↙`   |        |
 | elements j->i        |  —         |        | `↓`   | `↘`   |        |
@@ -27,21 +30,26 @@
 | reverse              | `reverse`  |  `⇌`   | `⌽`   | `⇌`   | `flip` instead? |
 | 1 to n               | `range`    |  `⇡`   | `⍳`   | `⇡`   |        |
 | sort                 | `sort`     |  `⍆`   | `⍋`   | `⍆`   |        |
+| grade up             | `grade`    |  `⍏`   | `⍋`   | `⍏`   | the positions that would sort |
+| sort by a key        | `sort-by`  |        | `X[⍋K]` |     | `over swap map grade at`: keys, graded, read in order |
+| keep by mask         | `keep`     |  `▽`   | `/`   | `▽`   |        |
 | word on array's end  | `within`   |        |       | `⍜`   | Uiua's under is nearest equivalent |
 | elements onto stack  | `spread`   |        |       |       |        |
 | insert in gap k      | `insert`   |        |       |       | 0 prepends, -1 appends |
 | remove element k     | `remove`   |        |       |       |        |
 | map keys             | `keys`     |        |       |       |        |
 | map values           | `values`   |        |       |       |        |
+| map value or nil     | `get`      |        |       |       | `v nil or` |
+| map with key set     | `put`      |        |       |       |        |
+| empty array or map   | `empty`    |        |       |       | of a type: `string i64 map empty`; name provisional |
 | each, collect        | `map`      |  `∵`   | `¨`   | `∵`   |        |
 | each pair, in step   | `zip`      |        |       |       |        |
 | outer product        | `table`    |  `×`   | `∘.`  | `⊞`   | `×` is the table of products |
 | dot product          | `dot`      |  ?     | `+.×` |       | contraction: matrix · matrix is the matrix product; `⊙`? (Hadamard in math) |
+| transpose            | `transpose` | `⍉`   | `⍉`   | `⍉`   |        |
 | each, thread stack   | `each`     |        |       |       |        |
 | fold from left       | `fold`     |        |       | `∧`   |        |
-| fold from right      | `rfold`    |        | `/`   |       |        |
-| reduce from left     | `reduce`   | `/` ?  |       | `/`   |        |
-| reduce from right    | `rreduce`  |        | `/`   |       |        |
+| reduce from left     | `reduce`   |        |       | `/`   | `/` is the reciprocal |
 | running reductions   | `scan`     |  ?     | `\`   | `\`   |        |
 | repeat n times       | `repeat`   | `⍥`    | `⍣`   | `⍥`   |        |
 | compose quotations   | `compose`  | `∘`    | `∘`   |  —    |        |
@@ -55,24 +63,19 @@
 | maximum              | `max`      |  `↥`   | `⌈`   | `↥`   |        |
 | floor                | `floor`    |  `⌊`   | `⌊`   | `⌊`   |        |
 | ceiling              | `ceil`     |  `⌈`   | `⌈`   | `⌈`   |        |
-| power                | `pow`      |  `ⁿ`   | `*`   | `ⁿ`   |        |
-
-| **add to March**     |           |        |       |       |
-|----------------------|-----------|--------|-------|-------|
-| not                  | `not`     |  `¬`   | `~`   | `¬`   |
-| and                  | `and`     |  `∧`   | `∧`   |  —    |
-| or                   | `or`      |  `∨`   | `∨`   | `∨`   |
-| square root          | `sqrt`    |  `√`   | `*.5` | `√`   |
+| power                | `pow`      |  `^`   | `*`   | `ⁿ`   | as LaTeX writes it |
+| square root          | `sqrt`     |  `√`   | `*.5` | `√`   |        |
+| truth                | `true` `false` |    | `1` `0` | `1` `0` | `bool`: 0 and 1, an i64 too |
+| not                  | `not`      |  `¬`   | `~`   | `¬`   | 1 − x  |
+| and                  | `and`      |  `∧`   | `∧`   |  —    | minimum |
+| or                   | `or`       |  `∨`   | `∨`   | `∨`   | maximum; on two types, their union |
 
 | **not yet in March** |           |        |       |       |
 |----------------------|-----------|--------|-------|-------|
-| convert to match     |  ?        | `!`    |       |       |
-| reciprocal           |           |  ?     |       |       |
-| negate               | `neg`     | `¯`    | `-`   | `¯`   |
+| convert to match     |  ?        |  ?     |       |       | `!` retired; `to`, `type-of` open |
 | at most              |           | `≤`    | `≤`   | `≤`   |
 | at least             |           | `≥`    | `≥`   | `≥`   |
 | not equal            | `neq`     | `≠`    | `≠`   | `≠`   |
-| keep by mask         | `keep`    | `▽`    | `/`   | `▽`   |
 | take                 | `take`    | `↙`    | `↑`   | `↙`   |
 | drop                 |           | `↘`    | `↓`   | `↘`   |
 | member of            |           | `∈`    | `∊`   | `∊`   |
@@ -81,19 +84,18 @@
 | where                |           | `⊚`    | `⍸`   | `⊚`   |
 | shape                | `shape`   | `△`    | `⍴`   | `△`   |
 | reshape              |           | `↯`    | `⍴`   | `↯`   |
-| transpose            | `transpose` | `⍉`  | `⍉`   | `⍉`   |
 | rotate               |           | `↻`    | `⌽`   | `↻`   |
-| grade up             |           | `⍏`    | `⍋`   | `⍏`   |
 | grade down           |           | `⍖`    | `⍒`   | `⍖`   |
 | dip                  |           | `⊙`    |  —    | `⊙`   |
 | under                |           | `⍜`    |  —    | `⍜`   |
 
+| **undecided**        |              |        |       |       | NOTES  |
+|----------------------|--------------|--------|-------|-------|--------|
+| fold from right      | `fold-rt`    |        | `/`   |       |        |
+| reduce from right    | `reduce-rt`  |        | `/`   |       |        |
+
 | **not needed**       |              |        |       |       | NOTES  |
 |----------------------|--------------|--------|-------|-------|--------|
-| swap subtract        | `subadd`  |  `-+`  |       |       | `~ -` |
-| subtract             | `addsub`  |  `+-`  |       |       | `-` |
-| swap divide          | `divmul`  |  `÷×`  |       |       | `~ ÷` |
-| divide               | `muldiv`  |  `×÷`  |       |       | `÷` |
 | text of a value      | `>string`    |        | `⍕`   |       |        |
 | same, from last      | `each-right` |        |       |       |        |
 

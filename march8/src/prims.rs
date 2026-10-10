@@ -63,6 +63,11 @@ pub enum Prim {
     MapPut,
     Empty,
     TupleLength,
+    GradeInts,
+    GradeFloats,
+    GradeMoney,
+    GradeTexts,
+    AryKeep,
     TupleAt,
     TupleSpread,
     MapKeys,
@@ -315,6 +320,36 @@ pub const PRIMS: &[PrimDef] = &[
         "< string ary -- string ary >",
         &[P::SortTexts],
     ),
+    d(
+        Prim::GradeInts,
+        "i64-grade",
+        "< i64 ary -- i64 ary >",
+        &[P::GradeInts],
+    ),
+    d(
+        Prim::GradeFloats,
+        "f64-grade",
+        "< f64 ary -- i64 ary >",
+        &[P::GradeFloats],
+    ),
+    d(
+        Prim::GradeMoney,
+        "money-grade",
+        "< money ary -- i64 ary >",
+        &[P::GradeInts],
+    ),
+    d(
+        Prim::GradeTexts,
+        "string-grade",
+        "< string ary -- i64 ary >",
+        &[P::GradeTexts],
+    ),
+    d(
+        Prim::AryKeep,
+        "ary-keep",
+        "< a ary bool ary -- a ary >",
+        &[P::Keep],
+    ),
     d(Prim::VecLength, "vec-length", "< n a vec -- i64 >", &[]),
     d(Prim::VecAt, "vec-at", "< n a vec i64 -- a >", &[P::VecAt]),
     d(
@@ -499,6 +534,11 @@ pub fn foldable(p: Prim) -> bool {
                 | Prim::MapKeys
                 | Prim::MapValues
                 | Prim::SortInts
+                | Prim::GradeInts
+                | Prim::GradeFloats
+                | Prim::GradeMoney
+                | Prim::GradeTexts
+                | Prim::AryKeep
                 | Prim::SortFloats
                 | Prim::SortMoney
                 | Prim::SortTexts

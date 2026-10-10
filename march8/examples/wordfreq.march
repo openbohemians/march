@@ -19,7 +19,7 @@
 [ < string i64 > 1 +. end-of. ] end-of def.
 
 -- Whether a word starts at i: none at it, and a separator before it.
-[ < string i64 > over. over. sep-at?. not. rot. rot. 1 -. sep-at?. and. ] starts? def.
+[ < string i64 > over. over. sep-at?. not. rot. rot. 1 -+. sep-at?. and. ] starts? def.
 
 -- The word at i, if one starts there; nothing otherwise.
 [ < string i64 starts? > over. over. end-of. slice. ] word-at def.

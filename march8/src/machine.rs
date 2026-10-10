@@ -1374,6 +1374,43 @@ impl Machine {
                 let r = self.allocate_vector(v)?;
                 self.push(r)?;
             }
+            GradeInts | GradeFloats | GradeTexts => {
+                let a = self.pop()?;
+                let cells: Vec<u64> = self.array(a)?.whole().iter().copied().collect();
+                let mut order: Vec<usize> = (0..cells.len()).collect();
+                match p {
+                    GradeInts => order.sort_by_key(|&i| cells[i] as i64),
+                    GradeFloats => order.sort_by(|&i, &j| {
+                        f64::from_bits(cells[i]).total_cmp(&f64::from_bits(cells[j]))
+                    }),
+                    _ => {
+                        let mut texts = Vec::with_capacity(cells.len());
+                        for &c in &cells {
+                            texts.push(self.text(c)?.to_text().ok_or(Error::Memory)?);
+                        }
+                        order.sort_by(|&i, &j| texts[i].cmp(&texts[j]));
+                    }
+                }
+                let r = self.allocate_vector(order.into_iter().map(|i| i as u64 + 1).collect())?;
+                self.push(r)?;
+            }
+            Keep => {
+                let m = self.pop()?;
+                let a = self.pop()?;
+                let mask = self.array(m)?.whole();
+                let whole = self.array(a)?.whole();
+                if mask.len() != whole.len() {
+                    return Err(Error::User(4));
+                }
+                let kept: merkle_champ::Sequence<u64> = whole
+                    .iter()
+                    .zip(mask.iter())
+                    .filter(|(_, f)| **f != 0)
+                    .map(|(&x, _)| x)
+                    .collect();
+                let r = self.allocate_vector(kept)?;
+                self.push(r)?;
+            }
             UnionMake => {
                 let t = self.pop()?;
                 let x = self.pop()?;

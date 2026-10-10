@@ -26,7 +26,7 @@ x sign.                             → 1 or 0, chosen at run time
 ( 1 2 3 ) 10 *.                     → ( 10 20 30 ): it lifts
 [ 0 eq?. ] zero? def.
 [ < i64 zero? > drop. 1 ] fact def.
-[ < i64 > dup. 1 -. fact. *. ] fact def.
+[ < i64 > dup. 1 -+. fact. *. ] fact def.
 10 fact.                            → 3628800, by fact's i64 instance
 ```
 
@@ -211,7 +211,7 @@ pattern**: the input must equal it (TYPES.md 2.12).
 ```
 [ < 0 > ] fib def.
 [ < 1 > ] fib def.
-[ < n > dup. 1 -. fib. swap. 2 -. fib. +. ] fib def.
+[ < n > dup. 1 -+. fib. swap. 2 -+. fib. +. ] fib def.
 ```
 
 - **It is a guard,** testing the input `eq?` the value, so it is chosen in
@@ -269,8 +269,8 @@ with `scratch-at`. The quotation may read the values below its element,
 one value. A vec maps to a vec as long. `map` given two types builds a map
 type instead.
 
-Lifting is six clauses in `core.march`, an array and a number in either
-order for `+`, `-` and `*`:
+Lifting is clauses in `core.march`, an array and a number in either
+order for `+`, `-+`, `*` and `/*` ("Arrays as tensors"):
 
 ```
 [ < a ary a -- a ary > swap. [ over. +. ] map. swap. drop. ] + def.
@@ -350,7 +350,7 @@ from the effect pass; only those are loaded, and the rest of the array is
 kept by a slice and joined to what the word leaves, so it costs what the word
 does, not the array's length. A vec's new length is known.
 
-With `-` on `( 1 2 3 )`, `fold` from 0 is −6 and `fold-right` is 2, as APL's
+With `-+` on `( 1 2 3 )`, `fold` from 0 is −6 and `fold-right` is 2, as APL's
 `-/`; for an associative word the two agree. A consumer takes a word as well
 as a quotation, so `( 1 2 3 4 ) + reduce.` is APL's `+/`, and in the surface,
 `'` will leave a word unapplied for it. `q r compose.` joins two quotations at
@@ -386,7 +386,7 @@ filter, flat-map and scan, with one loop:
   elements already collected, of the element type, as a scan reads the last;
   it may not take them.
 - **`_.` pulls a value from below the literal.** The first `_.` written takes
-  the deepest, so `1 2 ( _. _. /. )` is `( 1 2 /. )`, as march7 decided for
+  the deepest, so `1 2 ( _. _. div. )` is `( 1 2 div. )`, as march7 decided for
   string holes; the literal takes what it pulls, its inputs. A pull copies,
   so one in a loop reads the same value each pass, and it is found from the
   literal's mark (`mark-pick`), exact even above a run:
@@ -441,7 +441,7 @@ type gives its shape at compile time: `2 3 i64 vec vec` is a 2×3 matrix.
 ( ( 1 2 3 ) ( 4 5 6 ) ) transpose.        ( ( 1 4 ) ( 2 5 ) ( 3 6 ) ), a 3 2 i64 vec vec
 ```
 
-- **Element by element.** `+`, `-`, `⋅` and `÷` on two tensors of one shape
+- **Element by element.** `+`, `-+`, `*` and `/*` on two tensors of one shape
   pair their elements, by `xs ys q zip`, level by level. A tensor and one of
   lower rank, a number or a row, pair along the leading axis, recursively,
   so the lower broadcasts across the higher's trailing axes. A number goes
@@ -552,7 +552,7 @@ So the base case need not come first:
 ```
 [ 0 gt?. ] positive? def.
 [ < i64 > ] down def.                       the base, with no guard
-[ < i64 positive? > 1 -. down. ] down def.  tested first, compiled after
+[ < i64 positive? > 1 -+. down. ] down def.  tested first, compiled after
 ```
 
 A literal result, as `fact`'s 1, takes the type of an input it can become,
@@ -576,8 +576,11 @@ march8 --code '5 fact.'      source:  5  tail fact-i64
 
 ## The core vocabulary
 
-`core/core.march` defines `+`, `-`, `*` (written `⋅`, mathematics first:
-march7/docs/SURFACE.md), `/`, `mod`, the comparisons, `length`,
+`core/core.march` defines `+`, `*` (its glyph `⋅`), `-`, which negates,
+and `/`, the reciprocal (its glyph `÷`), with `-+` and `/*`, which subtract
+and divide by negating and adding, and by the reciprocal and the product,
+in one word until the compiler fuses the two (Thomas, 2026-10-09: so `-`
+has one meaning, and an inverse is a word); `^`, power; `mod`, the comparisons, `length`,
 `at`, `concat`, `slice`, `print`, the folds, reductions and `repeat` as families
 of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
 `swap`, and doubled, `==` and `~~`, as FORTH's 2DUP and 2SWAP (`dup2`,
@@ -585,13 +588,19 @@ of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
 `max` as clauses chosen by them, with no `if`; `sqrt`; `pow`, x to the y,
 exact for two literals and checked for integers; and `divmod`, the quotient
 and remainder, floored (`-7 3 divmod.` is `-3 2`), with `div` and `mod` each
-taking one of them, so the three agree, and `/` as `div` for now; and
+taking one of them, so the three agree, integers having no reciprocal; and
 `bool`, with `true` and `false`, which comparisons leave and guards take,
 and `not`, `and` and `or` as 1 - x, the minimum and the maximum (TYPES.md
 2.16); `floor`, `ceil`, `round` and `trunc`, which narrow a float to an integer,
 saying how it rounds (`round` halves away from zero), exact on a decimal
 literal, an error for a float with no i64. doc/design/WORDCHART.md
-charts the words beside APL's and Uiua's.
+charts the words beside APL's and Uiua's. `grade` gives the positions that
+put an array in order, stable, as APL's `⍋`; `at` given an array of
+positions gives the elements there; and `keep` the elements a mask of
+bools keeps, APL's compress. So `sort-by`, a sort by any key, is five
+words, `over. swap. map. grade. at.`: the keys made, graded, and the array
+read in their order; core keeps it, as long enough to be worth a name
+(Thomas, 2026-10-09).
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`) exist only at compile time.
@@ -612,15 +621,16 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with thirty primitives added: `pick`; checked
+The machine is march7's, with thirty-four primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
 `mark-pick`, which reads below an array literal's mark; `money>text` and
 `string-show`; `sort-ints`, `sort-floats` and `sort-texts`; `f64-sqrt`,
 `f64-pow` and `i64-pow`; `f64-floor`, `f64-ceil` and `f64-round`;
-`vector-insert` and `vector-remove`; and `union-make`, `union-tag` and
-`union-value`.
+`vector-insert` and `vector-remove`; `union-make`, `union-tag` and
+`union-value`; `grade-ints`, `grade-floats` and `grade-texts`; and
+`vector-keep`.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -753,10 +763,15 @@ warning where a union is made (above, "Unions").
   Markdown, since SURFACE.md's headings are words that read what follows.
   For now the word is `count`, the same as `length`.
 - **Array literals typed by what follows.** `( 2 4 )` settles at its `)`, to
-  integers, so `( 6.0 8.0 ) ( 2 4 ) ÷.` is no word; written `( 2.0 4.0 )` it
+  integers, so `( 6.0 8.0 ) ( 2 4 ) /*.` is no word; written `( 2.0 4.0 )` it
   works.
-- **Glyphs:** APL's and Uiua's for these words, and whether `/` is reduce,
-  are deferred.
+- **Glyphs:** APL's and Uiua's for these words are deferred. `/` is the
+  reciprocal, so reduce is the word `reduce`.
+- **Fusing `- +` and `/ *`.** The stage should compile a negation followed by
+  an addition as a subtraction, and a reciprocal followed by a product as a
+  division: as fast, exact for floats (`x ⋅ 1/y` can differ from `x / y` in
+  the last bit), and with no overflow negating the least i64. Until then
+  `-+` and `/*` are each one word.
 
 - **Mutual recursion** between instances, which would make a cycle of
   content identities; and words used before they are defined.

@@ -73,6 +73,8 @@ dependencies = [
 [[package]]
 name = "merkle-champ"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd1dd5d9b3eaba1b7c2ce9eb43170646f1709244637a24572c9418663d1cb2cb"
 dependencies = [
  "sha2",
 ]

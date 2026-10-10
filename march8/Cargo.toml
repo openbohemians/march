@@ -6,6 +6,5 @@ edition = "2024"
 [dependencies]
 sha2 = "0.10"
 
-# Persistent arrays, strings and maps (march7/docs/ARRAYS.md). From the
-# sibling checkout until merkle-champ 0.2 is published.
-merkle-champ = { path = "../../merkle-champ" }
+# Persistent arrays, strings and maps (march7/docs/ARRAYS.md).
+merkle-champ = "0.2"

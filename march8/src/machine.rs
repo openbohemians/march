@@ -1374,21 +1374,27 @@ impl Machine {
                 let r = self.allocate_vector(v)?;
                 self.push(r)?;
             }
-            GradeInts | GradeFloats | GradeTexts => {
+            GradeInts | GradeFloats | GradeTexts | GradeDownInts | GradeDownFloats
+            | GradeDownTexts => {
                 let a = self.pop()?;
                 let cells: Vec<u64> = self.array(a)?.whole().iter().copied().collect();
                 let mut order: Vec<usize> = (0..cells.len()).collect();
+                // Stable either way: equal elements keep their order.
+                let down = matches!(p, GradeDownInts | GradeDownFloats | GradeDownTexts);
+                let way = |o: std::cmp::Ordering| if down { o.reverse() } else { o };
                 match p {
-                    GradeInts => order.sort_by_key(|&i| cells[i] as i64),
-                    GradeFloats => order.sort_by(|&i, &j| {
-                        f64::from_bits(cells[i]).total_cmp(&f64::from_bits(cells[j]))
+                    GradeInts | GradeDownInts => {
+                        order.sort_by(|&i, &j| way((cells[i] as i64).cmp(&(cells[j] as i64))))
+                    }
+                    GradeFloats | GradeDownFloats => order.sort_by(|&i, &j| {
+                        way(f64::from_bits(cells[i]).total_cmp(&f64::from_bits(cells[j])))
                     }),
                     _ => {
                         let mut texts = Vec::with_capacity(cells.len());
                         for &c in &cells {
                             texts.push(self.text(c)?.to_text().ok_or(Error::Memory)?);
                         }
-                        order.sort_by(|&i, &j| texts[i].cmp(&texts[j]));
+                        order.sort_by(|&i, &j| way(texts[i].cmp(&texts[j])));
                     }
                 }
                 let r = self.allocate_vector(order.into_iter().map(|i| i as u64 + 1).collect())?;

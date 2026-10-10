@@ -234,18 +234,19 @@ fn an_inverse_is_a_word() {
 }
 
 #[test]
-fn grade_keep_and_positions() {
+fn order_keep_and_positions() {
     // The positions that order an array, stable; an array at positions; the
     // elements a mask keeps.
     assert_eq!(
-        show(&["( 30 10 20 10 ) grade. ( \"pear\" \"fig\" \"apple\" ) grade. ( 2.5 -1.0 ) grade."]),
+        show(&["( 30 10 20 10 ) order. ( \"pear\" \"fig\" \"apple\" ) order. ( 2.5 -1.0 ) order."]),
         "<3> ( 2 4 3 1 ) ( 3 2 1 ) ( 2 1 )"
     );
     assert_eq!(
         show(&["( 10 20 30 ) ( 3 1 ) at. ( 1 2 3 4 ) ( true. false. true. false. ) keep."]),
         "<2> ( 30 10 ) ( 1 3 )"
     );
-    // A sort by any key: the keys graded, and the array read in their order.
+    // A sort by any key: the keys ordered, and the array read in their order;
+    // `<#` and `#>` are `order` and `dorder`.
     assert_eq!(
         show(&["( \"pear\" \"fig\" \"apple\" ) [ length. ] sort-by. ( 3 -5 2 ) abs sort-by."]),
         "<2> ( \"fig\" \"pear\" \"apple\" ) ( 2 3 -5 )"
@@ -254,4 +255,62 @@ fn grade_keep_and_positions() {
         session(&["( 1 2 3 )", "( true. false. ) keep."]).err(),
         Some(Kind::Run(march8::machine::Error::User(4)))
     );
+}
+
+#[test]
+fn sums_products_and_truth_glyphs() {
+    // `∑` and `∏` are the mathematical operators (`\sum`, `\prod`), as words
+    // `sum` and `prod`; an empty sum is 0, and a mask's sum counts.
+    assert_eq!(
+        show(&["( 1 2 3 4 ) sum. ( 1 2 3 4 ) ∏. ( 1.5 2.5 ) \\sum. ( true. false. true. ) sum."]),
+        "<4> 10 24 4.0 2"
+    );
+    assert_eq!(
+        show(&["i64 ary. empty. sum. i64 ary. empty. prod."]),
+        "<2> 0 1"
+    );
+    assert_eq!(show(&["⊤. ⊥. \\top. not."]), "<3> true false false");
+}
+
+#[test]
+fn dorder_and_take() {
+    // Stable: equal elements keep their order.
+    assert_eq!(
+        show(&["( 30 10 20 10 ) dorder. ( \"pear\" \"fig\" \"apple\" ) dorder."]),
+        "<2> ( 1 3 2 4 ) ( 1 2 3 )"
+    );
+    assert_eq!(
+        show(&["( 30 10 20 10 ) dup. <#. swap. #>."]),
+        "<2> ( 2 4 3 1 ) ( 1 3 2 4 )"
+    );
+    // The first n, the last n when negative, all if fewer; strings too.
+    assert_eq!(
+        show(&[
+            "( 1 2 3 4 5 ) 2 take. ( 1 2 3 4 5 ) -2 take. ( 1 2 3 ) 9 take. ( 1 2 3 ) -9 take. ( 1 2 3 ) 0 take."
+        ]),
+        "<5> ( 1 2 ) ( 4 5 ) ( 1 2 3 ) ( 1 2 3 ) ( )"
+    );
+    assert_eq!(
+        show(&["\"hello\" 3 take. \"hello\"", "-2 take."]),
+        "<2> \"hel\" \"lo\""
+    );
+}
+
+#[test]
+fn skip_and_thru() {
+    // All but the first n, or the last n when negative; strings too.
+    assert_eq!(
+        show(&["( 1 2 3 4 5 ) 2 skip. ( 1 2 3 4 5 ) -2 skip. ( 1 2 3 ) 9 skip. ( 1 2 3 ) 0 skip."]),
+        "<4> ( 3 4 5 ) ( 1 2 3 ) ( ) ( 1 2 3 )"
+    );
+    assert_eq!(
+        show(&["\"hello\" 3 skip. \"hello\"", "-2 skip."]),
+        "<2> \"lo\" \"hel\""
+    );
+    // From a to b, both included, down when a is the larger; `‥` its glyph.
+    assert_eq!(
+        show(&["1 5 thru. 5 1 thru. 3 3 thru. -2 2 ‥. 0 3 \\thru."]),
+        "<5> ( 1 2 3 4 5 ) ( 5 4 3 2 1 ) ( 3 ) ( -2 -1 0 1 2 ) ( 0 1 2 3 )"
+    );
+    assert_eq!(show(&["4", "1 thru."]), "<1> ( 4 3 2 1 )");
 }

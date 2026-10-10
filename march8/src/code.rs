@@ -190,6 +190,11 @@ pub enum Primitive {
     GradeTexts = 106,
     // ( a m -- a ) The elements whose mask cell is not 0: APL's compress.
     Keep = 107,
+    // ( a -- p ) The grade down, stable: the positions, from 1, that would
+    // put an array in descending order, as APL's `⍒`.
+    GradeDownInts = 108,
+    GradeDownFloats = 109,
+    GradeDownTexts = 110,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -301,6 +306,9 @@ impl Primitive {
         (Self::GradeFloats, "grade-floats"),
         (Self::GradeTexts, "grade-texts"),
         (Self::Keep, "vector-keep"),
+        (Self::GradeDownInts, "grade-down-ints"),
+        (Self::GradeDownFloats, "grade-down-floats"),
+        (Self::GradeDownTexts, "grade-down-texts"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

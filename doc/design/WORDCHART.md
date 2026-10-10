@@ -22,6 +22,9 @@
 | element at           | `at`       |  `⊡`   | `⌷`   | `⊡`   | at an array of positions, an array |
 | join                 | `concat`   |  `⊂`   | `,`   | `⊂`   |        |
 | elements i->j        | `slice`    |        | `↑`   | `↙`   |        |
+| first n, last n      | `take`     |  `↑`   | `↑`   | `↙`   | negative n from the end; from SYMBOL |
+| all but first n      | `skip`     |  `↓`   | `↓`   | `↘`   | negative n from the end; `drop` is the stack's |
+| integers a to b      | `thru`     |  `‥`   |       |       | both included, down if a is larger; SYMBOL's `..` |
 | elements j->i        |  —         |        | `↓`   | `↘`   |        |
 | first                | `first`    |  `⊢`   | `⊃`   | `⊢`   |        |
 | last                 | `last`     |  `⊣`   | `⊃⌽`  | `⊣`   |        |
@@ -30,8 +33,9 @@
 | reverse              | `reverse`  |  `⇌`   | `⌽`   | `⇌`   | `flip` instead? |
 | 1 to n               | `range`    |  `⇡`   | `⍳`   | `⇡`   |        |
 | sort                 | `sort`     |  `⍆`   | `⍋`   | `⍆`   |        |
-| grade up             | `grade`    |  `⍏`   | `⍋`   | `⍏`   | the positions that would sort |
-| sort by a key        | `sort-by`  |        | `X[⍋K]` |     | `over swap map grade at`: keys, graded, read in order |
+| order (grade up)     | `order`    |  `<#`  | `⍋`   | `⍏`   | the positions that would sort; R's `order`; not "grade", near "gradient" |
+| order, descending    | `dorder`   |  `#>`  | `⍒`   | `⍖`   | stable, as `order reverse` is not; the point is where the smallest go |
+| sort by a key        | `sort-by`  |        | `X[⍋K]` |     | `over swap map order at`: keys, ordered, read in order |
 | keep by mask         | `keep`     |  `▽`   | `/`   | `▽`   |        |
 | word on array's end  | `within`   |        |       | `⍜`   | Uiua's under is nearest equivalent |
 | elements onto stack  | `spread`   |        |       |       |        |
@@ -65,7 +69,9 @@
 | ceiling              | `ceil`     |  `⌈`   | `⌈`   | `⌈`   |        |
 | power                | `pow`      |  `^`   | `*`   | `ⁿ`   | as LaTeX writes it |
 | square root          | `sqrt`     |  `√`   | `*.5` | `√`   |        |
-| truth                | `true` `false` |    | `1` `0` | `1` `0` | `bool`: 0 and 1, an i64 too |
+| sum                  | `sum`      |  `∑`   | `+/`  | `/+`  | ∑ U+2211, not Greek Σ; 0 when empty |
+| product              | `prod`     |  `∏`   | `×/`  | `/×`  | ∏ U+220F, not Greek Π; 1 when empty |
+| truth                | `true` `false` | `⊤` `⊥` | `1` `0` | `1` `0` | `bool`: 0 and 1, an i64 too |
 | not                  | `not`      |  `¬`   | `~`   | `¬`   | 1 − x  |
 | and                  | `and`      |  `∧`   | `∧`   |  —    | minimum |
 | or                   | `or`       |  `∨`   | `∨`   | `∨`   | maximum; on two types, their union |
@@ -76,8 +82,6 @@
 | at most              |           | `≤`    | `≤`   | `≤`   |
 | at least             |           | `≥`    | `≥`   | `≥`   |
 | not equal            | `neq`     | `≠`    | `≠`   | `≠`   |
-| take                 | `take`    | `↙`    | `↑`   | `↙`   |
-| drop                 |           | `↘`    | `↓`   | `↘`   |
 | member of            |           | `∈`    | `∊`   | `∊`   |
 | index of             | `index`   | `⊗`    | `⍳`   | `⊗`   |
 | unique               | `uniq`    | `◴`    | `∪`   | `◴`   |
@@ -85,12 +89,13 @@
 | shape                | `shape`   | `△`    | `⍴`   | `△`   |
 | reshape              |           | `↯`    | `⍴`   | `↯`   |
 | rotate               |           | `↻`    | `⌽`   | `↻`   |
-| grade down           |           | `⍖`    | `⍒`   | `⍖`   |
 | dip                  |           | `⊙`    |  —    | `⊙`   |
 | under                |           | `⍜`    |  —    | `⍜`   |
 
 | **undecided**        |              |        |       |       | NOTES  |
 |----------------------|--------------|--------|-------|-------|--------|
+| range type           |              |        |       |       | lazy; a subrange type, as Pascal's `0..100` (TYPES.md 3.11) |
+| list edits by arrows |              | `+>` `<+` `->` `<-` |  |  | SYMBOL's: to think on (TODO in MACHINE.md) |
 | fold from right      | `fold-rt`    |        | `/`   |       |        |
 | reduce from right    | `reduce-rt`  |        | `/`   |       |        |
 

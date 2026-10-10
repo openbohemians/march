@@ -305,6 +305,9 @@ ame` notation opens APL's character set to March, but
   the like) are not used: those words get other names, as `range` for `⍳`.
   The table keeps the Greek letters for typing them (`\alpha` is `α`), and
   programmers may define them as they like; they may suit type variables.
+  Mathematics' own operators are not letters: sum and product are `∑` and
+  `∏` (U+2211, U+220F, what LaTeX's `\sum` and `\prod` print), not Greek
+  `Σ` and `Π` (Thomas, 2026-10-09).
 - **Mathematics first, programming's conventions second** (Thomas,
   2026-10-09): where the two differ, a symbol means what it means in
   mathematics, and `×`, the Cartesian product, is kept for the outer product

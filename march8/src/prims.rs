@@ -67,6 +67,10 @@ pub enum Prim {
     GradeFloats,
     GradeMoney,
     GradeTexts,
+    GradeDownInts,
+    GradeDownFloats,
+    GradeDownMoney,
+    GradeDownTexts,
     AryKeep,
     TupleAt,
     TupleSpread,
@@ -322,27 +326,51 @@ pub const PRIMS: &[PrimDef] = &[
     ),
     d(
         Prim::GradeInts,
-        "i64-grade",
+        "i64-order",
         "< i64 ary -- i64 ary >",
         &[P::GradeInts],
     ),
     d(
         Prim::GradeFloats,
-        "f64-grade",
+        "f64-order",
         "< f64 ary -- i64 ary >",
         &[P::GradeFloats],
     ),
     d(
         Prim::GradeMoney,
-        "money-grade",
+        "money-order",
         "< money ary -- i64 ary >",
         &[P::GradeInts],
     ),
     d(
         Prim::GradeTexts,
-        "string-grade",
+        "string-order",
         "< string ary -- i64 ary >",
         &[P::GradeTexts],
+    ),
+    d(
+        Prim::GradeDownInts,
+        "i64-dorder",
+        "< i64 ary -- i64 ary >",
+        &[P::GradeDownInts],
+    ),
+    d(
+        Prim::GradeDownFloats,
+        "f64-dorder",
+        "< f64 ary -- i64 ary >",
+        &[P::GradeDownFloats],
+    ),
+    d(
+        Prim::GradeDownMoney,
+        "money-dorder",
+        "< money ary -- i64 ary >",
+        &[P::GradeDownInts],
+    ),
+    d(
+        Prim::GradeDownTexts,
+        "string-dorder",
+        "< string ary -- i64 ary >",
+        &[P::GradeDownTexts],
     ),
     d(
         Prim::AryKeep,
@@ -538,6 +566,10 @@ pub fn foldable(p: Prim) -> bool {
                 | Prim::GradeFloats
                 | Prim::GradeMoney
                 | Prim::GradeTexts
+                | Prim::GradeDownInts
+                | Prim::GradeDownFloats
+                | Prim::GradeDownMoney
+                | Prim::GradeDownTexts
                 | Prim::AryKeep
                 | Prim::SortFloats
                 | Prim::SortMoney

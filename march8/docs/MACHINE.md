@@ -594,13 +594,22 @@ and `not`, `and` and `or` as 1 - x, the minimum and the maximum (TYPES.md
 2.16); `floor`, `ceil`, `round` and `trunc`, which narrow a float to an integer,
 saying how it rounds (`round` halves away from zero), exact on a decimal
 literal, an error for a float with no i64. doc/design/WORDCHART.md
-charts the words beside APL's and Uiua's. `grade` gives the positions that
-put an array in order, stable, as APL's `⍋`; `at` given an array of
+charts the words beside APL's and Uiua's. `order`, `<#`, gives the positions
+that put an array in order, stable, APL's grade up `⍋` and R's `order` (not
+"grade", which is too near "gradient"); `at` given an array of
 positions gives the elements there; and `keep` the elements a mask of
 bools keeps, APL's compress. So `sort-by`, a sort by any key, is five
-words, `over. swap. map. grade. at.`: the keys made, graded, and the array
+words, `over. swap. map. order. at.`: the keys made, ordered, and the array
 read in their order; core keeps it, as long enough to be worth a name
-(Thomas, 2026-10-09).
+(Thomas, 2026-10-09). From SYMBOL (~/Projects/axiomatic/symbol, Thomas's
+expression language): `dorder`, `#>`, the descending order, stable, as APL's
+`⍒`, which `order reverse` is not; `take`, an
+array's or a string's first n elements or its last n when n is negative,
+and `skip`, all but those (`drop` being the stack's); `thru`, the integers
+from a to b, both included, counting down when a is the larger, its glyph
+`‥` (two dots as one character, since `.` applies);
+`sum` and `prod`, with their glyphs `∑` and `∏`, a fold from 0 and from 1;
+and `⊤` and `⊥` for `true` and `false`.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`) exist only at compile time.
@@ -621,7 +630,7 @@ string literal as a data object and `text`. A final call becomes a tail
 call, and a return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with thirty-four primitives added: `pick`; checked
+The machine is march7's, with thirty-seven primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
@@ -629,8 +638,8 @@ overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>
 `string-show`; `sort-ints`, `sort-floats` and `sort-texts`; `f64-sqrt`,
 `f64-pow` and `i64-pow`; `f64-floor`, `f64-ceil` and `f64-round`;
 `vector-insert` and `vector-remove`; `union-make`, `union-tag` and
-`union-value`; `grade-ints`, `grade-floats` and `grade-texts`; and
-`vector-keep`.
+`union-value`; `grade-ints`, `grade-floats` and `grade-texts`, and their
+`grade-down-` forms; and `vector-keep`.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -802,6 +811,19 @@ warning where a union is made (above, "Unions").
   the same way. Some of it at run time, by size or by a check that a value
   is unshared, as Koka's Perceus does. A project of its own, beside memory
   management (2.0).
+- **`fmt` to mathematics** (Thomas, 2026-10-09). `march8 fmt` rewrites
+  `\name` escapes as symbols; a "mathize" mode should also render what is
+  typed as what mathematics writes: `*` as `⋅`, `/` as `÷`, and a bracket's
+  `< … >` as the mathematical angle brackets `⟨ … ⟩` (U+27E8, U+27E9,
+  LaTeX's `\langle` and `\rangle`). The reader then reads `⟨ ⟩` as `< >`,
+  so either form reads back, and the way back is the same rewrite.
+- **TODO: list edits by arrows,** from SYMBOL (Thomas, 2026-10-09: to think
+  on). Its ASCII pairs point the way the elements move: `+>` and `<+` add an
+  element at the front and the end, `->` and `<-` remove a suffix and a
+  prefix if there, `<->` both, `~>` and `<~` interleave, `><` concatenates
+  and `<>` pairs. A typeable system, but it must be checked against `<` and
+  `>` as brackets (a word that only contains them is no bracket), and
+  against what March's words already say (`insert`, `remove`, `concat`).
 - **More of tuples, and records.** `rest`, `most`, `slice` and `concat` on
   tuples forget their positions, where they could make tuples; `eq?` has no
   clause for them. A literal with a run among mixed elements is still an

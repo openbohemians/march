@@ -27,6 +27,8 @@
 
 [ 1 bool. ] true def.
 [ 0 bool. ] false def.
+[ true. ] ⊤ def.
+[ false. ] ⊥ def.
 
 -- Classes: a union in a pattern matches any of its types, a little less
 -- well than one of them alone (TYPES.md 3.6). `def` on a type names it.
@@ -262,16 +264,54 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < money ary -- money ary > money-sort. ] sort def.
 [ < string ary -- string ary > string-sort. ] sort def.
 
--- `grade`: the positions that would put an array in order, as APL's `⍋`,
--- so that `xs dup. grade. at.` is `xs sort.`; stable, equal elements keeping
--- their order. With `at` taking an array of positions, `sort-by` sorts by
--- any key: the keys made, graded, and the array read in their order (Thomas,
--- 2026-10-09: five words are long enough to keep).
-[ < i64 ary -- i64 ary > i64-grade. ] grade def.
-[ < f64 ary -- i64 ary > f64-grade. ] grade def.
-[ < money ary -- i64 ary > money-grade. ] grade def.
-[ < string ary -- i64 ary > string-grade. ] grade def.
-[ over. swap. map. grade. at. ] sort-by def.
+-- `order`, `<#`: the positions that would put an array in order, APL's
+-- grade up `⍋` and R's `order` (Thomas, 2026-10-09: not "grade", too near
+-- "gradient"), so that `xs dup. order. at.` is `xs sort.`; stable, equal
+-- elements keeping their order. With `at` taking an array of positions,
+-- `sort-by` sorts by any key: the keys made, ordered, and the array read in
+-- their order (five words, long enough to keep). `dorder`, `#>`, is the
+-- descending order, as APL's `⍒`, also stable, which `order reverse` is not:
+-- that would turn equal elements around. The point of `<#` and `#>` is the
+-- end where the smallest go.
+[ < i64 ary -- i64 ary > i64-order. ] order def.
+[ < f64 ary -- i64 ary > f64-order. ] order def.
+[ < money ary -- i64 ary > money-order. ] order def.
+[ < string ary -- i64 ary > string-order. ] order def.
+[ order. ] <# def.
+[ over. swap. map. order. at. ] sort-by def.
+
+[ < i64 ary -- i64 ary > i64-dorder. ] dorder def.
+[ < f64 ary -- i64 ary > f64-dorder. ] dorder def.
+[ < money ary -- i64 ary > money-dorder. ] dorder def.
+[ < string ary -- i64 ary > string-dorder. ] dorder def.
+[ dorder. ] #> def.
+
+-- `take`: an array's or a string's first n elements, or its last n when n is
+-- negative; all of them, if it has fewer (from SYMBOL's `↑`).
+[ < a ary string or i64 negative? > -. over. length. min. over. length. dup. rot. -+. 1 +. swap. slice. ]
+  take def.
+[ < a ary string or i64 > over. length. min. 1 swap. slice. ] take def.
+
+-- `skip`: all but an array's or a string's first n elements, or all but its
+-- last n when n is negative; none, if it has fewer (SYMBOL's `↓`; `drop` is
+-- the stack's).
+[ < a ary string or i64 negative? > -. over. length. min. over. length. swap. -+. 1 swap. slice. ]
+  skip def.
+[ < a ary string or i64 > over. length. min. 1 +. over. length. slice. ] skip def.
+
+-- `thru`: the integers from a to b, both included, counting down when a is
+-- the larger (SYMBOL's `..`); `‥`, two dots as one character, is its glyph.
+[ < i64 i64 gt? > over. swap. -+. 1 +. range. -. swap. 1 +. +. ] thru def.
+[ < i64 i64 > over. -+. 1 +. range. swap. 1 -+. +. ] thru def.
+[ thru. ] ‥ def.
+
+-- Sums and products: `∑` and `∏` (`\sum`, `\prod`), the mathematical
+-- operators, not the Greek letters (SURFACE.md). An empty array's sum is 0
+-- and its product 1; a mask's sum counts its truths.
+[ 0 [ +. ] fold. ] sum def.
+[ 1 [ *. ] fold. ] prod def.
+[ sum. ] ∑ def.
+[ prod. ] ∏ def.
 
 -- `keep`: the elements whose mask is true, APL's compress.
 [ < a ary bool ary -- a ary > ary-keep. ] keep def.

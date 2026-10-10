@@ -474,6 +474,16 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     Open: the name, `next` or `super`; and which clause is next when
     guards decide at run time, the next by score that matches, its guards
     tested in turn, as a choice is now.
+11. **A range type** (2026-10-09). `thru` builds an array; a range could be a
+    value of its own instead, lazy: `length`, `at`, `each` and `sum` (in
+    closed form) work on it with no array built, and it becomes one only
+    where an array is wanted, as a tuple forgets its positions; so
+    `n range each` is a counted loop (march8/docs/MACHINE.md, "Not yet",
+    deferred terms). And, types being values, a range could be a type: a
+    subrange, as Pascal's `0..100` and Ada's `range 0 .. 100`, so `bool` is
+    the integers 0 through 1 and `fbool` the reals from 0 to 1 (3.9). A
+    literal, `1..5` or the like, is open; SYMBOL's interval notation,
+    `[1,2)`, is not to be had, `[` and `(` being March's brackets.
 
 ## 4. A way to build it (proposal)
 

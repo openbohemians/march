@@ -68,10 +68,9 @@
 | a case style         | `case`     |        |       |       | by a symbol: `snake case`, `kebab`, `camel`, `pascal`, `lower`, `upper` |
 | write any value      | `print`    |        | `⎕←`  | `&p`  |        |
 | write a string       | `write`    |        | `⍞←`  | `&pf` |        |
-| convert to a type    | `to`       |        |       |       | `2 i64.to.`; a type applied is the type |
-| a file, from a path  | `file`     |        |       |       | `"data.csv" file.to.`: a path said to be one |
-| read a file, stdin   | `read`     |        | `⎕NGET` | `&fras` | when the program runs; `stdin read.` is standard input |
-| read while compiling | `embed`    |        |       |       | the text is known, so what follows folds |
+| read a file          | `file-read` |       | `⎕NGET` | `&fras` | when the program runs; `io.file.read` with namespaces |
+| read standard input  | `stdin-read` |      |       |       | all of it, as a string |
+| read while compiling | `file-embed` |      |       |       | the text is known, so what follows folds |
 | swap top two         | `swap2`    |  `~~`  |       |       |        |
 | dup top two          | `dup2`     |  `==`  |       |       |        |
 | absolute value       | `abs`      |  `⌵`   | `\|`  | `⌵`   |        |
@@ -90,7 +89,7 @@
 
 | **not yet in March** |           |        |       |       |
 |----------------------|-----------|--------|-------|-------|
-| convert to match     |  ?        |  ?     |       |       | `!` retired; `to`, `type-of` open |
+| convert to match     |  ?        |  ?     |       |       | `2 i64.` converts by name; `type-of` open; `!` now marks a symbol in a bracket |
 | member of            |           | `∈`    | `∊`   | `∊`   |
 | index of             | `index`   | `⊗`    | `⍳`   | `⊗`   |
 | unique               | `uniq`    | `◴`    | `∪`   | `◴`   |

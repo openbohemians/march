@@ -28,7 +28,7 @@ fn holes_write_values_in() {
     assert_eq!(a, b);
     // Values are written as the display writes them; a string as its text.
     assert_eq!(
-        show(&["\"\\[ ( 1 2 ) ] \\[ ( \"a\" ) ] \\[ 19.99 money.to. ] \\[ 2.5 ] \\[ \"b\" ]\""]),
+        show(&["\"\\[ ( 1 2 ) ] \\[ ( \"a\" ) ] \\[ 19.99 money. ] \\[ 2.5 ] \\[ \"b\" ]\""]),
         "<1> \"( 1 2 ) ( \\\"a\\\" ) 19.99 2.5 b\""
     );
     // Strings nest, and text resumes right after the `]`.

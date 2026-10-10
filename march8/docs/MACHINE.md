@@ -13,20 +13,20 @@ time, `map`, and arithmetic lifted over arrays; slice 3 adds recursion,
 instances and tail calls.
 
 ```
-[ < money. -- money. > 1.10 +. ] fee def.
+[ < money -- money > 1.10 +. ] fee def.
 19.99 fee.                          → 21.09, exactly: 2109 cents
 [ dup. *. ] sq def.
 3 sq.                               → 9, compiled as the literal 9
 { "k" ( 41 2 ) } "k" at. 0 at. 1 +.        → 42
 [ 0 gt?. ] positive? def.
-[ < i64. positive? > drop. 1 ] sign def.
-[ < i64. > drop. 0 ] sign def.
+[ < i64 positive? > drop. 1 ] sign def.
+[ < i64 > drop. 0 ] sign def.
 x sign.                             → 1 or 0, chosen at run time
 5 sign.                             → the literal 1, chosen now
 ( 1 2 3 ) 10 *.                     → ( 10 20 30 ): it lifts
 [ 0 eq?. ] zero? def.
-[ < i64. zero? > drop. 1 ] fact def.
-[ < i64. > dup. 1 -+. fact. *. ] fact def.
+[ < i64 zero? > drop. 1 ] fact def.
+[ < i64 > dup. 1 -+. fact. *. ] fact def.
 10 fact.                            → 3628800, by fact's i64 instance
 ```
 
@@ -44,7 +44,7 @@ runs to the end of the line, except inside `< >`.
 | `\name` | a symbol, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
 | `.` | applies the value on top |
 | `name.` | `name .`: each dot at the end of a word applies it (Thomas, 2026-10-08), so no name ends in a dot; `vec..` is `vec . .` |
-| `a.b.` | `a. b.`: dots between names chain them, each applying the name before it, as uniform call syntax reads (Thomas, 2026-10-09): `"data.csv" file.to.read.lines.`. Literals stand apart: `2.5` is a number, `2.i64` no chain |
+| `a.b.` | `a. b.`: dots between names chain them, each applying the name before it, as uniform call syntax reads (Thomas, 2026-10-09): `"data.csv" file-read.lines.`. Literals stand apart: `2.5` is a number, `2.i64` no chain |
 | `[ … ]` | a quotation: its words, unevaluated |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
 | `_.` | in a literal, a copy of a value from below it (Comprehensions) |
@@ -54,36 +54,38 @@ runs to the end of the line, except inside `< >`.
 
 - a **name** means what it is defined as: a primitive, a type, a constructor
   or a family;
-- a **type** is itself, an operator returning the type: `i64.`;
+- a **type** converts the value below to it: `1 i64.`;
 - a **quotation** is evaluated: `[ 2 +. ].`.
 
-**Types are values, and types are operators** (Thomas, 2026-10-09). `i64.`
-is the type i64, `i64 ary.` "array of i64" and `100 i64 vec.` "array of
-100 i64": a constructor takes a bare name as the type it names. `to`
-converts a value to a type: `1 i64.to.`, `"data.csv" file.to.`,
-`x 100 i64 vec.to.`.
+**A type's name is a symbol** (Thomas, 2026-10-09), as any name is: `i64`
+names the type, and applied it converts the value below, `1 i64.`. A
+constructor builds a type from names below it, `i64 ary.` "array of i64",
+`100 i64 vec.` "array of 100 i64", and that type applied converts too:
+`x 100 i64 vec..`.
 
 **A bracket is code** (TYPES.md 2.2). Its words mean what they mean
 anywhere, and what its code leaves is the signature, by what each value is:
 
 ```
-[ < string. camel > … ] case def.         a string, and the symbol camel
-[ < a ary. i64. -- a > … ] at def.        one letter is a type variable
-[ < i64. positive? > … ] sign def.        a word ending in ? is a guard
-[ < i64. [ 2 mod. zero?. ] > … ] even def.    any quotation left is one too
-[ < 0 > … ] fib def.   [ < true. > … ] t def.   a value left: equal to it
-[ < ( i64. string. ) > … ] pair def.      an array of types: a tuple type
+[ < string camel! > … ] case def.         a string, and the symbol camel
+[ < a ary. i64 -- a > … ] at def.        one letter is a type variable
+[ < i64 positive? > … ] sign def.        a word ending in ? is a guard
+[ < i64 [ 2 mod. zero?. ] > … ] even def.    any quotation left is one too
+[ < 0 > … ] fib def.   [ < 0 i64. > … ]   [ < true. > … ]   a value left: equal to it
+[ < ( i64 string ) > … ] pair def.      an array of types: a tuple type
 ```
 
-Two rules are its own, by spelling, so no definition elsewhere changes what
-a bracket means: a word of one letter is a type variable, and a word ending
-in `?` a guard. A name left bare is a symbol, as it is anywhere; a type
-defined later by that name changes nothing. The code runs while compiling,
-so it leaves only known values. In a body, a bracket of n types gives the
-top n values those types, the deepest first: `x y < i64. f64. >`.
+A name left is read by its spelling, so no definition elsewhere changes
+what a bracket means: one letter is a type variable, a name ending in `?` a
+guard, one ending in `!` a symbol, and any other a type's name, an error if
+it names none, never read as something else. Outside a bracket a name is a
+symbol already, so `"Hello" camel case.` needs no mark: only in a bracket
+must a symbol be told from a type. The code runs while compiling, so it
+leaves only known values. In a body, a bracket of n types gives the top n
+values those types, the deepest first: `x y < i64 f64 >`.
 
 **A definition is data:** a quotation, a name and `def`:
-`[ < i64. -- i64. > 1 +. ] inc def.`. A bracket first in the quotation is
+`[ < i64 -- i64 > 1 +. ] inc def.`. A bracket first in the quotation is
 the clause's signature, its context (TYPES.md 2.15): the types of its
 inputs, then after `--` the outputs it promises. Clauses of one name are a
 family. `def` on a type names it: `string i64 map. config def.`, and a named
@@ -139,7 +141,7 @@ equal types are equal numbers.
 | `3 a vec` | an array of exactly 3: the length is known at compile time |
 | `k v map` | a map |
 | `a` to `z` | type variables, in patterns |
-| `atom` | in patterns, any type that is not a container: a number, a string, a literal. A class, not a type: it binds nothing, so `< atom. atom. >` takes two of different types |
+| `atom` | in patterns, any type that is not a container: a number, a string, a literal. A class, not a type: it binds nothing, so `< atom atom >` takes two of different types |
 | `a b or` | in patterns, a union: any of its types, `i64 f64 or`. Kept canonical, so order and repeats do not matter. It matches a little less well than one of its types alone, and better than `atom` |
 | `num` | the numbers: `i64 f64 or. money or. int# or. dec# or. num def.`, in `core.march` |
 | `nil` | the type with one value, `nil.`: nothing is there, as in `i64 nil or` |
@@ -184,12 +186,12 @@ A family applied chooses its clause by the values on top (TYPES.md 2.8):
 
 ### Guards: the choice at run time
 
-A word ending in `?` in a signature is a **guard**, `< i64. positive? >`, and
-so is any quotation left there, `< i64. [ 2 mod. zero?. ] >` (TYPES.md 2.2,
+A word ending in `?` in a signature is a **guard**, `< i64 positive? >`, and
+so is any quotation left there, `< i64 [ 2 mod. zero?. ] >` (TYPES.md 2.2,
 2.15). It looks at the inputs before it, as many as it takes,
 without taking them, and leaves a `bool` (TYPES.md 2.16). How many it takes comes from its
 definition, by a pass over its words: `positive?`, `[ 0 gt?. ]`, takes one,
-and `lt?` takes two, so `< i64. i64. lt? >` compares the two inputs. A word
+and `lt?` takes two, so `< i64 i64 lt? >` compares the two inputs. A word
 that does not leave one value cannot be a guard.
 
 When some clauses that match have guards, the choice has two phases:
@@ -238,7 +240,7 @@ pattern**: the input must equal it (TYPES.md 2.12).
   step, and `0 fib.` is the literal 0.
 - **An untyped value matches an input of any type it becomes,** compared in
   that type: `< 0 >` takes an i64, an f64 or money, and `< 0.5 >` an f64.
-  The input keeps its own type. `< 0 i64.to. >` takes an i64 only, as `0 i64.to.`
+  The input keeps its own type. `< 0 i64. >` takes an i64 only, as `0 i64.`
   is an i64 in code.
 - **Strings too:** `< "quit" >`.
 - **Inside its clause the input is known to equal the value:** it is
@@ -302,14 +304,14 @@ the prototype's original bug, `{ "k" ( 1 2 ) } "k" at. 1 +.`, lifts.
 A clause defined under a type's name says how a literal becomes that type:
 
 ```
-[ < int#. -- i64. > int#>i64. ] i64 def.
-[ < dec#. -- money. > dec#>money. ] money def.
+[ < int# -- i64 > int#>i64. ] i64 def.
+[ < dec# -- money > dec#>money. ] money def.
 ```
 
 Applying a type to a literal converts it by this clause, and so does a
 clause that wants the type and is given the literal. So literal handling is
 an open family, as Thomas framed it ("just another type signature"). Two
-literals fold by clauses on the literal types, `< int#. int#. -- int#. >`,
+literals fold by clauses on the literal types, `< int# int# -- int# >`,
 exactly, and stay literals, so `1 2 +. 3.5 +.` is the decimal 6.5. A
 literal takes its default type, i64 or f64, only when it must be a value at
 run time.
@@ -490,8 +492,8 @@ means nothing is there.
 ```
 { "a" 1 } "a" get.               1, of i64 nil or
 { "a" 1 } "z" get.               nil, of i64 nil or
-[ < i64. > 10 *. ] port def.
-[ < nil. > drop. 80 ] port def.
+[ < i64 > 10 *. ] port def.
+[ < nil > drop. 80 ] port def.
 m "z" get. port.                 80, by the clause the tag chooses
 m "a" get. 1 +.                  no word `+` for nil: each type needs a clause
 ```
@@ -569,8 +571,8 @@ So the base case need not come first:
 
 ```
 [ 0 gt?. ] positive? def.
-[ < i64. > ] down def.                       the base, with no guard
-[ < i64. positive? > 1 -+. down. ] down def.  tested first, compiled after
+[ < i64 > ] down def.                       the base, with no guard
+[ < i64 positive? > 1 -+. down. ] down def.  tested first, compiled after
 ```
 
 A literal result, as `fact`'s 1, takes the type of an input it can become,
@@ -634,19 +636,18 @@ strings. `parse` reads a number from its text, the type given as a value,
 `"42" i64 parse.`: `i64 nil or`, the value tagged at run time or nil, and
 on a known string the value or nil itself. `le?`, `ge?` and `neq?`, with
 `≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that
-NaN is at most and at least nothing. Files: `file`, applied to a string,
-makes a file, a path said to be one, `"data.csv" file.to.`, so that text is
-never taken for a path (a type applied to a value of another converts it
-when the type has a clause for that, and only when applied); `read` reads
-it when the program runs, an effect, and `embed` while compiling, so what
-follows folds on its text (TYPES.md 2.15). `read` is a family over sources:
-`stdin read.` is all of standard input, `stdin` being a symbol, no value or
-handle, which chooses `read`'s clause, `< stdin -- string. >`; so a filter
-starts `stdin read.lines.`. `case` puts a string in a style named by a
+NaN is at most and at least nothing. Reading is primitives, for now:
+`"data.csv" file-read.` a file's text and `stdin-read.` standard input,
+when the program runs, an effect, so a filter starts `stdin-read.lines.`;
+`"notes.txt" file-embed.` a file's text while compiling, so what follows
+folds on it (TYPES.md 2.15). With namespaces they become `io.file.read` and
+its kin (TYPES.md 3.12). A `read` chosen by a symbol, `"data.csv" file
+read.` beside `stdin read.`, was tried and left: its clauses would take one
+value and two, where a family's clauses share an arity. `case` puts a string in a style named by a
 symbol: `"Hello World" snake case.` is "hello_world", and `lower`, `upper`,
 `kebab`, `camel` and `pascal` the others, chosen while compiling.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
-operations, such as `i64+ < i64. i64. -- i64. >`, which is checked addition.
+operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`) exist only at compile time.
 A primitive applied to values all known folds, unless it has an effect
 (`write`).
@@ -697,7 +698,7 @@ stack are always known, and the display writes every value by its type:
 cargo run --offline -- --eval '[ < money > 1.10 +. ] fee def. 19.99 fee.'
 # <1> 21.09
 cargo run --offline -- --types --eval '{ "a" ( 1.5 ) } 2'
-# <2> { "a" ( 1.5 ) } < string. 1 f64. vec. map. > 2 < i64. >
+# <2> { "a" ( 1.5 ) } < string 1 f64 vec. map. > 2 < i64 >
 ```
 
 With no arguments, `march8` is a REPL: each line is compiled and run, and
@@ -750,7 +751,7 @@ warning where a union is made (above, "Unions").
    patching: constants pass through stack words and families, and only
    values at run time cost code.
 3. **No match is no word, everywhere.** Errors the prototype reported as type
-   mismatches (`< i64. f64. > +`) are no word here, since `+` has no clause for
+   mismatches (`< i64 f64 > +`) are no word here, since `+` has no clause for
    them, which is the design's rule.
 4. **An array literal is a vec,** so lengths are constants wherever arrays
    are written out, and a vec is accepted as an array.
@@ -833,8 +834,8 @@ warning where a union is made (above, "Unions").
   when it is defined to the family as it is then, so a new clause makes new
   identities; or modules pinning what they import. To decide with images and
   modules (doc/design/TYPES.md, open question 2).
-- **OR between whole contexts.** A union is one slot's: `< num. num. >` takes
-  an i64 and an f64 together, and `< i64. i64. >` or `< f64. f64. >` as one
+- **OR between whole contexts.** A union is one slot's: `< num num >` takes
+  an i64 and an f64 together, and `< i64 i64 >` or `< f64 f64 >` as one
   context is not built.
 - **Representations chosen by use** (2026-10-09). A tuple forgets its
   positions where a clause asks for an array, at that use, each time it
@@ -857,15 +858,15 @@ warning where a union is made (above, "Unions").
 - **Comments in brackets.** `--` divides a bracket's inputs from its
   outputs, so it cannot begin a comment there (Thomas, 2026-10-09).
 - **Symbols at run time.** A symbol is known while compiling; to choose by
-  one from data, `"camel" sym.to.` would make a symbol from a string, held
+  one from data, `"camel" sym.` would make a symbol from a string, held
   as the string's interned text, so symbols compare as cells.
 - **More of files.** Writing a file, which cannot be another
   `write` clause, since `write` takes one string and a family's clauses
-  take as many; `string error or` from `read` once there is an error type;
+  take as many; `string error or` from `file-read` once there is an error type;
   paths from the source's own place, not where march8 runs.
 - **Known arrays.** An array is always made at run time, so words that make
   one, `words`, `split`, `lines`, `range`, do not fold on known values, and
-  `embed`'s text folds only through words that make scalars: a YAML file
+  `file-embed`'s text folds only through words that make scalars: a YAML file
   read into data while compiling needs arrays and maps the stage knows.
 - **TODO: list edits by arrows,** from SYMBOL (Thomas, 2026-10-09: to think
   on). Its ASCII pairs point the way the elements move: `+>` and `<+` add an

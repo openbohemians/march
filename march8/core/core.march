@@ -12,21 +12,21 @@
 -- conversion: applying the type to a literal converts it, and a clause
 -- that wants the type converts a literal it is given (TYPES.md 2.10).
 
-[ < int#. -- i64. > int#>i64. ] i64 def.
-[ < int#. -- f64. > int#>f64. ] f64 def.
-[ < dec#. -- f64. > dec#>f64. ] f64 def.
-[ < int#. -- money. > int#>money. ] money def.
-[ < dec#. -- money. > dec#>money. ] money def.
-[ < int#. -- dec#. > int#>dec#. ] dec# def.
-[ < int#. -- bool. > int#>bool. ] bool def.
+[ < int# -- i64 > int#>i64. ] i64 def.
+[ < int# -- f64 > int#>f64. ] f64 def.
+[ < dec# -- f64 > dec#>f64. ] f64 def.
+[ < int# -- money > int#>money. ] money def.
+[ < dec# -- money > dec#>money. ] money def.
+[ < int# -- dec# > int#>dec#. ] dec# def.
+[ < int# -- bool > int#>bool. ] bool def.
 
 -- Truth (Thomas, 2026-10-09): `bool` is 0 and 1, Iverson's brackets, and so
 -- an i64 too: `mask + reduce.` counts. Comparisons leave one, and guards
 -- take one. `not`, `and` and `or` are 1 - x, the minimum and the maximum,
 -- which on values from 0 to 1 are also Zadeh's fuzzy connectives.
 
-[ 1 bool.to. ] true def.
-[ 0 bool.to. ] false def.
+[ 1 bool. ] true def.
+[ 0 bool. ] false def.
 [ true. ] ⊤ def.
 [ false. ] ⊥ def.
 
@@ -39,33 +39,33 @@ i64 f64 or. money or. int# or. dec# or. num def.
 -- literals; a literal beside a number takes its type. Money is added and
 -- subtracted, not multiplied.
 
-[ < int#. int#. -- int#. > int#+. ] + def.
-[ < dec#. dec#. -- dec#. > dec#+. ] + def.
-[ < i64. i64. -- i64. > i64+. ] + def.
-[ < f64. f64. -- f64. > f64+. ] + def.
-[ < money. money. -- money. > money+. ] + def.
+[ < int# int# -- int# > int#+. ] + def.
+[ < dec# dec# -- dec# > dec#+. ] + def.
+[ < i64 i64 -- i64 > i64+. ] + def.
+[ < f64 f64 -- f64 > f64+. ] + def.
+[ < money money -- money > money+. ] + def.
 
 -- `-` is one value's negative, and `-+` subtracts, negating and adding in
 -- one word until the compiler fuses the two (Thomas, 2026-10-09): `a b -+`
 -- is a + (-b). So `-` has one meaning, as in APL.
 
-[ < int#. int#. -- int#. > int#-. ] -+ def.
-[ < dec#. dec#. -- dec#. > dec#-. ] -+ def.
-[ < i64. i64. -- i64. > i64-. ] -+ def.
-[ < f64. f64. -- f64. > f64-. ] -+ def.
-[ < money. money. -- money. > money-. ] -+ def.
+[ < int# int# -- int# > int#-. ] -+ def.
+[ < dec# dec# -- dec# > dec#-. ] -+ def.
+[ < i64 i64 -- i64 > i64-. ] -+ def.
+[ < f64 f64 -- f64 > f64-. ] -+ def.
+[ < money money -- money > money-. ] -+ def.
 
-[ < int#. -- int#. > 0 swap. -+. ] - def.
-[ < dec#. -- dec#. > 0 swap. -+. ] - def.
-[ < i64. -- i64. > 0 swap. -+. ] - def.
-[ < f64. -- f64. > -1.0 f64*. ] - def.
-[ < money. -- money. > 0 swap. -+. ] - def.
+[ < int# -- int# > 0 swap. -+. ] - def.
+[ < dec# -- dec# > 0 swap. -+. ] - def.
+[ < i64 -- i64 > 0 swap. -+. ] - def.
+[ < f64 -- f64 > -1.0 f64*. ] - def.
+[ < money -- money > 0 swap. -+. ] - def.
 [ < a ary. > [ -. ] map. ] - def.
 
-[ < int#. int#. -- int#. > int#*. ] * def.
-[ < dec#. dec#. -- dec#. > dec#*. ] * def.
-[ < i64. i64. -- i64. > i64*. ] * def.
-[ < f64. f64. -- f64. > f64*. ] * def.
+[ < int# int# -- int# > int#*. ] * def.
+[ < dec# dec# -- dec# > dec#*. ] * def.
+[ < i64 i64 -- i64 > i64*. ] * def.
+[ < f64 f64 -- f64 > f64*. ] * def.
 
 -- Arithmetic lifts over arrays: a tensor and an atom, a number, at any
 -- rank, or a tensor and a row one rank lower, element by element along the
@@ -74,28 +74,28 @@ i64 f64 or. money or. int# or. dec# or. num def.
 -- `atom` matches any type that is not a container. The other value is read
 -- below each element; a literal takes the elements' type.
 
-[ < a ary. atom. > swap. [ over. +. ] map. swap. drop. ] + def.
-[ < atom. a ary. > [ over. +. ] map. swap. drop. ] + def.
+[ < a ary. atom > swap. [ over. +. ] map. swap. drop. ] + def.
+[ < atom a ary. > [ over. +. ] map. swap. drop. ] + def.
 [ < a ary. a > swap. [ over. +. ] map. swap. drop. ] + def.
 [ < a a ary. > [ over. +. ] map. swap. drop. ] + def.
 
-[ < a ary. atom. > swap. [ over. -+. ] map. swap. drop. ] -+ def.
-[ < atom. a ary. > [ over. swap. -+. ] map. swap. drop. ] -+ def.
+[ < a ary. atom > swap. [ over. -+. ] map. swap. drop. ] -+ def.
+[ < atom a ary. > [ over. swap. -+. ] map. swap. drop. ] -+ def.
 [ < a ary. a > swap. [ over. -+. ] map. swap. drop. ] -+ def.
 [ < a a ary. > [ over. swap. -+. ] map. swap. drop. ] -+ def.
 
-[ < a ary. atom. > swap. [ over. *. ] map. swap. drop. ] * def.
-[ < atom. a ary. > [ over. *. ] map. swap. drop. ] * def.
+[ < a ary. atom > swap. [ over. *. ] map. swap. drop. ] * def.
+[ < atom a ary. > [ over. *. ] map. swap. drop. ] * def.
 [ < a ary. a > swap. [ over. *. ] map. swap. drop. ] * def.
 [ < a a ary. > [ over. *. ] map. swap. drop. ] * def.
 
-[ < a ary. atom. > swap. [ over. div. ] map. swap. drop. ] div def.
-[ < atom. a ary. > [ over. swap. div. ] map. swap. drop. ] div def.
+[ < a ary. atom > swap. [ over. div. ] map. swap. drop. ] div def.
+[ < atom a ary. > [ over. swap. div. ] map. swap. drop. ] div def.
 [ < a ary. a > swap. [ over. div. ] map. swap. drop. ] div def.
 [ < a a ary. > [ over. swap. div. ] map. swap. drop. ] div def.
 
-[ < a ary. atom. > swap. [ over. /*. ] map. swap. drop. ] /* def.
-[ < atom. a ary. > [ over. swap. /*. ] map. swap. drop. ] /* def.
+[ < a ary. atom > swap. [ over. /*. ] map. swap. drop. ] /* def.
+[ < atom a ary. > [ over. swap. /*. ] map. swap. drop. ] /* def.
 [ < a ary. a > swap. [ over. /*. ] map. swap. drop. ] /* def.
 [ < a a ary. > [ over. swap. /*. ] map. swap. drop. ] /* def.
 
@@ -111,7 +111,7 @@ i64 f64 or. money or. int# or. dec# or. num def.
 -- outer product, the tensor product: each element of A times all of B, so
 -- ranks add.
 
-[ < atom. b > *. ] × def.
+[ < atom b > *. ] × def.
 [ < a ary. b > swap. [ over. ×. ] map. swap. drop. ] × def.
 
 -- `dot` contracts A's last index with B's first: vector · vector is a
@@ -138,34 +138,34 @@ i64 f64 or. money or. int# or. dec# or. num def.
 -- divmod.` is -3 2. `div` and `mod` take one of them, so the three always
 -- agree; `div` of floats is their quotient. Two literals divide exactly.
 
-[ < int#. int#. -- int#. int#. > int#-divmod. ] divmod def.
-[ < i64. i64. -- i64. i64. > i64-divmod. ] divmod def.
-[ < int#. int#. -- int#. > divmod. drop. ] div def.
-[ < i64. i64. -- i64. > divmod. drop. ] div def.
-[ < f64. f64. -- f64. > f64/. ] div def.
-[ < int#. int#. -- int#. > divmod. swap. drop. ] mod def.
-[ < i64. i64. -- i64. > divmod. swap. drop. ] mod def.
+[ < int# int# -- int# int# > int#-divmod. ] divmod def.
+[ < i64 i64 -- i64 i64 > i64-divmod. ] divmod def.
+[ < int# int# -- int# > divmod. drop. ] div def.
+[ < i64 i64 -- i64 > divmod. drop. ] div def.
+[ < f64 f64 -- f64 > f64/. ] div def.
+[ < int# int# -- int# > divmod. swap. drop. ] mod def.
+[ < i64 i64 -- i64 > divmod. swap. drop. ] mod def.
 [ < a ary. a ary. > [ div. ] zip. ] div def.
 
-[ < f64. -- f64. > 1.0 swap. f64/. ] / def.
+[ < f64 -- f64 > 1.0 swap. f64/. ] / def.
 [ < a ary. > [ /. ] map. ] / def.
-[ < f64. f64. -- f64. > f64/. ] /* def.
+[ < f64 f64 -- f64 > f64/. ] /* def.
 [ < a ary. a ary. > [ /*. ] zip. ] /* def.
 [ /. ] ÷ def.
 
 -- Comparisons leave a bool.
 
-[ < i64. i64. -- bool. > i64lt?. ] lt? def.
-[ < f64. f64. -- bool. > f64lt?. ] lt? def.
-[ < money. money. -- bool. > money-lt?. ] lt? def.
-[ < i64. i64. -- bool. > swap. i64lt?. ] gt? def.
-[ < f64. f64. -- bool. > swap. f64lt?. ] gt? def.
-[ < money. money. -- bool. > swap. money-lt?. ] gt? def.
-[ < i64. i64. -- bool. > i64eq?. ] eq? def.
-[ < f64. f64. -- bool. > f64eq?. ] eq? def.
-[ < money. money. -- bool. > money-eq?. ] eq? def.
-[ < string. string. -- bool. > string-eq?. ] eq? def.
-[ < sym. sym. -- bool. > sym-eq?. ] eq? def.
+[ < i64 i64 -- bool > i64lt?. ] lt? def.
+[ < f64 f64 -- bool > f64lt?. ] lt? def.
+[ < money money -- bool > money-lt?. ] lt? def.
+[ < i64 i64 -- bool > swap. i64lt?. ] gt? def.
+[ < f64 f64 -- bool > swap. f64lt?. ] gt? def.
+[ < money money -- bool > swap. money-lt?. ] gt? def.
+[ < i64 i64 -- bool > i64eq?. ] eq? def.
+[ < f64 f64 -- bool > f64eq?. ] eq? def.
+[ < money money -- bool > money-eq?. ] eq? def.
+[ < string string -- bool > string-eq?. ] eq? def.
+[ < sym sym -- bool > sym-eq?. ] eq? def.
 
 -- At most, at least, not equal: `≤`, `≥` and `≠`. "Less, or equal" rather
 -- than "not greater", so that a float that is no number, NaN, is at most
@@ -202,68 +202,68 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < a a gt? -- a > drop. ] max def.
 [ < a a -- a > swap. drop. ] max def.
 
-[ < bool. -- bool. > false. eq?. ] not def.
-[ < bool. bool. -- bool. > min. ] and def.
-[ < bool. bool. -- bool. > max. ] or def.
+[ < bool -- bool > false. eq?. ] not def.
+[ < bool bool -- bool > min. ] and def.
+[ < bool bool -- bool > max. ] or def.
 
 -- Narrowing: a float to an integer, saying how it rounds: down, up, half
 -- away from zero, or toward zero. A float with no i64 is an error. On an
 -- integer they change nothing, and on a decimal literal they are exact.
 
-[ < dec#. -- int#. > dec#-floor. ] floor def.
-[ < int#. -- int#. > ] floor def.
-[ < i64. -- i64. > ] floor def.
-[ < f64. -- i64. > f64-floor. ] floor def.
-[ < dec#. -- int#. > dec#-ceil. ] ceil def.
-[ < int#. -- int#. > ] ceil def.
-[ < i64. -- i64. > ] ceil def.
-[ < f64. -- i64. > f64-ceil. ] ceil def.
-[ < dec#. -- int#. > dec#-round. ] round def.
-[ < int#. -- int#. > ] round def.
-[ < i64. -- i64. > ] round def.
-[ < f64. -- i64. > f64-round. ] round def.
-[ < dec#. -- int#. > dec#-trunc. ] trunc def.
-[ < int#. -- int#. > ] trunc def.
-[ < i64. -- i64. > ] trunc def.
-[ < f64. -- i64. > f64-trunc. ] trunc def.
+[ < dec# -- int# > dec#-floor. ] floor def.
+[ < int# -- int# > ] floor def.
+[ < i64 -- i64 > ] floor def.
+[ < f64 -- i64 > f64-floor. ] floor def.
+[ < dec# -- int# > dec#-ceil. ] ceil def.
+[ < int# -- int# > ] ceil def.
+[ < i64 -- i64 > ] ceil def.
+[ < f64 -- i64 > f64-ceil. ] ceil def.
+[ < dec# -- int# > dec#-round. ] round def.
+[ < int# -- int# > ] round def.
+[ < i64 -- i64 > ] round def.
+[ < f64 -- i64 > f64-round. ] round def.
+[ < dec# -- int# > dec#-trunc. ] trunc def.
+[ < int# -- int# > ] trunc def.
+[ < i64 -- i64 > ] trunc def.
+[ < f64 -- i64 > f64-trunc. ] trunc def.
 
 -- Roots and powers. `pow` is x to the y, written `^` as LaTeX writes it
 -- (Thomas, 2026-10-09); `exp`, e to the x, is kept for that. Two literals
 -- stay an exact literal.
 
-[ < f64. -- f64. > f64-sqrt. ] sqrt def.
-[ < int#. int#. -- int#. > int#-pow. ] pow def.
-[ < i64. i64. -- i64. > i64-pow. ] pow def.
-[ < f64. f64. -- f64. > f64-pow. ] pow def.
+[ < f64 -- f64 > f64-sqrt. ] sqrt def.
+[ < int# int# -- int# > int#-pow. ] pow def.
+[ < i64 i64 -- i64 > i64-pow. ] pow def.
+[ < f64 f64 -- f64 > f64-pow. ] pow def.
 [ pow. ] ^ def.
 
 -- Containers, typed by their structure. A vec knows its length at compile
 -- time, so its length is a constant.
 
-[ < string. -- i64. > string-length. ] length def.
-[ < a ary. -- i64. > ary-length. ] length def.
-[ < n a vec. -- i64. > vec-length. ] length def.
-[ < tuple. -- i64. > tuple-length. ] length def.
-[ < k v map. -- i64. > map-length. ] length def.
+[ < string -- i64 > string-length. ] length def.
+[ < a ary. -- i64 > ary-length. ] length def.
+[ < n a vec. -- i64 > vec-length. ] length def.
+[ < tuple -- i64 > tuple-length. ] length def.
+[ < k v map. -- i64 > map-length. ] length def.
 
-[ < string. i64. -- i64. > string-at. ] at def.
-[ < a ary. i64. -- a > ary-at. ] at def.
-[ < n a vec. i64. -- a > vec-at. ] at def.
+[ < string i64 -- i64 > string-at. ] at def.
+[ < a ary. i64 -- a > ary-at. ] at def.
+[ < n a vec. i64 -- a > vec-at. ] at def.
 [ < k v map. k -- v > map-at. ] at def.
-[ < tuple. i64. > tuple-at. ] at def.
+[ < tuple i64 > tuple-at. ] at def.
 -- At an array of positions, an array: the element at each, as APL indexes.
-[ < a ary. i64. ary. > [ over. swap. at. ] map. swap. drop. ] at def.
+[ < a ary. i64 ary. > [ over. swap. at. ] map. swap. drop. ] at def.
 
 -- A map's value at a key, or nil where it has none: `v nil or`, decided at
 -- run time unless the map and key are known (TYPES.md 3.6). Its outputs
 -- name the union, so it is meant and not warned of.
-[ < k v map. k map-has? -- v nil. or. > map-at. ] get def.
-[ < k v map. k -- v nil. or. > drop. drop. nil. ] get def.
+[ < k v map. k map-has? -- v nil or. > map-at. ] get def.
+[ < k v map. k -- v nil or. > drop. drop. nil. ] get def.
 
 -- A map with a key set to a value: a new version, the old one unchanged.
 [ < k v map. k v -- k v map. > map-put. ] put def.
 
-[ < string. string. -- string. > string-concat. ] concat def.
+[ < string string -- string > string-concat. ] concat def.
 [ < a ary. a ary. -- a ary. > ary-concat. ] concat def.
 [ < n a vec. m a vec. > vec-concat. ] concat def.
 
@@ -271,10 +271,10 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ < k v map. -- v ary. > map-values. ] values def.
 
 -- `sort`: an array in order, numbers by value and strings by text.
-[ < i64. ary. -- i64. ary. > i64-sort. ] sort def.
-[ < f64. ary. -- f64. ary. > f64-sort. ] sort def.
-[ < money. ary. -- money. ary. > money-sort. ] sort def.
-[ < string. ary. -- string. ary. > string-sort. ] sort def.
+[ < i64 ary. -- i64 ary. > i64-sort. ] sort def.
+[ < f64 ary. -- f64 ary. > f64-sort. ] sort def.
+[ < money ary. -- money ary. > money-sort. ] sort def.
+[ < string ary. -- string ary. > string-sort. ] sort def.
 
 -- `order`, `<#`: the positions that would put an array in order, APL's
 -- grade up `⍋` and R's `order` (Thomas, 2026-10-09: not "grade", too near
@@ -285,70 +285,65 @@ i64 f64 or. money or. int# or. dec# or. num def.
 -- descending order, as APL's `⍒`, also stable, which `order reverse` is not:
 -- that would turn equal elements around. The point of `<#` and `#>` is the
 -- end where the smallest go.
-[ < i64. ary. -- i64. ary. > i64-order. ] order def.
-[ < f64. ary. -- i64. ary. > f64-order. ] order def.
-[ < money. ary. -- i64. ary. > money-order. ] order def.
-[ < string. ary. -- i64. ary. > string-order. ] order def.
+[ < i64 ary. -- i64 ary. > i64-order. ] order def.
+[ < f64 ary. -- i64 ary. > f64-order. ] order def.
+[ < money ary. -- i64 ary. > money-order. ] order def.
+[ < string ary. -- i64 ary. > string-order. ] order def.
 [ order. ] <# def.
 [ over. swap. map. order. at. ] sort-by def.
 
-[ < i64. ary. -- i64. ary. > i64-dorder. ] dorder def.
-[ < f64. ary. -- i64. ary. > f64-dorder. ] dorder def.
-[ < money. ary. -- i64. ary. > money-dorder. ] dorder def.
-[ < string. ary. -- i64. ary. > string-dorder. ] dorder def.
+[ < i64 ary. -- i64 ary. > i64-dorder. ] dorder def.
+[ < f64 ary. -- i64 ary. > f64-dorder. ] dorder def.
+[ < money ary. -- i64 ary. > money-dorder. ] dorder def.
+[ < string ary. -- i64 ary. > string-dorder. ] dorder def.
 [ dorder. ] #> def.
 
 -- `take`: an array's or a string's first n elements, or its last n when n is
 -- negative; all of them, if it has fewer (from SYMBOL's `↑`).
-[ < a ary. string. or. i64. negative? > -. over. length. min. over. length. dup. rot. -+. 1 +. swap. slice. ]
+[ < a ary. string or. i64 negative? > -. over. length. min. over. length. dup. rot. -+. 1 +. swap. slice. ]
   take def.
-[ < a ary. string. or. i64. > over. length. min. 1 swap. slice. ] take def.
+[ < a ary. string or. i64 > over. length. min. 1 swap. slice. ] take def.
 
 -- `skip`: all but an array's or a string's first n elements, or all but its
 -- last n when n is negative; none, if it has fewer (SYMBOL's `↓`; `drop` is
 -- the stack's).
-[ < a ary. string. or. i64. negative? > -. over. length. min. over. length. swap. -+. 1 swap. slice. ]
+[ < a ary. string or. i64 negative? > -. over. length. min. over. length. swap. -+. 1 swap. slice. ]
   skip def.
-[ < a ary. string. or. i64. > over. length. min. 1 +. over. length. slice. ] skip def.
+[ < a ary. string or. i64 > over. length. min. 1 +. over. length. slice. ] skip def.
 
--- Files (Thomas, 2026-10-09). `file` applied to a string makes a file, a
--- path said to be one, `"data.csv" file.`, so text is never taken for a
--- path. `read` reads its text when the program runs, an effect; `embed`
--- reads it while compiling, so that what follows can fold on it, as a macro
--- would, the text going into the code as data. Paths are from where march8
--- runs.
-[ < string. -- file. > string>file. ] file def.
-[ < file. -- string. > file-read. ] read def.
--- `stdin read.`: all of standard input. `stdin` is a symbol, no value or
--- handle: `read` is chosen by it, as by a file (Thomas, 2026-10-09).
-[ < stdin -- string. > drop. stdin-read. ] read def.
+-- Reading is primitives (Thomas, 2026-10-10, for now): `"data.csv"
+-- file-read.` a file's text and `stdin-read.` standard input, when the
+-- program runs, an effect; `"notes.txt" file-embed.` a file's text while
+-- compiling, so that what follows can fold on it, as a macro would. Paths
+-- are from where march8 runs. With namespaces they become `io.file.read`
+-- and the like (TYPES.md 3.12).
 
 -- Text: `split` at each separator (between characters, for ""), `lines`,
 -- and `words` at runs of white space, as Haskell's are; `lower` and `upper`,
 -- element by element over an array of strings.
-[ < string. string. -- string. ary. > string-split. ] split def.
-[ < string. -- string. ary. > string-lines. ] lines def.
-[ < string. -- string. ary. > string-words. ] words def.
-[ < string. -- string. > string-lower. ] lower def.
-[ < string. -- string. > string-upper. ] upper def.
-[ < string. ary. > [ lower. ] map. ] lower def.
-[ < string. ary. > [ upper. ] map. ] upper def.
+[ < string string -- string ary. > string-split. ] split def.
+[ < string -- string ary. > string-lines. ] lines def.
+[ < string -- string ary. > string-words. ] words def.
+[ < string -- string > string-lower. ] lower def.
+[ < string -- string > string-upper. ] upper def.
+[ < string ary. > [ lower. ] map. ] lower def.
+[ < string ary. > [ upper. ] map. ] upper def.
 
 -- `case`: a string in a case style, chosen by a symbol (Thomas, 2026-10-09):
 -- `"Hello World" snake case.` is "hello_world". A name left bare is a
 -- symbol, in a bracket too, so the clauses are the styles, and anyone may
 -- add one.
-[ < string. lower -- string. > drop. string-lower. ] case def.
-[ < string. upper -- string. > drop. string-upper. ] case def.
-[ < string. snake -- string. > drop. string-snake. ] case def.
-[ < string. kebab -- string. > drop. string-kebab. ] case def.
-[ < string. camel -- string. > drop. string-camel. ] case def.
-[ < string. pascal -- string. > drop. string-pascal. ] case def.
+[ < string lower! -- string > drop. string-lower. ] case def.
+[ < string upper! -- string > drop. string-upper. ] case def.
+[ < string snake! -- string > drop. string-snake. ] case def.
+[ < string kebab! -- string > drop. string-kebab. ] case def.
+[ < string camel! -- string > drop. string-camel. ] case def.
+[ < string pascal! -- string > drop. string-pascal. ] case def.
 
 -- `thru`: the integers from a to b, both included, counting down when a is
 -- the larger (SYMBOL's `..`); `‥`, two dots as one character, is its glyph.
-[ < i64. i64. gt? > over. swap. -+. 1 +. range. -. swap. 1 +. +. ] thru def.
-[ < i64. i64. > over. -+. 1 +. range. swap. 1 -+. +. ] thru def.
+[ < i64 i64 gt? > over. swap. -+. 1 +. range. -. swap. 1 +. +. ] thru def.
+[ < i64 i64 > over. -+. 1 +. range. swap. 1 -+. +. ] thru def.
 [ thru. ] ‥ def.
 
 -- Sums and products: `∑` and `∏` (`\sum`, `\prod`), the mathematical
@@ -360,13 +355,13 @@ i64 f64 or. money or. int# or. dec# or. num def.
 [ prod. ] ∏ def.
 
 -- `keep`: the elements whose mask is true, APL's compress.
-[ < a ary. bool. ary. -- a ary. > ary-keep. ] keep def.
+[ < a ary. bool ary. -- a ary. > ary-keep. ] keep def.
 
 -- `count` is `length`, for now (Thomas, 2026-10-08: `#` may come later).
 [ length. ] count def.
 
-[ < string. i64. i64. -- string. > string-slice. ] slice def.
-[ < a ary. i64. i64. -- a ary. > ary-slice. ] slice def.
+[ < string i64 i64 -- string > string-slice. ] slice def.
+[ < a ary. i64 i64 -- a ary. > ary-slice. ] slice def.
 
 -- Elements count from 1, and from -1 at the end; gaps between them count
 -- from 0, before the first, each gap after its element, so -1 is after the
@@ -407,7 +402,7 @@ i64 f64 or. money or. int# or. dec# or. num def.
 -- a vec's each a value, and any array's, inside an array literal, a run.
 
 [ < n a vec. > vec-spread. ] spread def.
-[ < tuple. > tuple-spread. ] spread def.
+[ < tuple > tuple-spread. ] spread def.
 [ < a ary. > [ ] each. ] spread def.
 
 -- `n q repeat` runs q n times.
@@ -419,27 +414,26 @@ i64 f64 or. money or. int# or. dec# or. num def.
 -- own text, and any other value shown; a string's holes write values in
 -- with it (march7/docs/STRINGS.md).
 
-[ < string. -- string. > string-show. ] show def.
-[ < i64. -- string. > i64>text. ] show def.
-[ < f64. -- string. > f64>text. ] show def.
-[ < money. -- string. > money>text. ] show def.
-[ < nil. -- string. > drop. "nil" ] show def.
-[ < file. -- string. > file-path. string-show. " file" concat. ] show def.
-[ < 1 bool.to. -- string. > drop. "true" ] show def.
-[ < bool. -- string. > drop. "false" ] show def.
-[ < tuple. -- string. > [ show. ] map. "(" swap. [ " " swap. concat. concat. ] each. " )" concat. ]
+[ < string -- string > string-show. ] show def.
+[ < i64 -- string > i64>text. ] show def.
+[ < f64 -- string > f64>text. ] show def.
+[ < money -- string > money>text. ] show def.
+[ < nil -- string > drop. "nil" ] show def.
+[ < 1 bool. -- string > drop. "true" ] show def.
+[ < bool -- string > drop. "false" ] show def.
+[ < tuple -- string > [ show. ] map. "(" swap. [ " " swap. concat. concat. ] each. " )" concat. ]
   show def.
-[ < a ary. -- string. > "(" swap. [ show. " " swap. concat. concat. ] each. " )" concat. ] show def.
-[ < k v map. -- string. >
+[ < a ary. -- string > "(" swap. [ show. " " swap. concat. concat. ] each. " )" concat. ] show def.
+[ < k v map. -- string >
   "{" swap. dup. keys. sort.
   [ over. over. at. show. swap. show. " " swap. concat. " " concat. swap. concat.
     rot. swap. concat. swap. ] each.
   drop. " }" concat. ] show def.
 
-[ < string. -- string. > ] >string def.
-[ < a -- string. > show. ] >string def.
+[ < string -- string > ] >string def.
+[ < a -- string > show. ] >string def.
 
 -- Writing.
 
-[ < string. > write. ] print def.
+[ < string > write. ] print def.
 [ < a > >string. write. ] print def.

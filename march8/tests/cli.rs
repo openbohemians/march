@@ -32,7 +32,7 @@ fn the_repl_runs_each_line() {
     assert_eq!(
         out,
         "<1> 3\n<2> 3 \"xx\"\nError: 1:3: no word `foo`\ntypes shown\n\
-         <3> 3 < i64. > \"xx\" < string. > ( 1 3 6 ) < i64. ary. >\n"
+         <3> 3 < i64 > \"xx\" < string > ( 1 3 6 ) < i64 ary. >\n"
     );
 }
 
@@ -50,7 +50,7 @@ fn the_stack_with_its_types_reads_as_march() {
     s.eval("{ \"a\" ( 1.5 ) } 2").unwrap();
     assert_eq!(
         s.show_typed(),
-        "<2> { \"a\" ( 1.5 ) } < string. 1 f64. vec. map. > 2 < i64. >"
+        "<2> { \"a\" ( 1.5 ) } < string 1 f64 vec. map. > 2 < i64 >"
     );
     // Text that ends inside a bracket or a string is unfinished, not wrong.
     assert_eq!(s.eval("( 1 2").unwrap_err().kind, Kind::Unfinished);
@@ -68,14 +68,13 @@ fn scan_gives_the_running_reductions() {
 }
 
 #[test]
-fn stdin_is_a_source_to_read() {
-    // `stdin read.` is all of standard input, as a string: `stdin` is a
-    // symbol, which chooses `read`'s clause.
+fn stdin_read_reads_standard_input() {
+    // `stdin-read.` is all of standard input, as a string.
     let out = march8(
-        &["--eval", "stdin read.lines.length."],
+        &["--eval", "stdin-read.lines.length."],
         "apple,3\npear,5\nfig,1\n",
     );
     assert_eq!(out, "<1> 3\n");
-    let out = march8(&["--eval", "stdin read. words."], "one two\nthree\n");
+    let out = march8(&["--eval", "stdin-read. words."], "one two\nthree\n");
     assert_eq!(out, "<1> ( \"one\" \"two\" \"three\" )\n");
 }

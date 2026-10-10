@@ -53,10 +53,7 @@ fn roots_and_powers() {
     // Integer powers are checked: two literals' power is exact, and too
     // large only when it must be an i64; at run time, an overflow.
     assert_eq!(session(&["2 64 pow."]).err(), Some(Kind::Literal));
-    assert_eq!(
-        session(&["2 i64.to. 64 pow."]).err(),
-        Some(Kind::Arithmetic)
-    );
+    assert_eq!(session(&["2 i64. 64 pow."]).err(), Some(Kind::Arithmetic));
     assert_eq!(
         session(&["2", "64 pow."]).err(),
         Some(Kind::Run(march8::machine::Error::Arithmetic))
@@ -229,9 +226,9 @@ fn an_inverse_is_a_word() {
     // `^` is power; `⋅` is `*`'s glyph.
     assert_eq!(show(&["2 10 ^. 3 4 ⋅."]), "<2> 1024 12");
     // An integer has no reciprocal among the integers: its division is `div`.
-    assert_eq!(session(&["7 i64.to.", "/."]).err(), Some(Kind::NoWord));
+    assert_eq!(session(&["7 i64.", "/."]).err(), Some(Kind::NoWord));
     assert_eq!(
-        session(&["-9223372036854775807 i64.to. 1 -+.", "-."]).err(),
+        session(&["-9223372036854775807 i64. 1 -+.", "-."]).err(),
         Some(Kind::Run(march8::machine::Error::Arithmetic))
     );
 }
@@ -341,9 +338,9 @@ fn parse_leaves_a_value_or_nil() {
     let mut s = Session::new();
     s.eval("\"42\" i64 parse. \" 2.5 \" f64 parse. \"x\" i64 parse.")
         .unwrap();
-    assert_eq!(s.show_typed(), "<3> 42 < i64. > 2.5 < f64. > nil < nil. >");
+    assert_eq!(s.show_typed(), "<3> 42 < i64 > 2.5 < f64 > nil < nil >");
     // At run time, `i64 nil or`, for clauses to take apart.
-    let n = "[ < i64. > ] n def. [ < nil. > drop. 0 ] n def.";
+    let n = "[ < i64 > ] n def. [ < nil > drop. 0 ] n def.";
     assert_eq!(
         show(&[n, "\"42\" \"nope\"", "i64 parse. n. swap. i64 parse. n."]),
         "<2> 0 42"

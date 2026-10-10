@@ -20,8 +20,8 @@ fn show(pieces: &[&str]) -> String {
 
 /// Leaves an element under 3, and nothing for any other.
 const KEEP: &str = "[ 3 lt?. ] small? def.
-    [ < i64. small? > ] keep def.
-    [ < i64. > drop. ] keep def.";
+    [ < i64 small? > ] keep def.
+    [ < i64 > drop. ] keep def.";
 
 #[test]
 fn each_inside_a_literal_collects() {

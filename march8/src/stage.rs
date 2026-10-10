@@ -657,10 +657,10 @@ impl Stage {
                 self.pos = at;
                 self.apply_word(&n)
             }
-            // A type applied is the type: `to` converts to one.
+            // A type applied converts the value below to it: `x 3 i64 vec..`.
             Val::Type(t) => {
-                self.push(TYPE, Val::Type(t));
-                Ok(())
+                self.need(1)?;
+                self.convert(self.stack.len() - 1, t)
             }
             Val::Quote(q) => {
                 self.enter()?;
@@ -709,10 +709,10 @@ impl Stage {
             self.push(NIL, Val::Int(0));
             Ok(())
         } else if let Some(t) = w.ty {
-            // A type applied is the type: types are operators, as `ary` is
-            // (Thomas, 2026-10-09), and `to` converts a value to one.
-            self.push(TYPE, Val::Type(t));
-            Ok(())
+            // A type's name is a symbol, `i64`, as any name is; applied, it
+            // converts the value below: `2 i64.` (Thomas, 2026-10-09).
+            self.need(1)?;
+            self.convert(self.stack.len() - 1, t)
         } else if !w.clauses.is_empty() {
             self.family(name)
         } else {
@@ -2262,9 +2262,12 @@ impl Stage {
                 _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
             });
         }
-        // A type applied is the type, and `nil.` its value: one value left.
-        if w.ty.is_some() {
+        // `nil.` is its value; another type's name applied converts.
+        if w.ty == Some(NIL) {
             return Some((0, 1));
+        }
+        if w.ty.is_some() {
+            return Some((1, 1));
         }
         if let Some(c) = w.con {
             return Some(if c == Con::Ary { (1, 1) } else { (2, 1) });
@@ -2517,6 +2520,24 @@ impl Stage {
         for (j, pos) in self.comprehend(inputs)? {
             match j.val {
                 Val::Type(t) => ins.push(t),
+                // A name left is a type's, or, marked `!`, a symbol: `< string
+                // camel! >` (Thomas, 2026-10-09). Outside brackets a name is a
+                // symbol already; here the mark tells it from a type.
+                Val::Name(n, at) => match n.strip_suffix('!') {
+                    Some(s) => {
+                        equals.push(Guard {
+                            test: Test::Equals(Jdg {
+                                ty: SYMBOL,
+                                val: Val::Name(s.into(), at),
+                            }),
+                            slot: ins.len(),
+                            arity: 1,
+                            pos,
+                        });
+                        ins.push(SYMBOL);
+                    }
+                    None => ins.push(self.named_type(&n, at)?),
+                },
                 // `nil.`, the one value of its type, is that type.
                 _ if j.ty == NIL => ins.push(NIL),
                 Val::Quote(q) => guards.push(self.quote_guard(q, ins.len(), pos)?),
@@ -2538,6 +2559,9 @@ impl Stage {
                 for (j, pos) in self.comprehend(o)? {
                     match j.val {
                         Val::Type(t) => outs.push(t),
+                        Val::Name(n, at) if !n.ends_with('!') => {
+                            outs.push(self.named_type(&n, at)?)
+                        }
                         _ if j.ty == NIL => outs.push(NIL),
                         _ => {
                             self.pos = pos;
@@ -2559,6 +2583,18 @@ impl Stage {
             ins,
             guards: equals,
             outs,
+        })
+    }
+
+    /// The type a name in a bracket names; a name that names none is an
+    /// error, never read as something else.
+    fn named_type(&self, n: &str, at: Pos) -> Result<Type> {
+        self.words.get(n).and_then(|w| w.ty).ok_or_else(|| {
+            Error::new(
+                Kind::NoWord,
+                Some(at),
+                format!("no type `{n}`: a symbol in a bracket is marked, `{n}!`"),
+            )
         })
     }
 
@@ -2959,7 +2995,6 @@ impl Stage {
             }
             Prim::TupleAt => self.tuple_at(base)?,
             Prim::Parse => self.parse(name, base)?,
-            Prim::To => self.to(name, base)?,
             // A file's text read while compiling, a known string, so what
             // follows folds on it: macros by staging. The text goes into the
             // code as data, so the code's identity follows the file.
@@ -3404,38 +3439,22 @@ impl Stage {
         Ok(())
     }
 
-    /// `to`: the value below as the type on top, `2 i64.to.`, a literal
-    /// converted by the type's clause for it, a value of another type by
-    /// the type's clause for that, as `"data.csv" file.to.` makes a file;
-    /// otherwise the value must have the type already, or forget into it.
-    fn to(&mut self, name: &str, base: usize) -> Result<()> {
-        let j = self.stack[base + 1].clone();
-        let t = match &j.val {
-            Val::Type(t) => *t,
-            Val::Name(n, _) if self.words.get(n).is_some_and(|w| w.ty.is_some()) => {
-                self.words[n].ty.expect("checked")
-            }
-            _ if j.ty == NIL => NIL,
-            _ => {
-                return Err(self.err(
-                    Kind::Mismatch,
-                    format!(
-                        "`{name}` converts to a type, and {} is not one",
-                        self.describe(&j)
-                    ),
-                ));
-            }
-        };
-        self.stack.pop();
-        let have = self.stack[base].ty;
+    /// The value at `i` as type `t`: a literal by the type's clause for it, a
+    /// value of another type by the type's clause for that, as a type's own
+    /// clauses say how to make one; otherwise it must have the type already,
+    /// or forget into it.
+    fn convert(&mut self, i: usize, t: Type) -> Result<()> {
+        let have = self.stack[i].ty;
         if have != t
             && !self.types.is_literal(have)
+            && i + 1 == self.stack.len()
             && let Some(c) = self.conversion(t, have)
         {
             let at = self.pos;
-            return self.apply_clause(name, &c, Env::default(), at);
+            let name = self.types.name(t);
+            return self.apply_clause(&name, &c, Env::default(), at);
         }
-        self.annotate(base, t)
+        self.annotate(i, t)
     }
 
     /// `parse`: the value of a type that a string writes, `"42" i64 parse.`,
@@ -4347,6 +4366,7 @@ impl Stage {
         for j in self.stack.drain(lit.start..).collect::<Vec<_>>() {
             match j.val {
                 Val::Type(t) => elems.push(t),
+                Val::Name(n, at) => elems.push(self.named_type(&n, at)?),
                 _ if j.ty == NIL => elems.push(NIL),
                 _ => {
                     return Err(self.err(

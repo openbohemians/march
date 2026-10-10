@@ -31,13 +31,10 @@ pub enum Base {
     /// Truth: 0 and 1, Iverson's brackets, so a subset of i64 (Thomas,
     /// 2026-10-09). Shown as `false` and `true`.
     Bool,
-    /// A file: a path said to be one, so that text is never taken for a
-    /// path. Held as a string, until March has roles.
-    File,
 }
 
 impl Base {
-    pub const ALL: [(Base, &'static str); 12] = [
+    pub const ALL: [(Base, &'static str); 11] = [
         (Base::I64, "i64"),
         (Base::F64, "f64"),
         (Base::Money, "money"),
@@ -49,7 +46,6 @@ impl Base {
         (Base::Quote, "quote"),
         (Base::Nil, "nil"),
         (Base::Bool, "bool"),
-        (Base::File, "file"),
     ];
 }
 
@@ -65,7 +61,6 @@ pub const SYMBOL: Type = 7;
 pub const QUOTE: Type = 8;
 pub const NIL: Type = 9;
 pub const BOOL: Type = 10;
-pub const FILE: Type = 11;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Term {
@@ -255,14 +250,14 @@ impl Types {
             self.classes.entry(t).or_insert_with(|| name.to_string());
         }
     }
-    /// The type as a bracket's code makes it, so that it reads back:
-    /// `3 i64. vec.`, `string. i64. ary. map.`, a variable as its letter.
+    /// The type as a bracket's code makes it, so that it reads back: names
+    /// bare, constructors applied, `3 i64 vec.`, `string i64 ary. map.`.
     pub fn source(&self, t: Type) -> String {
         if let Some(n) = self.classes.get(&t) {
-            return format!("{n}.");
+            return n.clone();
         }
         match self.term(t) {
-            Term::Base(_) | Term::Atom | Term::AnyTuple => format!("{}.", self.name(t)),
+            Term::Base(_) | Term::Atom | Term::AnyTuple => self.name(t),
             Term::Nat(n) => n.to_string(),
             Term::Var(_) => self.name(t),
             Term::Ary(e) => format!("{} ary.", self.source(e)),

@@ -57,35 +57,35 @@ every application is marked:
   `.` is the only special word, and types and operations share one
   namespace. (`.` is free: the surface language prints with `print`.)
 - **A dot at the end of a word applies it** (Thomas, 2026-10-08): `sq.` is
-  `sq .`, so `1 i64.to. 1 i64.to. +.` reads more easily. By that convention no
+  `sq .`, so `1 i64. 1 i64. +.` reads more easily. By that convention no
   name ends in a dot, and the reader enforces it. Each dot applies once:
-  `x 100 i64 vec.to.` builds a type and converts `x` to it. Dots between
+  `x 100 i64 vec..` builds a type and converts `x` to it. Dots between
   names chain them, each applying the name before it (Thomas, 2026-10-09):
-  `"data.csv" file.to.read.lines.` is `file. to. read. lines.`, as uniform call
+  `"data.csv" file-read.lines.` is `file-read. lines.`, as uniform call
   syntax reads (Nim's, D's): a concatenative program was a method chain all
   along. Literals stand apart: a number keeps its point, `2.5`, `2.i64` is
   no chain, and a string is followed by a space. So no name holds a dot.
-- **A type is an operator that returns itself** (Thomas, 2026-10-09; until
-  then, applying a type annotated the value below it). `i64.` is the type
-  i64, as `i64 ary.` is "array of i64" and `100 i64 vec.` "array of 100
-  i64": `ary`, `vec` and `map` showed the way, being operators already. A
-  name left bare is a symbol, which a type operator takes as the type it
-  names, so `i64 ary.` and `i64. ary.` are one type.
-  - `to` converts a value to a type: `1 i64.to.` is 1 as an i64, by `i64`'s
-    clause for literals; `"data.csv" file.to.` makes a file, by `file`'s
-    clause for strings; `x 100 i64 vec.to.` gives `x` that type.
-  - Annotating "the value below" could not be the rule: which value, when
-    two literals are below?
+- **A type's name is a symbol, as any name is** (Thomas, 2026-10-09).
+  `i64` is the name; applied, it converts the value below: `2 i64.` is 2
+  as an i64, by `i64`'s clause for literals. A constructor takes names and
+  builds a type, `i64 ary.`, `100 i64 vec.`, which applied converts too:
+  `x 100 i64 vec..`. (For a day `i64.` was the type itself, and `to`
+  converted: a name became a word returning a type, which it never is.)
 - **A bracket is code, a comprehension of types** (Thomas, 2026-10-09).
   `< … >` holds code like any other, whose words mean what they mean
-  anywhere, and what it leaves is the signature, by what each value is: a
-  type, inputs of that type; a value, inputs equal to it, a literal (`0`),
-  `true.`, or a symbol left bare (`< string. camel >`, a string and the
-  symbol `camel`); a quotation, a guard on the inputs before it. Its own
-  rules are two, by spelling only, so that no definition elsewhere changes
-  what a bracket means: a word of one letter is a type variable, and a word
-  ending in `?` is a guard (`< i64. positive? >`); a symbol can be neither.
-  A bracket's code runs while compiling, so it leaves only known values.
+  anywhere, and what it leaves is the signature: a type built, inputs of
+  that type; a value, inputs equal to it, a literal (`0`), a converted one
+  (`0 i64.`) or `true.`; a quotation, a guard on the inputs before it; and
+  a name, read by its spelling only, so that no definition elsewhere changes
+  what a bracket means. A word of one letter is a type variable; one ending
+  in `?` a guard (`< i64 positive? >`); one ending in `!` a symbol
+  (`< string camel! >`, a string and the symbol `camel`); any other a
+  type's name, an error if it names none. Outside a bracket a name is a
+  symbol already, `"Hello" camel case.`, so only here is it marked: a
+  slight asymmetry, taken for the quiet of types, which are written most.
+  Symbols need no declaring and are one namespace: a symbol has no
+  definition, only clauses that match it, which belong to families. A
+  bracket's code runs while compiling, so it leaves only known values.
   `--` divides inputs from outputs, which leaves no comment inside a
   bracket (open).
 - **Compile stages evaluate the type part and erase it.** When the type
@@ -188,8 +188,8 @@ an error.
 - **Clauses are signature patterns:**
 
   ```
-  < i64. i64. -- i64. >    integer add
-  < f64. f64. -- f64. >    float add
+  < i64 i64 -- i64 >    integer add
+  < f64 f64 -- f64 >    float add
   < a ary. a -- a ary. >  lift: add to each element ("a" is a type variable)
   ```
 
@@ -223,7 +223,7 @@ an error.
 Literals take their type from context, with no implicit promotion
 (SURFACE.md). At a compile stage a literal is undecided: its type is a
 **literal type** (`lit#` is a placeholder name). Thomas: it is "just another
-type signature `< f64. lit# >`", so literal handling is clauses, open like
+type signature `< f64 lit# >`", so literal handling is clauses, open like
 any family.
 
 - **Each type declares once how a literal becomes it:** f64 converts it to
@@ -262,8 +262,8 @@ branches, and lowering turns dispatch on values into branches.
   check at run time, or at compile time when the value is known. It is not
   a runtime value in a type. Written (2026-10-08): a value left in a bracket,
   `< 0 >`, matches an input of any type the literal becomes, compared in
-  that type; `< 0 i64.to. >` gives it a type, as `0 i64.to.` does in code. A
-  section's context ANDs with it slot by slot, so under `## < i64. >`, `< 0 >`
+  that type; `< 0 i64. >` gives it a type, as `0 i64.` does in code. A
+  section's context ANDs with it slot by slot, so under `## < i64 >`, `< 0 >`
   is an i64 equal to 0. `fib` needs no helper words:
 
   ```
@@ -282,13 +282,13 @@ name annotates: `19.99 money` lowers to `19.99 money .`. Building a type
 needs a bracket, as SURFACE.md assigns `< >` to signatures and patterns:
 
 - **Inside `< … >`, words build a type** instead of annotating: `i64` is
-  the type itself, so `< 100 i64. vec. >` is "array of 100 i64".
-- **A bracket of n types annotates the top n values:** `x < 100 i64. vec. >`
-  annotates `x`, and `x y < i64. f64. >` both. A signature at the start of a
-  word, `< f64. money. >`, is then the annotation of its inputs, not a
+  the type itself, so `< 100 i64 vec. >` is "array of 100 i64".
+- **A bracket of n types annotates the top n values:** `x < 100 i64 vec. >`
+  annotates `x`, and `x y < i64 f64 >` both. A signature at the start of a
+  word, `< f64 money >`, is then the annotation of its inputs, not a
   construct of its own.
 - In the explicit form a bracket builds its type and applies it:
-  `x < 100 i64. vec. >` lowers to `x 100 i64 vec . to .`.
+  `x < 100 i64 vec. >` lowers to `x 100 i64 vec .`.
 
 Rejected: marking each type name, as in `100 <i64> <vec>`. It leaves unclear
 where a type expression starts (is the 100 part of it?), and makes a second
@@ -309,7 +309,7 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
 - **Terms.** A **clause** is one definition: a name, a context and a body.
   A **family** is the clauses that share a name: `+`, with an i64 clause, an
   f64 clause and so on. A **domain** is the clauses that share a context:
-  everything defined on `< i64. >`. A **section** is the text under one
+  everything defined on `< i64 >`. A **section** is the text under one
   heading; sections far apart in a program can define in the same domain,
   so the domain is the meaning and the section only the layout. A domain is
   not a Haskell type class, which is an interface; the definitions of a
@@ -319,7 +319,7 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   `def` applied: `[ 1 + . ] inc def .`. `name : … ;` is the surface's
   spelling of it.
 - **A heading sets a mode** for the definitions after it, as a stack
-  machine's state: `## < i64. -- i64. >` makes them clauses for those types,
+  machine's state: `## < i64 -- i64 >` makes them clauses for those types,
   until the next heading. A heading always starts a section, even an empty
   one, so consecutive headings do not combine; how to write OR between
   patterns is deferred.
@@ -343,8 +343,9 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   effect rows of march5. Its run-time effect tokens are not needed while
   code runs in order.
 - **An effect runs while compiling only when asked** (Thomas, 2026-10-09).
-  `read` reads a file when the program runs, even when its path is known;
-  `embed` reads it while compiling, so what follows folds on its text:
+  `file-read` reads a file when the program runs, even when its path is
+  known; `file-embed` reads it while compiling, so what follows folds on its
+  text:
   macros by staging, as Crystal's `read_file` or Rust's `include_str!`, a
   YAML file read into values, even types, with no macro language. The text
   is data in the code, so the code's identity follows the file.
@@ -412,8 +413,8 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
      `i64 or nil`, the code branches on the tag. A tag is materialized late,
      as everything else is: when a union-typed value is stored, or passes
      through code not specialized for its type.
-   - **Clauses take unions apart,** with no `match`. Clauses on `< i64. >` and
-     `< nil. >` applied to an `i64 or nil` compile to a branch on the tag,
+   - **Clauses take unions apart,** with no `match`. Clauses on `< i64 >` and
+     `< nil >` applied to an `i64 or nil` compile to a branch on the tag,
      each arm specialized for its type (splitting). A clause that does not
      match narrows the rest to `T and not i64`, so the stage can report a
      member no clause handles.
@@ -469,7 +470,7 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
    - **`fbool`,** the numbers from 0 to 1, as f64 or UNORM, with `not`,
      `and` and `or` as for `bool` (2.16), which embeds in it. Fuzzy truths
      come mostly from membership functions, words that say how far a
-     measurement belongs to a fuzzy set: `[ < f64. -- fbool. > 160.0 -. 30.0
+     measurement belongs to a fuzzy set: `[ < f64 -- fbool. > 160.0 -. 30.0
      ÷. 0.0 1.0 clamp. ] tall def.`, 175 cm being 0.5 tall.
    - **Hedges,** Zadeh's modifiers: "very" is x², "somewhat" √x.
    - **`decide`** (Thomas's word) makes a bool from a fuzzy truth, for a
@@ -513,6 +514,19 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     the integers 0 through 1 and `fbool` the reals from 0 to 1 (3.9). A
     literal, `1..5` or the like, is open; SYMBOL's interval notation,
     `[1,2)`, is not to be had, `[` and `(` being March's brackets.
+12. **Namespaces** (Thomas, 2026-10-10). Words gather in namespaces,
+    `io.file.read`, `io.stdin.read`, `io.file.embed`, rather than a flat
+    dictionary's `file-read`. The dot chain already spells it: a namespace
+    is a compile-time value, so `"data.csv" io.file.read.` applies `io`,
+    then `file` in it, then `read` in that. Importing says how much of the
+    prefix a module needs, `import : ( io.file.* )` or the like, by words of
+    a namespace's own that declare what it imports and what it exports, as
+    march2 had (`<` imports, `>` exports, a namespace pushed on the stack:
+    doc/lineage/march2.md). Collisions between imports are the programmer's
+    to settle, by a longer prefix, as in Elixir. Symbols stay one global
+    namespace (2.2). Then `file-read` and its kin move in (they are plain
+    words for now; a `read` chosen by a symbol, `"data.csv" file read.`,
+    was tried and left, its clauses differing in arity).
 
 ## 4. A way to build it (proposal)
 

@@ -210,6 +210,14 @@ pub enum Primitive {
     ParseFloat = 117,
     // ( path -- text ) A file's text, read now; an error says why not.
     ReadFile = 118,
+    // ( -- text ) All of standard input.
+    ReadStdin = 119,
+    // ( s -- s ) A string in a case style: words joined by `_`, by `-`, or
+    // run together, each capitalized after the first, or each.
+    Snake = 120,
+    Kebab = 121,
+    Camel = 122,
+    Pascal = 123,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -332,6 +340,11 @@ impl Primitive {
         (Self::ParseInt, "parse-int"),
         (Self::ParseFloat, "parse-float"),
         (Self::ReadFile, "read-file"),
+        (Self::ReadStdin, "read-stdin"),
+        (Self::Snake, "snake-case"),
+        (Self::Kebab, "kebab-case"),
+        (Self::Camel, "camel-case"),
+        (Self::Pascal, "pascal-case"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

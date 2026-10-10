@@ -23,8 +23,8 @@ fn code(pieces: &[&str], src: &str) -> Vec<Op> {
 }
 
 const FACT: &str = "[ 0 eq?. ] zero? def.
-    [ < i64 zero? > drop. 1 ] fact def.
-    [ < i64 > dup. 1 -+. fact. *. ] fact def.";
+    [ < i64. zero? > drop. 1 ] fact def.
+    [ < i64. > dup. 1 -+. fact. *. ] fact def.";
 
 #[test]
 fn families_recurse_through_their_instances() {
@@ -45,9 +45,9 @@ fn families_recurse_through_their_instances() {
     );
     assert_eq!(code(&[FACT], "0 fact."), code(&[], "1"));
     let fib = "[ 0 eq?. ] zero? def. [ 1 eq?. ] one? def.
-        [ < i64 zero? > ] fib def.
-        [ < i64 one? > ] fib def.
-        [ < i64 > dup. 1 -+. fib. swap. 2 -+. fib. +. ] fib def.";
+        [ < i64. zero? > ] fib def.
+        [ < i64. one? > ] fib def.
+        [ < i64. > dup. 1 -+. fib. swap. 2 -+. fib. +. ] fib def.";
     assert_eq!(cells(&[fib, "15 fib."]).unwrap(), [610]);
     // With value patterns, no helper words: 0 and 1 are their own results.
     let fib = "[ < 0 > ] fib def. [ < 1 > ] fib def.
@@ -80,8 +80,8 @@ fn a_recursive_clause_may_come_before_the_base() {
     // The step is guarded and tested first, but the base, with no guard,
     // finishes first while compiling, and types the recursion.
     let down = "[ 0 gt?. ] positive? def.
-        [ < i64 > ] down def.
-        [ < i64 positive? > 1 -+. down. ] down def.";
+        [ < i64. > ] down def.
+        [ < i64. positive? > 1 -+. down. ] down def.";
     assert_eq!(cells(&[down, "5 down.", "3", "down."]).unwrap(), [0, 0]);
 }
 
@@ -89,8 +89,8 @@ fn a_recursive_clause_may_come_before_the_base() {
 fn tail_calls_run_in_constant_space() {
     // A million levels would exhaust the machine's 16384 return frames.
     let sumto = "[ 0 eq?. ] zero? def.
-        [ < i64 i64 zero? > drop. ] sumto def.
-        [ < i64 i64 > swap. over. +. swap. 1 -+. sumto. ] sumto def.";
+        [ < i64. i64. zero? > drop. ] sumto def.
+        [ < i64. i64. > swap. over. +. swap. 1 -+. sumto. ] sumto def.";
     let mut s = session(&[sumto]).unwrap();
     s.fuel = 50_000_000;
     s.eval("0 1000000 sumto.").unwrap();
@@ -101,10 +101,13 @@ fn tail_calls_run_in_constant_space() {
 fn recursion_needs_a_case_that_finishes() {
     // No clause finishes without applying itself, so its results have no
     // types, an error where it is defined.
-    assert_eq!(cells(&["[ < i64 > loop. ] loop def."]), Err(Kind::Mismatch));
+    assert_eq!(
+        cells(&["[ < i64. > loop. ] loop def."]),
+        Err(Kind::Mismatch)
+    );
     // Unless its signature promises them: then it is a loop, which runs
     // until the step budget is spent, in constant space.
-    let mut s = session(&["[ < i64 -- i64 > 1 +. loop. ] loop def."]).unwrap();
+    let mut s = session(&["[ < i64. -- i64. > 1 +. loop. ] loop def."]).unwrap();
     s.fuel = 100_000;
     assert_eq!(
         s.eval("1 loop.").unwrap_err().kind,

@@ -48,7 +48,7 @@ fn each_has_an_invariant() {
     // many as there were, of the same types.
     assert_eq!(session(&["( 1 2 ) [ ] each."]).err(), Some(Kind::Mismatch));
     assert_eq!(
-        session(&["1 i64. ( \"a\" ) [ drop. drop. \"x\" ] each."]).err(),
+        session(&["1 i64.to. ( \"a\" ) [ drop. drop. \"x\" ] each."]).err(),
         Some(Kind::Mismatch)
     );
     assert_eq!(session(&["( 1 2 ) 5 each."]).err(), Some(Kind::NoWord));

@@ -1425,6 +1425,19 @@ impl Machine {
                 let r = self.allocate_vector(cells.into_iter().collect())?;
                 self.push(r)?;
             }
+            Snake | Kebab | Camel | Pascal => {
+                let s = self.pop()?;
+                let text = self.text(s)?.to_text().ok_or(Error::Memory)?;
+                let style = match p {
+                    Snake => crate::prims::Style::Snake,
+                    Kebab => crate::prims::Style::Kebab,
+                    Camel => crate::prims::Style::Camel,
+                    _ => crate::prims::Style::Pascal,
+                };
+                let out = crate::prims::restyle(&text, style);
+                let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
+                self.push(r)?;
+            }
             Lower | Upper => {
                 let s = self.pop()?;
                 let text = self.text(s)?.to_text().ok_or(Error::Memory)?;
@@ -1441,6 +1454,12 @@ impl Machine {
                 let path = self.text(r)?.to_text().ok_or(Error::Memory)?;
                 let text = std::fs::read_to_string(&path)
                     .map_err(|e| Error::Io(format!("cannot read {path:?}: {e}")))?;
+                let t = self.allocate_text(merkle_champ::Sequence::text(&text))?;
+                self.push(t)?;
+            }
+            ReadStdin => {
+                let text = std::io::read_to_string(std::io::stdin())
+                    .map_err(|e| Error::Io(format!("cannot read standard input: {e}")))?;
                 let t = self.allocate_text(merkle_champ::Sequence::text(&text))?;
                 self.push(t)?;
             }

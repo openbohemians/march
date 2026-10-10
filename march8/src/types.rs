@@ -21,7 +21,7 @@ pub enum Base {
     DecLit,
     /// The type of a type: `i64` unapplied is a value of this type.
     Type,
-    /// The type of a name not yet applied.
+    /// The type of a name not yet applied, a symbol: `sym`.
     Symbol,
     /// The type of a quotation, `[ … ]`.
     Quote,
@@ -45,7 +45,7 @@ impl Base {
         (Base::IntLit, "int#"),
         (Base::DecLit, "dec#"),
         (Base::Type, "type"),
-        (Base::Symbol, "symbol"),
+        (Base::Symbol, "sym"),
         (Base::Quote, "quote"),
         (Base::Nil, "nil"),
         (Base::Bool, "bool"),
@@ -255,7 +255,30 @@ impl Types {
             self.classes.entry(t).or_insert_with(|| name.to_string());
         }
     }
-    /// The type as a bracket writes it: `3 i64 vec`, `string i64 ary map`.
+    /// The type as a bracket's code makes it, so that it reads back:
+    /// `3 i64. vec.`, `string. i64. ary. map.`, a variable as its letter.
+    pub fn source(&self, t: Type) -> String {
+        if let Some(n) = self.classes.get(&t) {
+            return format!("{n}.");
+        }
+        match self.term(t) {
+            Term::Base(_) | Term::Atom | Term::AnyTuple => format!("{}.", self.name(t)),
+            Term::Nat(n) => n.to_string(),
+            Term::Var(_) => self.name(t),
+            Term::Ary(e) => format!("{} ary.", self.source(e)),
+            Term::Vec(n, e) => format!("{} {} vec.", self.source(n), self.source(e)),
+            Term::Map(k, v) => format!("{} {} map.", self.source(k), self.source(v)),
+            Term::Or(a, b) => format!("{} {} or.", self.source(a), self.source(b)),
+            Term::Tuple(r) => {
+                let es: Vec<String> = self.rows[r as usize]
+                    .iter()
+                    .map(|&e| self.source(e))
+                    .collect();
+                format!("( {} )", es.join(" "))
+            }
+        }
+    }
+    /// The type as a message names it: `3 i64 vec`, `string i64 ary map`.
     pub fn name(&self, t: Type) -> String {
         if let Some(n) = self.classes.get(&t) {
             return n.clone();

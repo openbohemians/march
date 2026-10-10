@@ -65,10 +65,12 @@
 | split at a separator | `split`    |        |       | `⊜`   | "" splits between characters |
 | lines, words         | `lines` `words` |   |       |       | as Haskell's |
 | lower, upper case    | `lower` `upper` |   |       |       | element by element over arrays |
+| a case style         | `case`     |        |       |       | by a symbol: `snake case`, `kebab`, `camel`, `pascal`, `lower`, `upper` |
 | write any value      | `print`    |        | `⎕←`  | `&p`  |        |
 | write a string       | `write`    |        | `⍞←`  | `&pf` |        |
-| a file, from a path  | `file`     |        |       |       | `"data.csv" file`: a path said to be one |
-| read a file          | `read`     |        | `⎕NGET` | `&fras` | when the program runs |
+| convert to a type    | `to`       |        |       |       | `2 i64.to.`; a type applied is the type |
+| a file, from a path  | `file`     |        |       |       | `"data.csv" file.to.`: a path said to be one |
+| read a file, stdin   | `read`     |        | `⎕NGET` | `&fras` | when the program runs; `stdin read.` is standard input |
 | read while compiling | `embed`    |        |       |       | the text is known, so what follows folds |
 | swap top two         | `swap2`    |  `~~`  |       |       |        |
 | dup top two          | `dup2`     |  `==`  |       |       |        |

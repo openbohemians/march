@@ -6,23 +6,23 @@
 -- itself, by value patterns, recursion and a comprehension: commit f7ce8a0.)
 
 -- Counting: a word's count so far is `i64 nil or`, nil before its first.
-[ < i64 > 1 +. ] tally def.
-[ < nil > drop. 1 ] tally def.
-[ < k i64 map k > over. over. get. tally. put. ] bump def.
-[ < string ary -- string i64 map > string i64 map. empty. [ bump. ] fold. ]
+[ < i64. > 1 +. ] tally def.
+[ < nil. > drop. 1 ] tally def.
+[ < k i64. map. k > over. over. get. tally. put. ] bump def.
+[ < string. ary. -- string. i64. map. > string i64 map. empty. [ bump. ] fold. ]
   frequencies def.
 
 -- Each word and its count, a line each, in the words' order.
-[ < string i64 map > dup. keys. sort. [ over. over. at. "\_ \_\n;" write. ] each. drop. ]
+[ < string. i64. map. > dup. keys. sort. [ over. over. at. "\_ \_\n;" write. ] each. drop. ]
   report def.
 
 -- Most frequent first. With no `sort-by` yet, each count from the highest
 -- down to 1 looks through the words for its own: counts × words steps.
 [ rot. swap. at. eq?. ] has-count? def.
-[ < string i64 map i64 string has-count? > over. "\_ \_\n;" write. ] show-if def.
-[ < string i64 map i64 string > drop. ] show-if def.
-[ < string i64 map i64 > over. keys. sort. [ show-if. ] each. drop. drop. ] with-count def.
-[ < string i64 map > dup. values. sort. last. range. reverse. [ over. swap. with-count. ] each. drop. ]
+[ < string. i64. map. i64. string. has-count? > over. "\_ \_\n;" write. ] show-if def.
+[ < string. i64. map. i64. string. > drop. ] show-if def.
+[ < string. i64. map. i64. > over. keys. sort. [ show-if. ] each. drop. drop. ] with-count def.
+[ < string. i64. map. > dup. values. sort. last. range. reverse. [ over. swap. with-count. ] each. drop. ]
   ranked def.
 
 "The cat and the hat

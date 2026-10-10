@@ -31,9 +31,9 @@ fn word_frequencies() {
 fn put_sets_and_empty_starts() {
     assert_eq!(
         show("string i64 map. empty. \"a\" 1 put. \"b\" 2 put. \"a\" 3 put."),
-        "<1> { \"a\" 3 \"b\" 2 } < string i64 map >"
+        "<1> { \"a\" 3 \"b\" 2 } < string. i64. map. >"
     );
-    assert_eq!(show("string ary. empty. length."), "<1> 0 < i64 >");
+    assert_eq!(show("string ary. empty. length."), "<1> 0 < i64. >");
     let mut s = Session::new();
     assert_eq!(s.eval("i64 empty.").unwrap_err().kind, Kind::NoWord);
 }

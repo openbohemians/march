@@ -81,7 +81,14 @@ pub enum Prim {
     StrToFile,
     FilePath,
     FileRead,
+    StdinRead,
     Embed,
+    To,
+    SymEq,
+    StrSnake,
+    StrKebab,
+    StrCamel,
+    StrPascal,
     TupleAt,
     TupleSpread,
     MapKeys,
@@ -159,308 +166,350 @@ const fn d(prim: Prim, name: &'static str, sig: &'static str, ops: &'static [P])
 }
 
 pub const PRIMS: &[PrimDef] = &[
-    d(Prim::IntAdd, "int#+", "< int# int# -- int# >", &[]),
-    d(Prim::IntSub, "int#-", "< int# int# -- int# >", &[]),
-    d(Prim::IntMul, "int#*", "< int# int# -- int# >", &[]),
-    d(Prim::DecAdd, "dec#+", "< dec# dec# -- dec# >", &[]),
-    d(Prim::DecSub, "dec#-", "< dec# dec# -- dec# >", &[]),
-    d(Prim::DecMul, "dec#*", "< dec# dec# -- dec# >", &[]),
-    d(Prim::IntToDec, "int#>dec#", "< int# -- dec# >", &[]),
-    d(Prim::IntToI64, "int#>i64", "< int# -- i64 >", &[]),
-    d(Prim::IntToF64, "int#>f64", "< int# -- f64 >", &[]),
-    d(Prim::DecToF64, "dec#>f64", "< dec# -- f64 >", &[]),
-    d(Prim::IntToMoney, "int#>money", "< int# -- money >", &[]),
-    d(Prim::IntToBool, "int#>bool", "< int# -- bool >", &[]),
-    d(Prim::DecToMoney, "dec#>money", "< dec# -- money >", &[]),
-    d(Prim::I64Add, "i64+", "< i64 i64 -- i64 >", &[P::IAdd]),
-    d(Prim::I64Sub, "i64-", "< i64 i64 -- i64 >", &[P::ISub]),
-    d(Prim::I64Mul, "i64*", "< i64 i64 -- i64 >", &[P::IMul]),
-    d(Prim::I64Quot, "i64-quot", "< i64 i64 -- i64 >", &[P::IDiv]),
-    d(Prim::I64Rem, "i64-rem", "< i64 i64 -- i64 >", &[P::IMod]),
+    d(Prim::IntAdd, "int#+", "< int#. int#. -- int#. >", &[]),
+    d(Prim::IntSub, "int#-", "< int#. int#. -- int#. >", &[]),
+    d(Prim::IntMul, "int#*", "< int#. int#. -- int#. >", &[]),
+    d(Prim::DecAdd, "dec#+", "< dec#. dec#. -- dec#. >", &[]),
+    d(Prim::DecSub, "dec#-", "< dec#. dec#. -- dec#. >", &[]),
+    d(Prim::DecMul, "dec#*", "< dec#. dec#. -- dec#. >", &[]),
+    d(Prim::IntToDec, "int#>dec#", "< int#. -- dec#. >", &[]),
+    d(Prim::IntToI64, "int#>i64", "< int#. -- i64. >", &[]),
+    d(Prim::IntToF64, "int#>f64", "< int#. -- f64. >", &[]),
+    d(Prim::DecToF64, "dec#>f64", "< dec#. -- f64. >", &[]),
+    d(Prim::IntToMoney, "int#>money", "< int#. -- money. >", &[]),
+    d(Prim::IntToBool, "int#>bool", "< int#. -- bool. >", &[]),
+    d(Prim::DecToMoney, "dec#>money", "< dec#. -- money. >", &[]),
+    d(Prim::I64Add, "i64+", "< i64. i64. -- i64. >", &[P::IAdd]),
+    d(Prim::I64Sub, "i64-", "< i64. i64. -- i64. >", &[P::ISub]),
+    d(Prim::I64Mul, "i64*", "< i64. i64. -- i64. >", &[P::IMul]),
+    d(
+        Prim::I64Quot,
+        "i64-quot",
+        "< i64. i64. -- i64. >",
+        &[P::IDiv],
+    ),
+    d(Prim::I64Rem, "i64-rem", "< i64. i64. -- i64. >", &[P::IMod]),
     d(
         Prim::I64DivMod,
         "i64-divmod",
-        "< i64 i64 -- i64 i64 >",
+        "< i64. i64. -- i64. i64. >",
         &[P::IDivMod],
     ),
     d(
         Prim::IntDivMod,
         "int#-divmod",
-        "< int# int# -- int# int# >",
+        "< int#. int#. -- int#. int#. >",
         &[],
     ),
-    d(Prim::I64Lt, "i64lt?", "< i64 i64 -- bool >", &[P::ILt]),
-    d(Prim::I64Eq, "i64eq?", "< i64 i64 -- bool >", &[P::Eq]),
-    d(Prim::F64Add, "f64+", "< f64 f64 -- f64 >", &[P::FAdd]),
-    d(Prim::F64Sub, "f64-", "< f64 f64 -- f64 >", &[P::FSub]),
-    d(Prim::F64Mul, "f64*", "< f64 f64 -- f64 >", &[P::FMul]),
-    d(Prim::F64Div, "f64/", "< f64 f64 -- f64 >", &[P::FDiv]),
-    d(Prim::F64Lt, "f64lt?", "< f64 f64 -- bool >", &[P::FLt]),
-    d(Prim::F64Eq, "f64eq?", "< f64 f64 -- bool >", &[P::FEq]),
+    d(Prim::I64Lt, "i64lt?", "< i64. i64. -- bool. >", &[P::ILt]),
+    d(Prim::I64Eq, "i64eq?", "< i64. i64. -- bool. >", &[P::Eq]),
+    d(Prim::F64Add, "f64+", "< f64. f64. -- f64. >", &[P::FAdd]),
+    d(Prim::F64Sub, "f64-", "< f64. f64. -- f64. >", &[P::FSub]),
+    d(Prim::F64Mul, "f64*", "< f64. f64. -- f64. >", &[P::FMul]),
+    d(Prim::F64Div, "f64/", "< f64. f64. -- f64. >", &[P::FDiv]),
+    d(Prim::F64Lt, "f64lt?", "< f64. f64. -- bool. >", &[P::FLt]),
+    d(Prim::F64Eq, "f64eq?", "< f64. f64. -- bool. >", &[P::FEq]),
     d(
         Prim::MoneyAdd,
         "money+",
-        "< money money -- money >",
+        "< money. money. -- money. >",
         &[P::IAdd],
     ),
     d(
         Prim::MoneySub,
         "money-",
-        "< money money -- money >",
+        "< money. money. -- money. >",
         &[P::ISub],
     ),
     d(
         Prim::MoneyLt,
         "money-lt?",
-        "< money money -- bool >",
+        "< money. money. -- bool. >",
         &[P::ILt],
     ),
     d(
         Prim::MoneyEq,
         "money-eq?",
-        "< money money -- bool >",
+        "< money. money. -- bool. >",
         &[P::Eq],
     ),
     d(
         Prim::I64Text,
         "i64>text",
-        "< i64 -- string >",
+        "< i64. -- string. >",
         &[P::IntText],
     ),
     d(
         Prim::F64Text,
         "f64>text",
-        "< f64 -- string >",
+        "< f64. -- string. >",
         &[P::FloatText],
     ),
     d(
         Prim::MoneyText,
         "money>text",
-        "< money -- string >",
+        "< money. -- string. >",
         &[P::MoneyText],
     ),
     d(
         Prim::StrShow,
         "string-show",
-        "< string -- string >",
+        "< string. -- string. >",
         &[P::StringShow],
     ),
-    d(Prim::Write, "write", "< string -- >", &[P::Write]),
+    d(Prim::Write, "write", "< string. -- >", &[P::Write]),
     d(
         Prim::StrConcat,
         "string-concat",
-        "< string string -- string >",
+        "< string. string. -- string. >",
         &[P::Concat],
     ),
     d(
         Prim::StrLength,
         "string-length",
-        "< string -- i64 >",
+        "< string. -- i64. >",
         &[P::VecLen],
     ),
     d(
         Prim::StrAt,
         "string-at",
-        "< string i64 -- i64 >",
+        "< string. i64. -- i64. >",
         &[P::VecAt],
     ),
     d(
         Prim::StrEq,
         "string-eq?",
-        "< string string -- bool >",
+        "< string. string. -- bool. >",
         &[P::Eq],
     ),
     d(
         Prim::AryLength,
         "ary-length",
-        "< a ary -- i64 >",
+        "< a ary. -- i64. >",
         &[P::VecLen],
     ),
-    d(Prim::AryAt, "ary-at", "< a ary i64 -- a >", &[P::VecAt]),
+    d(Prim::AryAt, "ary-at", "< a ary. i64. -- a >", &[P::VecAt]),
     d(
         Prim::AryConcat,
         "ary-concat",
-        "< a ary a ary -- a ary >",
+        "< a ary. a ary. -- a ary. >",
         &[P::Concat],
     ),
     d(
         Prim::MapLength,
         "map-length",
-        "< k v map -- i64 >",
+        "< k v map. -- i64. >",
         &[P::VecLen],
     ),
-    d(Prim::MapAt, "map-at", "< k v map k -- v >", &[P::VecAt]),
-    d(Prim::MapHas, "map-has?", "< k v map k -- bool >", &[P::Has]),
+    d(Prim::MapAt, "map-at", "< k v map. k -- v >", &[P::VecAt]),
+    d(
+        Prim::MapHas,
+        "map-has?",
+        "< k v map. k -- bool. >",
+        &[P::Has],
+    ),
     d(
         Prim::MapPut,
         "map-put",
-        "< k v map k v -- k v map >",
+        "< k v map. k v -- k v map. >",
         &[P::Put],
     ),
-    d(Prim::Empty, "empty", "< type >", &[]),
+    d(Prim::Empty, "empty", "< type. >", &[]),
     d(
         Prim::MapKeys,
         "map-keys",
-        "< k v map -- k ary >",
+        "< k v map. -- k ary. >",
         &[P::Keys],
     ),
     d(
         Prim::MapValues,
         "map-values",
-        "< k v map -- v ary >",
+        "< k v map. -- v ary. >",
         &[P::Values],
     ),
     d(
         Prim::SortInts,
         "i64-sort",
-        "< i64 ary -- i64 ary >",
+        "< i64. ary. -- i64. ary. >",
         &[P::SortInts],
     ),
     d(
         Prim::SortFloats,
         "f64-sort",
-        "< f64 ary -- f64 ary >",
+        "< f64. ary. -- f64. ary. >",
         &[P::SortFloats],
     ),
     d(
         Prim::SortMoney,
         "money-sort",
-        "< money ary -- money ary >",
+        "< money. ary. -- money. ary. >",
         &[P::SortInts],
     ),
     d(
         Prim::SortTexts,
         "string-sort",
-        "< string ary -- string ary >",
+        "< string. ary. -- string. ary. >",
         &[P::SortTexts],
     ),
     d(
         Prim::GradeInts,
         "i64-order",
-        "< i64 ary -- i64 ary >",
+        "< i64. ary. -- i64. ary. >",
         &[P::GradeInts],
     ),
     d(
         Prim::GradeFloats,
         "f64-order",
-        "< f64 ary -- i64 ary >",
+        "< f64. ary. -- i64. ary. >",
         &[P::GradeFloats],
     ),
     d(
         Prim::GradeMoney,
         "money-order",
-        "< money ary -- i64 ary >",
+        "< money. ary. -- i64. ary. >",
         &[P::GradeInts],
     ),
     d(
         Prim::GradeTexts,
         "string-order",
-        "< string ary -- i64 ary >",
+        "< string. ary. -- i64. ary. >",
         &[P::GradeTexts],
     ),
     d(
         Prim::GradeDownInts,
         "i64-dorder",
-        "< i64 ary -- i64 ary >",
+        "< i64. ary. -- i64. ary. >",
         &[P::GradeDownInts],
     ),
     d(
         Prim::GradeDownFloats,
         "f64-dorder",
-        "< f64 ary -- i64 ary >",
+        "< f64. ary. -- i64. ary. >",
         &[P::GradeDownFloats],
     ),
     d(
         Prim::GradeDownMoney,
         "money-dorder",
-        "< money ary -- i64 ary >",
+        "< money. ary. -- i64. ary. >",
         &[P::GradeDownInts],
     ),
     d(
         Prim::GradeDownTexts,
         "string-dorder",
-        "< string ary -- i64 ary >",
+        "< string. ary. -- i64. ary. >",
         &[P::GradeDownTexts],
     ),
     d(
         Prim::AryKeep,
         "ary-keep",
-        "< a ary bool ary -- a ary >",
+        "< a ary. bool. ary. -- a ary. >",
         &[P::Keep],
     ),
     d(
         Prim::StrSplit,
         "string-split",
-        "< string string -- string ary >",
+        "< string. string. -- string. ary. >",
         &[P::Split],
     ),
     d(
         Prim::StrLines,
         "string-lines",
-        "< string -- string ary >",
+        "< string. -- string. ary. >",
         &[P::Lines],
     ),
     d(
         Prim::StrWords,
         "string-words",
-        "< string -- string ary >",
+        "< string. -- string. ary. >",
         &[P::Words],
     ),
     d(
         Prim::StrLower,
         "string-lower",
-        "< string -- string >",
+        "< string. -- string. >",
         &[P::Lower],
     ),
     d(
         Prim::StrUpper,
         "string-upper",
-        "< string -- string >",
+        "< string. -- string. >",
         &[P::Upper],
     ),
-    d(Prim::Parse, "parse", "< string a -- b >", &[]),
-    d(Prim::StrToFile, "string>file", "< string -- file >", &[]),
-    d(Prim::FilePath, "file-path", "< file -- string >", &[]),
+    d(Prim::Parse, "parse", "< string. a -- b >", &[]),
+    d(Prim::StrToFile, "string>file", "< string. -- file. >", &[]),
+    d(Prim::FilePath, "file-path", "< file. -- string. >", &[]),
     d(
         Prim::FileRead,
         "file-read",
-        "< file -- string >",
+        "< file. -- string. >",
         &[P::ReadFile],
     ),
-    d(Prim::Embed, "embed", "< file -- string >", &[]),
-    d(Prim::VecLength, "vec-length", "< n a vec -- i64 >", &[]),
-    d(Prim::VecAt, "vec-at", "< n a vec i64 -- a >", &[P::VecAt]),
+    d(
+        Prim::StdinRead,
+        "stdin-read",
+        "< -- string. >",
+        &[P::ReadStdin],
+    ),
+    d(Prim::To, "to", "< a b -- c >", &[]),
+    d(Prim::SymEq, "sym-eq?", "< sym. sym. -- bool. >", &[]),
+    d(
+        Prim::StrSnake,
+        "string-snake",
+        "< string. -- string. >",
+        &[P::Snake],
+    ),
+    d(
+        Prim::StrKebab,
+        "string-kebab",
+        "< string. -- string. >",
+        &[P::Kebab],
+    ),
+    d(
+        Prim::StrCamel,
+        "string-camel",
+        "< string. -- string. >",
+        &[P::Camel],
+    ),
+    d(
+        Prim::StrPascal,
+        "string-pascal",
+        "< string. -- string. >",
+        &[P::Pascal],
+    ),
+    d(Prim::Embed, "embed", "< file. -- string. >", &[]),
+    d(Prim::VecLength, "vec-length", "< n a vec. -- i64. >", &[]),
+    d(Prim::VecAt, "vec-at", "< n a vec. i64. -- a >", &[P::VecAt]),
     d(
         Prim::VecConcat,
         "vec-concat",
-        "< n a vec m a vec >",
+        "< n a vec. m a vec. >",
         &[P::Concat],
     ),
     d(Prim::Map, "map", "< b c >", &[]),
     d(Prim::Each, "each", "< b c >", &[]),
     d(Prim::EachRight, "each-right", "< b c >", &[]),
-    d(Prim::Range, "range", "< i64 >", &[P::Range]),
+    d(Prim::Range, "range", "< i64. >", &[P::Range]),
     d(Prim::Reverse, "reverse", "< b >", &[P::Reverse]),
     d(
         Prim::ArySlice,
         "ary-slice",
-        "< a ary i64 i64 -- a ary >",
+        "< a ary. i64. i64. -- a ary. >",
         &[P::Slice],
     ),
     d(
         Prim::StrSlice,
         "string-slice",
-        "< string i64 i64 -- string >",
+        "< string. i64. i64. -- string. >",
         &[P::Slice],
     ),
     d(Prim::Compose, "compose", "< b c >", &[]),
     d(Prim::Within, "within", "< b c >", &[]),
-    d(Prim::VecSpread, "vec-spread", "< n a vec >", &[]),
-    d(Prim::TupleLength, "tuple-length", "< tuple -- i64 >", &[]),
-    d(Prim::TupleAt, "tuple-at", "< tuple i64 >", &[]),
-    d(Prim::TupleSpread, "tuple-spread", "< tuple >", &[]),
-    d(Prim::AryInsert, "ary-insert", "< b c i64 >", &[]),
-    d(Prim::AryRemove, "ary-remove", "< b i64 >", &[]),
+    d(Prim::VecSpread, "vec-spread", "< n a vec. >", &[]),
+    d(Prim::TupleLength, "tuple-length", "< tuple. -- i64. >", &[]),
+    d(Prim::TupleAt, "tuple-at", "< tuple. i64. >", &[]),
+    d(Prim::TupleSpread, "tuple-spread", "< tuple. >", &[]),
+    d(Prim::AryInsert, "ary-insert", "< b c i64. >", &[]),
+    d(Prim::AryRemove, "ary-remove", "< b i64. >", &[]),
     d(Prim::Zip, "zip", "< b c d >", &[]),
     d(Prim::Table, "table", "< b c d >", &[]),
     d(Prim::Dup, "dup", "< a -- a a >", &[]),
@@ -469,34 +518,34 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::Over, "over", "< a b -- a b a >", &[]),
     d(Prim::Rot, "rot", "< a b c -- b c a >", &[]),
     d(Prim::Swap2, "swap2", "< a b c d -- c d a b >", &[]),
-    d(Prim::FSqrt, "f64-sqrt", "< f64 -- f64 >", &[P::FSqrt]),
+    d(Prim::FSqrt, "f64-sqrt", "< f64. -- f64. >", &[P::FSqrt]),
     d(
         Prim::FFloor,
         "f64-floor",
-        "< f64 -- i64 >",
+        "< f64. -- i64. >",
         &[P::FFloor, P::FToI],
     ),
     d(
         Prim::FCeil,
         "f64-ceil",
-        "< f64 -- i64 >",
+        "< f64. -- i64. >",
         &[P::FCeil, P::FToI],
     ),
     d(
         Prim::FRound,
         "f64-round",
-        "< f64 -- i64 >",
+        "< f64. -- i64. >",
         &[P::FRound, P::FToI],
     ),
-    d(Prim::FTrunc, "f64-trunc", "< f64 -- i64 >", &[P::FToI]),
-    d(Prim::DecFloor, "dec#-floor", "< dec# -- int# >", &[]),
-    d(Prim::DecCeil, "dec#-ceil", "< dec# -- int# >", &[]),
-    d(Prim::DecRound, "dec#-round", "< dec# -- int# >", &[]),
-    d(Prim::DecTrunc, "dec#-trunc", "< dec# -- int# >", &[]),
-    d(Prim::FPow, "f64-pow", "< f64 f64 -- f64 >", &[P::FPow]),
-    d(Prim::IPow, "i64-pow", "< i64 i64 -- i64 >", &[P::IPow]),
-    d(Prim::IntPow, "int#-pow", "< int# int# -- int# >", &[]),
-    d(Prim::Def, "def", "< a symbol -- >", &[]),
+    d(Prim::FTrunc, "f64-trunc", "< f64. -- i64. >", &[P::FToI]),
+    d(Prim::DecFloor, "dec#-floor", "< dec#. -- int#. >", &[]),
+    d(Prim::DecCeil, "dec#-ceil", "< dec#. -- int#. >", &[]),
+    d(Prim::DecRound, "dec#-round", "< dec#. -- int#. >", &[]),
+    d(Prim::DecTrunc, "dec#-trunc", "< dec#. -- int#. >", &[]),
+    d(Prim::FPow, "f64-pow", "< f64. f64. -- f64. >", &[P::FPow]),
+    d(Prim::IPow, "i64-pow", "< i64. i64. -- i64. >", &[P::IPow]),
+    d(Prim::IntPow, "int#-pow", "< int#. int#. -- int#. >", &[]),
+    d(Prim::Def, "def", "< a sym. -- >", &[]),
 ];
 
 /// Whether the stage handles the primitive itself, rather than by its
@@ -574,7 +623,7 @@ pub const WRITES: Effects = IO_WRITE;
 pub fn effects(p: Prim) -> Effects {
     match p {
         Prim::Write => IO_WRITE,
-        Prim::FileRead => IO_READ,
+        Prim::FileRead | Prim::StdinRead => IO_READ,
         _ => 0,
     }
 }
@@ -627,6 +676,7 @@ pub fn foldable(p: Prim) -> bool {
                 | Prim::StrWords
                 | Prim::Parse
                 | Prim::Embed
+                | Prim::To
                 | Prim::SortFloats
                 | Prim::SortMoney
                 | Prim::SortTexts
@@ -877,6 +927,11 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         StrLower => Ok(vec![Val::Str(text(&a[0]).to_lowercase().into())]),
         // A file is its path's text, retyped.
         StrToFile | FilePath => Ok(vec![a[0].clone()]),
+        SymEq => flag(matches!((&a[0], &a[1]), (Val::Name(x, _), Val::Name(y, _)) if x == y)),
+        StrSnake => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Snake).into())]),
+        StrKebab => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Kebab).into())]),
+        StrCamel => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Camel).into())]),
+        StrPascal => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Pascal).into())]),
         StrUpper => Ok(vec![Val::Str(text(&a[0]).to_uppercase().into())]),
         StrConcat => Ok(vec![Val::Str(
             format!("{}{}", text(&a[0]), text(&a[1])).into(),
@@ -935,4 +990,68 @@ pub fn show_dec(d: i128, s: u32) -> String {
     let padded = format!("{digits:0>width$}", width = s + 1);
     let (whole, frac) = padded.split_at(padded.len() - s);
     format!("{}{whole}.{frac}", if d < 0 { "-" } else { "" })
+}
+
+/// A case style for `case`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Style {
+    Snake,
+    Kebab,
+    Camel,
+    Pascal,
+}
+
+/// A string's words, for a case style: split at what is not a letter or a
+/// digit, and where a capital starts a word (`helloWorld`, `HTTPServer`),
+/// in lower case.
+fn case_words(s: &str) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut words = Vec::new();
+    let mut word = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if !c.is_alphanumeric() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+            continue;
+        }
+        if c.is_uppercase() && !word.is_empty() {
+            let before = chars[i - 1];
+            let after_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
+            if before.is_lowercase()
+                || before.is_numeric()
+                || (before.is_uppercase() && after_lower)
+            {
+                words.push(std::mem::take(&mut word));
+            }
+        }
+        word.push(c);
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words.into_iter().map(|w| w.to_lowercase()).collect()
+}
+
+fn capitalized(w: &str) -> String {
+    let mut cs = w.chars();
+    cs.next()
+        .map(|c| c.to_uppercase().chain(cs).collect())
+        .unwrap_or_default()
+}
+
+/// A string in a case style: `hello_world`, `hello-world`, `helloWorld`,
+/// `HelloWorld`.
+pub fn restyle(s: &str, style: Style) -> String {
+    let words = case_words(s);
+    match style {
+        Style::Snake => words.join("_"),
+        Style::Kebab => words.join("-"),
+        Style::Camel => words
+            .iter()
+            .enumerate()
+            .map(|(i, w)| if i == 0 { w.clone() } else { capitalized(w) })
+            .collect(),
+        Style::Pascal => words.iter().map(|w| capitalized(w)).collect(),
+    }
 }

@@ -124,7 +124,7 @@ impl Session {
         for (&v, &t) in self.machine.stack.iter().zip(&self.types) {
             out.push(' ');
             show::value(&self.machine, &self.stage.types, v, t, &mut out);
-            out.push_str(&format!(" < {} >", self.stage.types.name(t)));
+            out.push_str(&format!(" < {} >", self.stage.types.source(t)));
         }
         out
     }

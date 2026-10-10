@@ -95,19 +95,58 @@ pub struct Guard {
     pub pos: Pos,
 }
 
-/// What a guard tests: a word that leaves a flag, or, for a value pattern,
-/// that its input equals a value (`< 0 >`).
-#[derive(Clone, Debug, PartialEq)]
+/// What a guard tests: a quotation that leaves a flag, `[ positive?. ]`, or,
+/// for a value pattern, that its input equals a value (`< 0 >`).
+#[derive(Clone, Debug)]
 pub enum Test {
-    Word(Rc<str>),
+    Quote(Rc<[Token]>),
     Equals(Jdg),
+}
+
+/// Guards are equal by what they say, not where they were written, so a
+/// clause written again replaces itself.
+impl PartialEq for Test {
+    fn eq(&self, o: &Self) -> bool {
+        match (self, o) {
+            (Test::Quote(a), Test::Quote(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.tok == y.tok)
+            }
+            (Test::Equals(a), Test::Equals(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+/// Tokens as they are written, for a message.
+fn source_text(toks: &[Token]) -> String {
+    let mut out = String::new();
+    for t in toks {
+        let word = match &t.tok {
+            Tok::Apply => {
+                out.push('.');
+                continue;
+            }
+            Tok::Name(s) => s.to_string(),
+            Tok::Int(n) => n.to_string(),
+            Tok::Dec(d, s) => prims::show_dec(*d, *s),
+            Tok::Str(s) => format!("{s:?}"),
+            Tok::Open(b) | Tok::Close(b) => (*b as char).to_string(),
+            Tok::Dashes => "--".into(),
+            Tok::Template(_) => "\"…\"".into(),
+        };
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&word);
+    }
+    out
 }
 
 impl Guard {
     /// The guard as a message names it.
     fn name(&self) -> String {
         match &self.test {
-            Test::Word(n) => format!("the guard `{n}`"),
+            Test::Quote(q) => format!("the guard `[ {} ]`", source_text(q)),
             Test::Equals(j) => format!("the value pattern {}", value_text(j)),
         }
     }
@@ -166,13 +205,6 @@ fn pulls_in(toks: &[Token]) -> Vec<Pos> {
         i += 1;
     }
     out
-}
-
-/// A part of a bracket, while it is read: a type, or a value with where it
-/// was written.
-enum Part {
-    Ty(Type),
-    Val(Jdg, Pos),
 }
 
 /// A signature: the input patterns, deepest first, and the outputs it
@@ -339,6 +371,9 @@ pub struct Stage {
     /// Where the program applied the core clause being evaluated, if one
     /// is: its warnings are reported there, as its errors are.
     site: Option<Pos>,
+    /// Set while a bracket's code runs, where a word of one letter is a type
+    /// variable.
+    in_bracket: u32,
 }
 
 impl Default for Stage {
@@ -414,6 +449,7 @@ impl Stage {
             effects: 0,
             warnings: Vec::new(),
             site: None,
+            in_bracket: 0,
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
             let name: Rc<str> = (*name).into();
@@ -546,6 +582,29 @@ impl Stage {
                     self.pull(t.pos)?;
                     i += 1;
                 }
+                // In a bracket, a word of one letter is a type variable: its
+                // one rule of its own.
+                Tok::Name(s)
+                    if self.in_bracket > 0
+                        && s.len() == 1
+                        && s.as_bytes()[0].is_ascii_lowercase() =>
+                {
+                    let v = self.types.intern(Term::Var(s.as_bytes()[0] - b'a'));
+                    self.push(TYPE, Val::Type(v));
+                }
+                // And a word ending in `?` is a guard, as if quoted: it can be
+                // no symbol (Thomas, 2026-10-09).
+                Tok::Name(s) if self.in_bracket > 0 && s.ends_with('?') => {
+                    let q: Rc<[Token]> = vec![
+                        t.clone(),
+                        Token {
+                            tok: Tok::Apply,
+                            pos: t.pos,
+                        },
+                    ]
+                    .into();
+                    self.push(QUOTE, Val::Quote(q));
+                }
                 Tok::Name(s) => self.push(SYMBOL, Val::Name(s.clone(), t.pos)),
                 Tok::Apply => self.apply()?,
                 Tok::Open(b'[') => {
@@ -559,6 +618,16 @@ impl Stage {
                     self.pos = t.pos;
                     self.annotate_top(&sig)?;
                     i = j;
+                }
+                // An array of types, in a bracket, is a tuple type: no code.
+                Tok::Open(b'(') if self.in_bracket > 0 => {
+                    self.literals.push(Literal {
+                        bracket: b'(',
+                        start: self.stack.len(),
+                        floor: self.floor,
+                        pulls: Vec::new(),
+                    });
+                    self.floor = self.stack.len();
                 }
                 Tok::Open(b) => {
                     let pulls = pulls_in(&toks[i + 1..matching(toks, i)]);
@@ -588,9 +657,10 @@ impl Stage {
                 self.pos = at;
                 self.apply_word(&n)
             }
+            // A type applied is the type: `to` converts to one.
             Val::Type(t) => {
-                self.need(1)?;
-                self.annotate(self.stack.len() - 1, t)
+                self.push(TYPE, Val::Type(t));
+                Ok(())
             }
             Val::Quote(q) => {
                 self.enter()?;
@@ -619,12 +689,14 @@ impl Stage {
             return Err(self.err(Kind::NoWord, format!("no word `{name}`")));
         };
         // `map` builds a type from types, and maps over an array otherwise.
-        let typeish = self.stack.len() > self.floor
-            && match &self.stack[self.stack.len() - 1].val {
+        let typeish = self.stack.len() > self.floor && {
+            let j = &self.stack[self.stack.len() - 1];
+            match &j.val {
                 Val::Type(_) => true,
                 Val::Name(n, _) => self.words.get(n).is_some_and(|w| w.ty.is_some()),
-                _ => false,
-            };
+                _ => j.ty == NIL,
+            }
+        };
         if let Some(c) = w.con
             && (typeish || (w.prim.is_none() && w.clauses.is_empty()))
         {
@@ -632,24 +704,15 @@ impl Stage {
         } else if let Some((p, sig)) = w.prim.clone() {
             self.prim(name, p, &sig)
         } else if w.ty == Some(NIL) {
-            // `nil` is its own value.
+            // A type with one value is that value, `nil.`, which stands for
+            // its type where a type is wanted.
             self.push(NIL, Val::Int(0));
             Ok(())
         } else if let Some(t) = w.ty {
-            self.need(1)?;
-            let i = self.stack.len() - 1;
-            let have = self.stack[i].ty;
-            // A type applied to a value of another converts it, if the type
-            // has a clause for that: `"data.csv" file.`. Only when applied: a
-            // clause that wants a file is never given a string.
-            if have != t
-                && !self.types.is_literal(have)
-                && let Some(c) = self.conversion(t, have)
-            {
-                let at = self.pos;
-                return self.apply_clause(name, &c, Env::default(), at);
-            }
-            self.annotate(i, t)
+            // A type applied is the type: types are operators, as `ary` is
+            // (Thomas, 2026-10-09), and `to` converts a value to one.
+            self.push(TYPE, Val::Type(t));
+            Ok(())
         } else if !w.clauses.is_empty() {
             self.family(name)
         } else {
@@ -1265,6 +1328,8 @@ impl Stage {
                 }
                 order.push((cand, false));
             } else if alts.is_empty() {
+                // Said where the family was applied, not where a guard was.
+                self.pos = at;
                 return Err(self.err(
                     Kind::NoWord,
                     format!(
@@ -2037,7 +2102,11 @@ impl Stage {
             let outer = std::mem::replace(&mut self.effects, 0);
             self.pos = g.pos;
             let r = match &g.test {
-                Test::Word(name) => self.apply_word(name),
+                Test::Quote(q) => self.enter().and_then(|()| {
+                    let r = self.run(q);
+                    self.depth -= 1;
+                    r
+                }),
                 // A value pattern is the input `eq?` the value.
                 Test::Equals(v) => {
                     self.stack.push(v.clone());
@@ -2193,11 +2262,9 @@ impl Stage {
                 _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
             });
         }
-        if w.ty == Some(NIL) {
-            return Some((0, 1));
-        }
+        // A type applied is the type, and `nil.` its value: one value left.
         if w.ty.is_some() {
-            return Some((1, 1));
+            return Some((0, 1));
         }
         if let Some(c) = w.con {
             return Some(if c == Con::Ary { (1, 1) } else { (2, 1) });
@@ -2279,26 +2346,32 @@ impl Stage {
         Some((ins, items.len()))
     }
 
-    /// How many types a bracket in a body leaves.
+    /// How many types a bracket in a body leaves: its code's values, each
+    /// word applied taking and leaving what its effect says.
     fn bracket_size(&self, toks: &[Token]) -> usize {
-        let mut n: usize = 0;
-        let mut opens = Vec::new();
-        for t in toks {
-            match &t.tok {
-                Tok::Open(b'(') => opens.push(n),
-                Tok::Close(b')') => n = opens.pop().unwrap_or(0) + 1,
-                Tok::Int(_) => n += 1,
-                Tok::Name(s) => match self.words.get(s) {
-                    Some(w) if w.ty.is_some() => n += 1,
-                    Some(w) if w.con == Some(Con::Ary) => {}
-                    Some(w) if w.con.is_some() => n = n.saturating_sub(1),
-                    None => n += 1,
-                    Some(_) => {}
-                },
+        let mut n: isize = 0;
+        let mut i = 0;
+        while i < toks.len() {
+            match &toks[i].tok {
+                Tok::Int(_) | Tok::Dec(..) | Tok::Str(_) | Tok::Name(_) => n += 1,
+                Tok::Apply => {
+                    if let Some(Tok::Name(s)) = i.checked_sub(1).map(|k| &toks[k].tok)
+                        && let Some((a, b)) = self.word_effect(s, &mut Vec::new())
+                    {
+                        n += b as isize - a as isize - 1;
+                    }
+                }
+                Tok::Open(b'[') => i = matching(toks, i),
+                Tok::Open(_) => {
+                    i = matching(toks, i);
+                    n += 1;
+                }
+                Tok::Dashes => break,
                 _ => {}
             }
+            i += 1;
         }
-        n
+        n.max(0) as usize
     }
 
     /// An error from inside a core clause, as an error where it was applied.
@@ -2423,246 +2496,158 @@ impl Stage {
 
     // ---- Types as values ----
 
-    /// A type expression in `< >`: a type's name pushes the type, a number a
-    /// value, a single letter a variable, and a constructor builds from what
-    /// is below it; `.` gives the value below a type, as `0 i64.`. A word
-    /// that is none of these is a guard. `--` divides inputs from outputs.
-    /// What is left is the inputs' patterns: types, or values, which the
-    /// inputs must equal (value patterns).
+    /// A bracket, `< … >`, is code, a comprehension of types (Thomas,
+    /// 2026-10-09). Its words mean what they mean anywhere: a type applied is
+    /// the type, `string.`; a constructor applied builds one, `a ary.`; a
+    /// name left bare is a symbol. Its one rule of its own: a word of one
+    /// letter is a type variable. What the code leaves is the signature, by
+    /// what each value is: a type, inputs of that type; a value, a literal,
+    /// a symbol or `true.`, inputs equal to it; a quotation, a guard, which
+    /// tests the inputs before it. `--` divides the inputs from the outputs,
+    /// which are types.
     pub fn bracket(&mut self, toks: &[Token]) -> Result<Sig> {
-        let mut items: Vec<Part> = Vec::new();
-        let mut guards = Vec::new();
-        let mut dashes = None;
-        // Where each open `(` of a tuple type began.
-        let mut opens: Vec<usize> = Vec::new();
-        for t in toks {
-            self.pos = t.pos;
-            let lit = |ty, val| Part::Val(Jdg { ty, val }, t.pos);
-            match &t.tok {
-                Tok::Open(b'(') => opens.push(items.len()),
-                Tok::Close(b')') => {
-                    let start = opens.pop().expect("the reader checks nesting");
-                    let mut elems = Vec::new();
-                    for part in items.drain(start..) {
-                        match part {
-                            Part::Ty(t) => elems.push(t),
-                            Part::Val(j, _) => {
-                                return Err(self.err(
-                                    Kind::Mismatch,
-                                    format!(
-                                        "a tuple type holds types, and {} is a value",
-                                        value_text(&j)
-                                    ),
-                                ));
-                            }
-                        }
-                    }
-                    if elems.is_empty() {
-                        return Err(self.err(Kind::Mismatch, "a tuple type with no types"));
-                    }
-                    items.push(Part::Ty(self.types.tuple(elems)));
-                }
-                Tok::Int(n) => items.push(lit(INT_LIT, Val::Int(*n))),
-                Tok::Dec(d, p) => items.push(lit(DEC_LIT, Val::Dec(*d, *p))),
-                Tok::Str(v) => items.push(lit(STRING, Val::Str(v.clone()))),
-                Tok::Apply => self.typed_value(&mut items)?,
-                Tok::Dashes if dashes.is_none() => dashes = Some(items.len()),
-                Tok::Name(s) => {
-                    let w = self.words.get(s);
-                    if let Some(t) = w.and_then(|w| w.ty) {
-                        items.push(Part::Ty(t));
-                    } else if let Some(c) = w.and_then(|w| w.con) {
-                        self.build(c, &mut items)?;
-                    } else if w.is_none() && s.len() == 1 && s.as_bytes()[0].is_ascii_lowercase() {
-                        let v = self.types.intern(Term::Var(s.as_bytes()[0] - b'a'));
-                        items.push(Part::Ty(v));
-                    } else if w.is_some() && opens.is_empty() {
-                        guards.push(self.guard(s, items.len(), dashes.is_some(), t.pos)?);
-                    } else if w.is_some() {
-                        return Err(self.err(Kind::Mismatch, format!("`{s}` is not a type")));
-                    } else {
-                        return Err(self.err(Kind::NoWord, format!("no type `{s}`")));
-                    }
-                }
-                _ => {
-                    return Err(self.err(
-                        Kind::Syntax,
-                        "a bracket holds types, values, guards and one `--`",
-                    ));
-                }
-            }
-        }
-        // The values left are value patterns, tested before the guards.
+        let dashes = toks.iter().position(|t| t.tok == Tok::Dashes);
+        let (inputs, outputs) = match dashes {
+            Some(d) => (&toks[..d], Some(&toks[d + 1..])),
+            None => (toks, None),
+        };
         let mut ins = Vec::new();
         let mut equals = Vec::new();
-        for (k, part) in items.into_iter().enumerate() {
-            match part {
-                Part::Ty(t) => ins.push(t),
-                Part::Val(j, pos) if dashes.is_none_or(|d| k < d) => {
-                    ins.push(j.ty);
+        let mut guards = Vec::new();
+        for (j, pos) in self.comprehend(inputs)? {
+            match j.val {
+                Val::Type(t) => ins.push(t),
+                // `nil.`, the one value of its type, is that type.
+                _ if j.ty == NIL => ins.push(NIL),
+                Val::Quote(q) => guards.push(self.quote_guard(q, ins.len(), pos)?),
+                _ => {
                     equals.push(Guard {
-                        test: Test::Equals(j),
-                        slot: k,
+                        test: Test::Equals(j.clone()),
+                        slot: ins.len(),
                         arity: 1,
                         pos,
                     });
-                }
-                Part::Val(j, pos) => {
-                    self.pos = pos;
-                    return Err(self.err(
-                        Kind::Mismatch,
-                        format!("an output is a type, and {} is a value", value_text(&j)),
-                    ));
+                    ins.push(j.ty);
                 }
             }
         }
-        equals.extend(guards);
-        let guards = equals;
-        Ok(match dashes {
-            None => Sig {
-                ins,
-                guards,
-                outs: None,
-            },
-            Some(d) => {
-                let outs = ins.split_off(d);
-                Sig {
-                    ins,
-                    guards,
-                    outs: Some(outs),
+        let outs = match outputs {
+            None => None,
+            Some(o) => {
+                let mut outs = Vec::new();
+                for (j, pos) in self.comprehend(o)? {
+                    match j.val {
+                        Val::Type(t) => outs.push(t),
+                        _ if j.ty == NIL => outs.push(NIL),
+                        _ => {
+                            self.pos = pos;
+                            return Err(self.err(
+                                Kind::Mismatch,
+                                format!(
+                                    "an output is a type, and {} is not one",
+                                    self.describe(&j)
+                                ),
+                            ));
+                        }
+                    }
                 }
+                Some(outs)
             }
+        };
+        equals.extend(guards);
+        Ok(Sig {
+            ins,
+            guards: equals,
+            outs,
         })
     }
 
-    /// `.` in a bracket: the value below the type on top, as that type, so
-    /// `0 i64.` is a value pattern for an i64.
-    fn typed_value(&mut self, items: &mut Vec<Part>) -> Result<()> {
-        let n = items.len();
-        let (Some(Part::Val(..)), Some(Part::Ty(t))) =
-            (n.checked_sub(2).map(|i| &items[i]), items.last())
-        else {
-            return Err(self.err(
-                Kind::Syntax,
-                "`.` in a bracket gives the value below a type, as `0 i64.`",
-            ));
-        };
-        let t = *t;
-        items.pop();
-        let Some(Part::Val(j, pos)) = items.pop() else {
-            unreachable!("checked")
-        };
-        self.stack.push(j);
-        let i = self.stack.len() - 1;
-        let r = self.annotate(i, t);
-        let j = self.stack.pop().expect("pushed");
+    /// Runs a bracket's code, on a stack of its own, and gives what it
+    /// leaves, each value with where it was written. It runs while
+    /// compiling, so it may leave no code: its values are known.
+    fn comprehend(&mut self, toks: &[Token]) -> Result<Vec<(Jdg, Pos)>> {
+        let at = toks.first().map_or(self.pos, |t| t.pos);
+        let saved = (
+            std::mem::take(&mut self.stack),
+            std::mem::take(&mut self.code),
+            std::mem::replace(&mut self.floor, 0),
+            std::mem::take(&mut self.literals),
+            std::mem::replace(&mut self.effects, 0),
+        );
+        self.in_bracket += 1;
+        let r = self.run(toks);
+        self.in_bracket -= 1;
+        let (stack, code, effects) = (
+            std::mem::take(&mut self.stack),
+            std::mem::take(&mut self.code),
+            self.effects,
+        );
+        (
+            self.stack,
+            self.code,
+            self.floor,
+            self.literals,
+            self.effects,
+        ) = saved;
         r?;
-        items.push(Part::Val(j, pos));
-        Ok(())
-    }
-
-    /// A guard in a bracket: a word that looks at the inputs before it and
-    /// leaves one flag.
-    fn guard(&self, name: &Rc<str>, before: usize, outputs: bool, pos: Pos) -> Result<Guard> {
-        if outputs {
-            return Err(self.err(
-                Kind::Syntax,
-                format!("the guard `{name}` belongs among the inputs, before `--`"),
-            ));
-        }
-        let Some((ins, outs)) = self.effect_of(name) else {
+        if !code.is_empty() || effects != 0 || stack.iter().any(|j| !j.known()) {
+            self.pos = at;
             return Err(self.err(
                 Kind::Mismatch,
-                format!("`{name}` cannot be a guard: how many values it takes is not known"),
+                "a bracket's code runs while compiling, so its values must be known then",
+            ));
+        }
+        Ok(stack
+            .into_iter()
+            .map(|j| {
+                let pos = match &j.val {
+                    Val::Name(_, p) => *p,
+                    Val::Quote(q) => q.first().map_or(at, |t| t.pos),
+                    _ => at,
+                };
+                (j, pos)
+            })
+            .collect())
+    }
+
+    /// A quotation left in a bracket: a guard, testing the inputs before it,
+    /// as many as it takes, and leaving one flag.
+    fn quote_guard(&self, q: Rc<[Token]>, before: usize, pos: Pos) -> Result<Guard> {
+        let text = source_text(&q);
+        let Some((ins, outs)) = self.effect(&q, &mut Vec::new()) else {
+            return Err(Error::new(
+                Kind::Mismatch,
+                Some(pos),
+                format!("`[ {text} ]` cannot be a guard: how many values it takes is not known"),
             ));
         };
         if outs != 1 {
-            return Err(self.err(
+            return Err(Error::new(
                 Kind::Mismatch,
+                Some(pos),
                 format!(
-                    "`{name}` leaves {}, and a guard leaves one flag",
+                    "`[ {text} ]` leaves {}, and a guard leaves one flag",
                     values(outs)
                 ),
             ));
         }
         if ins > before {
-            return Err(self.err(
+            return Err(Error::new(
                 Kind::Mismatch,
+                Some(pos),
                 format!(
-                    "the guard `{name}` looks at {}, and {} before it",
+                    "the guard `[ {text} ]` looks at {}, and {} before it",
                     values(ins),
                     values(before)
                 ),
             ));
         }
         Ok(Guard {
-            test: Test::Word(name.clone()),
+            test: Test::Quote(q),
             slot: before - ins,
             arity: ins,
             pos,
         })
-    }
-
-    /// Applies a constructor inside a bracket. A length is a value, a whole
-    /// number, or a variable.
-    fn build(&mut self, c: Con, items: &mut Vec<Part>) -> Result<()> {
-        let missing = |s: &Self| {
-            s.err(
-                Kind::Mismatch,
-                format!("`{c:?}` needs more below it").to_lowercase(),
-            )
-        };
-        let ty = |s: &mut Self, items: &mut Vec<Part>| -> Result<Type> {
-            match items.pop() {
-                Some(Part::Ty(t)) => Ok(t),
-                Some(Part::Val(j, _)) => Err(s.err(
-                    Kind::Mismatch,
-                    format!("{} is a value, not a type", value_text(&j)),
-                )),
-                None => Err(missing(s)),
-            }
-        };
-        let t = match c {
-            Con::Ary => {
-                let e = ty(self, items)?;
-                Term::Ary(e)
-            }
-            Con::Vec => {
-                let e = ty(self, items)?;
-                let n = match items.pop() {
-                    Some(Part::Val(
-                        Jdg {
-                            ty: INT_LIT,
-                            val: Val::Int(n),
-                        },
-                        _,
-                    )) if n >= 0 => self.types.intern(Term::Nat(n as u64)),
-                    Some(Part::Ty(v)) if matches!(self.types.term(v), Term::Var(_)) => v,
-                    Some(_) => {
-                        return Err(self.err(
-                            Kind::Mismatch,
-                            "`vec` needs a length below its type: a whole number or a variable",
-                        ));
-                    }
-                    None => return Err(missing(self)),
-                };
-                Term::Vec(n, e)
-            }
-            Con::Map => {
-                let v = ty(self, items)?;
-                let k = ty(self, items)?;
-                Term::Map(k, v)
-            }
-            Con::Or => {
-                let b = ty(self, items)?;
-                let a = ty(self, items)?;
-                let t = self.types.union(a, b);
-                items.push(Part::Ty(t));
-                return Ok(());
-            }
-        };
-        items.push(Part::Ty(self.types.intern(t)));
-        Ok(())
     }
 
     /// Applies a constructor with `.`: `100 i64 vec .` is a type.
@@ -2675,6 +2660,13 @@ impl Stage {
             Con::Vec => {
                 let e = self.pop_type()?;
                 let j = self.pop()?;
+                if let Val::Type(v) = j.val
+                    && matches!(self.types.term(v), Term::Var(_))
+                {
+                    let t = self.types.intern(Term::Vec(v, e));
+                    self.push(TYPE, Val::Type(t));
+                    return Ok(());
+                }
                 let n = match j.val {
                     Val::Int(n) if n >= 0 && (j.ty == INT_LIT || j.ty == I64) => n as u64,
                     _ => {
@@ -2724,6 +2716,7 @@ impl Stage {
         let j = self.pop()?;
         match &j.val {
             Val::Type(t) => Ok(*t),
+            _ if j.ty == NIL => Ok(NIL),
             Val::Name(n, _) if self.words.get(n).is_some_and(|w| w.ty.is_some()) => {
                 Ok(self.words[n].ty.expect("checked"))
             }
@@ -2966,6 +2959,7 @@ impl Stage {
             }
             Prim::TupleAt => self.tuple_at(base)?,
             Prim::Parse => self.parse(name, base)?,
+            Prim::To => self.to(name, base)?,
             // A file's text read while compiling, a known string, so what
             // follows folds on it: macros by staging. The text goes into the
             // code as data, so the code's identity follows the file.
@@ -3408,6 +3402,40 @@ impl Stage {
         self.emit(Op::Prim(P::ScratchPop));
         self.emit(Op::Prim(P::Drop));
         Ok(())
+    }
+
+    /// `to`: the value below as the type on top, `2 i64.to.`, a literal
+    /// converted by the type's clause for it, a value of another type by
+    /// the type's clause for that, as `"data.csv" file.to.` makes a file;
+    /// otherwise the value must have the type already, or forget into it.
+    fn to(&mut self, name: &str, base: usize) -> Result<()> {
+        let j = self.stack[base + 1].clone();
+        let t = match &j.val {
+            Val::Type(t) => *t,
+            Val::Name(n, _) if self.words.get(n).is_some_and(|w| w.ty.is_some()) => {
+                self.words[n].ty.expect("checked")
+            }
+            _ if j.ty == NIL => NIL,
+            _ => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "`{name}` converts to a type, and {} is not one",
+                        self.describe(&j)
+                    ),
+                ));
+            }
+        };
+        self.stack.pop();
+        let have = self.stack[base].ty;
+        if have != t
+            && !self.types.is_literal(have)
+            && let Some(c) = self.conversion(t, have)
+        {
+            let at = self.pos;
+            return self.apply_clause(name, &c, Env::default(), at);
+        }
+        self.annotate(base, t)
     }
 
     /// `parse`: the value of a type that a string writes, `"42" i64 parse.`,
@@ -4225,6 +4253,9 @@ impl Stage {
     }
 
     fn close_literal(&mut self, b: u8) -> Result<()> {
+        if self.in_bracket > 0 && b == b')' {
+            return self.close_tuple_type();
+        }
         let lit = self.literals.pop().expect("the reader checks nesting");
         let start = lit.start;
         let n = self.stack.len() - start;
@@ -4306,6 +4337,34 @@ impl Stage {
             }
             self.stack.remove(i);
         }
+        Ok(())
+    }
+
+    /// `( … )` in a bracket: the types in it, a tuple type.
+    fn close_tuple_type(&mut self) -> Result<()> {
+        let lit = self.literals.pop().expect("the reader checks nesting");
+        let mut elems = Vec::new();
+        for j in self.stack.drain(lit.start..).collect::<Vec<_>>() {
+            match j.val {
+                Val::Type(t) => elems.push(t),
+                _ if j.ty == NIL => elems.push(NIL),
+                _ => {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!(
+                            "a tuple type holds types, and {} is not one",
+                            self.describe(&j)
+                        ),
+                    ));
+                }
+            }
+        }
+        self.floor = lit.floor;
+        if elems.is_empty() {
+            return Err(self.err(Kind::Mismatch, "a tuple type with no types"));
+        }
+        let t = self.types.tuple(elems);
+        self.push(TYPE, Val::Type(t));
         Ok(())
     }
 

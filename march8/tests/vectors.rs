@@ -82,12 +82,12 @@ fn tensors_of_any_rank() {
     let mut s = session(&["( ( 1 2 ) ( 3 4 ) ) 10 ⋅."]).unwrap();
     assert_eq!(
         s.show_typed(),
-        "<1> ( ( 10 20 ) ( 30 40 ) ) < 2 2 i64 vec vec >"
+        "<1> ( ( 10 20 ) ( 30 40 ) ) < 2 2 i64. vec. vec. >"
     );
     s = session(&["( ( 1 2 ) ( 3 4 ) ) ( 10 20 ) +."]).unwrap();
     assert_eq!(
         s.show_typed(),
-        "<1> ( ( 11 22 ) ( 13 24 ) ) < 2 2 i64 vec vec >"
+        "<1> ( ( 11 22 ) ( 13 24 ) ) < 2 2 i64. vec. vec. >"
     );
     assert_eq!(
         show(&["( ( ( 1 2 ) ( 3 4 ) ) ) 1 +."]),
@@ -101,7 +101,7 @@ fn tensors_of_any_rank() {
     s = session(&["( ( ( ( 1 2 ) ) ) ) 10 ⋅."]).unwrap();
     assert_eq!(
         s.show_typed(),
-        "<1> ( ( ( ( 10 20 ) ) ) ) < 1 1 1 2 i64 vec vec vec vec >"
+        "<1> ( ( ( ( 10 20 ) ) ) ) < 1 1 1 2 i64. vec. vec. vec. vec. >"
     );
     assert_eq!(
         show(&["( ( ( ( ( 8 ) ) ) ) ) 2 div. 3 ( ( ( 1 2 ) ) ) ×."]),
@@ -116,7 +116,10 @@ fn tensors_of_any_rank() {
 #[test]
 fn the_tensor_product_adds_ranks() {
     let s = session(&["( ( 1 2 ) ( 3 4 ) ) ( ( 5 6 ) ( 7 8 ) ) ×."]).unwrap();
-    assert!(s.show_typed().ends_with("< 2 2 2 2 i64 vec vec vec vec >"));
+    assert!(
+        s.show_typed()
+            .ends_with("< 2 2 2 2 i64. vec. vec. vec. vec. >")
+    );
     assert_eq!(
         show(&["( 1 2 ) ( 3 4 5 ) ×."]),
         "<1> ( ( 3 4 5 ) ( 6 8 10 ) )"
@@ -150,7 +153,7 @@ fn transpose_swaps_indices() {
     let s = session(&["( ( 1 2 3 ) ( 4 5 6 ) ) transpose."]).unwrap();
     assert_eq!(
         s.show_typed(),
-        "<1> ( ( 1 4 ) ( 2 5 ) ( 3 6 ) ) < 3 2 i64 vec vec >"
+        "<1> ( ( 1 4 ) ( 2 5 ) ( 3 6 ) ) < 3 2 i64. vec. vec. >"
     );
     // A matrix times its transpose.
     assert_eq!(

@@ -26,7 +26,7 @@ impl Drop for Temp {
 fn read_when_the_program_runs() {
     let f = Temp::new("read.csv", "name,qty\napple,3\npear,5\n");
     let mut s = Session::new();
-    s.eval(&format!("\"{}\" file-read.lines.", f.path()))
+    s.eval(&format!("\"{}\" file-read. lines.", f.path()))
         .unwrap();
     assert_eq!(s.show(), "<1> ( \"name,qty\" \"apple,3\" \"pear,5\" )");
 }
@@ -37,14 +37,14 @@ fn embed_while_compiling() {
     // the constant.
     let f = Temp::new("embed.txt", "one two three");
     let mut s = Session::new();
-    let src = format!("\"{}\" file-embed.upper.length.", f.path());
+    let src = format!("\"{}\" file-embed. upper. length.", f.path());
     assert_eq!(s.compile(&src).unwrap().0, s.compile("13").unwrap().0);
     s.eval(&src).unwrap();
     assert_eq!(s.show(), "<1> 13");
     // Words that make arrays run when the program does: the stage has no
     // known arrays yet.
     let mut s = Session::new();
-    s.eval(&format!("\"{}\" file-embed.words.length.", f.path()))
+    s.eval(&format!("\"{}\" file-embed. words. length.", f.path()))
         .unwrap();
     assert_eq!(s.show(), "<1> 3");
 }

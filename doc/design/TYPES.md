@@ -59,12 +59,13 @@ every application is marked:
 - **A dot at the end of a word applies it** (Thomas, 2026-10-08): `sq.` is
   `sq .`, so `1 i64. 1 i64. +.` reads more easily. By that convention no
   name ends in a dot, and the reader enforces it. Each dot applies once:
-  `x 100 i64 vec..` builds a type and converts `x` to it. Dots between
-  names chain them, each applying the name before it (Thomas, 2026-10-09):
-  `"data.csv" file-read.lines.` is `file-read. lines.`, as uniform call
-  syntax reads (Nim's, D's): a concatenative program was a method chain all
-  along. Literals stand apart: a number keeps its point, `2.5`, `2.i64` is
-  no chain, and a string is followed by a space. So no name holds a dot.
+  `x 100 i64 vec..` builds a type and converts `x` to it. A dot inside a
+  word is part of it: a number's point, `2.5`, and in a name a path in a
+  namespace, `io.file.read.` (3.12). For a day dots between names chained
+  them, `"data.csv" file-read.lines.` for `file-read. lines.`, as uniform
+  call syntax reads (Nim's, D's); but then a path had no spelling, so the
+  chain went (Thomas, 2026-10-10), and words are applied one by one:
+  `"data.csv" file-read. lines.`.
 - **A type's name is a symbol, as any name is** (Thomas, 2026-10-09).
   `i64` is the name; applied, it converts the value below: `2 i64.` is 2
   as an i64, by `i64`'s clause for literals. A constructor takes names and
@@ -516,10 +517,15 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     `[1,2)`, is not to be had, `[` and `(` being March's brackets.
 12. **Namespaces** (Thomas, 2026-10-10). Words gather in namespaces,
     `io.file.read`, `io.stdin.read`, `io.file.embed`, rather than a flat
-    dictionary's `file-read`. The dot chain already spells it: a namespace
-    is a compile-time value, so `"data.csv" io.file.read.` applies `io`,
-    then `file` in it, then `read` in that. Importing says how much of the
-    prefix a module needs, `import : ( io.file.* )` or the like, by words of
+    dictionary's `file-read`. A dot inside a name divides the path, and the
+    dot at the end applies the word it names: `"data.csv" io.file.read.`.
+    The dot chain, `a.b.` for `a. b.`, was tried and left for this, the two
+    being unable to share the dot (Thomas, 2026-10-10); the reader keeps a
+    dotted name whole, and `def` refuses one until namespaces come. Open:
+    `.` divides, or `:`, which the surface language already uses to define
+    (`name : … ;`); the lean is `.`, as headings already nest namespaces
+    into dotted names, `math.trig` (march7/docs/SURFACE.md). Importing
+    says how much of the prefix a module needs, `import : ( io.file.* )` or the like, by words of
     a namespace's own that declare what it imports and what it exports, as
     march2 had (`<` imports, `>` exports, a namespace pushed on the stack:
     doc/lineage/march2.md). Collisions between imports are the programmer's

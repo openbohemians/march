@@ -68,7 +68,7 @@ fn a_bool_is_an_i64() {
         typed(&["( true. false. ) ( 5 6 ) ⋅. 3 true. max. false. true. max."]),
         "<3> ( 5 0 ) < 2 i64 vec. > 3 < i64 > true < bool >"
     );
-    // A clause for bool is more specific than one for i64.to.
+    // A clause for bool is more specific than one for i64.
     let k = "[ < i64 > drop. 1 ] k def. [ < bool > drop. 2 ] k def.";
     assert_eq!(show(&[k, "5 k. true. k."]), "<2> 1 2");
 }

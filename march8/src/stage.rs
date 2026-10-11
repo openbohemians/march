@@ -686,6 +686,16 @@ impl Stage {
 
     fn apply_word(&mut self, name: &Rc<str>) -> Result<()> {
         let Some(w) = self.words.get(name) else {
+            if name.contains('.') && !name.ends_with('.') {
+                return Err(self.err(
+                    Kind::NoWord,
+                    format!(
+                        "no word `{name}`: a dot inside a word divides a path in a namespace, \
+                         and there are none yet; `{}.` applies each in turn",
+                        name.split('.').collect::<Vec<_>>().join(". ")
+                    ),
+                ));
+            }
             return Err(self.err(Kind::NoWord, format!("no word `{name}`")));
         };
         // `map` builds a type from types, and maps over an array otherwise.
@@ -3085,6 +3095,15 @@ impl Stage {
             Prim::Def => {
                 let name = self.stack.pop().expect("matched");
                 let quote = self.stack.pop().expect("matched");
+                if let Val::Name(n, _) = &name.val
+                    && n.contains('.')
+                {
+                    // Kept for paths in namespaces (doc/design/TYPES.md 3.12).
+                    return Err(self.err(
+                        Kind::Syntax,
+                        format!("`{n}` holds a dot, which divides a path in a namespace"),
+                    ));
+                }
                 let typed = match &quote.val {
                     Val::Type(t) => Some(*t),
                     Val::Name(n, _) => self.words.get(n).and_then(|w| w.ty),

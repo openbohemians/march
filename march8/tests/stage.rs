@@ -63,6 +63,18 @@ fn a_dot_at_the_end_of_a_word_applies_it() {
 }
 
 #[test]
+fn a_dot_inside_a_name_divides_a_path() {
+    // Kept for namespaces, `io.file.read` (doc/design/TYPES.md 3.12): words
+    // do not chain, and no word is defined by such a name.
+    let mut s = Session::new();
+    let e = s.eval("( 3 1 2 ) sort.length.").unwrap_err();
+    assert_eq!(e.kind, Kind::NoWord);
+    assert!(e.to_string().contains("`sort. length.`"), "{e}");
+    assert_eq!(show("( 3 1 2 ) sort. length."), "<1> 3");
+    assert_eq!(fails("[ 1 ] a.b def."), Kind::Syntax);
+}
+
+#[test]
 fn literals_take_their_type_from_context() {
     // An integer literal beside a float is a float.
     assert_eq!(show("[ < f64 > 1 + . ] inc def . 2.5 inc ."), "<1> 3.5");

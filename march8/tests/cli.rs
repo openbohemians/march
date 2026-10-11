@@ -71,7 +71,7 @@ fn scan_gives_the_running_reductions() {
 fn stdin_read_reads_standard_input() {
     // `stdin-read.` is all of standard input, as a string.
     let out = march8(
-        &["--eval", "stdin-read.lines.length."],
+        &["--eval", "stdin-read. lines. length."],
         "apple,3\npear,5\nfig,1\n",
     );
     assert_eq!(out, "<1> 3\n");

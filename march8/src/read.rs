@@ -114,25 +114,14 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             continue;
         }
         // Each dot at the end of a word applies it: `sq.` is `sq .`, and
-        // `vec..` is `vec . .`. Dots between names chain them, each applying
-        // the name before it, as uniform call syntax reads: `file.read.` is
-        // `file. read.` (Thomas, 2026-10-09). Literals stand apart, so a
-        // number keeps its point, `2.5`, and `2.i64` is no chain. So no name
-        // holds a dot.
-        let body = word.trim_end_matches('.');
-        let trailing = (word.len() - body.len()) as u32;
-        let parts: Vec<&str> = body.split('.').collect();
-        if parts.len() > 1 && parts.iter().all(|p| is_name(p, pos)) {
-            let mut col = pos.col;
-            for (k, part) in parts.iter().enumerate() {
-                let applies = if k + 1 == parts.len() { trailing } else { 1 };
-                let at = Pos { col, ..pos };
-                piece(part, applies, at, symbols, &mut open, &mut out)?;
-                col += part.chars().count() as u32 + 1;
-            }
-            continue;
-        }
-        piece(body, trailing, pos, symbols, &mut open, &mut out)?;
+        // `vec..` is `vec . .`. So no name ends in a dot. A dot inside a word
+        // is part of it: `2.5` is a number, and in a name it divides a path
+        // in a namespace, `io.file.read` (doc/design/TYPES.md 3.12). Dots
+        // between names once chained them, `file.read.` for `file. read.`,
+        // which left no spelling for a path (Thomas, 2026-10-10).
+        let stem = word.trim_end_matches('.');
+        let applies = (word.len() - stem.len()) as u32;
+        piece(stem, applies, pos, symbols, &mut open, &mut out)?;
     }
     if let Some((o, p)) = open.pop() {
         return Err(Error::new(
@@ -144,17 +133,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
     Ok(out)
 }
 
-/// Whether a part of a word between dots is a name: not a number, a bracket
-/// or a string.
-fn is_name(part: &str, pos: Pos) -> bool {
-    !part.is_empty()
-        && !matches!(part, "[" | "(" | "{" | "<" | "]" | ")" | "}" | ">")
-        && !part.starts_with('\'')
-        && matches!(number(part, pos), Ok(None))
-}
-
-/// One word, or one name of a chain: its token, and an application for each
-/// dot after it.
+/// One word: its token, and an application for each dot after it.
 fn piece(
     stem: &str,
     applies: u32,
@@ -502,22 +481,17 @@ mod tests {
     }
 
     #[test]
-    fn dots_between_names_chain_them() {
-        // `file.read.` is `file. read.`; a number keeps its point, and a
-        // literal does not chain.
+    fn dots_inside_a_word_are_part_of_it() {
+        // A number keeps its point, and a name its dots, a path in a
+        // namespace; only the dots at the end apply.
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("file.read. sum.show.length 2.5. 2.i64."),
+            toks("io.file.read. sum.show. 2.5. 2.i64."),
             [
-                n("file"),
+                n("io.file.read"),
                 Tok::Apply,
-                n("read"),
+                n("sum.show"),
                 Tok::Apply,
-                n("sum"),
-                Tok::Apply,
-                n("show"),
-                Tok::Apply,
-                n("length"),
                 Tok::Dec(25, 1),
                 Tok::Apply,
                 n("2.i64"),

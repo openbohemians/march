@@ -44,7 +44,7 @@ runs to the end of the line, except inside `< >`.
 | `\name` | a symbol, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
 | `.` | applies the value on top |
 | `name.` | `name .`: each dot at the end of a word applies it (Thomas, 2026-10-08), so no name ends in a dot; `vec..` is `vec . .` |
-| `a.b.` | `a. b.`: dots between names chain them, each applying the name before it, as uniform call syntax reads (Thomas, 2026-10-09): `"data.csv" file-read.lines.`. Literals stand apart: `2.5` is a number, `2.i64` no chain |
+| `a.b` | one word: a dot inside a word is part of it, a number's point, `2.5`, or in a name a path in a namespace, `io.file.read` (TYPES.md 3.12), kept for namespaces and defining no word yet. Dots between names once chained them, `a.b.` for `a. b.` (2026-10-09), which left no spelling for a path (Thomas, 2026-10-10) |
 | `[ … ]` | a quotation: its words, unevaluated |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
 | `_.` | in a literal, a copy of a value from below it (Comprehensions) |
@@ -638,7 +638,7 @@ on a known string the value or nil itself. `le?`, `ge?` and `neq?`, with
 `≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that
 NaN is at most and at least nothing. Reading is primitives, for now:
 `"data.csv" file-read.` a file's text and `stdin-read.` standard input,
-when the program runs, an effect, so a filter starts `stdin-read.lines.`;
+when the program runs, an effect, so a filter starts `stdin-read. lines.`;
 `"notes.txt" file-embed.` a file's text while compiling, so what follows
 folds on it (TYPES.md 2.15). With namespaces they become `io.file.read` and
 its kin (TYPES.md 3.12). A `read` chosen by a symbol, `"data.csv" file

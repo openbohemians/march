@@ -30,52 +30,52 @@ fn typed(pieces: &[&str]) -> String {
 const M: &str = "{ \"a\" 1 \"b\" 2 }";
 
 /// `b` leaves a string for a positive number, and 1 otherwise.
-const B: &str = "[ 0 gt?. ] positive? def.
-    [ < i64 positive? > drop. \"yes\" ] b def.
-    [ < i64 > drop. 1 i64. ] b def.";
+const B: &str = "positive?: [ 0 gt? ] def
+    b: [ < i64 positive? > drop \"yes\" ] def
+    b: [ < i64 > drop 1 i64 ] def";
 
 #[test]
 fn nil_is_its_own_value() {
-    assert_eq!(typed(&["nil."]), "<1> nil < nil >");
-    assert_eq!(show(&["nil. show."]), "<1> \"nil\"");
-    assert_eq!(show(&["[ < atom > drop. 1 ] k def. nil. k."]), "<1> 1");
+    assert_eq!(typed(&["nil"]), "<1> nil < nil >");
+    assert_eq!(show(&["nil show"]), "<1> \"nil\"");
+    assert_eq!(show(&["k: [ < atom > drop 1 ] def nil k"]), "<1> 1");
 }
 
 #[test]
 fn get_leaves_a_value_or_nil() {
-    let s = format!("{M} \"a\" get. {M} \"z\" get.");
+    let s = format!("{M} \"a\" get {M} \"z\" get");
     assert_eq!(typed(&[&s]), "<2> 1 < i64 nil or. > nil < i64 nil or. >");
     // Its outputs name the union, so it is not warned of.
     let mut s = Session::new();
-    s.eval(&format!("{M} \"a\" get.")).unwrap();
+    s.eval(&format!("{M} \"a\" get")).unwrap();
     assert!(s.take_warnings().is_empty());
 }
 
 #[test]
 fn a_word_is_applied_to_each_type_by_the_tag() {
-    let port = "[ < i64 > 10 *. ] port def. [ < nil > drop. 80 ] port def.";
+    let port = "port: [ < i64 > 10 * ] def port: [ < nil > drop 80 ] def";
     assert_eq!(
-        show(&[port, &format!("{M} \"a\" get. port. {M} \"z\" get. port.")]),
+        show(&[port, &format!("{M} \"a\" get port {M} \"z\" get port")]),
         "<2> 10 80"
     );
     assert_eq!(
-        show(&[&format!("{M} \"a\" get. show. {M} \"z\" get. show.")]),
+        show(&[&format!("{M} \"a\" get show {M} \"z\" get show")]),
         "<2> \"1\" \"nil\""
     );
     // A type with a better clause of its own is applied apart: `>string` of
     // a string is its text, where `show` quotes it.
     assert_eq!(
-        show(&[B, "3 -3", "b. >string. swap. b. >string."]),
+        show(&[B, "3 -3", "b >string swap b >string"]),
         "<2> \"1\" \"yes\""
     );
-    assert_eq!(show(&[B, "3", "b. show."]), "<1> \"\\\"yes\\\"\"");
+    assert_eq!(show(&[B, "3", "b show"]), "<1> \"\\\"yes\\\"\"");
     // Two unions: each of the first's types, then each of the second's.
-    let add = format!("{M} \"a\" get. {M} \"b\" get.");
-    let both = "[ < i64 i64 > +. ] add def. [ < i64 nil > drop. ] add def.
-        [ < nil a > swap. drop. ] add def.";
-    assert_eq!(show(&[both, &format!("{add} add.")]), "<1> 3");
+    let add = format!("{M} \"a\" get {M} \"b\" get");
+    let both = "add: [ < i64 i64 > + ] def add: [ < i64 nil > drop ] def
+        add: [ < nil a > swap drop ] def";
+    assert_eq!(show(&[both, &format!("{add} add")]), "<1> 3");
     assert_eq!(
-        show(&[both, &format!("{M} \"z\" get. {M} \"b\" get. add.")]),
+        show(&[both, &format!("{M} \"z\" get {M} \"b\" get add")]),
         "<1> 2"
     );
 }
@@ -85,7 +85,7 @@ fn a_type_with_no_clause_is_no_word() {
     // Every type a union may have at run time needs a clause: `+` has none
     // for nil.
     let mut s = Session::new();
-    let e = s.eval(&format!("{M} \"a\" get. 1 +.")).unwrap_err();
+    let e = s.eval(&format!("{M} \"a\" get 1 +")).unwrap_err();
     assert_eq!(e.kind, Kind::NoWord);
     assert!(
         e.to_string()
@@ -93,7 +93,7 @@ fn a_type_with_no_clause_is_no_word() {
         "{e}"
     );
     assert_eq!(
-        session(&[&format!("{M} \"a\" get. num.")]).err(),
+        session(&[&format!("{M} \"a\" get num")]).err(),
         Some(Kind::Mismatch)
     );
 }
@@ -103,26 +103,23 @@ fn some_words_take_a_union_whole() {
     // Stack words, a type variable, `atom`, and a union that holds it.
     let mut s = Session::new();
     let ops = s
-        .compile(&format!("{M} \"a\" get. dup. swap. drop."))
+        .compile(&format!("{M} \"a\" get dup swap drop"))
         .unwrap()
         .0;
     assert!(!ops.contains(&Op::Prim(Primitive::UnionTag)));
-    let k = "[ < atom > drop. 1 ] k def. [ < i64 nil or. > drop. 2 ] w def.";
+    let k = "k: [ < atom > drop 1 ] def w: [ < i64 nil or. > drop 2 ] def";
     assert_eq!(
-        show(&[
-            k,
-            &format!("{M} \"a\" get. k. {M} \"z\" get. w. 3 i64. w. nil. w.")
-        ]),
+        show(&[k, &format!("{M} \"a\" get k {M} \"z\" get w 3 i64 w nil w")]),
         "<4> 1 2 2 2"
     );
 }
 
 #[test]
 fn arrays_hold_unions() {
-    let xs = format!("( {M} \"a\" get. {M} \"z\" get. )");
+    let xs = format!("( {M} \"a\" get {M} \"z\" get )");
     assert_eq!(typed(&[&xs]), "<1> ( 1 nil ) < 2 i64 nil or. vec. >");
     assert_eq!(
-        show(&[&format!("{xs} [ show. ] map.")]),
+        show(&[&format!("{xs} [ show ] map")]),
         "<1> ( \"1\" \"nil\" )"
     );
 }
@@ -134,20 +131,20 @@ fn a_union_made_at_run_time_is_noted() {
     let mut s = Session::new();
     s.eval(B).unwrap();
     s.eval("3").unwrap();
-    s.eval("b.").unwrap();
+    s.eval("b").unwrap();
     let w = s.take_warnings();
     assert_eq!(w.len(), 1, "{w:?}");
     assert_eq!(w[0].level, Level::Informative);
-    s.eval("drop. 3 b. -3 b.").unwrap();
+    s.eval("drop 3 b -3 b").unwrap();
     assert!(s.take_warnings().is_empty());
     assert_eq!(s.show(), "<2> \"yes\" 1");
-    let named = "[ 0 gt?. ] positive? def.
-        [ < i64 positive? -- i64 string or. > drop. \"yes\" ] g def.
-        [ < i64 -- i64 string or. > drop. 1 i64. ] g def.";
+    let named = "positive?: [ 0 gt? ] def
+        g: [ < i64 positive? -- i64 string or. > drop \"yes\" ] def
+        g: [ < i64 -- i64 string or. > drop 1 i64 ] def";
     let mut s = Session::new();
     s.eval(named).unwrap();
     s.eval("3").unwrap();
-    s.eval("g.").unwrap();
+    s.eval("g").unwrap();
     assert!(s.take_warnings().is_empty());
     assert_eq!(s.show_typed(), "<1> \"yes\" < i64 string or. >");
 }

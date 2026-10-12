@@ -1,5 +1,6 @@
-//! The reader for the explicit form (docs/MACHINE.md): words separated by
-//! white space, as in FORTH, with numbers, strings, `.` and four brackets.
+//! The reader (docs/MACHINE.md): words separated by white space, as in
+//! FORTH, with numbers, strings, `.` and four brackets. In code a name
+//! applies, and a symbol is spelled as one; in a bracket names stay names.
 
 use crate::error::{Error, Kind, Pos, Result};
 use crate::symbols::Symbols;
@@ -13,7 +14,8 @@ pub enum Tok {
     Dec(i128, u32),
     Str(Rc<str>),
     Name(Rc<str>),
-    /// `.`, which applies the value on top.
+    /// `.`, which applies the value on top; the reader puts one after each
+    /// name in code.
     Apply,
     /// `[`, `(`, `{` or `<`.
     Open(u8),
@@ -113,15 +115,23 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             r.skip_line();
             continue;
         }
-        // Each dot at the end of a word applies it: `sq.` is `sq .`, and
-        // `vec..` is `vec . .`. So no name ends in a dot. A dot inside a word
-        // is part of it: `2.5` is a number, and in a name it divides a path
-        // in a namespace, `io.file.read` (doc/design/TYPES.md 3.12). Dots
-        // between names once chained them, `file.read.` for `file. read.`,
-        // which left no spelling for a path (Thomas, 2026-10-10).
+        // Each dot at the end of a word applies once more: `[ … ].` applies
+        // a quotation, and `x < 3 i64 vec > .` a type. So no name ends in a
+        // dot. A dot inside a word is part of it: `2.5` is a number, and in a
+        // name it divides a path in a namespace, `io.file.read`
+        // (doc/design/TYPES.md 3.12).
         let stem = word.trim_end_matches('.');
-        let applies = (word.len() - stem.len()) as u32;
-        piece(stem, applies, pos, symbols, &mut open, &mut out)?;
+        let dots = (word.len() - stem.len()) as u32;
+        let at = Pos {
+            col: pos.col + stem.chars().count() as u32,
+            ..pos
+        };
+        let (stem, applies) = if in_body(&open) && is_name(stem) {
+            spelled(stem)
+        } else {
+            (stem, false)
+        };
+        piece(stem, applies, dots, pos, at, symbols, &mut open, &mut out)?;
     }
     if let Some((o, p)) = open.pop() {
         return Err(Error::new(
@@ -133,11 +143,45 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
     Ok(out)
 }
 
-/// One word: its token, and an application for each dot after it.
+/// Whether code here is a body, where names apply, rather than a bracket,
+/// where they stay names: the innermost quotation or bracket decides.
+fn in_body(open: &[(u8, Pos)]) -> bool {
+    open.iter()
+        .rev()
+        .find(|(b, _)| matches!(b, b'[' | b'<'))
+        .is_none_or(|(b, _)| *b == b'[')
+}
+
+/// Whether a word is a name: not a number or a bracket.
+fn is_name(w: &str) -> bool {
+    let digits = w.strip_prefix('-').unwrap_or(w);
+    !(w.is_empty()
+        || matches!(w, "[" | "(" | "{" | "<" | "]" | ")" | "}" | ">")
+        || digits.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// A name in code, and whether it applies (Thomas, 2026-10-12): a name
+/// applies, as in FORTH, and a symbol is spelled as one. A capitalized name
+/// is a symbol, `Snake`; `name:` labels what follows, a name being defined
+/// or a key; and `name'` is a symbol in a script without capitals.
+fn spelled(w: &str) -> (&str, bool) {
+    let marked = |m: char| w.len() > m.len_utf8() && w.ends_with(m);
+    if marked(':') || marked('\'') {
+        (&w[..w.len() - 1], false)
+    } else {
+        (w, !w.starts_with(char::is_uppercase))
+    }
+}
+
+/// One word: its token, its own application if it is a name that applies,
+/// and an application for each dot after it, the first at `at`.
+#[allow(clippy::too_many_arguments)]
 fn piece(
     stem: &str,
-    applies: u32,
+    applies: bool,
+    dots: u32,
     pos: Pos,
+    at: Pos,
     symbols: &Symbols,
     open: &mut Vec<(u8, Pos)>,
     out: &mut Vec<Token>,
@@ -149,10 +193,6 @@ fn piece(
         let stem = match stem {
             "·" | "∙" => "⋅",
             s => s,
-        };
-        let dots = Pos {
-            line: pos.line,
-            col: pos.col + stem.chars().count() as u32,
         };
         let tok = match stem {
             "" => None,
@@ -186,12 +226,18 @@ fn piece(
         if let Some(tok) = tok {
             out.push(Token { tok, pos });
         }
-        for k in 0..applies {
+        if applies {
+            out.push(Token {
+                tok: Tok::Apply,
+                pos,
+            });
+        }
+        for k in 0..dots {
             out.push(Token {
                 tok: Tok::Apply,
                 pos: Pos {
-                    col: dots.col + k,
-                    ..dots
+                    col: at.col + k,
+                    ..at
                 },
             });
         }
@@ -459,23 +505,53 @@ mod tests {
 
     #[test]
     fn words_numbers_and_brackets() {
+        let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("1 -2 1.10 + . [ x ] < i64 -- i64 > -- a comment\n\\times"),
+            toks("1 -2 1.10 + [ x ] < i64 -- i64 > -- a comment\n\\times"),
             [
                 Tok::Int(1),
                 Tok::Int(-2),
                 Tok::Dec(110, 2),
-                Tok::Name("+".into()),
+                n("+"),
                 Tok::Apply,
                 Tok::Open(b'['),
-                Tok::Name("x".into()),
+                n("x"),
+                Tok::Apply,
                 Tok::Close(b']'),
                 Tok::Open(b'<'),
-                Tok::Name("i64".into()),
+                n("i64"),
                 Tok::Dashes,
-                Tok::Name("i64".into()),
+                n("i64"),
                 Tok::Close(b'>'),
-                Tok::Name("×".into()),
+                n("×"),
+                Tok::Apply,
+            ]
+        );
+    }
+
+    #[test]
+    fn names_apply_and_symbols_are_spelled() {
+        // A name applies; a capitalized one is a symbol, as are `name:`, a
+        // label, and `name'`. In a bracket names stay names, and a guard's
+        // quotation is code again.
+        let n = |s: &str| Tok::Name(s.into());
+        assert_eq!(
+            toks("dup Snake fib: +' < string Camel [ odd? ] > σ'"),
+            [
+                n("dup"),
+                Tok::Apply,
+                n("Snake"),
+                n("fib"),
+                n("+"),
+                Tok::Open(b'<'),
+                n("string"),
+                n("Camel"),
+                Tok::Open(b'['),
+                n("odd?"),
+                Tok::Apply,
+                Tok::Close(b']'),
+                Tok::Close(b'>'),
+                n("σ"),
             ]
         );
     }
@@ -483,66 +559,60 @@ mod tests {
     #[test]
     fn dots_inside_a_word_are_part_of_it() {
         // A number keeps its point, and a name its dots, a path in a
-        // namespace; only the dots at the end apply.
+        // namespace.
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("io.file.read. sum.show. 2.5. 2.i64."),
-            [
-                n("io.file.read"),
-                Tok::Apply,
-                n("sum.show"),
-                Tok::Apply,
-                Tok::Dec(25, 1),
-                Tok::Apply,
-                n("2.i64"),
-                Tok::Apply,
-            ]
+            toks("io.file.read 2.5 2.i64"),
+            [n("io.file.read"), Tok::Apply, Tok::Dec(25, 1), n("2.i64")]
         );
     }
 
     #[test]
-    fn trailing_dots_apply() {
+    fn dots_at_the_end_apply_once_more() {
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("sq. 1.5. 1. vec.. [ ]. \\times. .."),
+            toks("1.5. Snake. vec.. [ ]. .."),
             [
-                n("sq"),
-                Tok::Apply,
                 Tok::Dec(15, 1),
                 Tok::Apply,
-                Tok::Int(1),
+                n("Snake"),
                 Tok::Apply,
                 n("vec"),
+                Tok::Apply,
                 Tok::Apply,
                 Tok::Apply,
                 Tok::Open(b'['),
                 Tok::Close(b']'),
                 Tok::Apply,
-                n("×"),
-                Tok::Apply,
                 Tok::Apply,
                 Tok::Apply,
             ]
         );
-        // Each dot is where it is written.
+        // A name's own application is where the name is, and each dot where
+        // it is written.
         let t = read("a  sq..", &Symbols::standard()).unwrap();
-        assert_eq!(t[2].pos, Pos { line: 1, col: 6 });
-        assert_eq!(t[3].pos, Pos { line: 1, col: 7 });
+        let cols: Vec<u32> = t.iter().map(|t| t.pos.col).collect();
+        assert_eq!(cols, [1, 1, 4, 4, 6, 7]);
     }
 
     #[test]
     fn symbols_inside_words() {
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("x\\_1 \\times a\\times\\times \\infty \\foo y\\^2."),
+            toks("x\\_1 \\times a\\times\\times \\infty \\foo y\\^2"),
             [
                 n("x₁"),
+                Tok::Apply,
                 n("×"),
+                Tok::Apply,
                 n("a××"),
+                Tok::Apply,
                 n("∞"),
+                Tok::Apply,
                 n("\\foo"),
+                Tok::Apply,
                 n("y²"),
-                Tok::Apply
+                Tok::Apply,
             ]
         );
     }

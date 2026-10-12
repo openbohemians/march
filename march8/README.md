@@ -1,20 +1,19 @@
 # March8: March's compiler in Rust
 
-March8 compiles March in Rust: a symbolic stack machine runs March's
-explicit form on judgments, a type and maybe a known value for each stack
-item, and leaves bytecode for the machine (docs/MACHINE.md). System March
-(march7) is frozen. March will compile itself again once it is mature.
+March8 compiles March in Rust: a symbolic stack machine runs March on
+judgments, a type and maybe a known value for each stack item, and leaves
+bytecode for the machine (docs/MACHINE.md). System March (march7) is
+frozen. March will compile itself again once it is mature.
 
-It depends on merkle-champ (github.com/tabcomputing/merkle-champ) by path
-until its version 0.2 is published, so check it out next to this repository:
-`../../merkle-champ` from here.
+It builds on merkle-champ 0.2, from crates.io.
 
 ```sh
-cargo run --offline -- --eval '[ < money -- money > 1.10 +. ] fee def. 19.99 fee.'
+cargo run -- --eval 'fee: [ < money -- money > 1.10 + ] def 19.99 fee'
 # <1> 21.09
-cargo run --offline -- --eval '[ dup. *. ] sq def. 2.5 sq. 3 sq.'
+cargo run -- --eval 'sq: [ dup * ] def 2.5 sq 3 sq'
 # <2> 6.25 9
-cargo run --offline            # a REPL; :help for its commands
+cargo run -- examples/wordfreq.march
+cargo run                      # a REPL; :help for its commands
 ```
 
 | What | Where |

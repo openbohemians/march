@@ -30,12 +30,12 @@ fn word_frequencies() {
 #[test]
 fn put_sets_and_empty_starts() {
     assert_eq!(
-        show("string i64 map. empty. \"a\" 1 put. \"b\" 2 put. \"a\" 3 put."),
+        show("< string i64 map. > empty \"a\" 1 put \"b\" 2 put \"a\" 3 put"),
         "<1> { \"a\" 3 \"b\" 2 } < string i64 map. >"
     );
-    assert_eq!(show("string ary. empty. length."), "<1> 0 < i64 >");
+    assert_eq!(show("< string ary. > empty length"), "<1> 0 < i64 >");
     let mut s = Session::new();
-    assert_eq!(s.eval("i64 empty.").unwrap_err().kind, Kind::NoWord);
+    assert_eq!(s.eval("< i64 > empty").unwrap_err().kind, Kind::NoWord);
 }
 
 #[test]
@@ -48,8 +48,8 @@ fn a_literal_in_a_loop_is_made_once() {
         s.eval(src).unwrap();
         s.machine.stats.allocated_bytes
     };
-    let plain = bytes("1000 range. 0 [ 26 mod. 1 +. +. ] fold.");
+    let plain = bytes("1000 range 0 [ 26 mod 1 + + ] fold");
     let literal =
-        bytes("1000 range. 0 [ \"abcdefghijklmnopqrstuvwxyz\" swap. 26 mod. 1 +. at. +. ] fold.");
+        bytes("1000 range 0 [ \"abcdefghijklmnopqrstuvwxyz\" swap 26 mod 1 + at + ] fold");
     assert!(literal - plain < 26 * 10, "{plain} and {literal} bytes");
 }

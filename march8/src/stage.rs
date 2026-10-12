@@ -95,7 +95,7 @@ pub struct Guard {
     pub pos: Pos,
 }
 
-/// What a guard tests: a quotation that leaves a flag, `[ positive?. ]`, or,
+/// What a guard tests: a quotation that leaves a flag, `[ positive? ]`, or,
 /// for a value pattern, that its input equals a value (`< 0 >`).
 #[derive(Clone, Debug)]
 pub enum Test {
@@ -117,16 +117,43 @@ impl PartialEq for Test {
     }
 }
 
-/// Tokens as they are written, for a message.
+/// A symbol's name, if a name in a bracket is spelled as one: capitalized,
+/// `Camel`, or in a script without capitals marked, `name'`. Any other name
+/// in a bracket is a type's.
+fn symbol_spelled(n: &str) -> Option<&str> {
+    if n.starts_with(char::is_uppercase) {
+        Some(n)
+    } else {
+        n.strip_suffix('\'').filter(|s| !s.is_empty())
+    }
+}
+
+/// A name with its first letter capitalized, as a symbol is spelled.
+fn capital(n: &str) -> String {
+    let mut cs = n.chars();
+    cs.next()
+        .map(|c| c.to_uppercase().chain(cs).collect())
+        .unwrap_or_default()
+}
+
+/// Tokens as they are written, for a message: a name and its application
+/// are the name, and a symbol is spelled as one.
 fn source_text(toks: &[Token]) -> String {
     let mut out = String::new();
-    for t in toks {
-        let word = match &t.tok {
-            Tok::Apply => {
-                out.push('.');
-                continue;
+    let mut i = 0;
+    while i < toks.len() {
+        let word = match &toks[i].tok {
+            Tok::Apply => ".".into(),
+            Tok::Name(s) if toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) => {
+                i += 1;
+                if s.starts_with(char::is_uppercase) {
+                    format!("{s}.")
+                } else {
+                    s.to_string()
+                }
             }
-            Tok::Name(s) => s.to_string(),
+            Tok::Name(s) if s.starts_with(char::is_uppercase) => s.to_string(),
+            Tok::Name(s) => format!("{s}'"),
             Tok::Int(n) => n.to_string(),
             Tok::Dec(d, s) => prims::show_dec(*d, *s),
             Tok::Str(s) => format!("{s:?}"),
@@ -138,6 +165,7 @@ fn source_text(toks: &[Token]) -> String {
             out.push(' ');
         }
         out.push_str(&word);
+        i += 1;
     }
     out
 }
@@ -168,7 +196,7 @@ fn value_text(j: &Jdg) -> String {
 }
 
 /// An open array or map literal: its bracket, where its elements start, the
-/// floor outside it, and where each `_.` that pulls a value from below it is
+/// floor outside it, and where each `_` that pulls a value from below it is
 /// written, in reading order; it takes as many inputs.
 struct Literal {
     bracket: u8,
@@ -177,7 +205,7 @@ struct Literal {
     pulls: Vec<Pos>,
 }
 
-/// Where each `_.` in a string's holes is.
+/// Where each `_` in a string's holes is.
 fn template_pulls(pieces: &[Piece]) -> Vec<Pos> {
     pieces
         .iter()
@@ -189,7 +217,7 @@ fn template_pulls(pieces: &[Piece]) -> Vec<Pos> {
         .collect()
 }
 
-/// Where each `_.` in a literal's words is, not counting those of literals
+/// Where each `_` in a literal's words is, not counting those of literals
 /// inside it.
 fn pulls_in(toks: &[Token]) -> Vec<Pos> {
     let mut out = Vec::new();
@@ -561,7 +589,7 @@ impl Stage {
         Ok(self.stack.pop().expect("checked"))
     }
 
-    /// Evaluates tokens of the explicit form.
+    /// Evaluates code.
     pub fn run(&mut self, toks: &[Token]) -> Result<()> {
         let mut i = 0;
         while i < toks.len() {
@@ -612,11 +640,20 @@ impl Stage {
                     self.push(QUOTE, Val::Quote(toks[i + 1..j].into()));
                     i = j;
                 }
+                // A bracket is a value, as a quotation is (Thomas,
+                // 2026-10-12): a type, or, of more than one type, a
+                // signature, which applied gives the values below their
+                // types, `x y < i64 f64 > .`. Only first in a definition's
+                // quotation is it the clause's context, read by `def`.
                 Tok::Open(b'<') => {
                     let j = matching(toks, i);
                     let sig = self.bracket(&toks[i + 1..j])?;
                     self.pos = t.pos;
-                    self.annotate_top(&sig)?;
+                    if let ([t], None, []) = (&sig.ins[..], &sig.outs, &sig.guards[..]) {
+                        self.push(TYPE, Val::Type(*t));
+                    } else {
+                        self.push(QUOTE, Val::Quote(toks[i..=j].into()));
+                    }
                     i = j;
                 }
                 // An array of types, in a bracket, is a tuple type: no code.
@@ -657,10 +694,28 @@ impl Stage {
                 self.pos = at;
                 self.apply_word(&n)
             }
-            // A type applied converts the value below to it: `x 3 i64 vec..`.
+            // A type applied converts the value below to it, `x < 3 i64 vec >
+            // .`; a class or a type with variables checks it.
             Val::Type(t) => {
                 self.need(1)?;
-                self.convert(self.stack.len() - 1, t)
+                if self.types.is_pattern(t) {
+                    let sig = Sig {
+                        ins: vec![t],
+                        guards: Vec::new(),
+                        outs: None,
+                    };
+                    self.annotate_top(&sig)
+                } else {
+                    self.convert(self.stack.len() - 1, t)
+                }
+            }
+            // A signature, a bracket alone, gives the values below its types.
+            Val::Quote(q)
+                if q.first().is_some_and(|t| t.tok == Tok::Open(b'<'))
+                    && matching(&q, 0) + 1 == q.len() =>
+            {
+                let sig = self.bracket(&q[1..q.len() - 1])?;
+                self.annotate_top(&sig)
             }
             Val::Quote(q) => {
                 self.enter()?;
@@ -691,8 +746,8 @@ impl Stage {
                     Kind::NoWord,
                     format!(
                         "no word `{name}`: a dot inside a word divides a path in a namespace, \
-                         and there are none yet; `{}.` applies each in turn",
-                        name.split('.').collect::<Vec<_>>().join(". ")
+                         and there are none yet; `{}` applies each in turn",
+                        name.split('.').collect::<Vec<_>>().join(" ")
                     ),
                 ));
             }
@@ -714,13 +769,13 @@ impl Stage {
         } else if let Some((p, sig)) = w.prim.clone() {
             self.prim(name, p, &sig)
         } else if w.ty == Some(NIL) {
-            // A type with one value is that value, `nil.`, which stands for
+            // A type with one value is that value, `nil`, which stands for
             // its type where a type is wanted.
             self.push(NIL, Val::Int(0));
             Ok(())
         } else if let Some(t) = w.ty {
             // A type's name is a symbol, `i64`, as any name is; applied, it
-            // converts the value below: `2 i64.` (Thomas, 2026-10-09).
+            // converts the value below: `2 i64` (Thomas, 2026-10-09).
             self.need(1)?;
             self.convert(self.stack.len() - 1, t)
         } else if !w.clauses.is_empty() {
@@ -743,7 +798,7 @@ impl Stage {
             Val::Float(x) => format!("{x:?} (f64)"),
             Val::Str(s) => format!("{s:?}"),
             Val::Type(t) => format!("the type `{}`", self.types.name(*t)),
-            Val::Name(n, _) => format!("the word `{n}`"),
+            Val::Name(n, _) => format!("the symbol `{n}`{}", self.typo(n)),
             Val::Quote(_) => "a quotation".into(),
             Val::Many => format!("a run of {}", self.types.name(j.ty)),
             Val::Pinned(v) => self.describe(&Jdg {
@@ -753,17 +808,46 @@ impl Stage {
         }
     }
 
-    /// The types of the top `n` values, for a message.
+    /// The types of the top `n` values, for a message, a symbol by its name:
+    /// `door` for `Locked Open`.
     fn top_types(&self, n: usize) -> String {
         let n = n.min(self.stack.len() - self.floor);
         if n == 0 {
             return "no values".into();
         }
-        self.stack[self.stack.len() - n..]
+        let top = &self.stack[self.stack.len() - n..];
+        let mut out = top
             .iter()
-            .map(|j| self.types.name(j.ty))
+            .map(|j| match &j.val {
+                Val::Name(s, _) if j.ty == SYMBOL && s.starts_with(char::is_uppercase) => {
+                    s.to_string()
+                }
+                Val::Name(s, _) if j.ty == SYMBOL => format!("{s}'"),
+                _ => self.types.name(j.ty),
+            })
             .collect::<Vec<_>>()
-            .join(" ")
+            .join(" ");
+        for j in top {
+            if let Val::Name(s, _) = &j.val {
+                out.push_str(&self.typo(s));
+            }
+        }
+        out
+    }
+
+    /// A note for a capitalized symbol that a word is spelled like: `Dup`,
+    /// written for `dup`, is a symbol and applies nothing.
+    fn typo(&self, n: &str) -> String {
+        let mut cs = n.chars();
+        let Some(c) = cs.next().filter(|c| c.is_uppercase()) else {
+            return String::new();
+        };
+        let word: String = c.to_lowercase().chain(cs).collect();
+        if self.words.contains_key(word.as_str()) {
+            format!(" (`{n}` is a symbol; the word is `{word}`)")
+        } else {
+            String::new()
+        }
     }
 
     // ---- Literals and annotation ----
@@ -976,7 +1060,7 @@ impl Stage {
             Some(b) if b == have => Some(0),
             // A variable bound to a literal takes a type the literal becomes,
             // or the literal's own if that holds the other, as an i64 holds a
-            // bool: `3 true. max.` is 3.
+            // bool: `3 true max` is 3.
             Some(b) if self.types.is_literal(b) && self.accepts(have, b) => {
                 let own = Self::default_of(b);
                 env.0[v] = Some(if self.forgets(own, have) { own } else { have });
@@ -2272,7 +2356,7 @@ impl Stage {
                 _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
             });
         }
-        // `nil.` is its value; another type's name applied converts.
+        // `nil` applied is its value; another type's name applied converts.
         if w.ty == Some(NIL) {
             return Some((0, 1));
         }
@@ -2510,14 +2594,15 @@ impl Stage {
     // ---- Types as values ----
 
     /// A bracket, `< … >`, is code, a comprehension of types (Thomas,
-    /// 2026-10-09). Its words mean what they mean anywhere: a type applied is
-    /// the type, `string.`; a constructor applied builds one, `a ary.`; a
-    /// name left bare is a symbol. Its one rule of its own: a word of one
-    /// letter is a type variable. What the code leaves is the signature, by
-    /// what each value is: a type, inputs of that type; a value, a literal,
-    /// a symbol or `true.`, inputs equal to it; a quotation, a guard, which
-    /// tests the inputs before it. `--` divides the inputs from the outputs,
-    /// which are types.
+    /// 2026-10-09). In it names stay names, and a dot applies one: a
+    /// constructor applied builds a type, `a ary.`. A name left is read by
+    /// its spelling (Thomas, 2026-10-12): one letter is a type variable, a
+    /// name ending in `?` a guard, a capitalized one a symbol, and any other
+    /// a type's. What the code leaves is the signature, by what each value
+    /// is: a type, inputs of that type; a value, a literal, a symbol or
+    /// `true.`, inputs equal to it; a quotation, a guard, which tests the
+    /// inputs before it. `--` divides the inputs from the outputs, which are
+    /// types.
     pub fn bracket(&mut self, toks: &[Token]) -> Result<Sig> {
         let dashes = toks.iter().position(|t| t.tok == Tok::Dashes);
         let (inputs, outputs) = match dashes {
@@ -2530,10 +2615,9 @@ impl Stage {
         for (j, pos) in self.comprehend(inputs)? {
             match j.val {
                 Val::Type(t) => ins.push(t),
-                // A name left is a type's, or, marked `!`, a symbol: `< string
-                // camel! >` (Thomas, 2026-10-09). Outside brackets a name is a
-                // symbol already; here the mark tells it from a type.
-                Val::Name(n, at) => match n.strip_suffix('!') {
+                // A name left is a type's, or, capitalized, a symbol: `< string
+                // Camel >` (Thomas, 2026-10-12), as it is outside a bracket.
+                Val::Name(n, at) => match symbol_spelled(&n) {
                     Some(s) => {
                         equals.push(Guard {
                             test: Test::Equals(Jdg {
@@ -2569,7 +2653,7 @@ impl Stage {
                 for (j, pos) in self.comprehend(o)? {
                     match j.val {
                         Val::Type(t) => outs.push(t),
-                        Val::Name(n, at) if !n.ends_with('!') => {
+                        Val::Name(n, at) if symbol_spelled(&n).is_none() => {
                             outs.push(self.named_type(&n, at)?)
                         }
                         _ if j.ty == NIL => outs.push(NIL),
@@ -2603,7 +2687,7 @@ impl Stage {
             Error::new(
                 Kind::NoWord,
                 Some(at),
-                format!("no type `{n}`: a symbol in a bracket is marked, `{n}!`"),
+                format!("no type `{n}`: a symbol is capitalized, `{}`", capital(n)),
             )
         })
     }
@@ -2745,7 +2829,7 @@ impl Stage {
         Ok(())
     }
 
-    /// `def` on a type: the name is a name for it, as `i64 f64 or. num def.`
+    /// `def` on a type: the name is a name for it, as `num: < i64 f64 or. > def`
     /// names a class, in a bracket or applied to a value.
     fn name_type(&mut self, name: &Rc<str>, t: Type) -> Result<()> {
         let w = self.word(name);
@@ -3020,7 +3104,7 @@ impl Stage {
                 self.stack.pop();
                 self.push(STRING, Val::Str(text.into()));
             }
-            // An empty array or map of a type: `string i64 map. empty.`.
+            // An empty array or map of a type: `< string i64 map. > empty`.
             Prim::Empty => {
                 let Val::Type(t) = self.stack[base].val else {
                     unreachable!("a type value")
@@ -3093,8 +3177,10 @@ impl Stage {
                 self.push(QUOTE, Val::Quote(words.into()));
             }
             Prim::Def => {
-                let name = self.stack.pop().expect("matched");
+                // The name first, then what it names (Thomas, 2026-10-12):
+                // `fib: [ … ] def`, `num: < i64 f64 or. > def`.
                 let quote = self.stack.pop().expect("matched");
+                let name = self.stack.pop().expect("matched");
                 if let Val::Name(n, _) = &name.val
                     && n.contains('.')
                 {
@@ -3115,7 +3201,7 @@ impl Stage {
                 let (Val::Name(name, _), Val::Quote(q)) = (name.val, quote.val) else {
                     return Err(self.err(
                         Kind::Mismatch,
-                        "`def` takes a quotation or a type, and a name",
+                        "`def` takes a name, then a quotation or a type",
                     ));
                 };
                 let at = q.first().map_or(self.pos, |t| t.pos);
@@ -3476,7 +3562,7 @@ impl Stage {
         self.annotate(i, t)
     }
 
-    /// `parse`: the value of a type that a string writes, `"42" i64 parse.`,
+    /// `parse`: the value of a type that a string writes, `"42" < i64 > parse`,
     /// or nil: `i64 nil or`, the value tagged with its type at run time. A
     /// known string is parsed now, and is the value or nil itself.
     fn parse(&mut self, name: &str, base: usize) -> Result<()> {
@@ -3550,8 +3636,8 @@ impl Stage {
 
     /// `within`: an array and a quotation, run with the array's last
     /// elements as its stack, as many as it takes, and what it leaves put in
-    /// their place: Joy's `infra`, on the end of an array. `( 1 2 3 ) [ ~. ]
-    /// within.` is `( 1 3 2 )`, `[ 4 ] within.` appends, `[ drop. ] within.`
+    /// their place: Joy's `infra`, on the end of an array. `( 1 2 3 ) [ ~ ]
+    /// within` is `( 1 3 2 )`, `[ 4 ] within` appends, `[ drop ] within`
     /// drops the last. Only those elements are loaded and the rest is kept by
     /// a slice, so it costs what the quotation does, not the array's length.
     fn within(&mut self, name: &str) -> Result<()> {
@@ -4134,7 +4220,7 @@ impl Stage {
     }
 
     /// Takes the code a consumer applies: a quotation, or a word, which is
-    /// applied as `[ word. ]` is.
+    /// applied as `[ word ]` is.
     fn words_of(&mut self, name: &str) -> Result<Rc<[Token]>> {
         let j = self.stack.pop().expect("matched");
         match j.val {
@@ -4407,8 +4493,8 @@ impl Stage {
         Ok(())
     }
 
-    /// `_.` in a literal: a copy of one of the values below it, its inputs,
-    /// the first `_.` written taking the deepest. A value at run time is
+    /// `_` in a literal: a copy of one of the values below it, its inputs,
+    /// the first `_` written taking the deepest. A value at run time is
     /// found from the literal's mark, so the copy is exact even above a run.
     fn pull(&mut self, pos: Pos) -> Result<()> {
         let Some((li, k)) = self
@@ -4451,7 +4537,7 @@ impl Stage {
 
     /// A string with holes: each hole's code runs, its value is written in
     /// by `>string`, and the pieces are joined by `concat`, so on known values
-    /// the string is a constant. `_.` in a hole pulls an input from below the
+    /// the string is a constant. `_` in a hole pulls an input from below the
     /// string, as in an array literal, and the string takes its inputs.
     fn template(&mut self, pieces: &[Piece], pos: Pos) -> Result<()> {
         let pulls = template_pulls(pieces);

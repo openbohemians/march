@@ -250,8 +250,8 @@ impl Types {
             self.classes.entry(t).or_insert_with(|| name.to_string());
         }
     }
-    /// The type as a bracket's code makes it, so that it reads back: names
-    /// bare, constructors applied, `3 i64 vec.`, `string i64 ary. map.`.
+    /// The type as a bracket's code makes it, so that it reads back in one:
+    /// names bare, constructors applied, `3 i64 vec.`, `string i64 ary. map.`.
     pub fn source(&self, t: Type) -> String {
         if let Some(n) = self.classes.get(&t) {
             return n.clone();

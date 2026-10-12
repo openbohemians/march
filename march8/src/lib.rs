@@ -1,5 +1,5 @@
 //! March8: March's compiler in Rust (docs/MACHINE.md). The symbolic stack
-//! machine, `stage`, runs the explicit form on judgments and leaves code
+//! machine, `stage`, runs March on judgments and leaves code
 //! for the machine, `machine`, which runs it. System March, in march7, is
 //! frozen; March will compile itself again once it is mature.
 pub mod code;
@@ -22,7 +22,7 @@ use stage::Stage;
 use symbols::Symbols;
 use types::Type;
 
-/// The core vocabulary, in the explicit form.
+/// The core vocabulary, in March.
 pub const CORE: &str = include_str!("../core/core.march");
 
 /// A machine, a stage and the types of the values on the machine's stack.

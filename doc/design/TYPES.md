@@ -55,46 +55,63 @@ every application is marked:
 
 - **`.` applies.** Everything is a value or a symbol until `.` applies it.
   `.` is the only special word, and types and operations share one
-  namespace. (`.` is free: the surface language prints with `print`.)
-- **A dot at the end of a word applies it** (Thomas, 2026-10-08): `sq.` is
-  `sq .`, so `1 i64. 1 i64. +.` reads more easily. By that convention no
-  name ends in a dot, and the reader enforces it. Each dot applies once:
-  `x 100 i64 vec..` builds a type and converts `x` to it. A dot inside a
+  namespace. (`.` is free: the language prints with `print`.)
+- **A name applies; a symbol is spelled as one** (Thomas, 2026-10-12). The
+  form above is what code means, every application marked; it is written
+  with a name applying, as in FORTH: `1 i64 1 i64 +`. The same programs
+  written with a dot after each name applied and without showed code
+  applying words far more often than it passes symbols: a CSV summary had
+  57 dots and needs 8 marks without them. So the mark goes on the rarer
+  thing. A capitalized name is a symbol, `Snake`, `Closed`, as Haskell's
+  constructors, Rust's variants and Elixir's atoms are capitalized, so
+  programs of symbols, a state machine or facts and rules, read without
+  marks: `Socrates Is Human fact`. One capital letter is a logic variable,
+  as in Prolog's `X`. `name:` labels what follows, a name being defined or
+  a key, and `name'` is the symbol where a word is passed rather than
+  applied, `+' reduce`, or a script has no capitals. A dot at the end of a
+  word applies once more: `[ 2 + ].`, `x < 100 i64 vec. > .`. (From
+  2026-10-08 a dot after a word applied it, `sq.`, every name being a
+  symbol until then; Thomas's rule that a word of punctuation alone
+  applies was weighed on the way, and holds here anyway.) A dot inside a
   word is part of it: a number's point, `2.5`, and in a name a path in a
-  namespace, `io.file.read.` (3.12). For a day dots between names chained
+  namespace, `io.file.read` (3.12). For a day dots between names chained
   them, `"data.csv" file-read.lines.` for `file-read. lines.`, as uniform
   call syntax reads (Nim's, D's); but then a path had no spelling, so the
-  chain went (Thomas, 2026-10-10), and words are applied one by one:
-  `"data.csv" file-read. lines.`.
-- **A type's name is a symbol, as any name is** (Thomas, 2026-10-09).
-  `i64` is the name; applied, it converts the value below: `2 i64.` is 2
-  as an i64, by `i64`'s clause for literals. A constructor takes names and
-  builds a type, `i64 ary.`, `100 i64 vec.`, which applied converts too:
-  `x 100 i64 vec..`. (For a day `i64.` was the type itself, and `to`
-  converted: a name became a word returning a type, which it never is.)
+  chain went (Thomas, 2026-10-10).
+- **A type's name applied converts** (Thomas, 2026-10-09): `2 i64` is 2 as
+  an i64, by `i64`'s clause for literals. A type as a value is written in a
+  bracket, `"42" < i64 > parse`; a constructor builds one there, `< i64
+  ary. >`, `< 100 i64 vec. >`, and applied it converts too: `x < 100 i64
+  vec. > .`. (For a day `i64.` was the type itself, and `to` converted: a
+  name became a word returning a type, which it never is.)
 - **A bracket is code, a comprehension of types** (Thomas, 2026-10-09).
-  `< … >` holds code like any other, whose words mean what they mean
-  anywhere, and what it leaves is the signature: a type built, inputs of
-  that type; a value, inputs equal to it, a literal (`0`), a converted one
-  (`0 i64.`) or `true.`; a quotation, a guard on the inputs before it; and
-  a name, read by its spelling only, so that no definition elsewhere changes
-  what a bracket means. A word of one letter is a type variable; one ending
-  in `?` a guard (`< i64 positive? >`); one ending in `!` a symbol
-  (`< string camel! >`, a string and the symbol `camel`); any other a
-  type's name, an error if it names none. Outside a bracket a name is a
-  symbol already, `"Hello" camel case.`, so only here is it marked: a
-  slight asymmetry, taken for the quiet of types, which are written most.
-  Symbols need no declaring and are one namespace: a symbol has no
-  definition, only clauses that match it, which belong to families. A
-  bracket's code runs while compiling, so it leaves only known values.
-  `--` divides inputs from outputs, which leaves no comment inside a
-  bracket (open).
+  `< … >` holds code like any other, but in it names stay names, and a dot
+  applies one, a constructor: types are what is written most there. What
+  it leaves is the signature: a type built, inputs of that type; a value,
+  inputs equal to it, a literal (`0`), a converted one (`0 i64.`) or
+  `true.`; a quotation, a guard on the inputs before it; and a name, read
+  by its spelling only, so that no definition elsewhere changes what a
+  bracket means. A word of one letter is a type variable; one ending in `?`
+  a guard (`< i64 positive? >`); a capitalized one a symbol (`< string
+  Camel >`, a string and the symbol `Camel`), as outside a bracket
+  (2026-10-12; from 2026-10-09 `camel!` marked it, a mark needed only
+  there); any other a type's name, an error if it names none. Symbols need
+  no declaring and are one namespace: a symbol has no definition, only
+  clauses that match it, which belong to families. A bracket's code runs
+  while compiling, so it leaves only known values. A bracket first in a
+  definition's quotation is the clause's context; anywhere else it is a
+  value (2026-10-12), so `[ < f64 > parse ] map` passes `parse` its type: a
+  type, or, of more than one type, a signature, which applied gives the
+  values below their types, `x y < i64 f64 > .`. `--` divides inputs from
+  outputs, which leaves no comment inside a bracket (open).
 - **Compile stages evaluate the type part and erase it.** When the type
   stage meets `+ .` with two i64s, it picks integer addition and leaves a
   plain call behind. After lowering, `.` is an ordinary call instruction
   and the types are gone, so cells stay bare and fast.
-- **Programmers will not normally write this form,** as most do not write
-  System March. How many stages there are is still to be discovered.
+- **This is the language as written** (2026-10-12). With names applying
+  and definitions naming first (2.15), the notation SURFACE.md was to give
+  is this one, and nothing lowers to it. How many stages there are is
+  still to be discovered.
 
 This follows The Little Typer: types are values (of type Type), and
 annotation is an operator, Pie's `the`. Zig's `comptime`, where types are
@@ -209,7 +226,7 @@ an error.
   clause defined last" was considered and left open.)
 - **Every clause has the same stack effect,** as SURFACE.md decided, but
   clauses chosen by type may differ in their result types: `+` gives an
-  integer for integers and a float for floats.
+  integer for integers and a float for floats. To be relaxed (3.13).
 
 ### 2.9 Choices at compile time and at run time
 
@@ -263,7 +280,7 @@ branches, and lowering turns dispatch on values into branches.
   check at run time, or at compile time when the value is known. It is not
   a runtime value in a type. Written (2026-10-08): a value left in a bracket,
   `< 0 >`, matches an input of any type the literal becomes, compared in
-  that type; `< 0 i64. >` gives it a type, as `0 i64.` does in code. A
+  that type; `< 0 i64. >` gives it a type, as `0 i64` does in code. A
   section's context ANDs with it slot by slot, so under `## < i64 >`, `< 0 >`
   is an i64 equal to 0. `fib` needs no helper words:
 
@@ -287,9 +304,8 @@ needs a bracket, as SURFACE.md assigns `< >` to signatures and patterns:
 - **A bracket of n types annotates the top n values:** `x < 100 i64 vec. >`
   annotates `x`, and `x y < i64 f64 >` both. A signature at the start of a
   word, `< f64 money >`, is then the annotation of its inputs, not a
-  construct of its own.
-- In the explicit form a bracket builds its type and applies it:
-  `x < 100 i64 vec. >` lowers to `x 100 i64 vec .`.
+  construct of its own. (Since 2026-10-12 a bracket is a value except first
+  in a definition's quotation, and applied annotates: `x y < i64 f64 > .` (2.2).)
 
 Rejected: marking each type name, as in `100 <i64> <vec>`. It leaves unclear
 where a type expression starts (is the 100 part of it?), and makes a second
@@ -316,9 +332,13 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   not a Haskell type class, which is an interface; the definitions of a
   domain are nearer a Haskell instance.
 
-- **A definition is data in the lowered form:** a quoted body, a name, and
-  `def` applied: `[ 1 + . ] inc def .`. `name : … ;` is the surface's
-  spelling of it.
+- **A definition is data:** a name, what it names, and `def` applied
+  (Thomas, 2026-10-12): `inc: [ 1 + ] def`, the name first as a label, as
+  SURFACE.md's `name : … ;` put it, and `]` and `def` closing it as `;` did.
+  The bracket says what is defined: `[ ]` code, `< >` a type, `num: < i64
+  f64 or. > def`. Code computed where it stands, with no bracket to mark
+  where it starts, is refused: a word that takes a symbol could take the
+  name below it. Until then the name came last, `[ 1 + . ] inc def .`.
 - **A heading sets a mode** for the definitions after it, as a stack
   machine's state: `## < i64 -- i64 >` makes them clauses for those types,
   until the next heading. A heading always starts a section, even an empty
@@ -362,11 +382,11 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
   when it does not, as APL has it and Knuth writes it, and as FORTH's -1
   did not. So a bool is an i64 too, a subset: any word that takes an i64
   takes it as it is, matched a little less well than an i64, so a clause
-  for `bool` is more specific. `mask + reduce.` counts and `mask xs ⋅.`
+  for `bool` is more specific. `mask +' reduce` counts and `mask xs ⋅`
   zeroes. That is no promotion: the value does not change, it is a member
   of the larger set. A bool and an i64 join to an i64, and a variable bound
   to one widens to the other.
-- **A type of its own,** as Haskell's `Bool` is: `true.` and `false.` are
+- **A type of its own,** as Haskell's `Bool` is: `true` and `false` are
   its values, it shows as `true` and `false`, comparisons and predicates
   leave it, and guards take it, or a literal 0 or 1. A count is not a
   truth, so FORTH's flag that was a number is an error.
@@ -476,7 +496,7 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
    - **Hedges,** Zadeh's modifiers: "very" is x², "somewhat" √x.
    - **`decide`** (Thomas's word) makes a bool from a fuzzy truth, for a
      guard: an α-cut, truth at least α, which underneath is the comparison
-     `x α ge?.`.
+     `x α ge?`.
    - **α as an ambient setting,** not written at each decision, so that
      changing it changes every decision under it (Thomas). Lexical: a
      section's heading sets α for its definitions, decided at compile time,
@@ -518,21 +538,57 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
 12. **Namespaces** (Thomas, 2026-10-10). Words gather in namespaces,
     `io.file.read`, `io.stdin.read`, `io.file.embed`, rather than a flat
     dictionary's `file-read`. A dot inside a name divides the path, and the
-    dot at the end applies the word it names: `"data.csv" io.file.read.`.
+    name applies the word it names: `"data.csv" io.file.read`.
     The dot chain, `a.b.` for `a. b.`, was tried and left for this, the two
     being unable to share the dot (Thomas, 2026-10-10); the reader keeps a
-    dotted name whole, and `def` refuses one until namespaces come. Open:
-    `.` divides, or `:`, which the surface language already uses to define
-    (`name : … ;`); the lean is `.`, as headings already nest namespaces
-    into dotted names, `math.trig` (march7/docs/SURFACE.md). Importing
+    dotted name whole, and `def` refuses one until namespaces come. `.`
+    divides, as headings already nest namespaces into dotted names,
+    `math.trig` (march7/docs/SURFACE.md); `:`, the other candidate, ends a
+    label (2.2). Importing
     says how much of the prefix a module needs, `import : ( io.file.* )` or the like, by words of
     a namespace's own that declare what it imports and what it exports, as
     march2 had (`<` imports, `>` exports, a namespace pushed on the stack:
     doc/lineage/march2.md). Collisions between imports are the programmer's
     to settle, by a longer prefix, as in Elixir. Symbols stay one global
     namespace (2.2). Then `file-read` and its kin move in (they are plain
-    words for now; a `read` chosen by a symbol, `"data.csv" file read.`,
+    words for now; a `read` chosen by a symbol, `"data.csv" File read`,
     was tried and left, its clauses differing in arity).
+13. **Clauses of different arity** (Thomas, 2026-10-12). A family's clauses
+    need not take as many values as each other; `"data.csv" File read`
+    beside `Stdin read` wants it. When clauses of different lengths match,
+    **the shortest wins**, the most specific among those: a word reaches as
+    little of the stack as it can, and a longer clause never changes what a
+    call to a shorter one did (adding a shorter clause can, which deserves
+    an informative warning). The stage already looks as deep as the longest
+    clause. What constrains it is a choice made at run time, by guards or a
+    union's tag: alternatives must agree in net effect, and the deeper
+    slots merge as a union.
+14. **Types with holes** (2026-10-12). A bracket with type variables, named,
+    is a type with holes: `opt: < a nil or. > def`, `grid: < n m a vec.
+    vec. > def`. Unapplied in a signature the holes match anything, `< opt
+    >` being the class `a nil or`; applied to types they are filled, in the
+    order they first appear, the order the expression would take them from
+    a stack: `i64 opt`, `3 4 f64 grid`. Each use has fresh holes. That is
+    Haskell's `type Opt a = Maybe a`, a substitution; a type computed, by
+    arithmetic on a size or by cases, is code, a quotation that leaves a
+    type, as Zig's comptime functions and Haskell's type families are. Not
+    built: today `def` names such a bracket as a class.
+15. **Facts and rules** (Thomas, 2026-10-12). Symbols and families are most
+    of a logic language: `Socrates Is Human fact`, `X Is Mortal if X Is
+    Human rule`, `Socrates Is Mortal ask`, triples, RDF's shape, each word
+    of one arity, one capital letter a variable. Two ways to run it: rules
+    as clauses of the verb's family, chosen while compiling, so a question
+    on known symbols folds to its answer (and with truth from 0 to 1, `and`
+    and `or` being min and max, the same engine is fuzzy, 3.9); or facts as
+    data, an array of triples, rules applied until nothing new comes,
+    Datalog, which gives every answer, `X Is Mortal all`. The first needs a
+    word that makes a clause from symbols, and recursion on symbols
+    (16); the second known arrays
+    in the stage and symbols at run time.
+16. **Recursion on symbols.** A family that applies itself is compiled as a
+    word of its own, an instance, whose inputs are values at run time; a
+    symbol has none, so a family cannot recurse on symbols. With its inputs
+    known, it should unfold while compiling, under the depth limit.
 
 ## 4. A way to build it (proposal)
 

@@ -43,7 +43,7 @@ fn mixed_literals_are_tuples() {
     );
     assert_eq!(typed(&["( 1 2.5 )"]), "<1> ( 1.0 2.5 ) < 2 f64 vec. >");
     assert_eq!(
-        typed(&["{ \"a\" 1 } \"a\" get. ( _. \"x\" )"]),
+        typed(&["{ \"a\" 1 } \"a\" get ( _ \"x\" )"]),
         "<1> ( 1 \"x\" ) < ( i64 nil or. string ) >"
     );
 }
@@ -52,21 +52,21 @@ fn mixed_literals_are_tuples() {
 fn positions_keep_their_types() {
     // `at` with a known index, from either end, now or at run time.
     assert_eq!(
-        typed(&["( 1 \"a\" 2.5 ) dup. 2 at. swap. -1 at."]),
+        typed(&["( 1 \"a\" 2.5 ) dup 2 at swap -1 at"]),
         "<2> \"a\" < string > 2.5 < f64 >"
     );
-    assert_eq!(typed(&["( 1 \"a\" )", "1 at."]), "<1> 1 < i64 >");
-    assert_eq!(session(&["( 1 \"a\" ) 3 at."]).err(), Some(Kind::Mismatch));
+    assert_eq!(typed(&["( 1 \"a\" )", "1 at"]), "<1> 1 < i64 >");
+    assert_eq!(session(&["( 1 \"a\" ) 3 at"]).err(), Some(Kind::Mismatch));
     assert_eq!(
-        show(&["( 1 \"a\" ) dup. length. swap. dup. first. swap. last."]),
+        show(&["( 1 \"a\" ) dup length swap dup first swap last"]),
         "<3> 2 1 \"a\""
     );
     assert_eq!(
-        typed(&["( 1 \"a\" ) spread."]),
+        typed(&["( 1 \"a\" ) spread"]),
         "<2> 1 < i64 > \"a\" < string >"
     );
     assert_eq!(
-        typed(&["( 1 \"a\" ) reverse."]),
+        typed(&["( 1 \"a\" ) reverse"]),
         "<1> ( \"a\" 1 ) < ( string i64 ) >"
     );
 }
@@ -75,26 +75,23 @@ fn positions_keep_their_types() {
 fn map_and_each_are_unrolled() {
     // Each position compiled on its own type.
     assert_eq!(
-        typed(&["( 1 \"a\" ) [ show. ] map."]),
+        typed(&["( 1 \"a\" ) [ show ] map"]),
         "<1> ( \"1\" \"\\\"a\\\"\" ) < 2 string vec. >"
     );
     assert_eq!(
-        typed(&["( 1 \"a\" ) [ ] map."]),
+        typed(&["( 1 \"a\" ) [ ] map"]),
         "<1> ( 1 \"a\" ) < ( i64 string ) >"
     );
-    assert_eq!(
-        show(&["0 ( 1 \"ab\" ) [ show. length. +. ] each."]),
-        "<1> 5"
-    );
+    assert_eq!(show(&["0 ( 1 \"ab\" ) [ show length + ] each"]), "<1> 5");
     // What `each` threads may change type from one position to the next.
-    assert_eq!(show(&["( 1 \"ab\" ) [ ] each."]), "<2> 1 \"ab\"");
-    assert_eq!(show(&["( 1 \"ab\" ) [ ] each-right."]), "<2> \"ab\" 1");
+    assert_eq!(show(&["( 1 \"ab\" ) [ ] each"]), "<2> 1 \"ab\"");
+    assert_eq!(show(&["( 1 \"ab\" ) [ ] each-right"]), "<2> \"ab\" 1");
 }
 
 #[test]
 fn shown_by_position_without_a_warning() {
     let mut s = Session::new();
-    s.eval("( 1 \"a\" ) show. ( 2 \"b\" ) >string.").unwrap();
+    s.eval("( 1 \"a\" ) show ( 2 \"b\" ) >string").unwrap();
     assert_eq!(s.show(), "<2> \"( 1 \\\"a\\\" )\" \"( 2 \\\"b\\\" )\"");
     assert!(s.take_warnings().is_empty());
 }
@@ -104,7 +101,7 @@ fn an_array_is_wanted_so_positions_are_forgotten() {
     // `concat` asks for arrays: each tuple becomes an array of the union of
     // its types, its elements tagged, which is noted.
     let mut s = Session::new();
-    s.eval("( 1 \"a\" ) ( 2 \"b\" ) concat.").unwrap();
+    s.eval("( 1 \"a\" ) ( 2 \"b\" ) concat").unwrap();
     assert_eq!(
         s.show_typed(),
         "<1> ( 1 \"a\" 2 \"b\" ) < i64 string or. ary. >"
@@ -118,33 +115,33 @@ fn an_array_is_wanted_so_positions_are_forgotten() {
     );
     // An index known only at run time: an element of the union.
     assert_eq!(
-        typed(&["( 1 \"a\" ) 2", "at."]),
+        typed(&["( 1 \"a\" ) 2", "at"]),
         "<1> \"a\" < i64 string or. >"
     );
     assert_eq!(
-        show(&["( 1 \"a\" ) < i64 string or. ary. > [ show. ] map."]),
+        show(&["( 1 \"a\" ) < i64 string or. ary. > . [ show ] map"]),
         "<1> ( \"1\" \"\\\"a\\\"\" )"
     );
     // Only where the union fits: `sort` has no clause for it.
-    assert_eq!(session(&["( 1 \"a\" ) sort."]).err(), Some(Kind::NoWord));
+    assert_eq!(session(&["( 1 \"a\" ) sort"]).err(), Some(Kind::NoWord));
 }
 
 #[test]
 fn tuple_types_in_brackets() {
-    let p = "[ < ( i64 string ) > drop. 1 ] p def. [ < ( a b ) > drop. 2 ] p def.";
+    let p = "p: [ < ( i64 string ) > drop 1 ] def p: [ < ( a b ) > drop 2 ] def";
     // A vec is a tuple whose types are one, so `( a b )` takes `( 1 2 )`.
     assert_eq!(
-        show(&[p, "( 1 \"a\" ) p. ( 1 2 ) p. ( \"x\" 2.0 ) p."]),
+        show(&[p, "( 1 \"a\" ) p ( 1 2 ) p ( \"x\" 2.0 ) p"]),
         "<3> 1 2 2"
     );
     assert_eq!(
-        show(&["[ < -- ( i64 string ) > ( 1 \"a\" ) ] mk def. mk. 2 at."]),
+        show(&["mk: [ < -- ( i64 string ) > ( 1 \"a\" ) ] def mk 2 at"]),
         "<1> \"a\""
     );
-    assert_eq!(show(&["( 1 \"a\" ) < ( i64 string ) > length."]), "<1> 2");
+    assert_eq!(show(&["( 1 \"a\" ) < ( i64 string ) > . length"]), "<1> 2");
     assert_eq!(
-        session(&["( 1 2 ) < ( i64 string ) >"]).err(),
+        session(&["( 1 2 ) < ( i64 string ) > ."]).err(),
         Some(Kind::Mismatch)
     );
-    assert_eq!(session(&["1 < ( ) >"]).err(), Some(Kind::Mismatch));
+    assert_eq!(session(&["1 < ( ) > ."]).err(), Some(Kind::Mismatch));
 }

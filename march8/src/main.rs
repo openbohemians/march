@@ -121,7 +121,7 @@ fn repl(s: &mut Session, mut types: bool) -> Result<(), Box<dyn std::error::Erro
     let mut lines = stdin.lock().lines();
     let mut pending = String::new();
     if tty {
-        println!("march8: the explicit form. :help for commands, Ctrl-D to leave.");
+        println!("march8. :help for commands, Ctrl-D to leave.");
     }
     loop {
         if tty {

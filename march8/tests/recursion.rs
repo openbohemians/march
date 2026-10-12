@@ -22,47 +22,47 @@ fn code(pieces: &[&str], src: &str) -> Vec<Op> {
     s.compile(src).unwrap().0
 }
 
-const FACT: &str = "[ 0 eq?. ] zero? def.
-    [ < i64 zero? > drop. 1 ] fact def.
-    [ < i64 > dup. 1 -+. fact. *. ] fact def.";
+const FACT: &str = "zero?: [ 0 eq? ] def
+    fact: [ < i64 zero? > drop 1 ] def
+    fact: [ < i64 > dup 1 -+ fact * ] def";
 
 #[test]
 fn families_recurse_through_their_instances() {
     assert_eq!(
-        cells(&[FACT, "5 fact. 0 fact. 10 fact."]).unwrap(),
+        cells(&[FACT, "5 fact 0 fact 10 fact"]).unwrap(),
         [120, 1, 3_628_800]
     );
     // From a value known only at run time.
-    assert_eq!(cells(&[FACT, "6", "fact."]).unwrap(), [720]);
+    assert_eq!(cells(&[FACT, "6", "fact"]).unwrap(), [720]);
     // Inside another word.
-    assert_eq!(cells(&[FACT, "[ 5 fact. ] f def. f."]).unwrap(), [120]);
+    assert_eq!(cells(&[FACT, "f: [ 5 fact ] def f"]).unwrap(), [120]);
     // `fact` is called as its i64 instance, last, so as a tail call; at 0
     // its guard is decided now, and it folds.
-    let c = code(&[FACT], "5 fact.");
+    let c = code(&[FACT], "5 fact");
     assert!(
         matches!(c[..], [Op::Lit(5), Op::Tail(_), Op::Return]),
         "{c:?}"
     );
-    assert_eq!(code(&[FACT], "0 fact."), code(&[], "1"));
-    let fib = "[ 0 eq?. ] zero? def. [ 1 eq?. ] one? def.
-        [ < i64 zero? > ] fib def.
-        [ < i64 one? > ] fib def.
-        [ < i64 > dup. 1 -+. fib. swap. 2 -+. fib. +. ] fib def.";
-    assert_eq!(cells(&[fib, "15 fib."]).unwrap(), [610]);
+    assert_eq!(code(&[FACT], "0 fact"), code(&[], "1"));
+    let fib = "zero?: [ 0 eq? ] def one?: [ 1 eq? ] def
+        fib: [ < i64 zero? > ] def
+        fib: [ < i64 one? > ] def
+        fib: [ < i64 > dup 1 -+ fib swap 2 -+ fib + ] def";
+    assert_eq!(cells(&[fib, "15 fib"]).unwrap(), [610]);
     // With value patterns, no helper words: 0 and 1 are their own results.
-    let fib = "[ < 0 > ] fib def. [ < 1 > ] fib def.
-        [ < n > dup. 1 -+. fib. swap. 2 -+. fib. +. ] fib def.";
-    assert_eq!(cells(&[fib, "15 fib.", "20", "fib."]).unwrap(), [610, 6765]);
-    let s = session(&[fib, "10.0 fib."]).unwrap();
+    let fib = "fib: [ < 0 > ] def fib: [ < 1 > ] def
+        fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def";
+    assert_eq!(cells(&[fib, "15 fib", "20", "fib"]).unwrap(), [610, 6765]);
+    let s = session(&[fib, "10.0 fib"]).unwrap();
     assert_eq!(s.show(), "<1> 55.0");
 }
 
 #[test]
 fn instances_are_compiled_once_and_shared() {
     // Two words applying `fact` to an i64 call one instance.
-    let words = "[ fact. ] a def. [ 1 +. fact. ] b def.";
-    let a = code(&[FACT, words, "7"], "a.");
-    let b = code(&[FACT, words, "7"], "1 -+. b.");
+    let words = "a: [ fact ] def b: [ 1 + fact ] def";
+    let a = code(&[FACT, words, "7"], "a");
+    let b = code(&[FACT, words, "7"], "1 -+ b");
     assert_eq!(a.last(), Some(&Op::Return));
     assert_eq!(a[a.len() - 2], b[b.len() - 2]);
     assert!(matches!(a[a.len() - 2], Op::Tail(_)));
@@ -71,7 +71,7 @@ fn instances_are_compiled_once_and_shared() {
 #[test]
 fn the_ghost_takes_the_type_of_what_it_meets() {
     // The base's literal 1 becomes the f64 the step multiplies.
-    let s = session(&[FACT.replace("i64", "f64").as_str(), "5.0 fact."]).unwrap();
+    let s = session(&[FACT.replace("i64", "f64").as_str(), "5.0 fact"]).unwrap();
     assert_eq!(s.show(), "<1> 120.0");
 }
 
@@ -79,21 +79,21 @@ fn the_ghost_takes_the_type_of_what_it_meets() {
 fn a_recursive_clause_may_come_before_the_base() {
     // The step is guarded and tested first, but the base, with no guard,
     // finishes first while compiling, and types the recursion.
-    let down = "[ 0 gt?. ] positive? def.
-        [ < i64 > ] down def.
-        [ < i64 positive? > 1 -+. down. ] down def.";
-    assert_eq!(cells(&[down, "5 down.", "3", "down."]).unwrap(), [0, 0]);
+    let down = "positive?: [ 0 gt? ] def
+        down: [ < i64 > ] def
+        down: [ < i64 positive? > 1 -+ down ] def";
+    assert_eq!(cells(&[down, "5 down", "3", "down"]).unwrap(), [0, 0]);
 }
 
 #[test]
 fn tail_calls_run_in_constant_space() {
     // A million levels would exhaust the machine's 16384 return frames.
-    let sumto = "[ 0 eq?. ] zero? def.
-        [ < i64 i64 zero? > drop. ] sumto def.
-        [ < i64 i64 > swap. over. +. swap. 1 -+. sumto. ] sumto def.";
+    let sumto = "zero?: [ 0 eq? ] def
+        sumto: [ < i64 i64 zero? > drop ] def
+        sumto: [ < i64 i64 > swap over + swap 1 -+ sumto ] def";
     let mut s = session(&[sumto]).unwrap();
     s.fuel = 50_000_000;
-    s.eval("0 1000000 sumto.").unwrap();
+    s.eval("0 1000000 sumto").unwrap();
     assert_eq!(s.machine.stack, [500_000_500_000]);
 }
 
@@ -101,13 +101,13 @@ fn tail_calls_run_in_constant_space() {
 fn recursion_needs_a_case_that_finishes() {
     // No clause finishes without applying itself, so its results have no
     // types, an error where it is defined.
-    assert_eq!(cells(&["[ < i64 > loop. ] loop def."]), Err(Kind::Mismatch));
+    assert_eq!(cells(&["loop: [ < i64 > loop ] def"]), Err(Kind::Mismatch));
     // Unless its signature promises them: then it is a loop, which runs
     // until the step budget is spent, in constant space.
-    let mut s = session(&["[ < i64 -- i64 > 1 +. loop. ] loop def."]).unwrap();
+    let mut s = session(&["loop: [ < i64 -- i64 > 1 + loop ] def"]).unwrap();
     s.fuel = 100_000;
     assert_eq!(
-        s.eval("1 loop.").unwrap_err().kind,
+        s.eval("1 loop").unwrap_err().kind,
         Kind::Run(machine::Error::Fuel)
     );
 }

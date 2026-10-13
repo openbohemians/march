@@ -55,13 +55,12 @@ fn a_type_is_built_by_words() {
         typed(&["\"42\"", "i64! string i64 map empty"]),
         "<2> 42 < i64 nil or > { } < string i64 map >"
     );
-    // `!` converts by a type, built or named; it is `!!` applied, the word
-    // that structures a value by a type.
+    // `!` converts by a type, built or named; it is `convert` applied.
     assert_eq!(
         typed(&["2 i64! 2 f64! ( 1 2 ) i64 ary !"]),
         "<3> 2 < i64 > 2.0 < f64 > ( 1 2 ) < i64 ary >"
     );
-    assert_eq!(show(&["2 f64 !!"]), "<1> 2.0");
+    assert_eq!(show(&["2 f64 convert"]), "<1> 2.0");
     // A type is data, and is not called.
     let e = error("2 i64.");
     assert!(

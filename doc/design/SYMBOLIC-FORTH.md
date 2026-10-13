@@ -23,9 +23,11 @@ Everything in Symbolic Forth is a symbol, an ordered set of symbols, or
   as; a quotation, evaluated.
 
 And one convenience, so close to the fundamentals that the distinction is
-not worth fretting over: **`!`**, which is `!! .`, the primitive word `!!`
+not worth fretting over: **`!`**, which is `convert .`, a primitive word
 applied. It structures the value below by the type on top, a number
-symbol into a concrete i64, say: `2 i64 !! .`, written `2 i64 !`.
+symbol into a concrete i64, say: `2 i64 convert .`, written `2 i64 !`. No
+meta-operator is needed for it; `!` is kept because it is convenient
+(Thomas, 2026-10-13: the word's name is anyone's choice).
 
 ```
 1 i64 ! 1 i64 ! + .
@@ -55,8 +57,9 @@ So types need no spelling of their own, and types and words are one
 namespace.
 
 A type is data, and is not called. Structuring a value by it is applying
-another word, `!!`: `2 i64 . !! .`, or, since `!!` takes a type's symbol
-too, `2 i64 !! .`, which `!` shortens to `2 i64 !`. A type converts a literal by the clauses under its
+another word, `convert`: `2 i64 . convert .`, or, since `convert` takes a
+type's symbol too, `2 i64 convert .`, which `!` shortens to `2 i64 !`. A
+type converts a literal by the clauses under its
 name, a string by the number it writes, `"42" i64 !` being 42 or nil; a
 class checks, `x num !`; a signature gives several values their types, `x
 y < i64 . f64 . > !`. Which mark calls and which converts is only a
@@ -97,7 +100,7 @@ symbols, so a name applies by itself and a symbol is spelled as one
 | `fib:` | `fib` | a label is a symbol |
 | `a` | `a` | one lowercase letter is a variable |
 | `[ 2 + ].` | `[ 2 + . ] .` | a dot at a word's end applies once more |
-| `2 i64!` | `2 i64 . !` | `!` structures by a type: `!! .` |
+| `2 i64!` | `2 i64 . !` | `!` structures by a type: `convert .` |
 | `"\_ apples"` | `"\[ _ . ] apples"` | a hole's input |
 
 ```
@@ -130,8 +133,9 @@ Settled (Thomas, 2026-10-13):
    long way round. March8 does not have it yet: there `'…'` is a raw
    string, and lowering writes strings as strings.
 2. **Maps** are ordered sets of pairs, not a fundamental.
-3. **`!`** is `!! .`, a convenience over the primitive `!!`, which
-   structures a value by a type. Built: `2 i64 !! .` is `2 i64 !`.
+3. **`!`** is `convert .`, a convenience over a primitive word, which
+   structures a value by a type; it needs no meta-operator of its own.
+   Built: `2 i64 convert .` is `2 i64 !`.
 
 Open:
 

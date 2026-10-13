@@ -58,8 +58,9 @@ SYMBOLIC-FORTH.md): numbers, symbols and `.`. Every name is a symbol until `.` a
 the type: every type is given by a word, so types need no spelling of
 their own (one that bottoms out might show as `i64'`, were it ever shown).
 A type is data, and is not applied: converting is applying another word,
-`!!`, `i64 . !! .`, which the meta-operator `!` shortens to `i64 !` (`!!`
-takes a type, or a type's symbol). (First the form was `1 i64
+`convert`, `i64 . convert .`, which `!` shortens to `i64 !`, a
+convenience, not a further fundamental (`convert` takes a type, or a
+type's symbol). (First the form was `1 i64
 . 1 i64 . + .`, when applying a type's name converted.) March8 reads an
 intermediate form over it, in which this is `1 i64! 1 i64! +` (the last
 bullet below).

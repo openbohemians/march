@@ -124,7 +124,7 @@ fn unapplied(n: &str) -> bool {
 }
 
 /// Tokens as they are written, for a message: a name and its application
-/// are the name, `!!` applied is `!`, and a symbol or a variable is
+/// are the name, `convert` applied is `!`, and a symbol or a variable is
 /// spelled as one.
 fn source_text(toks: &[Token]) -> String {
     let mut out = String::new();
@@ -134,7 +134,7 @@ fn source_text(toks: &[Token]) -> String {
             Tok::Apply => ".".into(),
             Tok::Name(s) if toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) => {
                 i += 1;
-                if &**s == "!!" {
+                if &**s == "convert" {
                     "!".into()
                 } else if unapplied(s) {
                     format!("{s}.")
@@ -736,7 +736,7 @@ impl Stage {
         }
     }
 
-    /// `!!`, applied by `!` (Thomas, 2026-10-13): the value below given the
+    /// `convert`, written `!` (Thomas, 2026-10-13): the value below given the
     /// type on top. A type converts it, `2 i64!`, `"42" i64!`, `x 3 i64 vec
     /// !`, by the clauses under its name; a class or a type with variables
     /// checks it; a signature, a bracket of more than one type, gives the
@@ -2514,7 +2514,7 @@ impl Stage {
                         }
                         // `!` types as many values as the type on top has
                         // slots, and takes the type too.
-                        Item::Name(s) if &*s == "!!" => match items.last() {
+                        Item::Name(s) if &*s == "convert" => match items.last() {
                             Some(Item::Bracket(from, to)) => {
                                 let n = self.bracket_size(&toks[*from..*to]);
                                 (n + 1, n)

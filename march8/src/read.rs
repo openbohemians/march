@@ -15,7 +15,7 @@ pub enum Tok {
     Str(Rc<str>),
     Name(Rc<str>),
     /// `.`, which applies the value on top; the reader puts one after each
-    /// name that applies, and `!` is `!!` applied.
+    /// name that applies, and `!` is `convert` applied.
     Apply,
     /// `[`, `(`, `{` or `<`.
     Open(u8),
@@ -132,12 +132,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         // `x y < i64 f64 > !`. So no name ends in either. A dot inside a word
         // is part of it: `2.5` is a number, and in a name it divides a path
         // in a namespace, `io.file.read` (doc/design/TYPES.md 3.12).
-        // `!!` alone is the word `!` applies, which structures a value by a
-        // type: `2 i64 !! .` is `2 i64 !`.
-        let stem = match word {
-            "!!" => word,
-            _ => word.trim_end_matches(['.', '!']),
-        };
+        let stem = word.trim_end_matches(['.', '!']);
         let marks = &word[stem.len()..];
         let at = Pos {
             col: pos.col + stem.chars().count() as u32,
@@ -190,7 +185,7 @@ pub fn is_variable(w: &str) -> bool {
 
 /// One word: its token, its own application if it is a name that applies,
 /// and for each mark after it, the first at `at`, an application, `.`, or
-/// `!!` applied, `!`.
+/// `convert` applied, `!`.
 #[allow(clippy::too_many_arguments)]
 fn piece(
     stem: &str,
@@ -255,7 +250,7 @@ fn piece(
             };
             if m == '!' {
                 out.push(Token {
-                    tok: Tok::Name("!!".into()),
+                    tok: Tok::Name("convert".into()),
                     pos,
                 });
             }
@@ -498,7 +493,7 @@ impl<'a> Reader<'a> {
 }
 
 /// Code in Symbolic Forth, the lowest form (doc/design/TYPES.md 2.2): every
-/// name a symbol, each application a `.`, and `!!` applied `!`. It
+/// name a symbol, each application a `.`, and `convert` applied `!`. It
 /// reads back, by `read_symbolic`, to the same tokens: the litmus test of
 /// the intermediate form (Thomas, 2026-10-13). Lines are kept, so the text
 /// reads as the source did.
@@ -516,7 +511,7 @@ pub fn lower(toks: &[Token]) -> String {
         }
         match &t.tok {
             Tok::Name(n)
-                if &**n == "!!" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
+                if &**n == "convert" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
             {
                 out.push('!');
                 i += 1;
@@ -693,28 +688,16 @@ mod tests {
                 Tok::Int(2),
                 n("i64"),
                 Tok::Apply,
-                n("!!"),
+                n("convert"),
                 Tok::Apply,
                 Tok::Open(b'<'),
                 n("i64"),
                 Tok::Apply,
                 Tok::Close(b'>'),
-                n("!!"),
+                n("convert"),
                 Tok::Apply,
             ]
         );
-    }
-
-    #[test]
-    fn bangs_alone_name_the_word_a_bang_applies() {
-        let n = |s: &str| Tok::Name(s.into());
-        assert_eq!(toks("!!"), [n("!!"), Tok::Apply]);
-        let t: Vec<Tok> = read_symbolic("2 i64 !! .", &Symbols::standard())
-            .unwrap()
-            .into_iter()
-            .map(|t| t.tok)
-            .collect();
-        assert_eq!(t, [Tok::Int(2), n("i64"), n("!!"), Tok::Apply]);
     }
 
     #[test]

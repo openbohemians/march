@@ -42,8 +42,8 @@ It is an **intermediate form** (Thomas, 2026-10-13). Below it is Symbolic
 Forth, where everything is a number, a symbol, `.` or `!` (TYPES.md 2.2,
 doc/design/SYMBOLIC-FORTH.md):
 every name a symbol until `.` applies it, a type given by applying its
-word, `i64 .`, and converting the meta-operator `!`, `!! .`: the word
-`!!` applied, which takes a type or a type's symbol, `2 i64 !`. March8 reads the
+word, `i64 .`, and converting `!`, a convenience for `convert .`, the word
+`convert` applied, which takes a type or a type's symbol: `2 i64 !`. March8 reads the
 intermediate form and lowers it by spelling alone: `fib` is `fib .`,
 `Snake` and `+'` are symbols, and `2 i64!` is `2 i64 . !`. `march8 lower`
 writes any March in Symbolic Forth, and `--symbolic` reads it; the litmus
@@ -62,7 +62,7 @@ reads them back to the same tokens, and runs them to the same results.
 | `name'` | the symbol `name`, for a word passed rather than applied, `+' reduce`, or a script without capitals |
 | `\name` | a symbol table entry, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
 | `.` | applies the value on top, a word or a quotation; each dot at the end of a word applies once more: `[ 2 + ].` |
-| `!` | converts the value below by the type on top, `!!` applied: `2 i64!`, `x y < i64 f64 > !` (Thomas, 2026-10-13) |
+| `!` | converts the value below by the type on top, `convert` applied: `2 i64!`, `x y < i64 f64 > !` (Thomas, 2026-10-13) |
 | `a.b` | one word: a dot inside a word is part of it, a number's point, `2.5`, or in a name a path in a namespace, `io.file.read` (TYPES.md 3.12), kept for namespaces and defining no word yet. Dots between names once chained them, `a.b.` for `a. b.` (2026-10-09), which left no spelling for a path (Thomas, 2026-10-10) |
 | `[ … ]` | a quotation: its words, unevaluated |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |

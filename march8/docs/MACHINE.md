@@ -34,69 +34,80 @@ fact: [ < i64 > dup 1 -+ fact * ] def
 Words are separated by white space, as in FORTH. `--` starts a comment that
 runs to the end of the line, except inside `< >`. The notation was decided
 on 2026-10-12 (Thomas), after a comparison of the same programs written
-with a dot after every name applied and without: a name applies, as in
-FORTH, and a symbol is spelled as one. With definitions naming first, this
-is the notation SURFACE.md was to give, so nothing lowers to it.
+with a dot after every name applied and without (doc/design/DOTS.md): a
+name applies, as in FORTH, in code and in a bracket alike, and a symbol or
+a variable is spelled as one. With definitions naming first, this is the
+notation SURFACE.md was to give, so nothing lowers to it.
 
 | Form | What it is |
 |---|---|
 | `1`, `-2` | an integer literal |
 | `1.10` | a decimal literal: exact digits until its type is known |
 | `"text"`, `'raw'` | a string, with march7's escapes (`\n;`, `\#x2603;`, `\times;`) and holes (`\[ code ]`, `\_`) |
-| `name` | a name, applied: a primitive, a family, a type converting the value below, a constructor |
+| `name` | a name, applied: a primitive, a family, a constructor, or a type's name, which gives the type |
 | `Name` | a capitalized name: a symbol, a value that does nothing until applied |
+| `a` | one lowercase letter: a variable, a type variable in a bracket; it names no word |
 | `name:` | a label: the symbol `name`, written where a name is defined or a key given |
 | `name'` | the symbol `name`, for a word passed rather than applied, `+' reduce`, or a script without capitals |
 | `\name` | a symbol table entry, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
-| `.` | applies the value on top; each dot at the end of a word applies once more: `[ 2 + ].` |
+| `.` | applies the value on top; each dot at the end of a word applies once more: `[ 2 + ].`, `2 i64.` |
 | `a.b` | one word: a dot inside a word is part of it, a number's point, `2.5`, or in a name a path in a namespace, `io.file.read` (TYPES.md 3.12), kept for namespaces and defining no word yet. Dots between names once chained them, `a.b.` for `a. b.` (2026-10-09), which left no spelling for a path (Thomas, 2026-10-10) |
 | `[ … ]` | a quotation: its words, unevaluated |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
 | `_` | in a literal, a copy of a value from below it (Comprehensions) |
 | `< … >` | a bracket: code whose values are a type or a signature, a comprehension of types |
 
-A capital marks the rarer thing: code applies words far more often than it
-passes symbols, and symbols are what a state machine's states, a style for
-`case` or a logic program's atoms are made of, so they read without marks:
-`"Hello World" Snake case`, `Closed Open door`. One capital letter is kept
-for a logic program's variable, as in Prolog.
+**Literals, symbols and words** (Thomas, 2026-10-12). Literals spell
+themselves. A symbol is a pure literal, a name with no structure, and is
+capitalized: `"Hello World" Snake case`, `Closed Open door`. Everything else
+is structure, and structure is built by words, types included: `i64` is a
+word giving the type, as `64 int` might build it one day, and `ary`, `vec`,
+`map` and `or` build types from types, `string i64 map`. So types and words
+are one namespace, not two spelled alike, and a name reads the same
+everywhere. (For a day a bracket read names as types and code read them as
+words, the bracket deciding which a name was; and capitals cannot serve
+types and symbols both, since in a bracket one would be taken for the
+other.) A capital marks the rarer thing: code applies words far more often
+than it passes symbols, and symbols are what a state machine's states, a
+style for `case` or a logic program's atoms are made of, so they read
+without marks.
 
 **`.` applies** whatever is on top:
 
 - a **symbol** means what its name is defined as;
-- a **type** converts the value below to it: `x < f64 > .`; a class or a
-  type with variables checks it;
+- a **type** converts the value below to it: `2 i64.`, `x 100 i64 vec .`;
+  a class or a type with variables checks it: `x num.`;
 - a **signature**, a bracket of more than one type, gives the values below
   those types, the deepest first: `x y < i64 f64 > .`;
 - a **quotation** is evaluated: `[ 2 + ].`.
 
-**A type's name applied converts** the value below, `1 i64` (Thomas,
-2026-10-09). A type as a value is written in a bracket: `"42" < i64 >
-parse`. A constructor builds a type from the types below it, `< i64 ary. >`
-"array of i64", `< 100 i64 vec. >` "array of 100 i64", and that type
-applied converts too: `x < 100 i64 vec. > .`.
+**A type is a value**, given by its name or built: `string i64 map
+empty`. No bracket is needed for one in code. Applied, it converts, and
+parsing is converting: `"42" i64.` is 42, or nil for a string that writes
+no number (Thomas, 2026-10-13).
 
-**A bracket is code** (TYPES.md 2.2). In it names stay names, and a dot
-applies one, as a constructor is applied; what its code leaves is the
-signature, by what each value is:
+**A bracket is code** (TYPES.md 2.2), read as any code is; what its code
+leaves is the signature, by what each value is:
 
 ```
 case: [ < string Camel > … ] def        a string, and the symbol Camel
-at: [ < a ary. i64 -- a > … ] def       one letter is a type variable
-sign: [ < i64 positive? > … ] def       a word ending in ? is a guard
+at: [ < a ary i64 -- a > … ] def        one letter is a type variable
+sign: [ < i64 positive? > … ] def       a word ending in ? leaves a bool: a guard
 even: [ < i64 [ 2 mod zero? ] > … ] def     any quotation left is one too
-fib: [ < 0 > … ] def    [ < 0 i64. > … ]    [ < true. > … ]    a value left: equal to it
+fib: [ < 0 > … ] def    [ < 0 i64. > … ]    [ < true > … ]    a value left: equal to it
 pair: [ < ( i64 string ) > … ] def      an array of types: a tuple type
 ```
 
-A name left is read by its spelling, so no definition elsewhere changes
-what a bracket means: one letter is a type variable, a name ending in `?` a
-guard, a capitalized one a symbol, as it is outside a bracket, and any
-other a type's name, an error if it names none, never read as something
-else. The code runs while compiling, so it leaves only known values. First
-in a definition's quotation, a bracket is the clause's context. Anywhere
-else it is a value, as a quotation is, so `[ < f64 > parse ] map` passes
-`parse` its type.
+A word ending in `?` leaves one bool, and the compiler holds it to that
+where its signature is written and wherever it is applied; applied in a
+bracket it is a guard on the inputs before it. A name left in a bracket,
+unapplied, is a symbol or a variable, so no definition changes what a
+bracket means: a symbol is never a type. Reading a signature takes knowing
+what a constructor takes, `< k i64 map k >` being a map and a key, as
+reading any FORTH does. The code runs while compiling, so it leaves only
+known values. First in a definition's quotation, a bracket is the clause's
+context. Anywhere else it is a value, so `[ < f64 > . ] map` converts each
+element, as `[ f64. ] map` does.
 
 **A definition is data:** a name, what it names, and `def` (Thomas,
 2026-10-12): `inc: [ < i64 -- i64 > 1 + ] def`. The name comes first, and
@@ -104,17 +115,17 @@ the bracket after it says what kind of thing it names:
 
 ```
 fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def     code
-num: < i64 f64 or. money or. int# or. dec# or. > def    a type
+num: < i64 f64 or money or int# or dec# or > def    a type
 ```
 
 A bracket first in the quotation is the clause's signature, its context
 (TYPES.md 2.15): the types of its inputs, then after `--` the outputs it
-promises. Clauses of one name are a family. A type in a bracket is named,
-`config: < string i64 map. > def`, and a named class is called by its name
-in messages. `def` takes nothing else: a value computed where it stands,
-with no bracket to mark where it starts, could take the name below it.
-Constants are quotations, `primes: [ ( 2 3 5 7 ) ] def`, folding where
-they are used.
+promises. Clauses of one name are a family. A type is named, `config: <
+string i64 map > def`, the bracket only saying that it is one, and a named
+class is called by its name in messages. `def` takes nothing else: a value
+computed where it stands, with no bracket to mark where it starts, could
+take the name below it. Constants are quotations, `primes: [ ( 2 3 5 7 ) ]
+def`, folding where they are used.
 
 ## Judgments
 
@@ -168,7 +179,7 @@ equal types are equal numbers.
 | `a` to `z` | type variables, in patterns |
 | `atom` | in patterns, any type that is not a container: a number, a string, a literal. A class, not a type: it binds nothing, so `< atom atom >` takes two of different types |
 | `a b or` | in patterns, a union: any of its types, `i64 f64 or`. Kept canonical, so order and repeats do not matter. It matches a little less well than one of its types alone, and better than `atom` |
-| `num` | the numbers: `num: < i64 f64 or. money or. int# or. dec# or. > def`, in `core.march` |
+| `num` | the numbers: `num: < i64 f64 or money or int# or dec# or > def`, in `core.march` |
 | `nil` | the type with one value, `nil`: nothing is there, as in `i64 nil or` |
 | `bool` | truth: 0 and 1, `false` and `true`, Iverson's brackets, so an i64 too (TYPES.md 2.16) |
 | `( i64 string )` | a tuple: fixed positions, a type each. Positions of one type are a vec, so `( a b )` takes `( 1 2 )` |
@@ -211,13 +222,15 @@ A family applied chooses its clause by the values on top (TYPES.md 2.8):
 
 ### Guards: the choice at run time
 
-A word ending in `?` in a signature is a **guard**, `< i64 positive? >`, and
-so is any quotation left there, `< i64 [ 2 mod zero? ] >` (TYPES.md 2.2,
-2.15). It looks at the inputs before it, as many as it takes,
-without taking them, and leaves a `bool` (TYPES.md 2.16). How many it takes comes from its
-definition, by a pass over its words: `positive?`, `[ 0 gt? ]`, takes one,
-and `lt?` takes two, so `< i64 i64 lt? >` compares the two inputs. A word
-that does not leave one value cannot be a guard.
+A word ending in `?` applied in a signature is a **guard**, `< i64
+positive? >`, since it leaves one bool, and so is any quotation left there
+that does, `< i64 [ 2 mod zero? ] >` (TYPES.md 2.2, 2.15). It looks at the
+inputs before it, as many as it takes, without taking them, and leaves a
+`bool` (TYPES.md 2.16). How many it takes comes from its definition, by a
+pass over its words: `positive?`, `[ 0 gt? ]`, takes one, and `lt?` takes
+two, so `< i64 i64 lt? >` compares the two inputs. A word ending in `?`
+that leaves anything but one bool is an error, where its signature says so
+or where it is applied.
 
 When some clauses that match have guards, the choice has two phases:
 
@@ -265,7 +278,7 @@ fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def
   step, and `0 fib` is the literal 0.
 - **An untyped value matches an input of any type it becomes,** compared in
   that type: `< 0 >` takes an i64, an f64 or money, and `< 0.5 >` an f64.
-  The input keeps its own type. `< 0 i64. >` takes an i64 only, as `0 i64`
+  The input keeps its own type. `< 0 i64. >` takes an i64 only, as `0 i64.`
   is an i64 in code.
 - **Strings too:** `< "quit" >`.
 - **Inside its clause the input is known to equal the value:** it is
@@ -318,7 +331,7 @@ Lifting is clauses in `core.march`, an array and a number in either
 order for `+`, `-+`, `*` and `/*` ("Arrays as tensors"):
 
 ```
-+: [ < a ary. a -- a ary. > swap [ over + ] map swap drop ] def
++: [ < a ary a -- a ary > swap [ over + ] map swap drop ] def
 ```
 
 So `( 1 2 3 ) 1 +` is `( 2 3 4 )`, a literal taking the elements' type, and
@@ -333,8 +346,9 @@ i64: [ < int# -- i64 > int#>i64 ] def
 money: [ < dec# -- money > dec#>money ] def
 ```
 
-Applying a type to a literal converts it by this clause, and so does a
-clause that wants the type and is given the literal. So literal handling is
+Applying the type to a literal, `2 i64.`, converts it by this clause, and
+so does a clause that wants the type and is given the literal. Applying the
+name gives the type itself; its clauses are only its conversions. So literal handling is
 an open family, as Thomas framed it ("just another type signature"). Two
 literals fold by clauses on the literal types, `< int# int# -- int# >`,
 exactly, and stay literals, so `1 2 + 3.5 +` is the decimal 6.5. A
@@ -657,9 +671,9 @@ from a to b, both included, counting down when a is the larger, its glyph
 and `⊤` and `⊥` for `true` and `false`. Text: `split` at a separator
 (between characters, for ""), `lines`, `words` at white space, as
 Haskell's are, and `lower` and `upper`, element by element over arrays of
-strings. `parse` reads a number from its text, the type given as a value,
-`"42" < i64 > parse`: `i64 nil or`, the value tagged at run time or nil, and
-on a known string the value or nil itself. `le?`, `ge?` and `neq?`, with
+strings. A string converts to the number it writes, `"42" i64.`, by
+clauses for strings under `i64` and `f64`: `i64 nil or`, the value tagged
+at run time or nil, and on a known string the value or nil itself. `le?`, `ge?` and `neq?`, with
 `≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that
 NaN is at most and at least nothing. Reading is primitives, for now:
 `"data.csv" file-read` a file's text and `stdin-read` standard input,
@@ -723,7 +737,7 @@ stack are always known, and the display writes every value by its type:
 cargo run --offline -- --eval 'fee: [ < money > 1.10 + ] def 19.99 fee'
 # <1> 21.09
 cargo run --offline -- --types --eval '{ "a" ( 1.5 ) } 2'
-# <2> { "a" ( 1.5 ) } < string 1 f64 vec. map. > 2 < i64 >
+# <2> { "a" ( 1.5 ) } < string 1 f64 vec map > 2 < i64 >
 ```
 
 With no arguments, `march8` is a REPL: each line is compiled and run, and
@@ -802,7 +816,7 @@ warning where a union is made (above, "Unions").
     nothing, `get`'s `i64 nil or` taken apart by clauses, `fold` and a
     string with holes. Writing it found:
     - **Missing words,** added: `put`, a map with a key set, and `empty`,
-      an empty array or map of a type, `< string i64 map. > empty`, since `( )`
+      an empty array or map of a type, `string i64 map empty`, since `( )`
       and `{ }` cannot say their types. `empty` is provisional.
     - **A literal string in a loop was made again on every pass,** its bytes
       chunked and hashed each time, which made the count quadratic: 4.6 s

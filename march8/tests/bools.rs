@@ -41,7 +41,7 @@ fn comparisons_leave_a_bool() {
         "<2> \"true\" \"false\""
     );
     // Only 0 and 1 are bools.
-    assert_eq!(session(&["2 bool"]).err(), Some(Kind::Literal));
+    assert_eq!(session(&["2 bool."]).err(), Some(Kind::Literal));
 }
 
 #[test]
@@ -66,19 +66,19 @@ fn a_bool_is_an_i64() {
     );
     assert_eq!(
         typed(&["( true false ) ( 5 6 ) ⋅ 3 true max false true max"]),
-        "<3> ( 5 0 ) < 2 i64 vec. > 3 < i64 > true < bool >"
+        "<3> ( 5 0 ) < 2 i64 vec > 3 < i64 > true < bool >"
     );
     // A clause for bool is more specific than one for i64.
-    let k = "k: [ < i64 > drop 1 ] def k: [ < bool > drop 2 ] def";
-    assert_eq!(show(&[k, "5 k true k"]), "<2> 1 2");
+    let k = "kk: [ < i64 > drop 1 ] def kk: [ < bool > drop 2 ] def";
+    assert_eq!(show(&[k, "5 kk true kk"]), "<2> 1 2");
 }
 
 #[test]
 fn guards_take_a_bool() {
     // A count is not a truth: FORTH's flag that was a number is caught.
-    let odd = "odd?: [ 2 mod ] def f: [ < i64 odd? > drop 1 ] def";
+    let odd = "odd?: [ 2 mod ] def ff: [ < i64 odd? > drop 1 ] def";
     assert_eq!(session(&[odd]).err(), Some(Kind::Mismatch));
-    let odd = "odd?: [ 2 mod 1 eq? ] def f: [ < i64 odd? > drop 1 ] def \
-               f: [ < i64 > drop 0 ] def";
-    assert_eq!(show(&[odd, "3 4", "f swap f"]), "<2> 0 1");
+    let odd = "odd?: [ 2 mod 1 eq? ] def ff: [ < i64 odd? > drop 1 ] def \
+               ff: [ < i64 > drop 0 ] def";
+    assert_eq!(show(&[odd, "3 4", "ff swap ff"]), "<2> 0 1");
 }

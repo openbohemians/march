@@ -250,30 +250,8 @@ impl Types {
             self.classes.entry(t).or_insert_with(|| name.to_string());
         }
     }
-    /// The type as a bracket's code makes it, so that it reads back in one:
-    /// names bare, constructors applied, `3 i64 vec.`, `string i64 ary. map.`.
-    pub fn source(&self, t: Type) -> String {
-        if let Some(n) = self.classes.get(&t) {
-            return n.clone();
-        }
-        match self.term(t) {
-            Term::Base(_) | Term::Atom | Term::AnyTuple => self.name(t),
-            Term::Nat(n) => n.to_string(),
-            Term::Var(_) => self.name(t),
-            Term::Ary(e) => format!("{} ary.", self.source(e)),
-            Term::Vec(n, e) => format!("{} {} vec.", self.source(n), self.source(e)),
-            Term::Map(k, v) => format!("{} {} map.", self.source(k), self.source(v)),
-            Term::Or(a, b) => format!("{} {} or.", self.source(a), self.source(b)),
-            Term::Tuple(r) => {
-                let es: Vec<String> = self.rows[r as usize]
-                    .iter()
-                    .map(|&e| self.source(e))
-                    .collect();
-                format!("( {} )", es.join(" "))
-            }
-        }
-    }
-    /// The type as a message names it: `3 i64 vec`, `string i64 ary map`.
+    /// The type as it is written, in a message or a bracket, where it reads
+    /// back: `3 i64 vec`, `string i64 ary map`.
     pub fn name(&self, t: Type) -> String {
         if let Some(n) = self.classes.get(&t) {
             return n.clone();

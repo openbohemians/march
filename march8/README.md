@@ -13,6 +13,9 @@ cargo run -- --eval 'fee: [ < money -- money > 1.10 + ] def 19.99 fee'
 cargo run -- --eval 'sq: [ dup * ] def 2.5 sq 3 sq'
 # <2> 6.25 9
 cargo run -- examples/wordfreq.march
+cargo run -- examples/door.march        # a state machine of symbols
+cargo run -- examples/syllogism.march   # facts and a rule as clauses
+cargo run -- examples/summary.march < examples/fruit.csv
 cargo run                      # a REPL; :help for its commands
 ```
 

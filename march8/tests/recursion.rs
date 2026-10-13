@@ -35,7 +35,7 @@ fn families_recurse_through_their_instances() {
     // From a value known only at run time.
     assert_eq!(cells(&[FACT, "6", "fact"]).unwrap(), [720]);
     // Inside another word.
-    assert_eq!(cells(&[FACT, "f: [ 5 fact ] def f"]).unwrap(), [120]);
+    assert_eq!(cells(&[FACT, "ff: [ 5 fact ] def ff"]).unwrap(), [120]);
     // `fact` is called as its i64 instance, last, so as a tail call; at 0
     // its guard is decided now, and it folds.
     let c = code(&[FACT], "5 fact");
@@ -60,9 +60,9 @@ fn families_recurse_through_their_instances() {
 #[test]
 fn instances_are_compiled_once_and_shared() {
     // Two words applying `fact` to an i64 call one instance.
-    let words = "a: [ fact ] def b: [ 1 + fact ] def";
-    let a = code(&[FACT, words, "7"], "a");
-    let b = code(&[FACT, words, "7"], "1 -+ b");
+    let words = "aa: [ fact ] def bb: [ 1 + fact ] def";
+    let a = code(&[FACT, words, "7"], "aa");
+    let b = code(&[FACT, words, "7"], "1 -+ bb");
     assert_eq!(a.last(), Some(&Op::Return));
     assert_eq!(a[a.len() - 2], b[b.len() - 2]);
     assert!(matches!(a[a.len() - 2], Op::Tail(_)));

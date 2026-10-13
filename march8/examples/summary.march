@@ -1,0 +1,21 @@
+-- A CSV summary: the total and the average of each numeric column.
+-- Run it with `march8 examples/summary.march < examples/fruit.csv`.
+
+-- A field's number, or none.
+or-zero: [ < nil > drop 0.0 ] def
+or-zero: [ < f64 > ] def
+number?: [ < nil > drop false ] def
+number?: [ < f64 > drop true ] def
+
+-- A column is its name, then its fields. There is no i64 to f64 yet, so
+-- `count` counts by ones.
+numeric?: [ < string ary > rest [ f64. number? ] map true [ and ] fold ] def
+numbers: [ < string ary > rest [ f64. or-zero ] map ] def
+count: [ < f64 ary > [ drop 1.0 ] map sum ] def
+mean: [ < f64 ary > dup sum swap count /* ] def
+
+report: [ < string ary numeric? > dup first swap numbers dup sum swap mean
+  "\_: total \_, average \_\n;" write ] def
+report: [ < string ary > drop ] def
+
+stdin-read lines [ "," split ] map transpose [ report ] each

@@ -8,19 +8,19 @@
 -- Counting: a word's count so far is `i64 nil or`, nil before its first.
 tally: [ < i64 > 1 + ] def
 tally: [ < nil > drop 1 ] def
-bump: [ < k i64 map. k > over over get tally put ] def
-frequencies: [ < string ary. -- string i64 map. > < string i64 map. > empty [ bump ] fold ] def
+bump: [ < k i64 map k > over over get tally put ] def
+frequencies: [ < string ary -- string i64 map > string i64 map empty [ bump ] fold ] def
 
 -- Each word and its count, a line each, in the words' order.
-report: [ < string i64 map. > dup keys sort [ over over at "\_ \_\n;" write ] each drop ] def
+report: [ < string i64 map > dup keys sort [ over over at "\_ \_\n;" write ] each drop ] def
 
 -- Most frequent first. Each count from the highest down to 1 looks through
 -- the words for its own: counts × words steps. (Written before `sort-by`.)
 has-count?: [ rot swap at eq? ] def
-show-if: [ < string i64 map. i64 string has-count? > over "\_ \_\n;" write ] def
-show-if: [ < string i64 map. i64 string > drop ] def
-with-count: [ < string i64 map. i64 > over keys sort [ show-if ] each drop drop ] def
-ranked: [ < string i64 map. > dup values sort last range reverse [ over swap with-count ] each drop ] def
+show-if: [ < string i64 map i64 string has-count? > over "\_ \_\n;" write ] def
+show-if: [ < string i64 map i64 string > drop ] def
+with-count: [ < string i64 map i64 > over keys sort [ show-if ] each drop drop ] def
+ranked: [ < string i64 map > dup values sort last range reverse [ over swap with-count ] each drop ] def
 
 "The cat and the hat
 and the bat sat on the mat" words lower frequencies dup report "--\n;" write ranked

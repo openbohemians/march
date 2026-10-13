@@ -39,12 +39,12 @@ fn mixed_literals_are_tuples() {
     // Tuples of one type are an array of them; positions of one type, a vec.
     assert_eq!(
         typed(&["( ( 1 \"a\" ) ( 2 \"b\" ) )"]),
-        "<1> ( ( 1 \"a\" ) ( 2 \"b\" ) ) < 2 ( i64 string ) vec. >"
+        "<1> ( ( 1 \"a\" ) ( 2 \"b\" ) ) < 2 ( i64 string ) vec >"
     );
-    assert_eq!(typed(&["( 1 2.5 )"]), "<1> ( 1.0 2.5 ) < 2 f64 vec. >");
+    assert_eq!(typed(&["( 1 2.5 )"]), "<1> ( 1.0 2.5 ) < 2 f64 vec >");
     assert_eq!(
         typed(&["{ \"a\" 1 } \"a\" get ( _ \"x\" )"]),
-        "<1> ( 1 \"x\" ) < ( i64 nil or. string ) >"
+        "<1> ( 1 \"x\" ) < ( i64 nil or string ) >"
     );
 }
 
@@ -76,7 +76,7 @@ fn map_and_each_are_unrolled() {
     // Each position compiled on its own type.
     assert_eq!(
         typed(&["( 1 \"a\" ) [ show ] map"]),
-        "<1> ( \"1\" \"\\\"a\\\"\" ) < 2 string vec. >"
+        "<1> ( \"1\" \"\\\"a\\\"\" ) < 2 string vec >"
     );
     assert_eq!(
         typed(&["( 1 \"a\" ) [ ] map"]),
@@ -104,7 +104,7 @@ fn an_array_is_wanted_so_positions_are_forgotten() {
     s.eval("( 1 \"a\" ) ( 2 \"b\" ) concat").unwrap();
     assert_eq!(
         s.show_typed(),
-        "<1> ( 1 \"a\" 2 \"b\" ) < i64 string or. ary. >"
+        "<1> ( 1 \"a\" 2 \"b\" ) < i64 string or ary >"
     );
     let w = s.take_warnings();
     assert_eq!(w.len(), 1, "{w:?}");
@@ -116,10 +116,10 @@ fn an_array_is_wanted_so_positions_are_forgotten() {
     // An index known only at run time: an element of the union.
     assert_eq!(
         typed(&["( 1 \"a\" ) 2", "at"]),
-        "<1> \"a\" < i64 string or. >"
+        "<1> \"a\" < i64 string or >"
     );
     assert_eq!(
-        show(&["( 1 \"a\" ) < i64 string or. ary. > . [ show ] map"]),
+        show(&["( 1 \"a\" ) < i64 string or ary > . [ show ] map"]),
         "<1> ( \"1\" \"\\\"a\\\"\" )"
     );
     // Only where the union fits: `sort` has no clause for it.
@@ -128,10 +128,10 @@ fn an_array_is_wanted_so_positions_are_forgotten() {
 
 #[test]
 fn tuple_types_in_brackets() {
-    let p = "p: [ < ( i64 string ) > drop 1 ] def p: [ < ( a b ) > drop 2 ] def";
+    let p = "pp: [ < ( i64 string ) > drop 1 ] def pp: [ < ( a b ) > drop 2 ] def";
     // A vec is a tuple whose types are one, so `( a b )` takes `( 1 2 )`.
     assert_eq!(
-        show(&[p, "( 1 \"a\" ) p ( 1 2 ) p ( \"x\" 2.0 ) p"]),
+        show(&[p, "( 1 \"a\" ) pp ( 1 2 ) pp ( \"x\" 2.0 ) pp"]),
         "<3> 1 2 2"
     );
     assert_eq!(

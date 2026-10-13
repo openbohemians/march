@@ -1,6 +1,6 @@
 //! The reader (docs/MACHINE.md): words separated by white space, as in
-//! FORTH, with numbers, strings, `.` and four brackets. In code a name
-//! applies, and a symbol is spelled as one; in a bracket names stay names.
+//! FORTH, with numbers, strings, `.` and four brackets. A name applies, in
+//! code and in a bracket alike, and a symbol or a variable is spelled as one.
 
 use crate::error::{Error, Kind, Pos, Result};
 use crate::symbols::Symbols;
@@ -15,7 +15,7 @@ pub enum Tok {
     Str(Rc<str>),
     Name(Rc<str>),
     /// `.`, which applies the value on top; the reader puts one after each
-    /// name in code.
+    /// name that applies.
     Apply,
     /// `[`, `(`, `{` or `<`.
     Open(u8),
@@ -126,7 +126,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             col: pos.col + stem.chars().count() as u32,
             ..pos
         };
-        let (stem, applies) = if in_body(&open) && is_name(stem) {
+        let (stem, applies) = if is_name(stem) {
             spelled(stem)
         } else {
             (stem, false)
@@ -143,15 +143,6 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
     Ok(out)
 }
 
-/// Whether code here is a body, where names apply, rather than a bracket,
-/// where they stay names: the innermost quotation or bracket decides.
-fn in_body(open: &[(u8, Pos)]) -> bool {
-    open.iter()
-        .rev()
-        .find(|(b, _)| matches!(b, b'[' | b'<'))
-        .is_none_or(|(b, _)| *b == b'[')
-}
-
 /// Whether a word is a name: not a number or a bracket.
 fn is_name(w: &str) -> bool {
     let digits = w.strip_prefix('-').unwrap_or(w);
@@ -160,17 +151,24 @@ fn is_name(w: &str) -> bool {
         || digits.starts_with(|c: char| c.is_ascii_digit()))
 }
 
-/// A name in code, and whether it applies (Thomas, 2026-10-12): a name
-/// applies, as in FORTH, and a symbol is spelled as one. A capitalized name
-/// is a symbol, `Snake`; `name:` labels what follows, a name being defined
-/// or a key; and `name'` is a symbol in a script without capitals.
+/// A name, and whether it applies (Thomas, 2026-10-12): a name applies, as
+/// in FORTH, everywhere, and a symbol or a variable is spelled as one. A
+/// capitalized name is a symbol, `Snake`; one lowercase letter is a
+/// variable, `a`; `name:` labels what follows, a name being defined or a
+/// key; and `name'` is a symbol, a word passed rather than applied, `+'`.
 fn spelled(w: &str) -> (&str, bool) {
     let marked = |m: char| w.len() > m.len_utf8() && w.ends_with(m);
     if marked(':') || marked('\'') {
         (&w[..w.len() - 1], false)
     } else {
-        (w, !w.starts_with(char::is_uppercase))
+        (w, !(w.starts_with(char::is_uppercase) || is_variable(w)))
     }
+}
+
+/// Whether a name is a variable: one lowercase letter, `a` to `z`, a type
+/// variable in a bracket. It never applies, and no word has its name.
+pub fn is_variable(w: &str) -> bool {
+    w.len() == 1 && w.as_bytes()[0].is_ascii_lowercase()
 }
 
 /// One word: its token, its own application if it is a name that applies,
@@ -507,7 +505,7 @@ mod tests {
     fn words_numbers_and_brackets() {
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("1 -2 1.10 + [ x ] < i64 -- i64 > -- a comment\n\\times"),
+            toks("1 -2 1.10 + [ xs ] < i64 -- i64 > -- a comment\n\\times"),
             [
                 Tok::Int(1),
                 Tok::Int(-2),
@@ -515,13 +513,15 @@ mod tests {
                 n("+"),
                 Tok::Apply,
                 Tok::Open(b'['),
-                n("x"),
+                n("xs"),
                 Tok::Apply,
                 Tok::Close(b']'),
                 Tok::Open(b'<'),
                 n("i64"),
+                Tok::Apply,
                 Tok::Dashes,
                 n("i64"),
+                Tok::Apply,
                 Tok::Close(b'>'),
                 n("×"),
                 Tok::Apply,
@@ -531,12 +531,12 @@ mod tests {
 
     #[test]
     fn names_apply_and_symbols_are_spelled() {
-        // A name applies; a capitalized one is a symbol, as are `name:`, a
-        // label, and `name'`. In a bracket names stay names, and a guard's
-        // quotation is code again.
+        // A name applies, in a bracket too; a capitalized one is a symbol,
+        // as are `name:`, a label, and `name'`; one lowercase letter is a
+        // variable.
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("dup Snake fib: +' < string Camel [ odd? ] > σ'"),
+            toks("dup Snake fib: +' < string Camel a ary odd? > σ'"),
             [
                 n("dup"),
                 Tok::Apply,
@@ -545,11 +545,13 @@ mod tests {
                 n("+"),
                 Tok::Open(b'<'),
                 n("string"),
+                Tok::Apply,
                 n("Camel"),
-                Tok::Open(b'['),
+                n("a"),
+                n("ary"),
+                Tok::Apply,
                 n("odd?"),
                 Tok::Apply,
-                Tok::Close(b']'),
                 Tok::Close(b'>'),
                 n("σ"),
             ]
@@ -590,9 +592,9 @@ mod tests {
         );
         // A name's own application is where the name is, and each dot where
         // it is written.
-        let t = read("a  sq..", &Symbols::standard()).unwrap();
+        let t = read("xs  sq..", &Symbols::standard()).unwrap();
         let cols: Vec<u32> = t.iter().map(|t| t.pos.col).collect();
-        assert_eq!(cols, [1, 1, 4, 4, 6, 7]);
+        assert_eq!(cols, [1, 1, 5, 5, 7, 8]);
     }
 
     #[test]

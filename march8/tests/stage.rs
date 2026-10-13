@@ -43,7 +43,7 @@ fn literals_fold_and_default() {
     assert_eq!(show("-2.5 1 +"), "<1> -1.5");
     assert_eq!(code("", "1 2 + 3.5 +"), code("", "6.5"));
     // Applying a type annotates: these literals are i64 before `+` sees them.
-    assert_eq!(run("1 i64 1 i64 +").unwrap(), [2]);
+    assert_eq!(run("1 i64. 1 i64. +").unwrap(), [2]);
 }
 
 #[test]
@@ -51,8 +51,11 @@ fn a_name_applies_and_a_dot_applies_once_more() {
     // `sq` is `sq' .`, the symbol applied; a dot at the end of a word
     // applies what it left, `[ 1 + ].` as `[ 1 + ] .`.
     assert_eq!(
-        code("sq: [ dup * ] def", "3 sq 2.5 sq 4 [ 1 + ]. 1 i64 +"),
-        code("sq: [ dup * ] def", "3 sq' . 2.5 sq' . 4 [ 1 + ] . 1 i64 +")
+        code("sq: [ dup * ] def", "3 sq 2.5 sq 4 [ 1 + ]. 1 i64. +"),
+        code(
+            "sq: [ dup * ] def",
+            "3 sq' . 2.5 sq' . 4 [ 1 + ] . 1 i64. +"
+        )
     );
     assert_eq!(
         show("sq: [ dup * ] def 3 sq 2.5 sq 4 [ 1 + ]."),
@@ -76,8 +79,8 @@ fn a_dot_inside_a_name_divides_a_path() {
 fn literals_take_their_type_from_context() {
     // An integer literal beside a float is a float.
     assert_eq!(show("inc: [ < f64 > 1 + ] def 2.5 inc"), "<1> 3.5");
-    assert_eq!(show("y: [ < f64 > 1 + 2 + ] def 0.5 y"), "<1> 3.5");
-    assert_eq!(run("w: [ < i64 > 1 + ] def 41 w").unwrap(), [42]);
+    assert_eq!(show("yy: [ < f64 > 1 + 2 + ] def 0.5 yy"), "<1> 3.5");
+    assert_eq!(run("ww: [ < i64 > 1 + ] def 41 ww").unwrap(), [42]);
     // Money is exact cents: a decimal literal becomes cents without passing
     // through a float, and an integer literal is whole units.
     assert_eq!(
@@ -85,19 +88,19 @@ fn literals_take_their_type_from_context() {
         [2109]
     );
     assert_eq!(show("fee: [ < money > 1.10 + ] def 19.99 fee"), "<1> 21.09");
-    assert_eq!(run("19.99 money").unwrap(), [1999]);
-    assert_eq!(run("19.99 money 1 +").unwrap(), [2099]);
+    assert_eq!(run("19.99 money.").unwrap(), [1999]);
+    assert_eq!(run("19.99 money. 1 +").unwrap(), [2099]);
     // Overflow is found at compile time when the values are known, and at
     // run time when they are not.
     assert_eq!(
-        fails("w: [ < i64 > 1 + ] def 9223372036854775807 w"),
+        fails("ww: [ < i64 > 1 + ] def 9223372036854775807 ww"),
         Kind::Arithmetic
     );
     let mut s = Session::new();
-    s.eval("w: [ < i64 > 1 + ] def 9223372036854775807")
+    s.eval("ww: [ < i64 > 1 + ] def 9223372036854775807")
         .unwrap();
     assert_eq!(
-        s.eval("w").unwrap_err().kind,
+        s.eval("ww").unwrap_err().kind,
         Kind::Run(march8::machine::Error::Arithmetic)
     );
     assert_eq!(
@@ -111,22 +114,22 @@ fn literals_take_their_type_from_context() {
 fn impossible_types_are_compile_errors() {
     // Money holds cents: a third decimal digit cannot be exact. A clause
     // whose signature types its inputs is compiled where it is defined.
-    assert_eq!(fails("b: [ < money > 1.105 + ] def"), Kind::Literal);
+    assert_eq!(fails("bb: [ < money > 1.105 + ] def"), Kind::Literal);
     // A decimal literal is never an integer.
-    assert_eq!(fails("1.5 i64"), Kind::Literal);
-    assert_eq!(fails("b: [ < i64 > 1.5 + ] def"), Kind::NoWord);
+    assert_eq!(fails("1.5 i64."), Kind::Literal);
+    assert_eq!(fails("bb: [ < i64 > 1.5 + ] def"), Kind::NoWord);
     // No implicit promotion between types: no clause is no word.
-    assert_eq!(fails("b: [ < i64 f64 > + ] def"), Kind::NoWord);
-    assert_eq!(fails("b: [ < i64 money > + ] def"), Kind::NoWord);
+    assert_eq!(fails("bb: [ < i64 f64 > + ] def"), Kind::NoWord);
+    assert_eq!(fails("bb: [ < i64 money > + ] def"), Kind::NoWord);
     // A type left unapplied at the end, and a word with no definition.
     assert_eq!(fails("< i64 >"), Kind::Mismatch);
-    assert_eq!(fails("b: [ < i64 > ] def b"), Kind::Mismatch);
+    assert_eq!(fails("bb: [ < i64 > ] def bb"), Kind::Mismatch);
     assert_eq!(fails("1 foo"), Kind::NoWord);
     // A definition that fails is not made.
     let mut s = Session::new();
-    s.eval("b: [ < i64 > 1 + ] def").unwrap();
-    assert!(s.eval("b: [ < i64 > 1.5 + ] def").is_err());
-    s.eval("1 b").unwrap();
+    s.eval("bb: [ < i64 > 1 + ] def").unwrap();
+    assert!(s.eval("bb: [ < i64 > 1.5 + ] def").is_err());
+    s.eval("1 bb").unwrap();
     assert_eq!(s.machine.stack, [2]);
 }
 
@@ -136,11 +139,11 @@ fn words_are_evaluated_for_each_use() {
     // out there.
     let sq = "sq: [ dup * ] def ";
     assert_eq!(
-        run(&format!("{sq} s: [ < i64 > sq ] def 7 s")).unwrap(),
+        run(&format!("{sq} ss: [ < i64 > sq ] def 7 ss")).unwrap(),
         [49]
     );
     assert_eq!(
-        show(&format!("{sq} s: [ < f64 > sq ] def 2.5 s")),
+        show(&format!("{sq} ss: [ < f64 > sq ] def 2.5 ss")),
         "<1> 6.25"
     );
     // Applied to a literal, it folds: `nine` is the constant 9.
@@ -150,7 +153,7 @@ fn words_are_evaluated_for_each_use() {
     );
     // Words apply words.
     assert_eq!(
-        show("inc: [ 1 + ] def inc2: [ inc inc ] def x: [ < f64 > inc2 ] def 0.5 x"),
+        show("inc: [ 1 + ] def inc2: [ inc inc ] def xx: [ < f64 > inc2 ] def 0.5 xx"),
         "<1> 2.5"
     );
     // A signature types what its word is given: here a literal becomes money.
@@ -166,23 +169,26 @@ fn words_are_evaluated_for_each_use() {
 #[test]
 fn brackets_annotate_and_stack_words_move_judgments() {
     // A bracket after values types them, the deepest first.
-    assert_eq!(run("m: [ 1 2 < money money > . + ] def m").unwrap(), [300]);
+    assert_eq!(
+        run("mm: [ 1 2 < money money > . + ] def mm").unwrap(),
+        [300]
+    );
     assert_eq!(fails("1 2 < money i64 > . +"), Kind::NoWord);
-    assert_eq!(run("s: [ < i64 > 10 swap -+ ] def 3 s").unwrap(), [7]);
+    assert_eq!(run("ss: [ < i64 > 10 swap -+ ] def 3 ss").unwrap(), [7]);
     // A literal dropped leaves no code.
-    assert_eq!(code("k: [ 1 2 drop ] def", "k"), code("", "1"));
+    assert_eq!(code("kk: [ 1 2 drop ] def", "kk"), code("", "1"));
     // `dup` copies a literal as a literal, so `1.5 dup +` folds exactly.
     assert_eq!(show("1.5 dup +"), "<1> 3.0");
     // Products of decimals stay exact: 1.10 × 1.10 is 1.2100, 121 cents.
-    assert_eq!(run("1.10 1.10 * money").unwrap(), [121]);
-    assert_eq!(show("a: [ < f64 f64 > * ] def 2.0 3.5 a"), "<1> 7.0");
+    assert_eq!(run("1.10 1.10 * money.").unwrap(), [121]);
+    assert_eq!(show("aa: [ < f64 f64 > * ] def 2.0 3.5 aa"), "<1> 7.0");
     assert_eq!(run("10 3 -+").unwrap(), [7]);
     // Money is added, not multiplied.
-    assert_eq!(fails("b: [ < money money > * ] def"), Kind::NoWord);
+    assert_eq!(fails("bb: [ < money money > * ] def"), Kind::NoWord);
     // Types are values: `.` builds them and applies them.
-    assert_eq!(run("( 7 8 9 ) < 3 i64 vec. > . length").unwrap(), [3]);
-    assert_eq!(fails("( 7 8 9 ) < 4 i64 vec. > ."), Kind::Mismatch);
-    assert_eq!(show("( 7 8 9 ) < i64 ary. > ."), "<1> ( 7 8 9 )");
+    assert_eq!(run("( 7 8 9 ) < 3 i64 vec > . length").unwrap(), [3]);
+    assert_eq!(fails("( 7 8 9 ) < 4 i64 vec > ."), Kind::Mismatch);
+    assert_eq!(show("( 7 8 9 ) < i64 ary > ."), "<1> ( 7 8 9 )");
 }
 
 #[test]
@@ -205,33 +211,33 @@ fn known_values_have_no_code_until_needed() {
 fn structured_types_follow_values_through_containers() {
     // The map's type says its values are arrays of i64, so `at` gives an
     // array, and `at` again an i64.
-    let h = "h: [ < string i64 ary. map. > \"k\" at 1 at 1 + ] def";
-    assert_eq!(run(&format!("{h} {{ \"k\" ( 41 2 ) }} h")).unwrap(), [42]);
+    let h = "hh: [ < string i64 ary map > \"k\" at 1 at 1 + ] def";
+    assert_eq!(run(&format!("{h} {{ \"k\" ( 41 2 ) }} hh")).unwrap(), [42]);
     // Literals take their type from what the container holds.
-    let fl = "fl: [ < string f64 ary. map. > \"k\" at 1 at 1 + ] def";
+    let fl = "fl: [ < string f64 ary map > \"k\" at 1 at 1 + ] def";
     assert_eq!(show(&format!("{fl} {{ \"k\" ( 1.5 ) }} fl")), "<1> 2.5");
-    let m = "m: [ < string money map. > \"fee\" at 1.10 + ] def";
+    let m = "mm: [ < string money map > \"fee\" at 1.10 + ] def";
     assert_eq!(
-        run(&format!("{m} {{ \"fee\" 19.99 money }} m")).unwrap(),
+        run(&format!("{m} {{ \"fee\" 19.99 money. }} mm")).unwrap(),
         [2109]
     );
     // Equal types built apart are one type; different ones do not mix.
     assert_eq!(
-        run("c: [ < i64 ary. i64 ary. > concat length ] def ( 1 2 ) ( 3 ) c").unwrap(),
+        run("cc: [ < i64 ary i64 ary > concat length ] def ( 1 2 ) ( 3 ) cc").unwrap(),
         [3]
     );
     assert_eq!(
-        fails("c: [ < i64 ary. f64 ary. > concat ] def"),
+        fails("cc: [ < i64 ary f64 ary > concat ] def"),
         Kind::NoWord
     );
-    assert_eq!(fails("k: [ < i64 ary. > \"x\" at ] def"), Kind::NoWord);
+    assert_eq!(fails("kk: [ < i64 ary > \"x\" at ] def"), Kind::NoWord);
     // Strings, with spaces, and their own operations.
     assert_eq!(
-        show("s: [ < string > \"!\" concat ] def \"hi\" s"),
+        show("ss: [ < string > \"!\" concat ] def \"hi\" ss"),
         "<1> \"hi!\""
     );
     assert_eq!(run("\"a b c\" length").unwrap(), [5]);
-    assert_eq!(fails("s: [ < string > 1 + ] def"), Kind::NoWord);
+    assert_eq!(fails("ss: [ < string > 1 + ] def"), Kind::NoWord);
     // The display writes every value by its type, nested and mixed.
     assert_eq!(
         show("{ \"k\" ( 1 2 ) } ( \"a\" \"b\" ) ( ( 1.5 ) ( 2.5 3.5 ) )"),
@@ -244,23 +250,23 @@ fn a_vec_knows_its_length_at_compile_time() {
     // An array literal is a vec: its length is known, so `length` is a
     // constant and the value is dropped.
     assert_eq!(
-        run("v: [ < 3 i64 vec. > length ] def ( 7 8 9 ) v").unwrap(),
+        run("vv: [ < 3 i64 vec > length ] def ( 7 8 9 ) vv").unwrap(),
         [3]
     );
     assert_eq!(
-        code("v: [ < 3 i64 vec. > length ] def", "( 7 8 9 ) v"),
+        code("vv: [ < 3 i64 vec > length ] def", "( 7 8 9 ) vv"),
         code("", "( 7 8 9 ) drop 3")
     );
     // Two vecs concatenate to a vec as long as both.
     assert_eq!(
-        run("c: [ < 2 i64 vec. 3 i64 vec. > concat length ] def ( 1 2 ) ( 3 4 5 ) c").unwrap(),
+        run("cc: [ < 2 i64 vec 3 i64 vec > concat length ] def ( 1 2 ) ( 3 4 5 ) cc").unwrap(),
         [5]
     );
     // A literal index past the end is refused at compile time.
-    assert_eq!(fails("b: [ < 3 i64 vec. > 5 at ] def"), Kind::Mismatch);
+    assert_eq!(fails("bb: [ < 3 i64 vec > 5 at ] def"), Kind::Mismatch);
     // A value left in a bracket is a value pattern, so it cannot be an
     // output (tests/choice.rs).
-    assert_eq!(fails("b: [ < -- 2 > ] def"), Kind::Mismatch);
+    assert_eq!(fails("bb: [ < -- 2 > ] def"), Kind::Mismatch);
 }
 
 #[test]
@@ -268,41 +274,41 @@ fn signatures_promise_outputs() {
     // After `--`, the outputs, which are checked.
     let fee = "fee: [ < money -- money > 1.10 + ] def";
     assert_eq!(run(&format!("{fee} 19.99 fee")).unwrap(), [2109]);
-    assert_eq!(fails("b: [ < i64 -- f64 > 1 + ] def"), Kind::Mismatch);
-    assert_eq!(fails("b: [ < i64 -- i64 i64 > 1 + ] def"), Kind::Mismatch);
+    assert_eq!(fails("bb: [ < i64 -- f64 > 1 + ] def"), Kind::Mismatch);
+    assert_eq!(fails("bb: [ < i64 -- i64 i64 > 1 + ] def"), Kind::Mismatch);
     // A literal result takes the type promised.
     assert_eq!(show("two: [ < -- f64 > 2 ] def two"), "<1> 2.0");
 }
 
 #[test]
 fn clauses_are_chosen_by_types() {
-    let d = "d: [ < i64 > 2 * ] def d: [ < string > dup concat ] def";
+    let d = "dd: [ < i64 > 2 * ] def dd: [ < string > dup concat ] def";
     assert_eq!(
         show(&format!(
-            "{d} a: [ < i64 > d ] def b: [ < string > d ] def 21 a \"ab\" b"
+            "{d} aa: [ < i64 > dd ] def bb: [ < string > dd ] def 21 aa \"ab\" bb"
         )),
         "<2> 42 \"abab\""
     );
     // The most specific clause wins; a type variable matches anything.
-    let first = "first: [ < a ary. > 1 at ] def first: [ < i64 ary. > 2 at ] def";
+    let first = "first: [ < a ary > 1 at ] def first: [ < i64 ary > 2 at ] def";
     assert_eq!(
         show(&format!("{first} ( 5 6 ) first ( 1.5 2.5 ) first")),
         "<2> 6 1.5"
     );
     // Equally specific clauses tie.
-    let w = "w: [ < i64 a > drop drop 1 ] def w: [ < a i64 > drop drop 2 ] def";
+    let w = "ww: [ < i64 a > drop drop 1 ] def ww: [ < a i64 > drop drop 2 ] def";
     assert_eq!(
-        fails(&format!("{w} x: [ < i64 i64 > w ] def")),
+        fails(&format!("{w} xx: [ < i64 i64 > ww ] def")),
         Kind::Mismatch
     );
     // A literal prefers a clause of its default type, then one it converts to.
     let fee = "fee: [ < money > 1.10 + ] def fee: [ < i64 > 1 + ] def";
     assert_eq!(run(&format!("{fee} 5 fee 5.5 fee")).unwrap(), [6, 660]);
     // A family with no clause for the values is no word.
-    assert_eq!(fails("inc: [ < f64 > 1 + ] def 1 i64 inc"), Kind::NoWord);
+    assert_eq!(fails("inc: [ < f64 > 1 + ] def 1 i64. inc"), Kind::NoWord);
     // A clause with the same inputs as one before replaces it.
     assert_eq!(
-        run("f: [ < i64 > 1 + ] def f: [ < i64 > 2 + ] def 1 f").unwrap(),
+        run("ff: [ < i64 > 1 + ] def ff: [ < i64 > 2 + ] def 1 ff").unwrap(),
         [3]
     );
 }
@@ -316,7 +322,7 @@ fn array_literals_share_one_type_or_are_tuples() {
     assert_eq!(fails("( )"), Kind::Mismatch);
     // Elements of different types are a tuple (doc/design/TYPES.md 2.5).
     assert_eq!(show("( 1 \"a\" )"), "<1> ( 1 \"a\" )");
-    assert_eq!(show("( 1 i64 \"a\" ) length"), "<1> 2");
+    assert_eq!(show("( 1 i64. \"a\" ) length"), "<1> 2");
     // An element may not take values from outside its literal.
     assert_eq!(fails("1 ( 2 + )"), Kind::Mismatch);
 }
@@ -325,7 +331,10 @@ fn array_literals_share_one_type_or_are_tuples() {
 fn over_and_rot_move_judgments() {
     assert_eq!(run("1 2 3 rot").unwrap(), [2, 3, 1]);
     assert_eq!(run("1 2 over").unwrap(), [1, 2, 1]);
-    assert_eq!(show("o: [ < f64 i64 > over ] def 1.5 2 o"), "<3> 1.5 2 1.5");
+    assert_eq!(
+        show("oo: [ < f64 i64 > over ] def 1.5 2 oo"),
+        "<3> 1.5 2 1.5"
+    );
 }
 
 #[test]
@@ -334,10 +343,10 @@ fn errors_say_where() {
     let e = s.eval("1 2 +'\n  \"a\" +").unwrap_err();
     assert_eq!(e.kind, Kind::NoWord);
     assert_eq!(e.to_string(), "2:7: no word `+` for +' string");
-    let e = s.eval("f: [ < i64 > \"x\" + ] def").unwrap_err();
+    let e = s.eval("ff: [ < i64 > \"x\" + ] def").unwrap_err();
     assert_eq!(
         e.to_string(),
-        "1:18: no word `+` for i64 string\n  in `f`, defined at 1:6"
+        "1:19: no word `+` for i64 string\n  in `ff`, defined at 1:7"
     );
 }
 

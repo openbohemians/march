@@ -28,12 +28,15 @@ fn holes_write_values_in() {
     assert_eq!(a, b);
     // Values are written as the display writes them; a string as its text.
     assert_eq!(
-        show(&["\"\\[ ( 1 2 ) ] \\[ ( \"a\" ) ] \\[ 19.99 money ] \\[ 2.5 ] \\[ \"b\" ]\""]),
+        show(&["\"\\[ ( 1 2 ) ] \\[ ( \"a\" ) ] \\[ 19.99 money. ] \\[ 2.5 ] \\[ \"b\" ]\""]),
         "<1> \"( 1 2 ) ( \\\"a\\\" ) 19.99 2.5 b\""
     );
     // Strings nest, and text resumes right after the `]`.
     assert_eq!(show(&["\"a \\[ \"b\\[ 1 ]c\" ] d\""]), "<1> \"a b1c d\"");
-    assert_eq!(show(&["n: [ 3 ] def \"\\[ n ]apples\""]), "<1> \"3apples\"");
+    assert_eq!(
+        show(&["nn: [ 3 ] def \"\\[ nn ]apples\""]),
+        "<1> \"3apples\""
+    );
     // `\_` before a subscript's name and `;` is the subscript.
     assert_eq!(show(&["\"H\\_2;O\""]), "<1> \"H₂O\"");
 }
@@ -45,7 +48,7 @@ fn inputs_are_taken_in_reading_order() {
     assert_eq!(show(&["4", "\"\\[ _ dup * ]\""]), "<1> \"16\"");
     // In a word, a string with inputs makes the word take them.
     assert_eq!(
-        show(&["f: [ \"<\\[ _ 1 + ]>\" ] def 5 f 1.5 f"]),
+        show(&["ff: [ \"<\\[ _ 1 + ]>\" ] def 5 ff 1.5 ff"]),
         "<2> \"<6>\" \"<2.5>\""
     );
 }

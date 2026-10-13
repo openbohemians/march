@@ -1,6 +1,25 @@
 //! Whole programs (examples/), and the words they needed: `put`, `empty`.
 use march8::{Kind, Session};
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+/// What an example prints, given its input.
+fn example(name: &str, input: &str) -> String {
+    let path = format!("{}/examples/{name}", env!("CARGO_MANIFEST_DIR"));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_march8"))
+        .arg(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+}
 
 fn show(src: &str) -> String {
     let mut s = Session::new();
@@ -12,28 +31,47 @@ fn show(src: &str) -> String {
 
 #[test]
 fn word_frequencies() {
-    let out = Command::new(env!("CARGO_BIN_EXE_march8"))
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/examples/wordfreq.march"
-        ))
-        .output()
-        .unwrap();
-    let out = String::from_utf8(out.stdout).unwrap();
     assert_eq!(
-        out,
+        example("wordfreq.march", ""),
         "and 2\nbat 1\ncat 1\nhat 1\nmat 1\non 1\nsat 1\nthe 4\n--\n\
          the 4\nand 2\nbat 1\ncat 1\nhat 1\nmat 1\non 1\nsat 1\n<0>\n"
     );
 }
 
 #[test]
+fn a_door_is_a_state_machine() {
+    assert_eq!(example("door.march", ""), "<1> true\n");
+    // A transition the table lacks is no word, while compiling.
+    let mut s = Session::new();
+    let src = include_str!("../examples/door.march");
+    s.eval(src).unwrap();
+    let e = s.eval("Locked Open door").unwrap_err();
+    assert_eq!(e.kind, Kind::NoWord);
+    assert!(e.to_string().contains("for Locked Open"), "{e}");
+}
+
+#[test]
+fn socrates_is_mortal() {
+    assert_eq!(example("syllogism.march", ""), "<3> true false true\n");
+}
+
+#[test]
+fn a_csv_summary() {
+    let csv = include_str!("../examples/fruit.csv");
+    assert_eq!(
+        example("summary.march", csv),
+        "qty: total 9.0, average 3.0\n\
+         price: total 3.25, average 1.0833333333333333\n<0>\n"
+    );
+}
+
+#[test]
 fn put_sets_and_empty_starts() {
     assert_eq!(
-        show("< string i64 map. > empty \"a\" 1 put \"b\" 2 put \"a\" 3 put"),
-        "<1> { \"a\" 3 \"b\" 2 } < string i64 map. >"
+        show("< string i64 map > empty \"a\" 1 put \"b\" 2 put \"a\" 3 put"),
+        "<1> { \"a\" 3 \"b\" 2 } < string i64 map >"
     );
-    assert_eq!(show("< string ary. > empty length"), "<1> 0 < i64 >");
+    assert_eq!(show("< string ary > empty length"), "<1> 0 < i64 >");
     let mut s = Session::new();
     assert_eq!(s.eval("< i64 > empty").unwrap_err().kind, Kind::NoWord);
 }

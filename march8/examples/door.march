@@ -1,0 +1,11 @@
+-- A door as a state machine: a state and an event make the next state.
+-- The states and events are symbols, known while compiling, so the machine
+-- runs while compiling, and a transition the table lacks is a compile
+-- error: `Locked Open door` is no word `door` for Locked Open.
+
+door: [ < Closed Open > drop drop Opened ] def
+door: [ < Opened Close > drop drop Closed ] def
+door: [ < Closed Lock > drop drop Locked ] def
+door: [ < Locked Unlock > drop drop Closed ] def
+
+Closed Open door Close door Lock door Locked eq?

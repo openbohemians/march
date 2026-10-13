@@ -1438,6 +1438,14 @@ impl Machine {
                 let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
                 self.push(r)?;
             }
+            SymShow => {
+                let s = self.pop()?;
+                let text = self.text(s)?.to_text().ok_or(Error::Memory)?;
+                let mut out = String::new();
+                crate::show::symbol(&text, &mut out);
+                let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
+                self.push(r)?;
+            }
             Lower | Upper => {
                 let s = self.pop()?;
                 let text = self.text(s)?.to_text().ok_or(Error::Memory)?;

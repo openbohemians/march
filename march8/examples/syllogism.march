@@ -1,13 +1,11 @@
 -- All men are mortal; Socrates is a man; so Socrates is mortal. Facts and
--- a rule as clauses chosen while compiling. (A family that applies itself
--- needs its symbols at run time, which they cannot be yet, doc/design/
--- TYPES.md 3.16, so the facts are a family apart from the rule for now.)
+-- a rule as clauses of one family. The rule applies the family again, so
+-- `is` is compiled as a word of its own, which tests its symbols as it
+-- runs.
 
-known: [ < Socrates Human > drop drop true ] def
-known: [ < Plato Human > drop drop true ] def
-known: [ < x y > drop drop false ] def
-
-is: [ < x Mortal > drop Human known ] def
-is: [ < x y > known ] def
+is: [ < Socrates Human > drop drop true ] def
+is: [ < Plato Human > drop drop true ] def
+is: [ < x Mortal > drop Human is ] def
+is: [ < x y > drop drop false ] def
 
 Socrates Mortal is Zeus Mortal is Plato Human is

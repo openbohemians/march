@@ -111,15 +111,14 @@ fn symbolic_forth_runs() {
     s.symbolic = true;
     s.eval("7 i64 convert . 7 f64 !").unwrap();
     assert_eq!(s.show_typed(), "<2> 7 < i64 > 7.0 < f64 >");
-    // There, nothing applies unless a dot says so: a name is a symbol, and
-    // one left at the end has no value at run time.
+    // There, nothing applies unless a dot says so: a name is a symbol, a
+    // value, at run time too.
     let mut s = Session::new();
     s.symbolic = true;
     s.eval("3 dup .").unwrap();
     assert_eq!(s.show(), "<2> 3 3");
-    let e = s.eval("3 dup").unwrap_err();
-    assert!(
-        e.to_string().contains("the symbol `dup` is left unapplied"),
-        "{e}"
-    );
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval("3 dup Snake").unwrap();
+    assert_eq!(s.show_typed(), "<3> 3 < i64 > dup' < sym > Snake < sym >");
 }

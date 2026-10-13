@@ -184,7 +184,8 @@ equal types are equal numbers.
 | `money` | exact cents in an i64; a placeholder until March has precise numbers and newtypes (TYPES.md 2.11) |
 | `string` | UTF-8 text |
 | `int#`, `dec#` | an integer and a decimal literal, undecided (TYPES.md 2.10); the names are placeholders (TYPES.md 3.4) |
-| `type`, `symbol`, `quote` | a type, a name not yet applied, a quotation: values at compile time only |
+| `sym` | a symbol, a name not yet applied: at run time its name, an interned string, so symbols compare and key maps by identity |
+| `type`, `quote` | a type, a quotation: values at compile time only |
 | `a ary` | an array of any length |
 | `3 a vec` | an array of exactly 3: the length is known at compile time |
 | `k v map` | a map |
@@ -292,7 +293,10 @@ fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def
   that type: `< 0 >` takes an i64, an f64 or money, and `< 0.5 >` an f64.
   The input keeps its own type. `< 0 i64! >` takes an i64 only, as `0 i64!`
   is an i64 in code.
-- **Strings too:** `< "quit" >`.
+- **Strings and symbols too:** `< "quit" >`, `< Closed Open >`. A symbol
+  at run time is its name, an interned string, so the test is one `eq`:
+  a state machine's table is chosen from while compiling on known states,
+  and tested as it runs on states read from data, `"Open" sym!`.
 - **Inside its clause the input is known to equal the value:** it is
   *pinned*, a value known at compile time whose cell is still on the
   machine's stack. Passed through, it costs nothing, so `fib`'s `< 0 > ;` is
@@ -613,6 +617,11 @@ and makes it a call to an **instance**:
   to itself, `recur`.
 - Recursion through other words is found the same way. Only recursion
   needs an instance; every other word is inlined, so folding is unchanged.
+- Its inputs are values at run time, symbols among them: a rule that asks
+  its own family again, `is: [ < x Mortal > drop Human is ] def`, is a
+  word testing symbols as it runs. Known inputs do not unfold through
+  recursion, numbers or symbols: `10 fact` calls the instance (TYPES.md
+  3.16).
 
 **The ghost.** A recursive call's results have the types of the
 alternatives that finish without recursing (TYPES.md 2.7). An alternative
@@ -685,7 +694,9 @@ and `⊤` and `⊥` for `true` and `false`. Text: `split` at a separator
 Haskell's are, and `lower` and `upper`, element by element over arrays of
 strings. A string converts to the number it writes, `"42" i64!`, by
 clauses for strings under `i64` and `f64`: `i64 nil or`, the value tagged
-at run time or nil, and on a known string the value or nil itself. `le?`, `ge?` and `neq?`, with
+at run time or nil, and on a known string the value or nil itself. An i64
+converts to an f64, `12 i64! f64!`; an f64 to an i64 only by narrowing,
+which says how it rounds. `le?`, `ge?` and `neq?`, with
 `≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that
 NaN is at most and at least nothing. Reading is primitives, for now:
 `"data.csv" file-read` a file's text and `stdin-read` standard input,
@@ -776,7 +787,9 @@ values missing or out of reach, a type left unapplied); a literal that
 cannot become its type; arithmetic that overflows or divides by zero,
 found at compile time; an effect where none is allowed; a limit. An error
 inside a core clause is reported where the clause was applied. Errors while
-running are the machine's.
+running are the machine's, but for a family none of whose clauses holds at
+run time, which says which, as compiling does: ``no word `door` for sym
+sym: no clause's guard holds``.
 
 Warnings have three levels: informative, minor and severe (Thomas,
 2026-10-09). The session collects them, and `march8` writes them to
@@ -908,9 +921,6 @@ warning where a union is made (above, "Unions").
   so either form reads back, and the way back is the same rewrite.
 - **Comments in brackets.** `--` divides a bracket's inputs from its
   outputs, so it cannot begin a comment there (Thomas, 2026-10-09).
-- **Symbols at run time.** A symbol is known while compiling; to choose by
-  one from data, `"camel" sym` would make a symbol from a string, held
-  as the string's interned text, so symbols compare as cells.
 - **More of files.** Writing a file, which cannot be another
   `write` clause, since `write` takes one string and a family's clauses
   take as many; `string error or` from `file-read` once there is an error type;

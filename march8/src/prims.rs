@@ -4,7 +4,7 @@
 //! March (core/core.march).
 
 use crate::code::Primitive as P;
-use crate::error::Kind;
+use crate::error::{Kind, Pos};
 use crate::stage::Val;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +45,7 @@ pub enum Prim {
     MoneyEq,
     // Text.
     I64Text,
+    I64ToF64,
     F64Text,
     MoneyText,
     StrShow,
@@ -84,6 +85,9 @@ pub enum Prim {
     StdinRead,
     Embed,
     SymEq,
+    StrToSym,
+    SymToStr,
+    SymShow,
     StrSnake,
     StrKebab,
     StrCamel,
@@ -233,6 +237,7 @@ pub const PRIMS: &[PrimDef] = &[
         "< i64 -- string >",
         &[P::IntText],
     ),
+    d(Prim::I64ToF64, "i64>f64", "< i64 -- f64 >", &[P::IToF]),
     d(
         Prim::F64Text,
         "f64>text",
@@ -449,7 +454,18 @@ pub const PRIMS: &[PrimDef] = &[
         "< -- string >",
         &[P::ReadStdin],
     ),
-    d(Prim::SymEq, "sym-eq?", "< sym sym -- bool >", &[]),
+    // A symbol at run time is its name, an interned string, so symbols
+    // compare by the machine's `eq` and convert to and from strings as they
+    // are.
+    d(Prim::SymEq, "sym-eq?", "< sym sym -- bool >", &[P::Eq]),
+    d(Prim::StrToSym, "string>sym", "< string -- sym >", &[]),
+    d(Prim::SymToStr, "sym>string", "< sym -- string >", &[]),
+    d(
+        Prim::SymShow,
+        "sym-show",
+        "< sym -- string >",
+        &[P::SymShow],
+    ),
     d(
         Prim::StrSnake,
         "string-snake",
@@ -917,6 +933,7 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         F64Lt => flag(float(&a[0]) < float(&a[1])),
         F64Eq => flag(float(&a[0]) == float(&a[1])),
         I64Text => Ok(vec![Val::Str(int(&a[0]).to_string().into())]),
+        I64ToF64 => Ok(vec![Val::Float(int(&a[0]) as f64)]),
         F64Text => Ok(vec![Val::Str(format!("{:?}", float(&a[0])).into())]),
         MoneyText => Ok(vec![Val::Str(show_dec(int(&a[0]), 2).into())]),
         StrShow => {
@@ -926,6 +943,19 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         }
         StrLower => Ok(vec![Val::Str(text(&a[0]).to_lowercase().into())]),
         SymEq => flag(matches!((&a[0], &a[1]), (Val::Name(x, _), Val::Name(y, _)) if x == y)),
+        StrToSym => Ok(vec![Val::Name(text(&a[0]).into(), Pos::default())]),
+        SymToStr => match &a[0] {
+            Val::Name(n, _) => Ok(vec![Val::Str(n.clone())]),
+            _ => unreachable!("a symbol"),
+        },
+        SymShow => match &a[0] {
+            Val::Name(n, _) => {
+                let mut out = String::new();
+                crate::show::symbol(n, &mut out);
+                Ok(vec![Val::Str(out.into())])
+            }
+            _ => unreachable!("a symbol"),
+        },
         StrSnake => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Snake).into())]),
         StrKebab => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Kebab).into())]),
         StrCamel => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Camel).into())]),

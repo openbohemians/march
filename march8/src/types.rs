@@ -21,7 +21,8 @@ pub enum Base {
     DecLit,
     /// The type of a type: `i64` unapplied is a value of this type.
     Type,
-    /// The type of a name not yet applied, a symbol: `sym`.
+    /// The type of a name not yet applied, a symbol: `sym`. At run time a
+    /// symbol is its name, an interned string.
     Symbol,
     /// The type of a quotation, `[ … ]`.
     Quote,
@@ -148,7 +149,7 @@ impl Types {
     }
     /// Whether a value of this type exists only at compile time.
     pub fn compile_time_only(&self, t: Type) -> bool {
-        matches!(t, INT_LIT | DEC_LIT | TYPE | SYMBOL | QUOTE)
+        matches!(t, INT_LIT | DEC_LIT | TYPE | QUOTE)
     }
     /// Whether `t` is a pattern rather than one type: it has a variable or a
     /// class, `atom` or a union.

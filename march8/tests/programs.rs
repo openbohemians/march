@@ -40,7 +40,8 @@ fn word_frequencies() {
 
 #[test]
 fn a_door_is_a_state_machine() {
-    assert_eq!(example("door.march", ""), "<1> true\n");
+    // Run while compiling, then on events made symbols as it runs.
+    assert_eq!(example("door.march", ""), "<2> Locked Closed\n");
     // A transition the table lacks is no word, while compiling.
     let mut s = Session::new();
     let src = include_str!("../examples/door.march");

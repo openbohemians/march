@@ -330,6 +330,16 @@ fn text_words() {
 }
 
 #[test]
+fn an_i64_converts_to_an_f64() {
+    // Now or at run time. An f64 has no conversion to i64, since narrowing
+    // says how it rounds.
+    assert_eq!(show(&["12 i64! f64!"]), "<1> 12.0");
+    assert_eq!(show(&["12 i64!", "f64!"]), "<1> 12.0");
+    assert_eq!(show(&["2.7 f64! round"]), "<1> 3");
+    assert_eq!(session(&["2.5 f64! i64!"]).err(), Some(Kind::Mismatch));
+}
+
+#[test]
 fn a_string_converts_to_the_number_it_writes() {
     // Parsing is converting (Thomas, 2026-10-13). A known string is
     // converted now: the value, or nil.

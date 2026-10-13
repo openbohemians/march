@@ -619,13 +619,17 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     and `or` being min and max, the same engine is fuzzy, 3.9); or facts as
     data, an array of triples, rules applied until nothing new comes,
     Datalog, which gives every answer, `x Is Mortal all`. The first needs a
-    word that makes a clause from symbols, and recursion on symbols
-    (16); the second known arrays
-    in the stage and symbols at run time.
+    word that makes a clause from symbols; the second known arrays in the
+    stage. Both have symbols at run time and recursion on them (16).
 16. **Recursion on symbols.** A family that applies itself is compiled as a
-    word of its own, an instance, whose inputs are values at run time; a
-    symbol has none, so a family cannot recurse on symbols. With its inputs
-    known, it should unfold while compiling, under the depth limit.
+    word of its own, an instance, whose inputs are values at run time. A
+    symbol is one now (2026-10-13), its name as an interned string, so a
+    family recurses on symbols as on numbers, testing them as it runs:
+    march8/examples/syllogism.march. Open: with its inputs known, a
+    recursion could unfold while compiling, under the depth limit, so that
+    `Socrates Mortal is` folds to true, as `10 fact` might to 3628800;
+    where it stops, when a known recursion is too deep or too wide to
+    unfold, is the question.
 
 ## 4. A way to build it (proposal)
 

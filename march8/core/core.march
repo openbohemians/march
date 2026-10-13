@@ -30,6 +30,17 @@ bool: [ < int# -- bool > int#>bool ] def
 i64: [ < string -- i64 nil or > string>i64 ] def
 f64: [ < string -- f64 nil or > string>f64 ] def
 
+-- An i64 converts to the f64 nearest it, `12 i64! f64!`. An f64 has no
+-- conversion to i64: narrowing says how it rounds, `floor`, `round`.
+
+f64: [ < i64 -- f64 > i64>f64 ] def
+
+-- A symbol is a value at run time too: its name, which a string converts
+-- to and back. `"Open" sym!` is Open, and `Open string!` is "Open".
+
+sym: [ < string -- sym > string>sym ] def
+string: [ < sym -- string > sym>string ] def
+
 -- Truth (Thomas, 2026-10-09): `bool` is 0 and 1, Iverson's brackets, and so
 -- an i64 too: `mask +' reduce` counts. Comparisons leave one, and guards
 -- take one. `not`, `and` and `or` are 1 - x, the minimum and the maximum,
@@ -429,6 +440,7 @@ show: [ < money -- string > money>text ] def
 show: [ < nil -- string > drop "nil" ] def
 show: [ < 1 bool! -- string > drop "true" ] def
 show: [ < bool -- string > drop "false" ] def
+show: [ < sym -- string > sym-show ] def
 show: [ < tuple -- string > [ show ] map "(" swap [ " " swap concat concat ] each " )" concat ] def
 show: [ < a ary -- string > "(" swap [ show " " swap concat concat ] each " )" concat ] def
 show: [ < k v map -- string >

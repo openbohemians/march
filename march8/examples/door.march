@@ -1,5 +1,5 @@
 -- A door as a state machine: a state and an event make the next state.
--- The states and events are symbols, known while compiling, so the machine
+-- The states and events are symbols. Known while compiling, the machine
 -- runs while compiling, and a transition the table lacks is a compile
 -- error: `Locked Open door` is no word `door` for Locked Open.
 
@@ -8,4 +8,10 @@ door: [ < Opened Close > drop drop Closed ] def
 door: [ < Closed Lock > drop drop Locked ] def
 door: [ < Locked Unlock > drop drop Closed ] def
 
-Closed Open door Close door Lock door Locked eq?
+Closed Open door Close door Lock door
+
+-- Symbols are values at run time too. Events read as text become symbols,
+-- `"Open" sym!`, as the program runs, and the table is tested then: an
+-- event the table lacks for the state stops the program.
+
+"Unlock Open Close" words [ sym! ] map Locked [ door ] fold

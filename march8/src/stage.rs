@@ -111,7 +111,11 @@ impl PartialEq for Test {
             (Test::Quote(a), Test::Quote(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.tok == y.tok)
             }
-            (Test::Equals(a), Test::Equals(b)) => a == b,
+            // A symbol by its name, not where it was written.
+            (Test::Equals(a), Test::Equals(b)) => match (&a.val, &b.val) {
+                (Val::Name(x, _), Val::Name(y, _)) => a.ty == b.ty && x == y,
+                _ => a == b,
+            },
             _ => false,
         }
     }
@@ -729,6 +733,12 @@ impl Stage {
                 self.depth -= 1;
                 r
             }
+            // Which word a name applies is chosen while compiling.
+            Val::Run if f.ty == SYMBOL => Err(self.err(
+                Kind::Mismatch,
+                "a symbol known only at run time cannot be applied: \
+                 the word a name applies is chosen while compiling",
+            )),
             _ => Err(self.err(
                 Kind::Mismatch,
                 format!("{} cannot be applied", self.describe(&f)),
@@ -901,10 +911,11 @@ impl Stage {
         let mut out = top
             .iter()
             .map(|j| match &j.val {
-                Val::Name(s, _) if j.ty == SYMBOL && s.starts_with(char::is_uppercase) => {
-                    s.to_string()
+                Val::Name(s, _) if j.ty == SYMBOL => {
+                    let mut out = String::new();
+                    crate::show::symbol(s, &mut out);
+                    out
                 }
-                Val::Name(s, _) if j.ty == SYMBOL => format!("{s}'"),
                 _ => self.types.name(j.ty),
             })
             .collect::<Vec<_>>()
@@ -1514,8 +1525,18 @@ impl Stage {
                     ),
                 ));
             } else {
+                // The trap leaves its message beneath its code, for the
+                // session to report.
+                let msg = format!(
+                    "no word `{name}` for {}: no clause's guard holds",
+                    self.top_types(arity)
+                );
                 alts.push(Some(Alt {
-                    code: vec![Ins::Op(Op::Lit(1)), Ins::Op(Op::Prim(P::Trap))],
+                    code: vec![
+                        Ins::Str(msg.into()),
+                        Ins::Op(Op::Lit(1)),
+                        Ins::Op(Op::Prim(P::Trap)),
+                    ],
                     stack: None,
                     skip: None,
                 }));
@@ -2961,7 +2982,9 @@ impl Stage {
         let ins = match &self.stack[i].val {
             Val::Int(n) => Ins::Op(Op::Lit(*n as i64 as u64)),
             Val::Float(x) => Ins::Op(Op::Float(float_bits(*x))),
-            Val::Str(s) => Ins::Str(s.clone()),
+            // A symbol is its name, an interned string, so symbols compare
+            // by identity.
+            Val::Str(s) | Val::Name(s, _) => Ins::Str(s.clone()),
             _ => {
                 return Err(self.err(
                     Kind::Mismatch,

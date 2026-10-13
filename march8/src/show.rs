@@ -2,6 +2,8 @@
 
 use crate::machine::Machine;
 use crate::prims::show_dec;
+use crate::read::{Tok, read};
+use crate::symbols::Symbols;
 use crate::types::{Base, Term, Type, Types};
 
 /// Elements shown of a collection, before the count of the rest.
@@ -26,6 +28,11 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
         Term::Base(Base::String) => match m.text(v).ok().and_then(|t| t.to_text()) {
             Some(s) => quoted(&s, out),
             None => out.push_str(&format!("<string {v}>")),
+        },
+        // A symbol by its name, as it is spelled: `Locked`, `x'`.
+        Term::Base(Base::Symbol) => match m.text(v).ok().and_then(|t| t.to_text()) {
+            Some(s) => symbol(&s, out),
+            None => out.push_str(&format!("<sym {v}>")),
         },
         Term::Ary(e) | Term::Vec(_, e) => {
             let Ok(seq) = m.sequence(v) else {
@@ -92,6 +99,25 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
             out.push_str(" }");
         }
         _ => out.push_str(&(v as i64).to_string()),
+    }
+}
+
+/// A symbol as March reads it back: a capitalized name as it is, any other
+/// name with a prime, `x'`, and text that is no name as a string made a
+/// symbol, `"two words" sym!`.
+pub fn symbol(s: &str, out: &mut String) {
+    let reads = |spelled: &str| {
+        let none = Symbols::parse("").expect("an empty table");
+        matches!(read(spelled, &none).as_deref(), Ok([t]) if t.tok == Tok::Name(s.into()))
+    };
+    if s.starts_with(char::is_uppercase) && reads(s) {
+        out.push_str(s);
+    } else if reads(&format!("{s}'")) {
+        out.push_str(s);
+        out.push('\'');
+    } else {
+        quoted(s, out);
+        out.push_str(" sym!");
     }
 }
 

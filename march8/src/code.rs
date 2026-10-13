@@ -218,6 +218,9 @@ pub enum Primitive {
     Kebab = 121,
     Camel = 122,
     Pascal = 123,
+    // ( sym -- s ) A symbol as March reads it back: `Locked`, `x'`, or
+    // `"two words" sym!`.
+    SymShow = 124,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -345,6 +348,7 @@ impl Primitive {
         (Self::Kebab, "kebab-case"),
         (Self::Camel, "camel-case"),
         (Self::Pascal, "pascal-case"),
+        (Self::SymShow, "symbol-show"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

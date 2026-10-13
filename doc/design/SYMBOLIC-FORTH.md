@@ -137,19 +137,28 @@ Settled (Thomas, 2026-10-13):
    structures a value by a type; it needs no meta-operator of its own.
    Built: `2 i64 convert .` is `2 i64 !`.
 
+Built since:
+
+4. **Symbols at run time** (2026-10-13). A symbol is a value while a
+   program runs too, its name, which march8 keeps as an interned string,
+   so symbols compare and key maps by identity, and a family applies itself
+   to them: `3 dup` leaves 3 and the symbol `dup`, and `"Open" sym!` makes
+   a symbol from data. Applying one is choosing a word, which is done while
+   compiling, so `.` applies a known symbol only.
+
 Open:
 
-4. **Comments and `--`.** A comment runs from `--` to the line's end,
+5. **Comments and `--`.** A comment runs from `--` to the line's end,
    except in a bracket, where `--` divides inputs from outputs, which
    leaves no comment inside a bracket (Thomas is thinking on it).
-5. **Namespaces.** A namespace is a map, so an ordered set of pairs, and
+6. **Namespaces.** A namespace is a map, so an ordered set of pairs, and
    may need no notation of its own: only a way to confine `.` to a
    namespace, which may well be a mode of the system (Thomas). Meanwhile a
    dot inside a word divides a path, `io.file.read` (TYPES.md 3.12).
-6. **Quotations and ordered sets.** Joy has one thing, a list, which `i`
+7. **Quotations and ordered sets.** Joy has one thing, a list, which `i`
    applies; here `[ … ]` and `( … )` may be one ordered set, applied by
    `.`, and `< … >` built from words, as FORTH builds `:` and `;`.
-7. **Symbols at run time.** Programs of symbols alone, a state machine or
-   facts and rules, run while compiling today: a symbol cannot be left for
-   run time (DOTS.md, finding 3), nor can a family that applies itself
-   take symbols (TYPES.md 3.16).
+8. **Symbols applied at run time.** A symbol known only as the program
+   runs names a word that is not chosen yet. Applying one would take the
+   words themselves at run time, a dictionary as FORTH has, or a choice
+   among the words a symbol's type allows.

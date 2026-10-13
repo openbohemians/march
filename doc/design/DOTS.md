@@ -438,20 +438,27 @@ Zeus Is Mortal ask
    compiling, so `is` couldn't call itself. The facts had to become a
    separate family, `known`. With known symbols, such a family should
    unfold while compiling, under the depth limit. The logic notation needs
-   this first. *Since:* open, TYPES.md 3.16.
+   this first. *Since:* a symbol is a value at run time, so a family
+   applies itself to symbols as to numbers, compiled as a word that tests
+   them as it runs; the syllogism is one family, `is`. Unfolding a
+   recursion on known inputs is still open, TYPES.md 3.16.
 2. **Whole programs fold.** The door machine compiles to `true` and the
    syllogism to three constants. The machine and the logic run entirely
-   while compiling.
+   while compiling. *Since:* the syllogism runs: its rule applies `is`
+   again, which makes `is` a word of its own (finding 1).
 3. **A symbol can't be left for run time.** The door ends with `locked
    eq?.` because a final state left on the stack has no run-time value.
-   Showing one needs `show` for symbols. *Since:* still so; the example
-   ends with `Locked eq?`.
+   Showing one needs `show` for symbols. *Since:* a symbol is its name at
+   run time, an interned string, and shows as it reads back; the door ends
+   with `Locked`, and runs a second time on events made symbols from text,
+   `"Open" sym!`.
 4. **The door's error is vague.** It says ``no word `door` for sym sym: no
    clause's guard holds``. It should name the symbols: ``no clause of
    `door` for locked open``. *Since:* fixed in 0a80aba; it says ``no word
    `door` for Locked Open``.
 5. **There's no conversion from i64 to f64,** so the summary's `count` adds
-   up ones. *Since:* still none.
+   up ones. *Since:* there is, `12 i64! f64!`, a clause under `f64`, and the
+   summary divides by `length f64!`.
 6. **In C, a type passed as an argument takes a prime:** `f64' parse`. It
    could also be written `< f64 > parse`. *Since:* `parse` is gone; a string
    converts as a literal does, `[ f64! ] map` (TYPES.md 2.2).

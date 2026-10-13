@@ -105,6 +105,11 @@ fn symbolic_forth_runs() {
     s.eval("sq [ dup . * . ] def . 3 sq . 2.5 sq . 2 f64 ! \"42\" i64 !")
         .unwrap();
     assert_eq!(s.show(), "<4> 9 6.25 2.0 42");
+    // `!` is `!! .`: the word that structures a value by a type, applied.
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval("7 i64 !! . 7 f64 !").unwrap();
+    assert_eq!(s.show_typed(), "<2> 7 < i64 > 7.0 < f64 >");
     // There, nothing applies unless a dot says so: a name is a symbol, and
     // one left at the end has no value at run time.
     let mut s = Session::new();

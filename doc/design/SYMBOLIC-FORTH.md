@@ -8,15 +8,24 @@ test (section 5).
 
 ## 1. What it is
 
-Everything in Symbolic Forth is a number, a symbol, `.` or `!`:
+Everything in Symbolic Forth is a symbol, an ordered set of symbols, or
+`.` (Thomas, 2026-10-13):
 
-- **A number** is a literal, unstructured until something structures it:
-  `2` is a number before it is an i64.
-- **A symbol** is any name. A name means nothing until it is applied:
-  `dup` is the symbol `dup`, and so is `Snake`.
+- **A symbol** is a name, `dup`, `Snake`; a number, `2`, a literal no type
+  has structured yet; or, quoted, a symbol with spaces in it, `'this is
+  one symbol'`, which is what text is before a type structures it. A
+  symbol means nothing until it is applied.
+- **An ordered set of symbols**, `( … )`, an "array" only in quotes:
+  nothing here is a data structure, and structure comes only with types.
+  A map is no fundamental of its own, but an ordered set of pairs read as
+  keys and values. A quotation, `[ … ]`, holds code the same way.
 - **`.` applies** the value on top: a symbol, the word its name is defined
   as; a quotation, evaluated.
-- **`!` converts** the value below by the type on top: `2 i64 !`.
+
+And one convenience, so close to the fundamentals that the distinction is
+not worth fretting over: **`!`**, which is `!! .`, the primitive word `!!`
+applied. It structures the value below by the type on top, a number
+symbol into a concrete i64, say: `2 i64 !! .`, written `2 i64 !`.
 
 ```
 1 i64 ! 1 i64 ! + .
@@ -45,9 +54,9 @@ it ever shown, but it never is, since every type is given by a word: even
 So types need no spelling of their own, and types and words are one
 namespace.
 
-A type is data, and is not called. Converting is applying another word,
-`2 i64 . convert .`, which `!` shortens: `2 i64 !` (`convert` takes a type,
-or a type's symbol). A type converts a literal by the clauses under its
+A type is data, and is not called. Structuring a value by it is applying
+another word, `!!`: `2 i64 . !! .`, or, since `!!` takes a type's symbol
+too, `2 i64 !! .`, which `!` shortens to `2 i64 !`. A type converts a literal by the clauses under its
 name, a string by the number it writes, `"42" i64 !` being 42 or nil; a
 class checks, `x num !`; a signature gives several values their types, `x
 y < i64 . f64 . > !`. Which mark calls and which converts is only a
@@ -55,17 +64,22 @@ choice: `!` would serve as well for calling, a command (Thomas).
 
 ## 3. Structure
 
+What march8 has today, beyond symbols and `.`:
+
 - **`[ … ]`** is a quotation: its words, unevaluated.
 - **`( … )` and `{ … }`** are an array and a map literal, collecting what
-  their code leaves.
+  their code leaves. In the lowest form the first is the ordered set, and
+  the second a set of pairs (section 1).
 - **`< … >`** is a bracket: code run while compiling, whose values are a
   type or a signature, `< string . i64 . map . k >`. `--` divides inputs
   from outputs. First in a definition's quotation it is the clause's
   context.
-- **`"…"`** is a string, a literal, with holes of code: `"\[ _ . ] apples"`.
+- **`"…"`** is a string, with holes of code: `"\[ _ . ] apples"`. In the
+  lowest form text is a quoted symbol, `'…'`, which a type structures; the
+  holes are code that builds one.
 
-Inside each, the code is Symbolic Forth too. Whether these belong to the
-lowest form or are structure built from numbers and symbols is open
+Inside each, the code is Symbolic Forth too. Which of these are
+fundamental and which are words over the fundamentals is still open
 (section 6).
 
 ## 4. The intermediate form
@@ -83,7 +97,7 @@ symbols, so a name applies by itself and a symbol is spelled as one
 | `fib:` | `fib` | a label is a symbol |
 | `a` | `a` | one lowercase letter is a variable |
 | `[ 2 + ].` | `[ 2 + . ] .` | a dot at a word's end applies once more |
-| `2 i64!` | `2 i64 . !` | `!` converts |
+| `2 i64!` | `2 i64 . !` | `!` structures by a type: `!! .` |
 | `"\_ apples"` | `"\[ _ . ] apples"` | a hole's input |
 
 ```
@@ -106,21 +120,32 @@ lowers the core vocabulary and the examples, reads them back to the same
 tokens, and runs the examples lowered to the same results. Code as data
 is this form: what a program builds as code, it builds in Symbolic Forth.
 
-## 6. Open, toward a specification
+## 6. Toward a specification
 
-1. **Strings.** A literal, as a number is, or structure, text built from
-   numbers (`utf8 str`)?
-2. **Brackets.** Part of the lowest form, or words over it? FORTH builds
-   its own from words, `:` and `;`, `[` and `]`.
-3. **`!`.** A meta-operator in its own right, or only `convert .`?
-   Lowering writes `2 i64 . !` where `2 i64 !` would do, since `convert`
-   takes a type's symbol.
+Settled (Thomas, 2026-10-13):
+
+1. **Text** is a symbol that may hold white space, written quoted, `'this
+   is symbols with spaces in it'`, and a type structures it into a
+   string. An ordered set of code points would do too, but that is the
+   long way round. March8 does not have it yet: there `'…'` is a raw
+   string, and lowering writes strings as strings.
+2. **Maps** are ordered sets of pairs, not a fundamental.
+3. **`!`** is `!! .`, a convenience over the primitive `!!`, which
+   structures a value by a type. Built: `2 i64 !! .` is `2 i64 !`.
+
+Open:
+
 4. **Comments and `--`.** A comment runs from `--` to the line's end,
    except in a bracket, where `--` divides inputs from outputs, which
-   leaves no comment inside a bracket.
-5. **Symbols at run time.** Programs of symbols alone, a state machine or
+   leaves no comment inside a bracket (Thomas is thinking on it).
+5. **Namespaces.** A namespace is a map, so an ordered set of pairs, and
+   may need no notation of its own: only a way to confine `.` to a
+   namespace, which may well be a mode of the system (Thomas). Meanwhile a
+   dot inside a word divides a path, `io.file.read` (TYPES.md 3.12).
+6. **Quotations and ordered sets.** Joy has one thing, a list, which `i`
+   applies; here `[ … ]` and `( … )` may be one ordered set, applied by
+   `.`, and `< … >` built from words, as FORTH builds `:` and `;`.
+7. **Symbols at run time.** Programs of symbols alone, a state machine or
    facts and rules, run while compiling today: a symbol cannot be left for
    run time (DOTS.md, finding 3), nor can a family that applies itself
    take symbols (TYPES.md 3.16).
-6. **Namespaces.** A dot inside a word divides a path, `io.file.read`
-   (TYPES.md 3.12): in Symbolic Forth a symbol with dots, applied whole.

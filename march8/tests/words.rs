@@ -53,7 +53,7 @@ fn roots_and_powers() {
     // Integer powers are checked: two literals' power is exact, and too
     // large only when it must be an i64; at run time, an overflow.
     assert_eq!(session(&["2 64 pow"]).err(), Some(Kind::Literal));
-    assert_eq!(session(&["2 i64. 64 pow"]).err(), Some(Kind::Arithmetic));
+    assert_eq!(session(&["2 i64! 64 pow"]).err(), Some(Kind::Arithmetic));
     assert_eq!(
         session(&["2", "64 pow"]).err(),
         Some(Kind::Run(march8::machine::Error::Arithmetic))
@@ -223,9 +223,9 @@ fn an_inverse_is_a_word() {
     // `^` is power; `⋅` is `*`'s glyph.
     assert_eq!(show(&["2 10 ^ 3 4 ⋅"]), "<2> 1024 12");
     // An integer has no reciprocal among the integers: its division is `div`.
-    assert_eq!(session(&["7 i64.", "/"]).err(), Some(Kind::NoWord));
+    assert_eq!(session(&["7 i64!", "/"]).err(), Some(Kind::NoWord));
     assert_eq!(
-        session(&["-9223372036854775807 i64. 1 -+", "-"]).err(),
+        session(&["-9223372036854775807 i64! 1 -+", "-"]).err(),
         Some(Kind::Run(march8::machine::Error::Arithmetic))
     );
 }
@@ -334,16 +334,16 @@ fn a_string_converts_to_the_number_it_writes() {
     // Parsing is converting (Thomas, 2026-10-13). A known string is
     // converted now: the value, or nil.
     let mut s = Session::new();
-    s.eval("\"42\" i64. \" 2.5 \" f64. \"x\" i64.").unwrap();
+    s.eval("\"42\" i64! \" 2.5 \" f64! \"x\" i64!").unwrap();
     assert_eq!(s.show_typed(), "<3> 42 < i64 > 2.5 < f64 > nil < nil >");
     // At run time, `i64 nil or`, for clauses to take apart.
     let n = "nn: [ < i64 > ] def nn: [ < nil > drop 0 ] def";
     assert_eq!(
-        show(&[n, "\"42\" \"nope\"", "i64. nn swap i64. nn"]),
+        show(&[n, "\"42\" \"nope\"", "i64! nn swap i64! nn"]),
         "<2> 0 42"
     );
     // A type with no clause for strings converts none, and `parse` is gone.
-    assert_eq!(session(&["\"1\" money."]).err(), Some(Kind::Mismatch));
+    assert_eq!(session(&["\"1\" money!"]).err(), Some(Kind::Mismatch));
     assert_eq!(session(&["\"1\" i64 parse"]).err(), Some(Kind::NoWord));
 }
 

@@ -36,8 +36,19 @@ runs to the end of the line, except inside `< >`. The notation was decided
 on 2026-10-12 (Thomas), after a comparison of the same programs written
 with a dot after every name applied and without (doc/design/DOTS.md): a
 name applies, as in FORTH, in code and in a bracket alike, and a symbol or
-a variable is spelled as one. With definitions naming first, this is the
-notation SURFACE.md was to give, so nothing lowers to it.
+a variable is spelled as one.
+
+It is an **intermediate form** (Thomas, 2026-10-13). Below it is Symbolic
+Forth, where everything is a number, a symbol, `.` or `!` (TYPES.md 2.2,
+doc/design/SYMBOLIC-FORTH.md):
+every name a symbol until `.` applies it, a type given by applying its
+word, `i64 .`, and converting the meta-operator `!`, `convert` applied,
+which takes a type or a type's symbol, `2 i64 !`. March8 reads the
+intermediate form and lowers it by spelling alone: `fib` is `fib .`,
+`Snake` and `+'` are symbols, and `2 i64!` is `2 i64 . !`. `march8 lower`
+writes any March in Symbolic Forth, and `--symbolic` reads it; the litmus
+test, `tests/symbolic.rs`, lowers the core vocabulary and the examples,
+reads them back to the same tokens, and runs them to the same results.
 
 | Form | What it is |
 |---|---|
@@ -50,7 +61,8 @@ notation SURFACE.md was to give, so nothing lowers to it.
 | `name:` | a label: the symbol `name`, written where a name is defined or a key given |
 | `name'` | the symbol `name`, for a word passed rather than applied, `+' reduce`, or a script without capitals |
 | `\name` | a symbol table entry, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
-| `.` | applies the value on top; each dot at the end of a word applies once more: `[ 2 + ].`, `2 i64.` |
+| `.` | applies the value on top, a word or a quotation; each dot at the end of a word applies once more: `[ 2 + ].` |
+| `!` | converts the value below by the type on top, `convert` applied: `2 i64!`, `x y < i64 f64 > !` (Thomas, 2026-10-13) |
 | `a.b` | one word: a dot inside a word is part of it, a number's point, `2.5`, or in a name a path in a namespace, `io.file.read` (TYPES.md 3.12), kept for namespaces and defining no word yet. Dots between names once chained them, `a.b.` for `a. b.` (2026-10-09), which left no spelling for a path (Thomas, 2026-10-10) |
 | `[ … ]` | a quotation: its words, unevaluated |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
@@ -72,19 +84,19 @@ than it passes symbols, and symbols are what a state machine's states, a
 style for `case` or a logic program's atoms are made of, so they read
 without marks.
 
-**`.` applies** whatever is on top:
-
-- a **symbol** means what its name is defined as;
-- a **type** converts the value below to it: `2 i64.`, `x 100 i64 vec .`;
-  a class or a type with variables checks it: `x num.`;
-- a **signature**, a bracket of more than one type, gives the values below
-  those types, the deepest first: `x y < i64 f64 > .`;
-- a **quotation** is evaluated: `[ 2 + ].`.
+**`.` calls** what is on top: a **symbol**, the word its name is defined
+as, or a **quotation**, evaluated: `[ 2 + ].`. Nothing else is called.
 
 **A type is a value**, given by its name or built: `string i64 map
-empty`. No bracket is needed for one in code. Applied, it converts, and
-parsing is converting: `"42" i64.` is 42, or nil for a string that writes
-no number (Thomas, 2026-10-13).
+empty`. No bracket is needed for one in code. A type is data, and is not
+called (Thomas, 2026-10-13); **`!` converts** by it:
+
+- a **type** converts the value below to it: `2 i64!`, `x 100 i64 vec !`;
+  parsing is converting, `"42" i64!` being 42, or nil for a string that
+  writes no number;
+- a **class** or a type with variables checks it: `x num!`;
+- a **signature**, a bracket of more than one type, gives the values below
+  those types, the deepest first: `x y < i64 f64 > !`.
 
 **A bracket is code** (TYPES.md 2.2), read as any code is; what its code
 leaves is the signature, by what each value is:
@@ -94,7 +106,7 @@ case: [ < string Camel > … ] def        a string, and the symbol Camel
 at: [ < a ary i64 -- a > … ] def        one letter is a type variable
 sign: [ < i64 positive? > … ] def       a word ending in ? leaves a bool: a guard
 even: [ < i64 [ 2 mod zero? ] > … ] def     any quotation left is one too
-fib: [ < 0 > … ] def    [ < 0 i64. > … ]    [ < true > … ]    a value left: equal to it
+fib: [ < 0 > … ] def    [ < 0 i64! > … ]    [ < true > … ]    a value left: equal to it
 pair: [ < ( i64 string ) > … ] def      an array of types: a tuple type
 ```
 
@@ -106,8 +118,8 @@ bracket means: a symbol is never a type. Reading a signature takes knowing
 what a constructor takes, `< k i64 map k >` being a map and a key, as
 reading any FORTH does. The code runs while compiling, so it leaves only
 known values. First in a definition's quotation, a bracket is the clause's
-context. Anywhere else it is a value, so `[ < f64 > . ] map` converts each
-element, as `[ f64. ] map` does.
+context. Anywhere else it is a value, so `[ < f64 > ! ] map` converts each
+element, as `[ f64! ] map` does.
 
 **A definition is data:** a name, what it names, and `def` (Thomas,
 2026-10-12): `inc: [ < i64 -- i64 > 1 + ] def`. The name comes first, and
@@ -278,7 +290,7 @@ fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def
   step, and `0 fib` is the literal 0.
 - **An untyped value matches an input of any type it becomes,** compared in
   that type: `< 0 >` takes an i64, an f64 or money, and `< 0.5 >` an f64.
-  The input keeps its own type. `< 0 i64. >` takes an i64 only, as `0 i64.`
+  The input keeps its own type. `< 0 i64! >` takes an i64 only, as `0 i64!`
   is an i64 in code.
 - **Strings too:** `< "quit" >`.
 - **Inside its clause the input is known to equal the value:** it is
@@ -346,9 +358,9 @@ i64: [ < int# -- i64 > int#>i64 ] def
 money: [ < dec# -- money > dec#>money ] def
 ```
 
-Applying the type to a literal, `2 i64.`, converts it by this clause, and
-so does a clause that wants the type and is given the literal. Applying the
-name gives the type itself; its clauses are only its conversions. So literal handling is
+Converting a literal by the type, `2 i64!`, runs this clause, and so does
+a clause that wants the type and is given the literal. Applying the name
+gives the type itself; its clauses are only its conversions. So literal handling is
 an open family, as Thomas framed it ("just another type signature"). Two
 literals fold by clauses on the literal types, `< int# int# -- int# >`,
 exactly, and stay literals, so `1 2 + 3.5 +` is the decimal 6.5. A
@@ -671,7 +683,7 @@ from a to b, both included, counting down when a is the larger, its glyph
 and `⊤` and `⊥` for `true` and `false`. Text: `split` at a separator
 (between characters, for ""), `lines`, `words` at white space, as
 Haskell's are, and `lower` and `upper`, element by element over arrays of
-strings. A string converts to the number it writes, `"42" i64.`, by
+strings. A string converts to the number it writes, `"42" i64!`, by
 clauses for strings under `i64` and `f64`: `i64 nil or`, the value tagged
 at run time or nil, and on a known string the value or nil itself. `le?`, `ge?` and `neq?`, with
 `≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that

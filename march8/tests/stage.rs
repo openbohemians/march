@@ -43,7 +43,7 @@ fn literals_fold_and_default() {
     assert_eq!(show("-2.5 1 +"), "<1> -1.5");
     assert_eq!(code("", "1 2 + 3.5 +"), code("", "6.5"));
     // Applying a type annotates: these literals are i64 before `+` sees them.
-    assert_eq!(run("1 i64. 1 i64. +").unwrap(), [2]);
+    assert_eq!(run("1 i64! 1 i64! +").unwrap(), [2]);
 }
 
 #[test]
@@ -51,10 +51,10 @@ fn a_name_applies_and_a_dot_applies_once_more() {
     // `sq` is `sq' .`, the symbol applied; a dot at the end of a word
     // applies what it left, `[ 1 + ].` as `[ 1 + ] .`.
     assert_eq!(
-        code("sq: [ dup * ] def", "3 sq 2.5 sq 4 [ 1 + ]. 1 i64. +"),
+        code("sq: [ dup * ] def", "3 sq 2.5 sq 4 [ 1 + ]. 1 i64! +"),
         code(
             "sq: [ dup * ] def",
-            "3 sq' . 2.5 sq' . 4 [ 1 + ] . 1 i64. +"
+            "3 sq' . 2.5 sq' . 4 [ 1 + ] . 1 i64! +"
         )
     );
     assert_eq!(
@@ -88,8 +88,8 @@ fn literals_take_their_type_from_context() {
         [2109]
     );
     assert_eq!(show("fee: [ < money > 1.10 + ] def 19.99 fee"), "<1> 21.09");
-    assert_eq!(run("19.99 money.").unwrap(), [1999]);
-    assert_eq!(run("19.99 money. 1 +").unwrap(), [2099]);
+    assert_eq!(run("19.99 money!").unwrap(), [1999]);
+    assert_eq!(run("19.99 money! 1 +").unwrap(), [2099]);
     // Overflow is found at compile time when the values are known, and at
     // run time when they are not.
     assert_eq!(
@@ -116,7 +116,7 @@ fn impossible_types_are_compile_errors() {
     // whose signature types its inputs is compiled where it is defined.
     assert_eq!(fails("bb: [ < money > 1.105 + ] def"), Kind::Literal);
     // A decimal literal is never an integer.
-    assert_eq!(fails("1.5 i64."), Kind::Literal);
+    assert_eq!(fails("1.5 i64!"), Kind::Literal);
     assert_eq!(fails("bb: [ < i64 > 1.5 + ] def"), Kind::NoWord);
     // No implicit promotion between types: no clause is no word.
     assert_eq!(fails("bb: [ < i64 f64 > + ] def"), Kind::NoWord);
@@ -170,25 +170,25 @@ fn words_are_evaluated_for_each_use() {
 fn brackets_annotate_and_stack_words_move_judgments() {
     // A bracket after values types them, the deepest first.
     assert_eq!(
-        run("mm: [ 1 2 < money money > . + ] def mm").unwrap(),
+        run("mm: [ 1 2 < money money > ! + ] def mm").unwrap(),
         [300]
     );
-    assert_eq!(fails("1 2 < money i64 > . +"), Kind::NoWord);
+    assert_eq!(fails("1 2 < money i64 > ! +"), Kind::NoWord);
     assert_eq!(run("ss: [ < i64 > 10 swap -+ ] def 3 ss").unwrap(), [7]);
     // A literal dropped leaves no code.
     assert_eq!(code("kk: [ 1 2 drop ] def", "kk"), code("", "1"));
     // `dup` copies a literal as a literal, so `1.5 dup +` folds exactly.
     assert_eq!(show("1.5 dup +"), "<1> 3.0");
     // Products of decimals stay exact: 1.10 × 1.10 is 1.2100, 121 cents.
-    assert_eq!(run("1.10 1.10 * money.").unwrap(), [121]);
+    assert_eq!(run("1.10 1.10 * money!").unwrap(), [121]);
     assert_eq!(show("aa: [ < f64 f64 > * ] def 2.0 3.5 aa"), "<1> 7.0");
     assert_eq!(run("10 3 -+").unwrap(), [7]);
     // Money is added, not multiplied.
     assert_eq!(fails("bb: [ < money money > * ] def"), Kind::NoWord);
     // Types are values: `.` builds them and applies them.
-    assert_eq!(run("( 7 8 9 ) < 3 i64 vec > . length").unwrap(), [3]);
-    assert_eq!(fails("( 7 8 9 ) < 4 i64 vec > ."), Kind::Mismatch);
-    assert_eq!(show("( 7 8 9 ) < i64 ary > ."), "<1> ( 7 8 9 )");
+    assert_eq!(run("( 7 8 9 ) < 3 i64 vec > ! length").unwrap(), [3]);
+    assert_eq!(fails("( 7 8 9 ) < 4 i64 vec > !"), Kind::Mismatch);
+    assert_eq!(show("( 7 8 9 ) < i64 ary > !"), "<1> ( 7 8 9 )");
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn structured_types_follow_values_through_containers() {
     assert_eq!(show(&format!("{fl} {{ \"k\" ( 1.5 ) }} fl")), "<1> 2.5");
     let m = "mm: [ < string money map > \"fee\" at 1.10 + ] def";
     assert_eq!(
-        run(&format!("{m} {{ \"fee\" 19.99 money. }} mm")).unwrap(),
+        run(&format!("{m} {{ \"fee\" 19.99 money! }} mm")).unwrap(),
         [2109]
     );
     // Equal types built apart are one type; different ones do not mix.
@@ -305,7 +305,7 @@ fn clauses_are_chosen_by_types() {
     let fee = "fee: [ < money > 1.10 + ] def fee: [ < i64 > 1 + ] def";
     assert_eq!(run(&format!("{fee} 5 fee 5.5 fee")).unwrap(), [6, 660]);
     // A family with no clause for the values is no word.
-    assert_eq!(fails("inc: [ < f64 > 1 + ] def 1 i64. inc"), Kind::NoWord);
+    assert_eq!(fails("inc: [ < f64 > 1 + ] def 1 i64! inc"), Kind::NoWord);
     // A clause with the same inputs as one before replaces it.
     assert_eq!(
         run("ff: [ < i64 > 1 + ] def ff: [ < i64 > 2 + ] def 1 ff").unwrap(),
@@ -322,7 +322,7 @@ fn array_literals_share_one_type_or_are_tuples() {
     assert_eq!(fails("( )"), Kind::Mismatch);
     // Elements of different types are a tuple (doc/design/TYPES.md 2.5).
     assert_eq!(show("( 1 \"a\" )"), "<1> ( 1 \"a\" )");
-    assert_eq!(show("( 1 i64. \"a\" ) length"), "<1> 2");
+    assert_eq!(show("( 1 i64! \"a\" ) length"), "<1> 2");
     // An element may not take values from outside its literal.
     assert_eq!(fails("1 ( 2 + )"), Kind::Mismatch);
 }

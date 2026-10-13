@@ -119,7 +119,7 @@ fn an_array_is_wanted_so_positions_are_forgotten() {
         "<1> \"a\" < i64 string or >"
     );
     assert_eq!(
-        show(&["( 1 \"a\" ) < i64 string or ary > . [ show ] map"]),
+        show(&["( 1 \"a\" ) < i64 string or ary > ! [ show ] map"]),
         "<1> ( \"1\" \"\\\"a\\\"\" )"
     );
     // Only where the union fits: `sort` has no clause for it.
@@ -138,10 +138,10 @@ fn tuple_types_in_brackets() {
         show(&["mk: [ < -- ( i64 string ) > ( 1 \"a\" ) ] def mk 2 at"]),
         "<1> \"a\""
     );
-    assert_eq!(show(&["( 1 \"a\" ) < ( i64 string ) > . length"]), "<1> 2");
+    assert_eq!(show(&["( 1 \"a\" ) < ( i64 string ) > ! length"]), "<1> 2");
     assert_eq!(
-        session(&["( 1 2 ) < ( i64 string ) > ."]).err(),
+        session(&["( 1 2 ) < ( i64 string ) > !"]).err(),
         Some(Kind::Mismatch)
     );
-    assert_eq!(session(&["1 < ( ) > ."]).err(), Some(Kind::Mismatch));
+    assert_eq!(session(&["1 < ( ) > !"]).err(), Some(Kind::Mismatch));
 }

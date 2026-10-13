@@ -45,6 +45,23 @@ fn fmt_writes_symbols() {
 }
 
 #[test]
+fn lower_writes_symbolic_forth() {
+    // Every application a dot, and `!` converting (doc/design/TYPES.md 2.2).
+    assert_eq!(
+        march8(&["lower"], "sq: [ dup * ] def\n3 sq 2 f64!\n"),
+        "sq [ dup . * . ] def .\n3 sq . 2 f64 . !\n"
+    );
+    // And `--symbolic` runs it.
+    assert_eq!(
+        march8(
+            &["--symbolic", "--eval", "sq [ dup . * . ] def . 3 sq ."],
+            ""
+        ),
+        "<1> 9\n"
+    );
+}
+
+#[test]
 fn the_stack_with_its_types_reads_as_march() {
     let mut s = Session::new();
     s.eval("{ \"a\" ( 1.5 ) } 2").unwrap();

@@ -61,9 +61,12 @@ fn main() {
     }
 }
 
-const USAGE: &str = "usage: march8 [--fuel N] [--types] [--eval SOURCE | --code SOURCE | FILE]...
+const USAGE: &str =
+    "usage: march8 [--fuel N] [--types] [--symbolic] [--eval SOURCE | --code SOURCE | FILE]...
        march8                 a REPL, reading lines from the terminal or stdin
-       march8 fmt             rewrites `\\name` escapes as symbols, stdin to stdout";
+       march8 fmt             rewrites `\\name` escapes as symbols, stdin to stdout
+       march8 lower           writes March as Symbolic Forth, the lowest form, stdin to stdout
+       --symbolic             reads the sources after it as Symbolic Forth";
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1).peekable();
@@ -71,6 +74,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut source = String::new();
         std::io::Read::read_to_string(&mut std::io::stdin(), &mut source)?;
         print!("{}", march8::symbols::Symbols::standard().format(&source));
+        return Ok(());
+    }
+    if args.peek().map(String::as_str) == Some("lower") {
+        let mut source = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut source)?;
+        let toks = march8::read::read(&source, &march8::symbols::Symbols::standard())?;
+        println!("{}", march8::read::lower(&toks));
         return Ok(());
     }
     let mut s = Session::new();
@@ -84,6 +94,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--types" => {
                 types = true;
+                continue;
+            }
+            "--symbolic" => {
+                s.symbolic = true;
                 continue;
             }
             "--eval" => s.eval(&args.next().ok_or("missing source")?),

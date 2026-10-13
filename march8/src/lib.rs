@@ -36,6 +36,9 @@ pub struct Session {
     pub types: Vec<Type>,
     /// Steps a piece of source may run for.
     pub fuel: u64,
+    /// Whether source is Symbolic Forth, the lowest form, rather than the
+    /// intermediate form (doc/design/TYPES.md 2.2).
+    pub symbolic: bool,
 }
 
 impl Default for Session {
@@ -62,6 +65,7 @@ impl Session {
             symbols: Symbols::standard(),
             types: Vec::new(),
             fuel: 10_000_000,
+            symbolic: false,
         }
     }
 
@@ -81,7 +85,11 @@ impl Session {
     }
 
     fn compile_word(&mut self, src: &str) -> error::Result<(Vec<Op>, Vec<Type>)> {
-        let toks = read::read(src, &self.symbols)?;
+        let toks = if self.symbolic {
+            read::read_symbolic(src, &self.symbols)?
+        } else {
+            read::read(src, &self.symbols)?
+        };
         self.stage.begin(&self.types);
         self.stage.run(&toks)?;
         let types = self.stage.finish()?;

@@ -57,7 +57,7 @@ fn a_type_applied_converts() {
     // A type's name gives the type, and a constructor builds one from types
     // below it; applied, a type converts the value below.
     let mut s = Session::new();
-    s.eval("2 i64. 2.5 f64. ( 1 2 ) < i64 ary > .").unwrap();
+    s.eval("2 i64! 2.5 f64! ( 1 2 ) < i64 ary > !").unwrap();
     assert_eq!(
         s.show_typed(),
         "<3> 2 < i64 > 2.5 < f64 > ( 1 2 ) < i64 ary >"
@@ -71,9 +71,9 @@ fn a_type_applied_converts() {
         "<1> 1"
     );
     // A bracket in a body still types the values on top.
-    assert_eq!(show(&["2 < f64 > . 3 +"]), "<1> 5.0");
+    assert_eq!(show(&["2 < f64 > ! 3 +"]), "<1> 5.0");
     // A tuple type is an array of types.
-    assert_eq!(show(&["( 1 \"a\" ) < ( i64 string ) > . length"]), "<1> 2");
+    assert_eq!(show(&["( 1 \"a\" ) < ( i64 string ) > ! length"]), "<1> 2");
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn brackets_inside_brackets() {
     // converts to a number. The bracket in the guard is one value, applied
     // to the input, so the guard looks at one input.
     let num = "number?: [ < nil > drop false ] def number?: [ < f64 > drop true ] def
-        hh: [ < string [ < f64 > . number? ] > drop 1 ] def
+        hh: [ < string [ < f64 > ! number? ] > drop 1 ] def
         hh: [ < string > drop 0 ] def";
     assert_eq!(
         show(&[num, "\"2.5\" hh \"x\" hh", "\"7\"", "hh"]),
@@ -112,9 +112,9 @@ fn brackets_inside_brackets() {
     );
     // A guard's message shows its brackets as written.
     let e = Session::new()
-        .eval("ff: [ < [ < f64 > . number? ] > ] def")
+        .eval("ff: [ < [ < f64 > ! number? ] > ] def")
         .unwrap_err();
-    assert!(e.to_string().contains("`[ < f64 > . number? ]`"), "{e}");
+    assert!(e.to_string().contains("`[ < f64 > ! number? ]`"), "{e}");
     // A one-slot bracket in a bracket is its type.
     assert_eq!(
         show(&["ff: [ < < i64 > -- < i64 > > 1 + ] def 1 ff"]),

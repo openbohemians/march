@@ -67,7 +67,7 @@ fn clauses_chosen_at_run_time_join_their_types() {
     // (doc/design/TYPES.md 2.9, 3.6).
     let two = "positive?: [ 0 gt? ] def
         bb: [ < i64 positive? > drop \"yes\" ] def
-        bb: [ < i64 > drop 1 i64. ] def";
+        bb: [ < i64 > drop 1 i64! ] def";
     let mut s = session(&[two, "3 -3"]).unwrap();
     s.eval("bb swap bb").unwrap();
     assert_eq!(
@@ -142,7 +142,7 @@ fn map_applies_a_quotation_to_each_element() {
     assert_eq!(cells(&["1 ( 2 3 ) [ + ] map"]), Err(Kind::Mismatch));
     // `map` given types builds a map type.
     assert_eq!(
-        show(&["{ \"a\" 1 } < string i64 map > ."]),
+        show(&["{ \"a\" 1 } < string i64 map > !"]),
         "<1> { \"a\" 1 }"
     );
 }
@@ -214,10 +214,10 @@ fn value_patterns_choose_by_equality() {
     // that type; `.` gives it a type of its own.
     let h = "hh: [ < 0.5 > drop 1 ] def hh: [ < f64 > drop 0 ] def";
     assert_eq!(cells(&[h, "0.5 0.25", "hh swap hh"]).unwrap(), [0, 1]);
-    let z = "zz: [ < 0 i64. > drop \"zero\" ] def zz: [ < i64 > drop \"other\" ] def";
+    let z = "zz: [ < 0 i64! > drop \"zero\" ] def zz: [ < i64 > drop \"other\" ] def";
     assert_eq!(show(&[z, "0 3", "zz swap zz"]), "<2> \"other\" \"zero\"");
     assert_eq!(cells(&[z, "0.0 zz"]), Err(Kind::NoWord));
-    assert_eq!(cells(&["bb: [ < 1.5 i64. > ] def"]), Err(Kind::Literal));
+    assert_eq!(cells(&["bb: [ < 1.5 i64! > ] def"]), Err(Kind::Literal));
     // Inside its clause the input is known to equal the value, so code
     // there folds on it: `1 +` on the 0 is the constant 1, its cell
     // dropped. Passed through, it costs nothing.
@@ -238,6 +238,6 @@ fn value_patterns_choose_by_equality() {
         "<2> \"hi\" \"bye: quit\""
     );
     // Patterns belong in signatures, and a value is not an output.
-    assert_eq!(cells(&["1 < 1 > ."]), Err(Kind::Syntax));
+    assert_eq!(cells(&["1 < 1 > !"]), Err(Kind::Syntax));
     assert_eq!(cells(&["bb: [ < i64 -- 0 > ] def"]), Err(Kind::Mismatch));
 }

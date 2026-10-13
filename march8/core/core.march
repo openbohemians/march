@@ -12,7 +12,7 @@
 -- best (doc/design/TYPES.md 2.8, 2.15). A type defined is named.
 
 -- How a literal becomes each type. A clause under a type's name is a
--- conversion: applying the type, `2 i64.`, converts a literal, and a clause
+-- conversion: `!` by the type, `2 i64!`, converts a literal, and a clause
 -- that wants the type converts a literal it is given (TYPES.md 2.10).
 
 i64: [ < int# -- i64 > int#>i64 ] def
@@ -24,8 +24,8 @@ dec#: [ < int# -- dec# > int#>dec# ] def
 bool: [ < int# -- bool > int#>bool ] def
 
 -- A string converts to the number it writes, or to nil where it writes
--- none: parsing is converting (Thomas, 2026-10-13). `"42" i64.` is 42, and
--- `"x" i64.` nil, so the value is an `i64 nil or`.
+-- none: parsing is converting (Thomas, 2026-10-13). `"42" i64!` is 42, and
+-- `"x" i64!` nil, so the value is an `i64 nil or`.
 
 i64: [ < string -- i64 nil or > string>i64 ] def
 f64: [ < string -- f64 nil or > string>f64 ] def
@@ -35,8 +35,8 @@ f64: [ < string -- f64 nil or > string>f64 ] def
 -- take one. `not`, `and` and `or` are 1 - x, the minimum and the maximum,
 -- which on values from 0 to 1 are also Zadeh's fuzzy connectives.
 
-true: [ 1 bool. ] def
-false: [ 0 bool. ] def
+true: [ 1 bool! ] def
+false: [ 0 bool! ] def
 ⊤: [ true ] def
 ⊥: [ false ] def
 
@@ -427,7 +427,7 @@ show: [ < i64 -- string > i64>text ] def
 show: [ < f64 -- string > f64>text ] def
 show: [ < money -- string > money>text ] def
 show: [ < nil -- string > drop "nil" ] def
-show: [ < 1 bool. -- string > drop "true" ] def
+show: [ < 1 bool! -- string > drop "true" ] def
 show: [ < bool -- string > drop "false" ] def
 show: [ < tuple -- string > [ show ] map "(" swap [ " " swap concat concat ] each " )" concat ] def
 show: [ < a ary -- string > "(" swap [ show " " swap concat concat ] each " )" concat ] def

@@ -9,8 +9,8 @@ number?: [ < f64 > drop true ] def
 
 -- A column is its name, then its fields. There is no i64 to f64 yet, so
 -- `count` counts by ones.
-numeric?: [ < string ary > rest [ f64. number? ] map true [ and ] fold ] def
-numbers: [ < string ary > rest [ f64. or-zero ] map ] def
+numeric?: [ < string ary > rest [ f64! number? ] map true [ and ] fold ] def
+numbers: [ < string ary > rest [ f64! or-zero ] map ] def
 count: [ < f64 ary > [ drop 1.0 ] map sum ] def
 mean: [ < f64 ary > dup sum swap count /* ] def
 

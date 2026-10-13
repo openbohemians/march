@@ -79,6 +79,7 @@ pub enum Prim {
     StrUpper,
     StrToI64,
     StrToF64,
+    Convert,
     FileRead,
     StdinRead,
     Embed,
@@ -423,7 +424,7 @@ pub const PRIMS: &[PrimDef] = &[
         "< string -- string >",
         &[P::Upper],
     ),
-    // Under the conversions `"42" i64.` and `"2.5" f64.` (core.march).
+    // Under the conversions `"42" i64!` and `"2.5" f64!` (core.march).
     d(
         Prim::StrToI64,
         "string>i64",
@@ -543,6 +544,8 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::IPow, "i64-pow", "< i64 i64 -- i64 >", &[P::IPow]),
     d(Prim::IntPow, "int#-pow", "< int# int# -- int# >", &[]),
     d(Prim::Def, "def", "< sym a -- >", &[]),
+    // `!`: the value below given the type on top (stage.rs, `convert_by`).
+    d(Prim::Convert, "convert", "< a b -- a >", &[]),
 ];
 
 /// Whether the stage handles the primitive itself, rather than by its

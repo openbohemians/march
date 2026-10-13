@@ -15,7 +15,7 @@ pub enum Tok {
     Str(Rc<str>),
     Name(Rc<str>),
     /// `.`, which applies the value on top; the reader puts one after each
-    /// name that applies.
+    /// name that applies, and `!` is `convert` applied.
     Apply,
     /// `[`, `(`, `{` or `<`.
     Open(u8),
@@ -53,11 +53,23 @@ fn closer(open: u8) -> u8 {
 /// Reads source into tokens, checking that brackets nest. `--` outside
 /// `< >` starts a comment that runs to the end of the line.
 pub fn read(src: &str, symbols: &Symbols) -> Result<Vec<Token>> {
+    read_form(src, symbols, false)
+}
+
+/// Reads Symbolic Forth, the lowest form (doc/design/TYPES.md 2.2; Thomas,
+/// 2026-10-13): every name is a symbol, applied only by `.`, and `!`
+/// converts, `2 i64 !`. Labels, primes and capitals mark nothing there.
+pub fn read_symbolic(src: &str, symbols: &Symbols) -> Result<Vec<Token>> {
+    read_form(src, symbols, true)
+}
+
+fn read_form(src: &str, symbols: &Symbols, symbolic: bool) -> Result<Vec<Token>> {
     let mut r = Reader {
         src,
         at: 0,
         line: 1,
         col: 1,
+        symbolic,
     };
     tokens(&mut r, symbols, None)
 }
@@ -115,23 +127,23 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             r.skip_line();
             continue;
         }
-        // Each dot at the end of a word applies once more: `[ … ].` applies
-        // a quotation, and `x < 3 i64 vec > .` a type. So no name ends in a
-        // dot. A dot inside a word is part of it: `2.5` is a number, and in a
-        // name it divides a path in a namespace, `io.file.read`
-        // (doc/design/TYPES.md 3.12).
-        let stem = word.trim_end_matches('.');
-        let dots = (word.len() - stem.len()) as u32;
+        // Each dot at the end of a word applies once more, `[ … ].`, and
+        // each `!` converts by what is on top (Thomas, 2026-10-13): `2 i64!`,
+        // `x y < i64 f64 > !`. So no name ends in either. A dot inside a word
+        // is part of it: `2.5` is a number, and in a name it divides a path
+        // in a namespace, `io.file.read` (doc/design/TYPES.md 3.12).
+        let stem = word.trim_end_matches(['.', '!']);
+        let marks = &word[stem.len()..];
         let at = Pos {
             col: pos.col + stem.chars().count() as u32,
             ..pos
         };
-        let (stem, applies) = if is_name(stem) {
+        let (stem, applies) = if is_name(stem) && !r.symbolic {
             spelled(stem)
         } else {
             (stem, false)
         };
-        piece(stem, applies, dots, pos, at, symbols, &mut open, &mut out)?;
+        piece(stem, applies, marks, pos, at, symbols, &mut open, &mut out)?;
     }
     if let Some((o, p)) = open.pop() {
         return Err(Error::new(
@@ -172,12 +184,13 @@ pub fn is_variable(w: &str) -> bool {
 }
 
 /// One word: its token, its own application if it is a name that applies,
-/// and an application for each dot after it, the first at `at`.
+/// and for each mark after it, the first at `at`, an application, `.`, or
+/// `convert` applied, `!`.
 #[allow(clippy::too_many_arguments)]
 fn piece(
     stem: &str,
     applies: bool,
-    dots: u32,
+    marks: &str,
     pos: Pos,
     at: Pos,
     symbols: &Symbols,
@@ -230,13 +243,20 @@ fn piece(
                 pos,
             });
         }
-        for k in 0..dots {
+        for (k, m) in marks.chars().enumerate() {
+            let pos = Pos {
+                col: at.col + k as u32,
+                ..at
+            };
+            if m == '!' {
+                out.push(Token {
+                    tok: Tok::Name("convert".into()),
+                    pos,
+                });
+            }
             out.push(Token {
                 tok: Tok::Apply,
-                pos: Pos {
-                    col: at.col + k,
-                    ..at
-                },
+                pos,
             });
         }
     }
@@ -298,6 +318,8 @@ struct Reader<'a> {
     at: usize,
     line: u32,
     col: u32,
+    /// Reading Symbolic Forth, where no name applies by itself.
+    symbolic: bool,
 }
 
 impl<'a> Reader<'a> {
@@ -470,6 +492,66 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Code in Symbolic Forth, the lowest form (doc/design/TYPES.md 2.2): every
+/// name a symbol, each application a `.`, and `convert` applied `!`. It
+/// reads back, by `read_symbolic`, to the same tokens: the litmus test of
+/// the intermediate form (Thomas, 2026-10-13). Lines are kept, so the text
+/// reads as the source did.
+pub fn lower(toks: &[Token]) -> String {
+    let mut out = String::new();
+    let mut line = toks.first().map_or(1, |t| t.pos.line);
+    let mut i = 0;
+    while i < toks.len() {
+        let t = &toks[i];
+        if t.pos.line > line {
+            out.push_str(if t.pos.line > line + 1 { "\n\n" } else { "\n" });
+            line = t.pos.line;
+        } else if !out.is_empty() {
+            out.push(' ');
+        }
+        match &t.tok {
+            Tok::Name(n)
+                if &**n == "convert" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
+            {
+                out.push('!');
+                i += 1;
+            }
+            tok => out.push_str(&lowered(tok)),
+        }
+        i += 1;
+    }
+    out
+}
+
+/// One token in Symbolic Forth.
+fn lowered(tok: &Tok) -> String {
+    let text = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"");
+    match tok {
+        Tok::Int(n) => n.to_string(),
+        Tok::Dec(d, s) => crate::prims::show_dec(*d, *s),
+        Tok::Str(s) => format!("\"{}\"", text(s)),
+        Tok::Name(n) => n.to_string(),
+        Tok::Apply => ".".into(),
+        Tok::Open(b) | Tok::Close(b) => (*b as char).to_string(),
+        Tok::Dashes => "--".into(),
+        Tok::Template(pieces) => {
+            let mut s = String::from('"');
+            for p in pieces.iter() {
+                match p {
+                    Piece::Text(t) => s.push_str(&text(t)),
+                    Piece::Hole(code) => {
+                        s.push_str("\\[ ");
+                        s.push_str(&lower(code).replace('\n', " "));
+                        s.push_str(" ]");
+                    }
+                }
+            }
+            s.push('"');
+            s
+        }
+    }
+}
+
 /// The text of a named or numeric escape: `n`, `t`, `r`, `#9731`, `#x2603`,
 /// or a name in the symbol table.
 fn escape(name: &str, symbols: &Symbols) -> Option<String> {
@@ -595,6 +677,27 @@ mod tests {
         let t = read("xs  sq..", &Symbols::standard()).unwrap();
         let cols: Vec<u32> = t.iter().map(|t| t.pos.col).collect();
         assert_eq!(cols, [1, 1, 5, 5, 7, 8]);
+    }
+
+    #[test]
+    fn a_bang_converts() {
+        let n = |s: &str| Tok::Name(s.into());
+        assert_eq!(
+            toks("2 i64! < i64 > !"),
+            [
+                Tok::Int(2),
+                n("i64"),
+                Tok::Apply,
+                n("convert"),
+                Tok::Apply,
+                Tok::Open(b'<'),
+                n("i64"),
+                Tok::Apply,
+                Tok::Close(b'>'),
+                n("convert"),
+                Tok::Apply,
+            ]
+        );
     }
 
     #[test]

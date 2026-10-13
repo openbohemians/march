@@ -16,7 +16,8 @@ code and brackets read differently, and its constructors kept their dots,
 `< string i64 map. >`. Thomas then saw types as structure built by words:
 a type's name gives the type, so names apply in brackets as in code, and
 the dots there went, `< string i64 map >`; and parsing became converting,
-`"42" i64.` (TYPES.md 2.2).
+`"42" i64!`, `!` converting by a type, which is data and not called
+(TYPES.md 2.2).
 The programs below are as they were compared.
 
 ## 1. The forms
@@ -453,7 +454,7 @@ Zeus Is Mortal ask
    up ones. *Since:* still none.
 6. **In C, a type passed as an argument takes a prime:** `f64' parse`. It
    could also be written `< f64 > parse`. *Since:* `parse` is gone; a string
-   converts as a literal does, `[ f64. ] map` (TYPES.md 2.2).
+   converts as a literal does, `[ f64! ] map` (TYPES.md 2.2).
 
 ## 5. Claude's read
 

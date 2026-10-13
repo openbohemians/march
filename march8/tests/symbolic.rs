@@ -1,0 +1,119 @@
+//! Symbolic Forth, the lowest form (doc/design/TYPES.md 2.2; Thomas,
+//! 2026-10-13): numbers, symbols, `.` and `!`. Every name is a symbol until
+//! `.` applies it, a type is given by applying its word, `i64 .`, and `!`
+//! converts. The form march8 reads is an intermediate one over it, and this
+//! is its litmus test: all of it lowers to Symbolic Forth and reads back the
+//! same, and the lowered programs run.
+use march8::read::{Piece, Tok, Token, lower, read, read_symbolic};
+use march8::symbols::Symbols;
+use march8::{CORE, Pos, Session};
+
+/// The tokens of source, wherever they were written.
+fn toks(src: &str, symbolic: bool) -> Vec<Tok> {
+    let s = Symbols::standard();
+    let t = if symbolic {
+        read_symbolic(src, &s)
+    } else {
+        read(src, &s)
+    };
+    t.unwrap().into_iter().map(placeless).collect()
+}
+
+fn placeless(t: Token) -> Tok {
+    match t.tok {
+        Tok::Template(pieces) => Tok::Template(
+            pieces
+                .iter()
+                .map(|p| match p {
+                    Piece::Hole(code) => Piece::Hole(
+                        code.iter()
+                            .map(|t| Token {
+                                tok: placeless(t.clone()),
+                                pos: Pos { line: 0, col: 0 },
+                            })
+                            .collect(),
+                    ),
+                    text => text.clone(),
+                })
+                .collect(),
+        ),
+        tok => tok,
+    }
+}
+
+/// The source lowered to Symbolic Forth, checked to read back to the same
+/// tokens.
+fn lowered(src: &str) -> String {
+    let low = lower(&read(src, &Symbols::standard()).unwrap());
+    assert_eq!(toks(src, false), toks(&low, true), "{low}");
+    low
+}
+
+const EXAMPLES: [&str; 4] = [
+    include_str!("../examples/wordfreq.march"),
+    include_str!("../examples/door.march"),
+    include_str!("../examples/syllogism.march"),
+    include_str!("../examples/summary.march"),
+];
+
+#[test]
+fn every_application_is_a_dot() {
+    assert_eq!(
+        lowered("fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def"),
+        "fib [ < n > dup . 1 -+ . fib . swap . 2 -+ . fib . + . ] def ."
+    );
+    // A symbol, a label or a word passed is a symbol, and a type is given
+    // by applying its word, then `!` converts.
+    assert_eq!(
+        lowered("Closed Open door ( 1 2 ) +' reduce 2 i64! x y < i64 f64 > !"),
+        "Closed Open door . ( 1 2 ) + reduce . 2 i64 . ! x y < i64 . f64 . > !"
+    );
+    // Strings keep their escapes, and a hole its code, lowered too.
+    assert_eq!(
+        lowered(r#""say \"hi\" \\ \_ and \[ 1 2 + ]""#),
+        r#""say \"hi\" \\ \[ _ . ] and \[ 1 2 + . ]""#
+    );
+}
+
+#[test]
+fn the_core_vocabulary_lowers() {
+    lowered(CORE);
+}
+
+#[test]
+fn the_examples_lower_and_run_the_same() {
+    for src in EXAMPLES {
+        lowered(src);
+    }
+    // Run lowered, a program does what it did: core is read as it is, and
+    // the program as Symbolic Forth.
+    for src in &EXAMPLES[..3] {
+        let mut a = Session::new();
+        a.eval(src).unwrap();
+        let mut b = Session::new();
+        b.symbolic = true;
+        b.eval(&lowered(src)).unwrap();
+        assert_eq!(a.show(), b.show());
+        assert_eq!(a.take_output(), b.take_output());
+    }
+}
+
+#[test]
+fn symbolic_forth_runs() {
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval("sq [ dup . * . ] def . 3 sq . 2.5 sq . 2 f64 ! \"42\" i64 !")
+        .unwrap();
+    assert_eq!(s.show(), "<4> 9 6.25 2.0 42");
+    // There, nothing applies unless a dot says so: a name is a symbol, and
+    // one left at the end has no value at run time.
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval("3 dup .").unwrap();
+    assert_eq!(s.show(), "<2> 3 3");
+    let e = s.eval("3 dup").unwrap_err();
+    assert!(
+        e.to_string().contains("the symbol `dup` is left unapplied"),
+        "{e}"
+    );
+}

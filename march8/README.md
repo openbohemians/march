@@ -16,6 +16,7 @@ cargo run -- examples/wordfreq.march
 cargo run -- examples/door.march        # a state machine of symbols
 cargo run -- examples/syllogism.march   # facts and a rule as clauses
 cargo run -- examples/summary.march < examples/fruit.csv
+cargo run -- lower < examples/door.march   # the same, in Symbolic Forth
 cargo run                      # a REPL; :help for its commands
 ```
 

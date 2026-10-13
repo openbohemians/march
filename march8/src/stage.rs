@@ -124,7 +124,8 @@ fn unapplied(n: &str) -> bool {
 }
 
 /// Tokens as they are written, for a message: a name and its application
-/// are the name, and a symbol or a variable is spelled as one.
+/// are the name, `convert` applied is `!`, and a symbol or a variable is
+/// spelled as one.
 fn source_text(toks: &[Token]) -> String {
     let mut out = String::new();
     let mut i = 0;
@@ -133,7 +134,9 @@ fn source_text(toks: &[Token]) -> String {
             Tok::Apply => ".".into(),
             Tok::Name(s) if toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) => {
                 i += 1;
-                if unapplied(s) {
+                if &**s == "convert" {
+                    "!".into()
+                } else if unapplied(s) {
                     format!("{s}.")
                 } else {
                     s.to_string()
@@ -294,9 +297,10 @@ struct Frame {
 enum Item {
     Name(Rc<str>),
     Quote(usize, usize),
-    /// A bracket, a value: applied, it types as many values as it has slots.
+    /// A bracket, a value: converted by, it types as many values as it has
+    /// slots.
     Bracket(usize, usize),
-    /// A type, given by its name: applied, it converts one value.
+    /// A type, given by its name.
     Type,
     Other,
 }
@@ -705,26 +709,20 @@ impl Stage {
                 self.pos = at;
                 self.apply_word(&n)
             }
-            // A type applied converts the value below to it, `2 i64.`, `x 3
-            // i64 vec .`; a class or a type with variables checks it.
-            Val::Type(t) => {
-                self.need(1)?;
-                if self.types.is_pattern(t) {
-                    let sig = Sig {
-                        ins: vec![t],
-                        guards: Vec::new(),
-                        outs: None,
-                    };
-                    self.annotate_top(&sig)
-                } else {
-                    self.convert(self.stack.len() - 1, t)
-                }
-            }
-            // A signature, a bracket alone, gives the values below its types.
-            Val::Quote(q) if signature(&q) => {
-                let sig = self.bracket(&q[1..q.len() - 1])?;
-                self.annotate_top(&sig)
-            }
+            // A type is data, and is not called (Thomas, 2026-10-13): `!`
+            // converts by it.
+            Val::Type(_) => Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "{} is not called: `!` converts by it, `2 i64!`",
+                    self.describe(&f)
+                ),
+            )),
+            Val::Quote(q) if signature(&q) => Err(self.err(
+                Kind::Mismatch,
+                "a signature is not called: `!` gives the values below its types, \
+                 `x y < i64 f64 > !`",
+            )),
             Val::Quote(q) => {
                 self.enter()?;
                 let r = self.run(&q);
@@ -735,6 +733,48 @@ impl Stage {
                 Kind::Mismatch,
                 format!("{} cannot be applied", self.describe(&f)),
             )),
+        }
+    }
+
+    /// `convert`, written `!` (Thomas, 2026-10-13): the value below given the
+    /// type on top. A type converts it, `2 i64!`, `"42" i64!`, `x 3 i64 vec
+    /// !`, by the clauses under its name; a class or a type with variables
+    /// checks it; a signature, a bracket of more than one type, gives the
+    /// values below its types, `x y < i64 f64 > !`.
+    fn convert_by(&mut self) -> Result<()> {
+        let f = self.pop()?;
+        let named = match &f.val {
+            Val::Name(n, _) => self.words.get(n).and_then(|w| w.ty),
+            _ => None,
+        };
+        let t = match f.val {
+            Val::Type(t) => t,
+            Val::Name(..) if named.is_some() => named.expect("checked"),
+            Val::Quote(q) if signature(&q) => {
+                let sig = self.bracket(&q[1..q.len() - 1])?;
+                return self.annotate_top(&sig);
+            }
+            _ if f.ty == NIL => NIL,
+            _ => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "`!` converts by a type, and {} is not one",
+                        self.describe(&f)
+                    ),
+                ));
+            }
+        };
+        self.need(1)?;
+        if self.types.is_pattern(t) {
+            let sig = Sig {
+                ins: vec![t],
+                guards: Vec::new(),
+                outs: None,
+            };
+            self.annotate_top(&sig)
+        } else {
+            self.convert(self.stack.len() - 1, t)
         }
     }
 
@@ -785,7 +825,7 @@ impl Stage {
         } else if let Some(t) = w.ty {
             // A type's name is a word that gives the type, as any word that
             // builds a value gives it (Thomas, 2026-10-12): types are
-            // structure, made by words. The type applied converts, `2 i64.`.
+            // structure, made by words. `!` converts by the type, `2 i64!`.
             self.push(TYPE, Val::Type(t));
             Ok(())
         } else if !w.clauses.is_empty() {
@@ -2395,6 +2435,7 @@ impl Stage {
                 Prim::VecSpread | Prim::TupleSpread => return None,
                 Prim::Range | Prim::Reverse => (1, 1),
                 Prim::Def => (2, 0),
+                Prim::Convert => (2, 1),
                 _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
             });
         }
@@ -2471,14 +2512,19 @@ impl Stage {
                             i += 1;
                             continue;
                         }
+                        // `!` types as many values as the type on top has
+                        // slots, and takes the type too.
+                        Item::Name(s) if &*s == "convert" => match items.last() {
+                            Some(Item::Bracket(from, to)) => {
+                                let n = self.bracket_size(&toks[*from..*to]);
+                                (n + 1, n)
+                            }
+                            _ => (2, 1),
+                        },
                         Item::Name(s) => self.word_effect(&s, visiting)?,
-                        Item::Type => (1, 1),
+                        Item::Type => return None,
                         Item::Quote(from, to) => self.effect(&toks[from..to], visiting)?,
-                        Item::Bracket(from, to) => {
-                            let n = self.bracket_size(&toks[from..to]);
-                            (n, n)
-                        }
-                        Item::Other => return None,
+                        Item::Bracket(..) | Item::Other => return None,
                     };
                     take(&mut items, &mut ins, a);
                     items.extend((0..b).map(|_| Item::Other));
@@ -2490,8 +2536,9 @@ impl Stage {
         Some((ins, items.len()))
     }
 
-    /// How many values a bracket in a body types when applied: its code's
-    /// values, each word applied taking and leaving what its effect says.
+    /// How many values a bracket in a body types when `!` converts by it:
+    /// its code's values, each word applied taking and leaving what its
+    /// effect says.
     fn bracket_size(&self, toks: &[Token]) -> usize {
         let mut n: isize = 0;
         let mut i = 0;
@@ -2982,6 +3029,11 @@ impl Stage {
     // ---- Primitives ----
 
     fn prim(&mut self, name: &str, p: Prim, sig: &Sig) -> Result<()> {
+        // Its inputs are the type on top and as many values as it types, of
+        // any type, a literal kept a literal until it converts.
+        if p == Prim::Convert {
+            return self.convert_by();
+        }
         let n = sig.ins.len();
         self.need(n)?;
         let Some((_, env)) = self.match_sig(sig) else {
@@ -3625,8 +3677,8 @@ impl Stage {
         self.annotate(i, t)
     }
 
-    /// `string>i64` and `string>f64`, under the conversions `"42" i64.` and
-    /// `"2.5" f64.`: the number a string writes, or nil, `i64 nil or`, the
+    /// `string>i64` and `string>f64`, under the conversions `"42" i64!` and
+    /// `"2.5" f64!`: the number a string writes, or nil, `i64 nil or`, the
     /// value tagged with its type at run time. Parsing is converting (Thomas,
     /// 2026-10-13). A known string is parsed now, and is the value or nil
     /// itself.

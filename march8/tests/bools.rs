@@ -41,7 +41,7 @@ fn comparisons_leave_a_bool() {
         "<2> \"true\" \"false\""
     );
     // Only 0 and 1 are bools.
-    assert_eq!(session(&["2 bool."]).err(), Some(Kind::Literal));
+    assert_eq!(session(&["2 bool!"]).err(), Some(Kind::Literal));
 }
 
 #[test]

@@ -32,7 +32,7 @@ const M: &str = "{ \"a\" 1 \"b\" 2 }";
 /// `b` leaves a string for a positive number, and 1 otherwise.
 const B: &str = "positive?: [ 0 gt? ] def
     bb: [ < i64 positive? > drop \"yes\" ] def
-    bb: [ < i64 > drop 1 i64. ] def";
+    bb: [ < i64 > drop 1 i64! ] def";
 
 #[test]
 fn nil_is_its_own_value() {
@@ -93,7 +93,7 @@ fn a_type_with_no_clause_is_no_word() {
         "{e}"
     );
     assert_eq!(
-        session(&[&format!("{M} \"a\" get num.")]).err(),
+        session(&[&format!("{M} \"a\" get num!")]).err(),
         Some(Kind::Mismatch)
     );
 }
@@ -111,7 +111,7 @@ fn some_words_take_a_union_whole() {
     assert_eq!(
         show(&[
             k,
-            &format!("{M} \"a\" get kk {M} \"z\" get ww 3 i64. ww nil ww")
+            &format!("{M} \"a\" get kk {M} \"z\" get ww 3 i64! ww nil ww")
         ]),
         "<4> 1 2 2 2"
     );
@@ -143,7 +143,7 @@ fn a_union_made_at_run_time_is_noted() {
     assert_eq!(s.show(), "<2> \"yes\" 1");
     let named = "positive?: [ 0 gt? ] def
         gg: [ < i64 positive? -- i64 string or > drop \"yes\" ] def
-        gg: [ < i64 -- i64 string or > drop 1 i64. ] def";
+        gg: [ < i64 -- i64 string or > drop 1 i64! ] def";
     let mut s = Session::new();
     s.eval(named).unwrap();
     s.eval("3").unwrap();

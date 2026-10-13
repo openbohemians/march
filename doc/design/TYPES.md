@@ -50,12 +50,19 @@ a first-class type system in the code itself."
 every application is marked:
 
 ```
-1 i64 . . 1 i64 . . + .
+1 i64 ! 1 i64 ! + .
 ```
 
-(First `1 i64 . 1 i64 . + .`, when applying a type's name converted; now
-the name gives the type, and applying the type converts. Written, it is `1
-i64. 1 i64. +`.)
+This is **Symbolic Forth**, the lowest form (Thomas, 2026-10-13;
+SYMBOLIC-FORTH.md): numbers, symbols and `.`. Every name is a symbol until `.` applies it. `i64 .` is
+the type: every type is given by a word, so types need no spelling of
+their own (one that bottoms out might show as `i64'`, were it ever shown).
+A type is data, and is not applied: converting is applying another word,
+`i64 . convert .`, which the meta-operator `!` shortens to `i64 !`
+(`convert` takes a type, or a type's symbol). (First the form was `1 i64
+. 1 i64 . + .`, when applying a type's name converted.) March8 reads an
+intermediate form over it, in which this is `1 i64! 1 i64! +` (the last
+bullet below).
 
 - **`.` applies.** Everything is a value or a symbol until `.` applies it.
   `.` is the only special word, and types and operations share one
@@ -74,8 +81,8 @@ i64. 1 i64. +`.)
   program's variable, `x Is Mortal if x Is Human rule`, and names no word.
   `name:` labels what follows, a name being defined or a key, and `name'` is
   the symbol where a word is passed rather than applied, `+' reduce`, or a
-  script has no capitals. A dot at the end of a word applies once more: `[
-  2 + ].`, `2 i64.`. (From 2026-10-08 a dot after a word applied it, `sq.`,
+  script has no capitals. A dot at the end of a word applies once more, `[
+  2 + ].`, and a `!` converts, `2 i64!`. (From 2026-10-08 a dot after a word applied it, `sq.`,
   every name being a symbol until then; Thomas's rule that a word of
   punctuation alone applies was weighed on the way, and holds here anyway.)
   A dot inside a word is part of it: a number's point, `2.5`, and in a name
@@ -90,20 +97,20 @@ i64. 1 i64. +`.)
   as `string` might be `utf8 str`, and constructors build types from types,
   `string i64 map`. So types and words are one namespace, and words,
   symbols and literals are the three kinds of thing, each spelled its own
-  way: a type's name reads the same in code and in a bracket. Applied, a
-  type converts, `2 i64.`, `x 100 i64 vec .`, by its clauses for literals,
-  and a type is a value like any other, `string i64 map empty`. Parsing
-  is converting (Thomas, 2026-10-13): `"42" i64.` is 42, or nil, `i64 nil
-  or`, by `i64`'s clause for strings. (From 2026-10-09 a type's name applied converted, `2 i64`, so a
+  way: a type's name reads the same in code and in a bracket. A type is a
+  value like any other, `string i64 map empty`, and data, not called:
+  `!` converts by it (Thomas, 2026-10-13), `2 i64!`, `x 100 i64 vec !`, by
+  its clauses for literals. Parsing is converting: `"42" i64!` is 42, or
+  nil, `i64 nil or`, by `i64`'s clause for strings. (From 2026-10-09 a type's name applied converted, `2 i64`, so a
   type as a value took a bracket, `< i64 >`, and in a bracket names stayed
   names, a dot applying a constructor, `< string i64 map. >`: code and
-  brackets read differently, a surface over a lower form in all but name.
+  brackets read differently, two notations where one would do.
   For a day before that, `i64.` was the type and `to` converted; this
-  returns to it, with the reason it lacked.)
+  returns to it, with `!` for `to` and the reason it lacked.)
 - **A bracket is code, a comprehension of types** (Thomas, 2026-10-09).
   `< … >` holds code like any other, read as all code is. What it leaves is
   the signature: a type, inputs of that type; a value, inputs equal to it,
-  a literal (`0`), a converted one (`0 i64.`) or `true`; a quotation, a
+  a literal (`0`), a converted one (`0 i64!`) or `true`; a quotation, a
   guard on the inputs before it; a word ending in `?` applied, a guard too,
   as such a word leaves one bool, which the compiler holds it to (Thomas,
   2026-10-12); a symbol, `< string Camel >`, inputs equal to it; and a
@@ -118,18 +125,27 @@ i64. 1 i64. +`.)
   bracket first in a definition's quotation is the clause's context;
   anywhere else it is a value (2026-10-12), so `[ < f64 > . ] map`
   converts each element: a type, or, of more than one type, a signature,
-  which applied gives the values below their types, `x y < i64 f64 > .`.
+  by which `!` gives the values below their types, `x y < i64 f64 > !`.
   `--` divides inputs from outputs, which leaves no comment inside a
   bracket (open).
 - **Compile stages evaluate the type part and erase it.** When the type
   stage meets `+ .` with two i64s, it picks integer addition and leaves a
   plain call behind. After lowering, `.` is an ordinary call instruction
   and the types are gone, so cells stay bare and fast.
-- **This is the language as written** (2026-10-12). With names applying
-  and definitions naming first (2.15), the notation SURFACE.md was to give
-  is this one, and nothing lowers to it. It reads one way everywhere, so
-  code is data in the form it is written. How many stages there are is
-  still to be discovered.
+- **March8 reads an intermediate form** (Thomas, 2026-10-13). Names apply
+  without a dot, a capital or a prime marks a symbol, one letter a
+  variable, `name:` a label: all of it notation over Symbolic Forth, where
+  everything is a number, a symbol, `.` or `!`. It lowers to it by
+  spelling alone: `fib` is `fib .`, `Snake`, `+'` and `fib:` are the
+  symbols `Snake`, `+` and `fib`, and `2 i64!` is `2 i64 . !`. Both forms
+  call with `.` and convert with `!`; one could as well call with `!`, a
+  command, and the choice is only that (Thomas).
+  Symbolic Forth is the litmus test of a notation: what cannot be said in
+  it is not March. March8 runs it (march8/tests/symbolic.rs): the core
+  vocabulary and the examples lower, read back the same, and run the same. The intermediate form reads one way in code and in
+  brackets, so code is data there too. A surface may come above it, as
+  SURFACE.md's headings were; how many stages there are is still to be
+  discovered.
 
 This follows The Little Typer: types are values (of type Type), and
 annotation is an operator, Pie's `the`. Zig's `comptime`, where types are
@@ -298,7 +314,7 @@ branches, and lowering turns dispatch on values into branches.
   check at run time, or at compile time when the value is known. It is not
   a runtime value in a type. Written (2026-10-08): a value left in a bracket,
   `< 0 >`, matches an input of any type the literal becomes, compared in
-  that type; `< 0 i64. >` gives it a type, as `0 i64` does in code. A
+  that type; `< 0 i64! >` gives it a type, as `0 i64!` does in code. A
   section's context ANDs with it slot by slot, so under `## < i64 >`, `< 0 >`
   is an i64 equal to 0. `fib` needs no helper words:
 
@@ -325,7 +341,7 @@ needs a bracket, as SURFACE.md assigns `< >` to signatures and patterns:
   construct of its own. (Since 2026-10-12 a type's name gives the type
   everywhere, so a type is built in code as in a bracket, `x 100 i64 vec
   .`, and a bracket is a value except first in a definition's quotation,
-  applied annotating: `x y < i64 f64 > .` (2.2).)
+  `!` annotating by it: `x y < i64 f64 > !` (2.2).)
 
 Rejected: marking each type name, as in `100 <i64> <vec>`. It leaves unclear
 where a type expression starts (is the 100 part of it?), and makes a second

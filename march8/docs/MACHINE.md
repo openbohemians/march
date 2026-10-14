@@ -54,6 +54,7 @@ reads them back to the same tokens, and runs them to the same results.
 |---|---|
 | `1`, `-2` | an integer literal |
 | `1.10` | a decimal literal: exact digits until its type is known |
+| `1:2`, `12:30:15` | a ratio literal: whole numbers between colons, a sign only in front, kept as written (Thomas, 2026-10-13). Of two terms it is a number, `1:2` one half; of more, it is for what takes it to read |
 | `"text"`, `'raw'` | a string, with march7's escapes (`\n;`, `\#x2603;`, `\times;`) and holes (`\[ code ]`, `\_`) |
 | `name` | a name, applied: a primitive, a family, a constructor, or a type's name, which gives the type |
 | `Name` | a capitalized name: a symbol, a value that does nothing until applied |
@@ -127,7 +128,7 @@ the bracket after it says what kind of thing it names:
 
 ```
 fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def     code
-num: < i64 f64 or money or int# or dec# or > def    a type
+num: < i64 f64 or money or int# or dec# or ratio# or > def    a type
 ```
 
 A bracket first in the quotation is the clause's signature, its context
@@ -148,6 +149,7 @@ The machine runs code on a stack of **judgments** (TYPES.md
 |---|---|
 | an integer | an integer literal, an i64, or money in cents |
 | digits and places | a decimal literal |
+| terms | a ratio literal: as written, or in lowest terms once computed |
 | a float, a string | an f64, a string |
 | a type | a type, as a value |
 | a name, a quotation | a word not yet applied, a quotation |
@@ -183,7 +185,7 @@ equal types are equal numbers.
 | `i64`, `f64` | numbers |
 | `money` | exact cents in an i64; a placeholder until March has precise numbers and newtypes (TYPES.md 2.11) |
 | `string` | UTF-8 text |
-| `int#`, `dec#` | an integer and a decimal literal, undecided (TYPES.md 2.10); the names are placeholders (TYPES.md 3.4) |
+| `int#`, `dec#`, `ratio#` | an integer, a decimal and a ratio literal, undecided (TYPES.md 2.10); the names are placeholders (TYPES.md 3.4) |
 | `sym` | a symbol, a name not yet applied: at run time its name, an interned string, so symbols compare and key maps by identity |
 | `type`, `quote` | a type, a quotation: values at compile time only |
 | `a ary` | an array of any length |
@@ -192,7 +194,7 @@ equal types are equal numbers.
 | `a` to `z` | type variables, in patterns |
 | `atom` | in patterns, any type that is not a container: a number, a string, a literal. A class, not a type: it binds nothing, so `< atom atom >` takes two of different types |
 | `a b or` | in patterns, a union: any of its types, `i64 f64 or`. Kept canonical, so order and repeats do not matter. It matches a little less well than one of its types alone, and better than `atom` |
-| `num` | the numbers: `num: < i64 f64 or money or int# or dec# or > def`, in `core.march` |
+| `num` | the numbers: `num: < i64 f64 or money or int# or dec# or ratio# or > def`, in `core.march` |
 | `nil` | the type with one value, `nil`: nothing is there, as in `i64 nil or` |
 | `bool` | truth: 0 and 1, `false` and `true`, Iverson's brackets, so an i64 too (TYPES.md 2.16) |
 | `( i64 string )` | a tuple: fixed positions, a type each. Positions of one type are a vec, so `( a b )` takes `( 1 2 )` |
@@ -412,7 +414,18 @@ an open family, as Thomas framed it ("just another type signature"). Two
 literals fold by clauses on the literal types, `< int# int# -- int# >`,
 exactly, and stay literals, so `1 2 + 3.5 +` is the decimal 6.5. A
 literal takes its default type, i64 or f64, only when it must be a value at
-run time.
+run time. Until then it prefers to become another literal kind, which keeps
+it exact, over its default: `1 3 /*` is the ratio 1:3, so `1 3 /* 3 *` is
+exactly 1.
+
+A ratio, `1:2`, is one half: the f64 nearest it when it must be a value,
+rounded once from the exact quotient, money when it is a whole number of
+cents, never an i64 (`1:2 i64!` says to round). Its terms are kept as
+written, so `12:30` is not `2:5`, and a ratio of more terms, `2026:10:13`,
+reads: it is no number, but a word that takes it can read its terms, as a
+time or a date might. Computed, a ratio is in lowest terms. Literal
+division is exact, so `1 0 /*` is an error while compiling, and NaN takes
+a float, `0.0 f64! 0.0 /*`.
 
 ### Loops: `each`, folds and reductions
 
@@ -716,7 +729,7 @@ taking one of them, so the three agree, integers having no reciprocal; and
 and `not`, `and` and `or` as 1 - x, the minimum and the maximum (TYPES.md
 2.16); `floor`, `ceil`, `round` and `trunc`, which narrow a float to an integer,
 saying how it rounds (`round` halves away from zero), exact on a decimal
-literal, an error for a float with no i64; converting does not round, so
+or a ratio literal, an error for a float with no i64; converting does not round, so
 `2.5 i64!` is an error that names them. doc/design/WORDCHART.md
 charts the words beside APL's and Uiua's. `order`, `<#`, gives the positions
 that put an array in order, stable, APL's grade up `⍋` and R's `order` (not
@@ -753,7 +766,8 @@ symbol: `"Hello World" Snake case` is "hello_world", and `lower`, `upper`,
 `kebab`, `camel` and `pascal` the others, chosen while compiling.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
-The literal primitives (`int#+`, `dec#>money`) exist only at compile time.
+The literal primitives (`int#+`, `dec#>money`, `ratio#/`) exist only at
+compile time.
 A primitive applied to values all known folds, unless it has an effect
 (`write`).
 

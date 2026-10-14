@@ -283,10 +283,18 @@ any family.
   a float, money converts it exactly. One general rule covers every family:
   a clause that wants a T and finds a literal converts it with T's
   conversion. A specific clause can still override.
-- **Two literal types, integer and decimal.** An integer literal can become
-  i64, f64 or money; a decimal literal can become f64 or money, not i64.
-  A decimal literal keeps its exact digits until its type is known, so
-  `price 1.10 +` adds exactly one dollar ten, never via a binary float.
+- **Three literal types, integer, decimal and ratio.** An integer literal
+  can become i64, f64 or money; a decimal literal can become f64 or money,
+  not i64. A decimal literal keeps its exact digits until its type is known,
+  so `price 1.10 +` adds exactly one dollar ten, never via a binary float.
+- **A ratio literal, `1:2`** (Thomas, 2026-10-13; built 2026-10-14): one
+  half, exact while a literal, an f64 rounded once or money when it must be
+  a value. Its terms are kept as written, so a word that takes it can read
+  them: `12:30` is not `2:5`, and `2026:10:13`, no number, could be a date.
+  It is not a union of what it could become: a union is one of its members,
+  and whoever takes it handles each; a literal is undecided, and whoever
+  takes it decides. Two literals divide exactly, `1 3 /*` is 1:3: a literal
+  prefers another literal kind to its default, since it keeps it exact.
 - **`1 1 +`** matches a clause on two literals and folds to the literal 2 at
   compile time. A literal defaults to i64 only when a concrete
   representation is needed: stored, printed, or never given a type.

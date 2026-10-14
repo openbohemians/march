@@ -17,6 +17,18 @@ pub enum Prim {
     DecSub,
     DecMul,
     IntToDec,
+    RatioAdd,
+    RatioSub,
+    RatioMul,
+    RatioDiv,
+    IntToRatio,
+    DecToRatio,
+    RatioToF64,
+    RatioToMoney,
+    RatioFloor,
+    RatioCeil,
+    RatioRound,
+    RatioTrunc,
     IntToI64,
     IntToF64,
     DecToF64,
@@ -182,6 +194,43 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::IntToMoney, "int#>money", "< int# -- money >", &[]),
     d(Prim::IntToBool, "int#>bool", "< int# -- bool >", &[]),
     d(Prim::DecToMoney, "dec#>money", "< dec# -- money >", &[]),
+    d(
+        Prim::RatioAdd,
+        "ratio#+",
+        "< ratio# ratio# -- ratio# >",
+        &[],
+    ),
+    d(
+        Prim::RatioSub,
+        "ratio#-",
+        "< ratio# ratio# -- ratio# >",
+        &[],
+    ),
+    d(
+        Prim::RatioMul,
+        "ratio#*",
+        "< ratio# ratio# -- ratio# >",
+        &[],
+    ),
+    d(
+        Prim::RatioDiv,
+        "ratio#/",
+        "< ratio# ratio# -- ratio# >",
+        &[],
+    ),
+    d(Prim::IntToRatio, "int#>ratio#", "< int# -- ratio# >", &[]),
+    d(Prim::DecToRatio, "dec#>ratio#", "< dec# -- ratio# >", &[]),
+    d(Prim::RatioToF64, "ratio#>f64", "< ratio# -- f64 >", &[]),
+    d(
+        Prim::RatioToMoney,
+        "ratio#>money",
+        "< ratio# -- money >",
+        &[],
+    ),
+    d(Prim::RatioFloor, "ratio#-floor", "< ratio# -- int# >", &[]),
+    d(Prim::RatioCeil, "ratio#-ceil", "< ratio# -- int# >", &[]),
+    d(Prim::RatioRound, "ratio#-round", "< ratio# -- int# >", &[]),
+    d(Prim::RatioTrunc, "ratio#-trunc", "< ratio# -- int# >", &[]),
     d(Prim::I64Add, "i64+", "< i64 i64 -- i64 >", &[P::IAdd]),
     d(Prim::I64Sub, "i64-", "< i64 i64 -- i64 >", &[P::ISub]),
     d(Prim::I64Mul, "i64*", "< i64 i64 -- i64 >", &[P::IMul]),
@@ -624,6 +673,18 @@ pub fn compile_time_only(p: Prim) -> bool {
             | IntToMoney
             | IntToBool
             | DecToMoney
+            | RatioAdd
+            | RatioSub
+            | RatioMul
+            | RatioDiv
+            | IntToRatio
+            | DecToRatio
+            | RatioToF64
+            | RatioToMoney
+            | RatioFloor
+            | RatioCeil
+            | RatioRound
+            | RatioTrunc
     )
 }
 
@@ -713,6 +774,73 @@ fn dec(v: &Val) -> (i128, u32) {
         _ => unreachable!("a decimal"),
     }
 }
+fn terms(v: &Val) -> &[i128] {
+    match v {
+        Val::Ratio(t) => t,
+        _ => unreachable!("a ratio"),
+    }
+}
+
+/// A ratio's number, in lowest terms with a positive second: a ratio of
+/// two terms, the second not zero.
+fn fraction(v: &Val) -> Result<(i128, i128), (Kind, String)> {
+    let t = terms(v);
+    let &[n, d] = t else {
+        return Err((
+            Kind::Literal,
+            format!(
+                "{} is not a number: a number is a ratio of two terms",
+                show_ratio(t)
+            ),
+        ));
+    };
+    if d == 0 {
+        return Err((
+            Kind::Arithmetic,
+            format!("{} divides by zero", show_ratio(t)),
+        ));
+    }
+    Ok(lowest(n, d))
+}
+
+/// n:d in lowest terms, the second positive.
+fn lowest(n: i128, d: i128) -> (i128, i128) {
+    let (mut a, mut b) = (n.unsigned_abs(), d.unsigned_abs());
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    let g = (a as i128) * d.signum();
+    (n / g, d / g)
+}
+
+/// n/d, d positive, as the nearest f64, ties to even: rounded once, from
+/// the exact quotient. None for terms too large to divide so.
+fn nearest(n: i128, d: i128) -> Option<f64> {
+    if n == 0 {
+        return Some(0.0);
+    }
+    let bits = |x: u128| 128 - x.leading_zeros() as i32;
+    let (a, b) = (n.unsigned_abs(), d.unsigned_abs());
+    // Scaled by 2^k, the quotient has 55 or 56 bits: the 53 an f64 keeps,
+    // and those it is rounded by.
+    let k = 55 + bits(b) - bits(a);
+    let (a, b) = if k >= 0 {
+        (bits(a) + k <= 128).then(|| (a << k, b))?
+    } else {
+        (bits(b) - k <= 128).then(|| (a, b << -k))?
+    };
+    let (q, r) = (a / b, a % b);
+    let s = bits(q) - 53;
+    let mut m = q >> s;
+    let (rest, half) = (q & ((1 << s) - 1), 1 << (s - 1));
+    if rest > half || (rest == half && (r != 0 || m & 1 == 1)) {
+        m += 1;
+    }
+    // m is at most 2^53, and the power of two is a normal f64: exact.
+    let x = m as f64 * f64::from_bits(((s - k + 1023) as u64) << 52);
+    Some(if n < 0 { -x } else { x })
+}
+
 fn float(v: &Val) -> f64 {
     match v {
         Val::Float(x) => *x,
@@ -825,6 +953,70 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         }
         FPow => Ok(vec![Val::Float(float(&a[0]).powf(float(&a[1])))]),
         IntToDec => Ok(vec![Val::Dec(int(&a[0]), 0)]),
+        RatioAdd | RatioSub | RatioMul | RatioDiv => {
+            let ((x, y), (z, w)) = (fraction(&a[0])?, fraction(&a[1])?);
+            if p == RatioDiv && z == 0 {
+                return Err((Kind::Arithmetic, "division by zero".into()));
+            }
+            let r = match p {
+                RatioAdd => x
+                    .checked_mul(w)
+                    .zip(z.checked_mul(y))
+                    .and_then(|(a, b)| a.checked_add(b).zip(y.checked_mul(w))),
+                RatioSub => x
+                    .checked_mul(w)
+                    .zip(z.checked_mul(y))
+                    .and_then(|(a, b)| a.checked_sub(b).zip(y.checked_mul(w))),
+                RatioMul => x.checked_mul(z).zip(y.checked_mul(w)),
+                _ => x.checked_mul(w).zip(y.checked_mul(z)),
+            };
+            let (n, d) = r.ok_or_else(|| overflow("a ratio literal"))?;
+            let (n, d) = lowest(n, d);
+            Ok(vec![Val::Ratio([n, d].into())])
+        }
+        IntToRatio => Ok(vec![Val::Ratio([int(&a[0]), 1].into())]),
+        DecToRatio => {
+            let (d, s) = dec(&a[0]);
+            let unit = pow10(s).ok_or_else(|| overflow("a decimal literal"))?;
+            let (n, d) = lowest(d, unit);
+            Ok(vec![Val::Ratio([n, d].into())])
+        }
+        RatioToF64 => {
+            let (n, d) = fraction(&a[0])?;
+            let x = nearest(n, d).ok_or_else(|| {
+                (
+                    Kind::Literal,
+                    format!("{n}:{d} is too large to become an f64"),
+                )
+            })?;
+            Ok(vec![Val::Float(x)])
+        }
+        RatioToMoney => {
+            let (n, d) = fraction(&a[0])?;
+            let cents = n.checked_mul(100).ok_or_else(|| overflow("money"))?;
+            if cents % d != 0 {
+                return Err((
+                    Kind::Literal,
+                    format!("{n}:{d} is not a whole number of cents, so it is not exact money"),
+                ));
+            }
+            match i64::try_from(cents / d) {
+                Ok(c) => Ok(vec![Val::Int(c.into())]),
+                Err(_) => Err((Kind::Literal, format!("{n}:{d} is too large for money"))),
+            }
+        }
+        RatioFloor | RatioCeil | RatioRound | RatioTrunc => {
+            let (n, d) = fraction(&a[0])?;
+            let (q, r) = (n / d, n % d);
+            let k = match p {
+                RatioFloor => n.div_euclid(d),
+                RatioCeil => -(-n).div_euclid(d),
+                RatioTrunc => q,
+                _ if 2 * r.abs() >= d => q + n.signum(),
+                _ => q,
+            };
+            Ok(vec![Val::Int(k)])
+        }
         IntToI64 => {
             let n = int(&a[0]);
             match i64::try_from(n) {
@@ -1009,6 +1201,12 @@ pub fn end(k: i128, n: i128) -> Option<usize> {
 }
 
 /// A decimal as it is written.
+/// A ratio as it is written: its terms between colons, `1:2`, `-1:3`.
+pub fn show_ratio(t: &[i128]) -> String {
+    let terms: Vec<String> = t.iter().map(i128::to_string).collect();
+    terms.join(":")
+}
+
 pub fn show_dec(d: i128, s: u32) -> String {
     if s == 0 {
         return d.to_string();
@@ -1081,5 +1279,27 @@ pub fn restyle(s: &str, style: Style) -> String {
             .map(|(i, w)| if i == 0 { w.clone() } else { capitalized(w) })
             .collect(),
         Style::Pascal => words.iter().map(|w| capitalized(w)).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_ratio_is_the_nearest_f64() {
+        // Two small integers are floats exactly, and an IEEE division of
+        // exact values is rounded once, to the nearest: the same rounding.
+        for n in -300i128..=300 {
+            for d in 1i128..=300 {
+                assert_eq!(nearest(n, d), Some(n as f64 / d as f64), "{n}:{d}");
+            }
+        }
+        let big = 9_007_199_254_740_993; // 2^53 + 1, no f64: a tie, to even
+        assert_eq!(nearest(big, 1), Some(9_007_199_254_740_992.0));
+        assert_eq!(nearest(1, 1 << 72), Some(2f64.powi(-72)));
+        assert_eq!(nearest(1, 1 << 73), None);
+        assert_eq!(lowest(6, -4), (-3, 2));
+        assert_eq!(lowest(0, 5), (0, 1));
     }
 }

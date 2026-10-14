@@ -12,6 +12,8 @@ pub enum Tok {
     Int(i128),
     /// A decimal literal: its digits, and how many follow the point.
     Dec(i128, u32),
+    /// A ratio literal, `1:2`: its terms as written, the sign on the first.
+    Ratio(Rc<[i128]>),
     Str(Rc<str>),
     Name(Rc<str>),
     /// `.`, which applies the value on top; the reader puts one after each
@@ -293,6 +295,9 @@ fn symbolize(w: &str, symbols: &Symbols) -> String {
 /// decimal a point with digits on both sides.
 fn number(w: &str, pos: Pos) -> Result<Option<Tok>> {
     let digits = w.strip_prefix('-').unwrap_or(w);
+    if digits.starts_with(|c: char| c.is_ascii_digit()) && digits.contains(':') {
+        return ratio(w, pos).map(Some);
+    }
     let (whole, frac) = match digits.split_once('.') {
         Some((a, b)) => (a, Some(b)),
         None => (digits, None),
@@ -311,6 +316,29 @@ fn number(w: &str, pos: Pos) -> Result<Option<Tok>> {
         None => Tok::Int(n),
         Some(f) => Tok::Dec(n, u32::try_from(f.len()).map_err(|_| too_big())?),
     }))
+}
+
+/// A ratio, `1:2`, or one of more terms, `12:30:15` (Thomas, 2026-10-13):
+/// whole numbers between colons, a sign only in front. The terms are kept as
+/// written, so that what takes the literal reads them: `12:30` is not `2:5`.
+fn ratio(w: &str, pos: Pos) -> Result<Tok> {
+    let err = |why: &str| Error::new(Kind::Literal, Some(pos), format!("{w} {why}"));
+    let mut terms = Vec::new();
+    for t in w.strip_prefix('-').unwrap_or(w).split(':') {
+        if t.is_empty() || !t.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(err(
+                "is not a ratio: whole numbers between colons, a sign only in front",
+            ));
+        }
+        let n: i64 = t
+            .parse()
+            .map_err(|_| err("is too large: each term is an i64"))?;
+        terms.push(i128::from(n));
+    }
+    if w.starts_with('-') {
+        terms[0] = -terms[0];
+    }
+    Ok(Tok::Ratio(terms.into()))
 }
 
 struct Reader<'a> {
@@ -529,6 +557,7 @@ fn lowered(tok: &Tok) -> String {
     match tok {
         Tok::Int(n) => n.to_string(),
         Tok::Dec(d, s) => crate::prims::show_dec(*d, *s),
+        Tok::Ratio(t) => crate::prims::show_ratio(t),
         Tok::Str(s) => format!("\"{}\"", text(s)),
         Tok::Name(n) => n.to_string(),
         Tok::Apply => ".".into(),
@@ -609,6 +638,28 @@ mod tests {
                 Tok::Apply,
             ]
         );
+    }
+
+    #[test]
+    fn a_ratio_keeps_its_terms() {
+        let r = |t: &[i128]| Tok::Ratio(t.into());
+        assert_eq!(
+            toks("1:2 -1:3 12:30 2026:10:13 1:2!"),
+            [
+                r(&[1, 2]),
+                r(&[-1, 3]),
+                r(&[12, 30]),
+                r(&[2026, 10, 13]),
+                r(&[1, 2]),
+                Tok::Name("convert".into()),
+                Tok::Apply,
+            ]
+        );
+        for w in ["1:", "1:-2", "1:2.5", "1::2", "1:x"] {
+            let e = read(w, &Symbols::standard()).unwrap_err();
+            assert_eq!(e.kind, Kind::Literal, "{w}");
+            assert!(e.msg.contains("is not a ratio"), "{w}: {e}");
+        }
     }
 
     #[test]

@@ -24,6 +24,9 @@ pub enum Val {
     Int(i128),
     /// A decimal literal: its digits and how many follow the point.
     Dec(i128, u32),
+    /// A ratio literal: its terms, as written or, once computed, in lowest
+    /// terms.
+    Ratio(Rc<[i128]>),
     Float(f64),
     Str(Rc<str>),
     /// A type, as a value.
@@ -150,6 +153,7 @@ fn source_text(toks: &[Token]) -> String {
             Tok::Name(s) => format!("{s}'"),
             Tok::Int(n) => n.to_string(),
             Tok::Dec(d, s) => prims::show_dec(*d, *s),
+            Tok::Ratio(t) => prims::show_ratio(t),
             Tok::Str(s) => format!("{s:?}"),
             Tok::Open(b) | Tok::Close(b) => (*b as char).to_string(),
             Tok::Dashes => "--".into(),
@@ -183,6 +187,7 @@ fn value_text(j: &Jdg) -> String {
         Val::Int(_) if j.ty == BOOL => "true".into(),
         Val::Int(n) => n.to_string(),
         Val::Dec(d, s) => prims::show_dec(*d, *s),
+        Val::Ratio(t) => prims::show_ratio(t),
         Val::Float(x) => format!("{x:?}"),
         Val::Str(s) => format!("{s:?}"),
         Val::Name(s, _) => {
@@ -322,7 +327,7 @@ enum Item {
 /// What an error making a `have` a `t` adds: a float becomes an integer
 /// only by a word that says how it rounds (core/core.march).
 fn narrowing(t: Type, have: Type) -> &'static str {
-    if matches!(t, I64 | INT_LIT) && matches!(have, F64 | DEC_LIT) {
+    if matches!(t, I64 | INT_LIT) && matches!(have, F64 | DEC_LIT | RATIO_LIT) {
         ": say how it rounds, `round`, `floor`, `ceil` or `trunc`"
     } else {
         ""
@@ -658,6 +663,7 @@ impl Stage {
             match &t.tok {
                 Tok::Int(n) => self.push(INT_LIT, Val::Int(*n)),
                 Tok::Dec(d, s) => self.push(DEC_LIT, Val::Dec(*d, *s)),
+                Tok::Ratio(t) => self.push(RATIO_LIT, Val::Ratio(t.clone())),
                 Tok::Str(s) => self.push(STRING, Val::Str(s.clone())),
                 Tok::Template(pieces) => self.template(pieces, t.pos)?,
                 Tok::Name(s)
@@ -926,6 +932,7 @@ impl Stage {
             Val::Int(_) if j.ty == BOOL => "true".into(),
             Val::Int(n) => format!("{n} ({})", self.types.name(j.ty)),
             Val::Dec(d, s) => format!("{} (dec#)", prims::show_dec(*d, *s)),
+            Val::Ratio(t) => format!("{} (ratio#)", prims::show_ratio(t)),
             Val::Float(x) => format!("{x:?} (f64)"),
             Val::Str(s) => format!("{s:?}"),
             Val::Type(t) => format!("the type `{}`", self.types.name(*t)),
@@ -1000,7 +1007,7 @@ impl Stage {
 
     /// The type a literal takes when nothing says (TYPES.md 2.10).
     fn default_of(lit: Type) -> Type {
-        if lit == DEC_LIT { F64 } else { I64 }
+        if lit == INT_LIT { I64 } else { F64 }
     }
 
     /// Gives the judgment at `i` the type `t`: it has it already; or it is a
@@ -1140,8 +1147,9 @@ impl Stage {
         Some((score, env))
     }
 
-    /// A literal matches its own type best, then its default type, then any
-    /// type it converts to; anything else must unify.
+    /// A literal matches its own type best, then another literal kind, then
+    /// its default type, then any type it converts to; anything else must
+    /// unify.
     fn match_slot(&mut self, p: Type, have: Type, env: &mut Env) -> Option<i32> {
         if let Term::Or(..) = self.types.term(p) {
             return self.match_union(p, have, env);
@@ -1151,7 +1159,16 @@ impl Stage {
                 Term::Var(v) => self.bind(v, have, env),
                 Term::Atom => Some(2),
                 _ if p == have => Some(8),
-                _ if self.accepts(p, have) => Some(if p == Self::default_of(have) { 4 } else { 2 }),
+                // Another literal kind keeps it a literal, exact, so `1 3
+                // /*` is the ratio 1:3: a literal takes a type when one is
+                // needed (TYPES.md 2.10). Then its default, then any other.
+                _ if self.accepts(p, have) => Some(if self.types.is_literal(p) {
+                    6
+                } else if p == Self::default_of(have) {
+                    4
+                } else {
+                    2
+                }),
                 _ => None,
             };
         }
@@ -1913,8 +1930,7 @@ impl Stage {
         let base = self.stack.len() - arity;
         for i in base..self.stack.len() {
             match self.stack[i].ty {
-                INT_LIT => self.annotate(i, I64)?,
-                DEC_LIT => self.annotate(i, F64)?,
+                t if self.types.is_literal(t) => self.annotate(i, Self::default_of(t))?,
                 t if self.types.compile_time_only(t) => {
                     return Err(self.err(
                         Kind::Mismatch,
@@ -2614,7 +2630,7 @@ impl Stage {
         let mut i = 0;
         while i < toks.len() {
             match &toks[i].tok {
-                Tok::Int(_) | Tok::Dec(..) | Tok::Str(_) => items.push(Item::Other),
+                Tok::Int(_) | Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_) => items.push(Item::Other),
                 Tok::Template(pieces) => {
                     take(&mut items, &mut ins, template_pulls(pieces).len());
                     items.push(Item::Other);
@@ -2677,7 +2693,7 @@ impl Stage {
         let mut i = 0;
         while i < toks.len() {
             match &toks[i].tok {
-                Tok::Int(_) | Tok::Dec(..) | Tok::Str(_) | Tok::Name(_) => n += 1,
+                Tok::Int(_) | Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_) | Tok::Name(_) => n += 1,
                 Tok::Apply => {
                     if let Some(Tok::Name(s)) = i.checked_sub(1).map(|k| &toks[k].tok)
                         && let Some((a, b)) = self.word_effect(s, &mut Vec::new())
@@ -3163,10 +3179,9 @@ impl Stage {
         if !self.stack[i].known() {
             return Ok(());
         }
-        match self.stack[i].ty {
-            INT_LIT => self.annotate(i, I64)?,
-            DEC_LIT => self.annotate(i, F64)?,
-            _ => {}
+        let t = self.stack[i].ty;
+        if self.types.is_literal(t) {
+            self.annotate(i, Self::default_of(t))?;
         }
         let ins = match &self.stack[i].val {
             Val::Int(n) => Ins::Op(Op::Lit(*n as i64 as u64)),
@@ -4687,7 +4702,11 @@ impl Stage {
                 },
             });
         }
-        Some(t.unwrap_or(if tys.contains(&DEC_LIT) { F64 } else { I64 }))
+        Some(t.unwrap_or(if tys.iter().all(|&x| x == INT_LIT) {
+            I64
+        } else {
+            F64
+        }))
     }
 
     fn close_literal(&mut self, b: u8) -> Result<()> {

@@ -23,6 +23,16 @@ money: [ < dec# -- money > dec#>money ] def
 dec#: [ < int# -- dec# > int#>dec# ] def
 bool: [ < int# -- bool > int#>bool ] def
 
+-- A ratio, `1:2`, is exact while it is a literal, and becomes an f64 rounded
+-- once, or money if it is a whole number of cents. Its terms are kept as
+-- written, so `12:30` is not `2:5`; computed, a ratio is in lowest terms. A
+-- number is a ratio of two terms, the second not zero.
+
+f64: [ < ratio# -- f64 > ratio#>f64 ] def
+money: [ < ratio# -- money > ratio#>money ] def
+ratio#: [ < int# -- ratio# > int#>ratio# ] def
+ratio#: [ < dec# -- ratio# > dec#>ratio# ] def
+
 -- A string converts to the number it writes, or to nil where it writes
 -- none: parsing is converting (Thomas, 2026-10-13). `"42" i64!` is 42, and
 -- `"x" i64!` nil, so the value is an `i64 nil or`.
@@ -54,7 +64,7 @@ false: [ 0 bool! ] def
 -- Classes: a union in a pattern matches any of its types, a little less
 -- well than one of them alone (TYPES.md 3.6). `def` on a type names it.
 
-num: < i64 f64 or money or int# or dec# or > def
+num: < i64 f64 or money or int# or dec# or ratio# or > def
 
 -- Arithmetic. Two literals fold exactly, at compile time, and stay
 -- literals; a literal beside a number takes its type. Money is added and
@@ -62,6 +72,7 @@ num: < i64 f64 or money or int# or dec# or > def
 
 +: [ < int# int# -- int# > int#+ ] def
 +: [ < dec# dec# -- dec# > dec#+ ] def
++: [ < ratio# ratio# -- ratio# > ratio#+ ] def
 +: [ < i64 i64 -- i64 > i64+ ] def
 +: [ < f64 f64 -- f64 > f64+ ] def
 +: [ < money money -- money > money+ ] def
@@ -72,12 +83,14 @@ num: < i64 f64 or money or int# or dec# or > def
 
 -+: [ < int# int# -- int# > int#- ] def
 -+: [ < dec# dec# -- dec# > dec#- ] def
+-+: [ < ratio# ratio# -- ratio# > ratio#- ] def
 -+: [ < i64 i64 -- i64 > i64- ] def
 -+: [ < f64 f64 -- f64 > f64- ] def
 -+: [ < money money -- money > money- ] def
 
 -: [ < int# -- int# > 0 swap -+ ] def
 -: [ < dec# -- dec# > 0 swap -+ ] def
+-: [ < ratio# -- ratio# > 0 swap -+ ] def
 -: [ < i64 -- i64 > 0 swap -+ ] def
 -: [ < f64 -- f64 > -1.0 f64* ] def
 -: [ < money -- money > 0 swap -+ ] def
@@ -85,6 +98,7 @@ num: < i64 f64 or money or int# or dec# or > def
 
 *: [ < int# int# -- int# > int#* ] def
 *: [ < dec# dec# -- dec# > dec#* ] def
+*: [ < ratio# ratio# -- ratio# > ratio#* ] def
 *: [ < i64 i64 -- i64 > i64* ] def
 *: [ < f64 f64 -- f64 > f64* ] def
 
@@ -157,7 +171,8 @@ transpose: [ < a ary ary > dup 1 at length range [ over [ over at ] map swap dro
 -- division is `divmod`, floored, the quotient rounded down and the
 -- remainder with the divisor's sign, so that a = q b + r and `-7 3
 -- divmod` is -3 2. `div` and `mod` take one of them, so the three always
--- agree; `div` of floats is their quotient. Two literals divide exactly.
+-- agree; `div` of floats is their quotient. Two literals divide exactly:
+-- `1 3 /*` is the ratio 1:3, and `2 /` is 1:2.
 
 divmod: [ < int# int# -- int# int# > int#-divmod ] def
 divmod: [ < i64 i64 -- i64 i64 > i64-divmod ] def
@@ -168,8 +183,10 @@ mod: [ < int# int# -- int# > divmod swap drop ] def
 mod: [ < i64 i64 -- i64 > divmod swap drop ] def
 div: [ < a ary a ary > [ div ] zip ] def
 
+/: [ < ratio# -- ratio# > 1 swap /* ] def
 /: [ < f64 -- f64 > 1.0 swap f64/ ] def
 /: [ < a ary > [ / ] map ] def
+/*: [ < ratio# ratio# -- ratio# > ratio#/ ] def
 /*: [ < f64 f64 -- f64 > f64/ ] def
 /*: [ < a ary a ary > [ /* ] zip ] def
 ÷: [ / ] def
@@ -229,21 +246,26 @@ or: [ < bool bool -- bool > max ] def
 
 -- Narrowing: a float to an integer, saying how it rounds: down, up, half
 -- away from zero, or toward zero. A float with no i64 is an error. On an
--- integer they change nothing, and on a decimal literal they are exact.
+-- integer they change nothing, and on a decimal or a ratio literal they are
+-- exact.
 
 floor: [ < dec# -- int# > dec#-floor ] def
+floor: [ < ratio# -- int# > ratio#-floor ] def
 floor: [ < int# -- int# > ] def
 floor: [ < i64 -- i64 > ] def
 floor: [ < f64 -- i64 > f64-floor ] def
 ceil: [ < dec# -- int# > dec#-ceil ] def
+ceil: [ < ratio# -- int# > ratio#-ceil ] def
 ceil: [ < int# -- int# > ] def
 ceil: [ < i64 -- i64 > ] def
 ceil: [ < f64 -- i64 > f64-ceil ] def
 round: [ < dec# -- int# > dec#-round ] def
+round: [ < ratio# -- int# > ratio#-round ] def
 round: [ < int# -- int# > ] def
 round: [ < i64 -- i64 > ] def
 round: [ < f64 -- i64 > f64-round ] def
 trunc: [ < dec# -- int# > dec#-trunc ] def
+trunc: [ < ratio# -- int# > ratio#-trunc ] def
 trunc: [ < int# -- int# > ] def
 trunc: [ < i64 -- i64 > ] def
 trunc: [ < f64 -- i64 > f64-trunc ] def

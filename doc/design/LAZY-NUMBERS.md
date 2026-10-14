@@ -152,8 +152,10 @@ scheduled.
 
 1. **Big integers and exact rationals.**
    - Host primitives, always reduced, with checker types and family clauses.
-   - A ratio literal (`1/3`), and exact decimal literals in a rational
-     context.
+   - A ratio literal, `1:3` (Thomas, 2026-10-13: `:` is the ratio sign, and
+     `/` is March's reciprocal), and exact decimal literals in a rational
+     context. The literal is built (2026-10-14, march8): exact at compile
+     time, an f64 at run time until there is a rational type.
    - Rounding to a scale, for money.
 
    Covers money, fractions and exact counting.

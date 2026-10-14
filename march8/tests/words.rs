@@ -372,9 +372,12 @@ fn at_most_at_least_not_equal() {
         show(&["3 5 le? 5 5 ≤ 5 3 ge? 3 5 neq? 3 3 ≠"]),
         "<5> true true true true false"
     );
-    // NaN is at most nothing and at least nothing, and equal to nothing.
+    // NaN is at most nothing and at least nothing, and equal to nothing. It
+    // takes a float: two literals divide exactly, and zero by zero is an
+    // error.
     assert_eq!(
-        show(&["0.0 0.0 /* dup le? 0.0 0.0 /* dup ge? 0.0 0.0 /* dup neq?"]),
+        show(&["0.0 f64! 0.0 /* dup le? 0.0 f64! 0.0 /* dup ge? 0.0 f64! 0.0 /* dup neq?"]),
         "<3> false false true"
     );
+    assert_eq!(session(&["0.0 0.0 /*"]).err(), Some(Kind::Arithmetic));
 }

@@ -373,6 +373,44 @@ Decided:
 
 Numbers are described in docs/NUMBERS.md.
 
+## Copies and operands: `or*3`, `or^4`
+
+Surface notation (Thomas, 2026-10-13), not built. Two counts, as
+mathematics has n⋅x and xⁿ:
+
+- **`w*n` is n copies of the word,** written in a row, as 3x is x+x+x and
+  `"ab" * 3` is `"ababab"`. Any word repeats: `sqrt*2` is a fourth root,
+  `swap*2` changes nothing, and `w*0` is nothing at all. It agrees with `t*`
+  above, any number of t, the regular expression's star: `t*3` is three.
+- **`w^n` is n operands joined by the word,** as x⁴ is four x's joined by
+  ⋅. It says at a glance how many values are taken, with no one to add, as
+  Lisp's `(or a b c d)` is one operator over four operands.
+
+```
+ratio date time datetime or^4    -- ratio date time datetime or or or
++^4                              -- + + +, the sum of four values
+or*3                             -- or or or, the same as or^4
+sqrt*2                           -- sqrt sqrt
+```
+
+- **`^` is `*` counted by values:** a word that takes k values and leaves one
+  is `w*((n-1)/(k-1))`, so `or^4` is `or*3`; one that leaves none is `w*n`.
+  `^` means nothing for a word that takes one value and leaves one, `neg`
+  or `sqrt`, which takes one however often it is applied, nor for a count
+  that does not come out whole: those are errors, and `*` says what is
+  meant.
+- **One and none, as x¹ and x⁰:** `or^1` takes one value and does nothing,
+  as x¹ is x. `^0` takes none and leaves the identity of the word's
+  operation, as x⁰ is 1, the empty product, and as a fold starts from it:
+  `+^0` is 0, `⋅^0` is 1, and `or^0` is `false` of bools and `none` of
+  types, the empty union. Open: nothing taken says which identity, so its
+  type must come from context, as a literal's does.
+- **n is written,** a number in the source. A count known only at run time
+  needs a word.
+- **`/*` repeated** is `/**3`, legible if rare.
+- **Open:** a word that takes nothing, a value: `pi^2` could be its power,
+  π², and `pi*2` two of it.
+
 ## Locals: a maybe
 
 Not decided. If March gets named locals, the spelling would be `4 :x`: the

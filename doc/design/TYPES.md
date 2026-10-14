@@ -54,13 +54,21 @@ every application is marked:
 ```
 
 This is **Symbolic Forth**, the lowest form (Thomas, 2026-10-13;
-SYMBOLIC-FORTH.md): numbers, symbols and `.`. Every name is a symbol until `.` applies it. `i64 .` is
+SYMBOLIC-FORTH.md): symbols, numbers among them, sets of them in one
+bracket, `[ … ]`, and the meta-ops `[`, `]`, `.` and `!` (2026-10-14).
+Every name is a symbol until `.` applies it. `i64 .` is
 the type: every type is given by a word, so types need no spelling of
 their own (one that bottoms out might show as `i64'`, were it ever shown).
-A type is data, and is not applied: converting is applying another word,
-`convert`, `i64 . convert .`, which `!` shortens to `i64 !`, a
-convenience, not a further fundamental (`convert` takes a type, or a
-type's symbol). (First the form was `1 i64
+A type is data, and is not applied: converting is the meta-op `!`,
+`i64 . !` or `i64 !` (`!` takes a type, or a type's symbol). It was
+`convert .` at first, a word applied, and march8 still reads it so. A
+bracket is a quotation, made data the same way, `[ … ] seq# !`, and so is
+a number, which is
+only a symbol there: `10 i64 !`, or `10 int# !` for a literal whose type
+what takes it decides (2.10). A signature there is two sets, inputs then
+outputs, `[ i64 . ] seq# ! [ i64 . ] seq# !`, so `--` is only a comment,
+and a type variable is given by a word, `n var .`: no rule of spelling is
+left there. (First the form was `1 i64
 . 1 i64 . + .`, when applying a type's name converted.) March8 reads an
 intermediate form over it, in which this is `1 i64! 1 i64! +` (the last
 bullet below).
@@ -295,6 +303,12 @@ any family.
   and whoever takes it handles each; a literal is undecided, and whoever
   takes it decides. Two literals divide exactly, `1 3 /*` is 1:3: a literal
   prefers another literal kind to its default, since it keeps it exact.
+- **A sequence literal, `seq#`** (Thomas, 2026-10-14; not built): what
+  `( … )` collects, `[ … ] seq# !` in the lowest form. Ordered, repeats
+  allowed, and undecided like a number: a clause that wants a tuple, a vec
+  or an `i64 ary` makes it one, and with nothing to take it, it settles by
+  its contents, a vec when its elements are alike, a tuple when not.
+  `{ … }` is `[ … ] map# !`, a map literal, undecided the same way.
 - **`1 1 +`** matches a clause on two literals and folds to the literal 2 at
   compile time. A literal defaults to i64 only when a concrete
   representation is needed: stored, printed, or never given a type.

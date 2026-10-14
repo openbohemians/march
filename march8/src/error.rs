@@ -31,6 +31,9 @@ pub enum Kind {
     Mismatch,
     /// A literal that cannot become the type wanted.
     Literal,
+    /// A value needed while compiling that is known only when the program
+    /// runs: a file to embed, a bracket's values, a vec's length.
+    Unknown,
     /// Arithmetic that overflows or divides by zero, found at compile time.
     Arithmetic,
     /// A limit of the machine, or something not built yet.

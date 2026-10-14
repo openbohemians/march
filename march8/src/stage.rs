@@ -185,6 +185,11 @@ fn value_text(j: &Jdg) -> String {
         Val::Dec(d, s) => prims::show_dec(*d, *s),
         Val::Float(x) => format!("{x:?}"),
         Val::Str(s) => format!("{s:?}"),
+        Val::Name(s, _) => {
+            let mut out = String::new();
+            crate::show::symbol(s, &mut out);
+            out
+        }
         _ => "a value".into(),
     }
 }
@@ -251,9 +256,14 @@ impl Sig {
     }
     /// Whether input `k` is a value pattern.
     fn value(&self, k: usize) -> bool {
-        self.guards
-            .iter()
-            .any(|g| g.slot == k && matches!(g.test, Test::Equals(_)))
+        self.pattern(k).is_some()
+    }
+    /// The value input `k` must equal, if it is a value pattern.
+    fn pattern(&self, k: usize) -> Option<&Jdg> {
+        self.guards.iter().find_map(|g| match &g.test {
+            Test::Equals(j) if g.slot == k => Some(j),
+            _ => None,
+        })
     }
 }
 
@@ -307,6 +317,35 @@ enum Item {
     /// A type, given by its name.
     Type,
     Other,
+}
+
+/// What an error making a `have` a `t` adds: a float becomes an integer
+/// only by a word that says how it rounds (core/core.march).
+fn narrowing(t: Type, have: Type) -> &'static str {
+    if matches!(t, I64 | INT_LIT) && matches!(have, F64 | DEC_LIT) {
+        ": say how it rounds, `round`, `floor`, `ceil` or `trunc`"
+    } else {
+        ""
+    }
+}
+
+/// What each value a clause takes costs its score, so that of clauses of
+/// different lengths the shortest wins, before how well each matches.
+const REACH: i32 = 1 << 12;
+
+/// The most values a family's signatures take.
+fn longest(clauses: &[Rc<Clause>]) -> usize {
+    clauses
+        .iter()
+        .filter_map(|c| c.sig.as_ref().map(|s| s.ins.len()))
+        .max()
+        .unwrap_or(0)
+}
+
+/// How many values a clause takes: its signature's inputs, or, without one,
+/// as many as the family's longest.
+fn length(c: &Clause, longest: usize) -> usize {
+    c.sig.as_ref().map_or(longest, |s| s.ins.len())
 }
 
 /// The candidate that matches best, the first defined among equals.
@@ -991,9 +1030,10 @@ impl Stage {
                 return Err(self.err(
                     Kind::Literal,
                     format!(
-                        "{} cannot become {}",
+                        "{} cannot become {}{}",
                         self.describe(&self.stack[i]),
-                        self.types.name(t)
+                        self.types.name(t),
+                        narrowing(t, have)
                     ),
                 ));
             };
@@ -1018,9 +1058,10 @@ impl Stage {
         Err(self.err(
             Kind::Mismatch,
             format!(
-                "expected {}, found {}",
+                "expected {}, found {}{}",
                 self.types.name(t),
-                self.describe(&self.stack[i])
+                self.describe(&self.stack[i]),
+                narrowing(t, have)
             ),
         ))
     }
@@ -1319,16 +1360,22 @@ impl Stage {
         }
     }
 
-    /// How many values a family takes: the most any signature names, or what
-    /// its definition takes.
-    fn arity(&self, name: &Rc<str>) -> usize {
-        self.words[name]
-            .clauses
+    /// How many values an application of a family takes: the most that the
+    /// clauses which may be chosen for the values on top take, as a choice
+    /// at run time between them leaves those deeper than a shorter one
+    /// takes as they were (TYPES.md 3.13); if none may be, the most any
+    /// signature names; and without signatures, what its definition takes.
+    fn arity(&mut self, name: &Rc<str>) -> usize {
+        let clauses = self.words[name].clauses.clone();
+        if clauses.iter().all(|c| c.sig.is_none()) {
+            return self.effect_of(name).map_or(0, |e| e.0);
+        }
+        let longest = longest(&clauses);
+        self.candidates(&clauses)
             .iter()
-            .filter_map(|c| c.sig.as_ref().map(|s| s.ins.len()))
+            .map(|c| length(&c.1, longest))
             .max()
-            .or_else(|| self.effect_of(name).map(|e| e.0))
-            .unwrap_or(0)
+            .unwrap_or(longest)
     }
 
     /// Chooses among a family's clauses and applies the choice. Clauses are
@@ -1380,19 +1427,37 @@ impl Stage {
         }
     }
 
-    /// The clauses whose inputs match the values on top, in the order they
-    /// were defined, with their scores and bindings.
+    /// The clauses whose inputs match the values on top and which may be
+    /// chosen, with their scores and bindings, the shortest first and in the
+    /// order they were defined among equals.
+    ///
+    /// When clauses of different lengths match, the shortest wins (Thomas,
+    /// TYPES.md 3.13): a word reaches as little of the stack as it can, so a
+    /// longer clause never changes what a call to a shorter one did. So a
+    /// clause scores less the more values it takes, then by how well it
+    /// matches; and one longer than the shortest that matches without
+    /// guards, which always holds, is never chosen.
     fn candidates(&mut self, clauses: &[Rc<Clause>]) -> Vec<Candidate> {
-        clauses
+        let longest = longest(clauses);
+        let mut cands: Vec<(usize, Candidate)> = clauses
             .iter()
             .filter_map(|c| {
                 let m = match &c.sig {
                     None => Some((0, Env::default())),
                     Some(s) => self.match_sig(s),
                 };
-                m.map(|(score, env)| (score, c.clone(), env))
+                let n = length(c, longest);
+                m.map(|(score, env)| (n, (score - REACH * n as i32, c.clone(), env)))
             })
-            .collect()
+            .collect();
+        let bound = cands
+            .iter()
+            .filter(|(_, c)| !c.1.guarded())
+            .map(|&(n, _)| n)
+            .min();
+        cands.retain(|&(n, _)| bound.is_none_or(|b| n <= b));
+        cands.sort_by_key(|&(n, _)| n);
+        cands.into_iter().map(|(_, c)| c).collect()
     }
 
     /// The best of the clauses given, if any: the highest score; a tie is an
@@ -1469,9 +1534,10 @@ impl Stage {
         at: Pos,
         top: bool,
     ) -> Result<()> {
+        let longest = longest(&self.words[name].clauses);
         let n = cands
             .iter()
-            .filter_map(|c| c.1.sig.as_ref().map(|s| s.ins.len()))
+            .map(|c| length(&c.1, longest))
             .max()
             .unwrap_or(0);
         self.need(n)?;
@@ -1560,6 +1626,33 @@ impl Stage {
                     _ => return Err(Error::new(Kind::Ghost, Some(at), name.to_string())),
                 }
             }
+        }
+        // Clauses of different lengths chosen between at run time must leave
+        // the stack as deep (TYPES.md 3.13).
+        let lens: Vec<usize> = order.iter().map(|(c, _)| length(&c.1, longest)).collect();
+        let depths: Vec<usize> = alts
+            .iter()
+            .flatten()
+            .filter_map(|a| a.stack.as_ref().map(Vec::len))
+            .collect();
+        if lens.windows(2).any(|w| w[0] != w[1])
+            && depths.windows(2).any(|w| w[0] != w[1])
+            && self.collecting(base).is_none()
+        {
+            let mut takes: Vec<usize> = lens.clone();
+            takes.sort_unstable();
+            takes.dedup();
+            let takes: Vec<String> = takes.iter().map(usize::to_string).collect();
+            self.pos = at;
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "clauses of `{name}` taking {} values are chosen between at run time, \
+                     and leave the stack at different depths: whichever is chosen must \
+                     leave it as deep",
+                    takes.join(" and ")
+                ),
+            ));
         }
         // A union its clauses' outputs name is meant, and not warned of.
         let declared = order.iter().all(|(c, _)| {
@@ -2432,8 +2525,11 @@ impl Stage {
     // ---- Stack effects ----
 
     /// How many values a word takes and leaves, worked out from its
-    /// definition: what a guard looks at. Clauses of a family share one
-    /// effect, so the first whose effect is known gives it.
+    /// definition: what a guard looks at. Clauses of a family of one length
+    /// share one effect, so the first whose effect is known gives it. Of
+    /// clauses of different lengths, which is chosen depends on the values,
+    /// so they have one only if they agree in what they add to the stack:
+    /// the longest's inputs, and as many more or fewer outputs.
     fn effect_of(&self, name: &Rc<str>) -> Option<(usize, usize)> {
         self.word_effect(name, &mut Vec::new())
     }
@@ -2471,10 +2567,26 @@ impl Stage {
             return None;
         }
         visiting.push(name.clone());
-        let r = w
-            .clauses
-            .iter()
-            .find_map(|c| self.clause_effect(c, visiting));
+        let longest = longest(&w.clauses);
+        let r = if w.clauses.iter().all(|c| length(c, longest) == longest) {
+            w.clauses
+                .iter()
+                .find_map(|c| self.clause_effect(c, visiting))
+        } else {
+            let effects: Vec<(usize, usize)> = w
+                .clauses
+                .iter()
+                .filter_map(|c| self.clause_effect(c, visiting))
+                .collect();
+            let net = |e: &(usize, usize)| e.1 as isize - e.0 as isize;
+            match effects.split_first() {
+                Some((first, rest)) if rest.iter().all(|e| net(e) == net(first)) => {
+                    let ins = effects.iter().map(|e| e.0).max().expect("one");
+                    Some((ins, (ins as isize + net(first)) as usize))
+                }
+                _ => None,
+            }
+        };
         visiting.pop();
         r
     }
@@ -2637,7 +2749,9 @@ impl Stage {
     /// already there replaces it. A clause whose signature types all its
     /// inputs is compiled once now, on values of those types, so that its
     /// errors show where it is defined; if it fails, the family is left as
-    /// it was.
+    /// it was. One that needs its inputs known while compiling, as `embed`'s
+    /// file, cannot be compiled on values at run time, and is checked where
+    /// it is applied instead.
     fn define(&mut self, name: &Rc<str>, clause: Clause) -> Result<()> {
         // Instances compiled before may apply the family changed.
         self.instances.clear();
@@ -2658,11 +2772,86 @@ impl Stage {
             ins.iter()
                 .all(|&t| !self.types.is_pattern(t) && !self.types.compile_time_only(t))
         });
-        if typed && let Err(e) = self.check(name, &c) {
+        if typed
+            && let Err(e) = self.check(name, &c)
+            && e.kind != Kind::Unknown
+        {
             self.word(name).clauses = before;
             return Err(e);
         }
+        if let Some(sig) = &c.sig {
+            self.pos = c.at;
+            self.shadows(name, sig);
+        }
         Ok(())
+    }
+
+    /// Warns of clauses of different lengths that both may match: the
+    /// shorter is chosen then (TYPES.md 3.13). A new shorter clause may
+    /// change what applying the family did; a new longer one, under a
+    /// shorter without guards, is not chosen where that one matches.
+    fn shadows(&mut self, name: &Rc<str>, new: &Sig) {
+        let clauses = self.words[name].clauses.clone();
+        for old in &clauses {
+            let Some(o) = &old.sig else { continue };
+            let msg = if o.ins.len() > new.ins.len() && self.overlap(new, o) {
+                format!(
+                    "this clause of `{name}`, {}, takes fewer values than its clause {}, \
+                     so it is chosen wherever both match",
+                    self.sig_text(new),
+                    self.sig_text(o)
+                )
+            } else if o.ins.len() < new.ins.len() && o.guards.is_empty() && self.overlap(o, new) {
+                format!(
+                    "this clause of `{name}`, {}, takes more values than its clause {}, \
+                     which is chosen wherever both match",
+                    self.sig_text(new),
+                    self.sig_text(o)
+                )
+            } else {
+                continue;
+            };
+            self.warn(Level::Informative, msg);
+        }
+    }
+
+    /// Whether a value could match both a shorter signature and the same
+    /// inputs of a longer one, its top ones: as far as types and value
+    /// patterns tell, since a guard's test is not known.
+    fn overlap(&mut self, short: &Sig, long: &Sig) -> bool {
+        let off = long.ins.len() - short.ins.len();
+        for k in 0..short.ins.len() {
+            if let (Some(a), Some(b)) = (short.pattern(k), long.pattern(off + k))
+                && Test::Equals(a.clone()) != Test::Equals(b.clone())
+            {
+                return false;
+            }
+            let (s, l) = (short.ins[k], long.ins[off + k]);
+            let loose = |me: &Self, t| me.types.is_pattern(t) || me.types.is_literal(t);
+            if s == l || loose(self, s) || loose(self, l) {
+                continue;
+            }
+            if self.unify(s, l, &mut Env::default()).is_none()
+                && self.unify(l, s, &mut Env::default()).is_none()
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// A signature as a message writes it, its value patterns by value.
+    fn sig_text(&self, sig: &Sig) -> String {
+        let slots: Vec<String> = sig
+            .ins
+            .iter()
+            .enumerate()
+            .map(|(k, &t)| match sig.pattern(k) {
+                Some(j) => value_text(j),
+                None => self.types.name(t),
+            })
+            .collect();
+        format!("`< {} >`", slots.join(" "))
     }
 
     /// Compiles a clause on values at run time of its signature's types, and
@@ -2830,7 +3019,7 @@ impl Stage {
         if !code.is_empty() || effects != 0 || stack.iter().any(|j| !j.known()) {
             self.pos = at;
             return Err(self.err(
-                Kind::Mismatch,
+                Kind::Unknown,
                 "a bracket's code runs while compiling, so its values must be known then",
             ));
         }
@@ -2908,7 +3097,7 @@ impl Stage {
                     Val::Int(n) if n >= 0 && (j.ty == INT_LIT || j.ty == I64) => n as u64,
                     _ => {
                         return Err(self.err(
-                            Kind::Mismatch,
+                            Kind::Unknown,
                             format!(
                                 "`vec` needs a length known at compile time, not {}",
                                 self.describe(&j)
@@ -3210,7 +3399,7 @@ impl Stage {
             Prim::Embed => {
                 let Val::Str(path) = self.stack[base].val.clone() else {
                     return Err(self.err(
-                        Kind::Mismatch,
+                        Kind::Unknown,
                         format!("`{name}` reads while compiling, so its file must be known then"),
                     ));
                 };
@@ -3395,7 +3584,7 @@ impl Stage {
                     }
                 } else if prims::compile_time_only(p) {
                     return Err(self.err(
-                        Kind::Mismatch,
+                        Kind::Unknown,
                         format!("`{name}` needs values known at compile time"),
                     ));
                 } else {

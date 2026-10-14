@@ -330,12 +330,17 @@ take: [ < a ary string or i64 > over length min 1 swap slice ] def
 skip: [ < a ary string or i64 negative? > - over length min over length swap -+ 1 swap slice ] def
 skip: [ < a ary string or i64 > over length min 1 + over length slice ] def
 
--- Reading is primitives (Thomas, 2026-10-10, for now): `"data.csv"
--- file-read` a file's text and `stdin-read` standard input, when the
--- program runs, an effect; `"notes.txt" file-embed` a file's text while
--- compiling, so that what follows can fold on it, as a macro would. Paths
--- are from where march8 runs. With namespaces they become `io.file.read`
--- and the like (TYPES.md 3.12).
+-- Reading: `Stdin read` is standard input's text, and `"data.csv" File
+-- read` a file's, when the program runs, an effect; `"notes.txt" File
+-- embed` a file's text while compiling, so that what follows can fold on
+-- it, as a macro would. Paths are from where march8 runs. The clauses take
+-- one value or two, and the shortest that matches wins (TYPES.md 3.13).
+-- With namespaces the primitives become `io.file.read` and the like
+-- (TYPES.md 3.12).
+
+read: [ < Stdin > drop stdin-read ] def
+read: [ < string File > drop file-read ] def
+embed: [ < string File > drop file-embed ] def
 
 -- Text: `split` at each separator (between characters, for ""), `lines`,
 -- and `words` at runs of white space, as Haskell's are; `lower` and `upper`,

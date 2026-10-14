@@ -209,17 +209,19 @@ A family applied chooses its clause by the values on top (TYPES.md 2.8):
 
 - **Matching.** Each clause's signature is matched against as many values
   as it has inputs, scoring:
-  - 4 for each part of a pattern that is not a variable, and 2 for an `ary`
-    that a vec stands for;
-  - for a literal: 4 for its own type, 2 for its default type, 1 for any
+  - 8 for each part of a pattern that is not a variable, 4 for an `ary`
+    that a vec stands for, 2 for `atom`, and for a union 1 less than its
+    best member;
+  - for a literal: 8 for its own type, 4 for its default type, 2 for any
     other type it becomes;
   - nothing for a variable, which binds; the same letter must be the same
     type, and a variable bound to a literal takes a type the literal
     becomes.
 
   A clause with no signature matches anything, with no score.
-- **The highest score wins; a tie is an error.** No clause matching is no
-  word, the same error as a name with no definition (TYPES.md 2.15).
+- **The shortest clause wins, then the highest score; a tie is an error.**
+  No clause matching is no word, the same error as a name with no
+  definition (TYPES.md 2.15). Clauses of different lengths are below.
 - **The chosen clause is evaluated where it is applied, on the caller's
   judgments** (TYPES.md 2.6). So `sq` is integer multiplication in one
   place, float multiplication in another, and a constant on a literal.
@@ -229,9 +231,50 @@ A family applied chooses its clause by the values on top (TYPES.md 2.8):
   promised.
 - **A clause whose signature types all its inputs** is also compiled where
   it is defined, on values at run time of those types, so its errors show
-  there. If it fails, it is not defined.
+  there. If it fails, it is not defined; unless it fails only for needing
+  a value known while compiling, as `embed`'s file, when it is checked
+  where it is applied instead.
 - **A clause with the same context as one before replaces it,** as a FORTH
   redefinition does; otherwise the two would always tie.
+
+### Clauses of different lengths
+
+A family's clauses need not take as many values as each other (Thomas,
+TYPES.md 3.13):
+
+```
+read: [ < Stdin > drop stdin-read ] def
+read: [ < string File > drop file-read ] def
+
+Stdin read                         standard input's text
+"data.csv" File read               a file's
+```
+
+- **When clauses of different lengths match, the shortest wins,** the most
+  specific among those. A word reaches as little of the stack as it can,
+  so a longer clause never changes what a call to a shorter one did. A
+  clause loses a large score for each value it takes, before how well it
+  matches, and one longer than the shortest that matches without guards,
+  which always holds, is dropped: `< i64 >` beside `< i64 i64 >` is chosen
+  for `2 3`, leaving 2.
+- **Guarded clauses are tried shortest first,** each length in the order
+  defined, so a shorter clause whose guard fails gives way to a longer:
+  `"x" File read` tests `Stdin` against File, known now, and drops it.
+- **An application takes as many values as the longest clause that may be
+  chosen,** which is what an instance of a recursive family takes; a
+  clause's body still cannot reach below its own signature.
+- **A choice at run time between clauses of different lengths must leave
+  the stack as deep,** whichever is chosen; the values beneath the shorter
+  clause's are left as they were, and merge with what the longer leaves
+  there, as a union if they differ. Otherwise it is an error: ``clauses
+  of `read` taking 1 and 2 values are chosen between at run time``.
+- **Their effect,** for a guard's arity, is one only if all agree in what
+  they add to the stack: the longest's inputs, and as many more or fewer
+  outputs.
+- **A clause shorter than another that both may match is warned of,**
+  informatively: added, it may change what a call did. So is a longer
+  clause added under a shorter one with no guards, which is chosen
+  wherever both match.
 
 ### Guards: the choice at run time
 
@@ -673,7 +716,8 @@ taking one of them, so the three agree, integers having no reciprocal; and
 and `not`, `and` and `or` as 1 - x, the minimum and the maximum (TYPES.md
 2.16); `floor`, `ceil`, `round` and `trunc`, which narrow a float to an integer,
 saying how it rounds (`round` halves away from zero), exact on a decimal
-literal, an error for a float with no i64. doc/design/WORDCHART.md
+literal, an error for a float with no i64; converting does not round, so
+`2.5 i64!` is an error that names them. doc/design/WORDCHART.md
 charts the words beside APL's and Uiua's. `order`, `<#`, gives the positions
 that put an array in order, stable, APL's grade up `⍋` and R's `order` (not
 "grade", which is too near "gradient"); `at` given an array of
@@ -698,14 +742,13 @@ at run time or nil, and on a known string the value or nil itself. An i64
 converts to an f64, `12 i64! f64!`; an f64 to an i64 only by narrowing,
 which says how it rounds. `le?`, `ge?` and `neq?`, with
 `≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that
-NaN is at most and at least nothing. Reading is primitives, for now:
-`"data.csv" file-read` a file's text and `stdin-read` standard input,
-when the program runs, an effect, so a filter starts `stdin-read lines`;
-`"notes.txt" file-embed.` a file's text while compiling, so what follows
-folds on it (TYPES.md 2.15). With namespaces they become `io.file.read` and
-its kin (TYPES.md 3.12). A `read` chosen by a symbol, `"data.csv" File
-read` beside `Stdin read`, was tried and left: its clauses would take one
-value and two, where a family's clauses share an arity. `case` puts a string in a style named by a
+NaN is at most and at least nothing. Reading is a family whose clauses
+take one value or two (above): `Stdin read` is standard input's text and
+`"data.csv" File read` a file's, when the program runs, an effect, so a
+filter starts `Stdin read lines`; `"notes.txt" File embed` a file's text
+while compiling, so what follows folds on it (TYPES.md 2.15). The
+primitives beneath are `stdin-read`, `file-read` and `file-embed`; with
+namespaces they become `io.file.read` and its kin (TYPES.md 3.12). `case` puts a string in a style named by a
 symbol: `"Hello World" Snake case` is "hello_world", and `lower`, `upper`,
 `kebab`, `camel` and `pascal` the others, chosen while compiling.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
@@ -784,7 +827,8 @@ the words being applied:
 
 Their kinds: no word; a mismatch (types that disagree, clauses that tie,
 values missing or out of reach, a type left unapplied); a literal that
-cannot become its type; arithmetic that overflows or divides by zero,
+cannot become its type; a value needed while compiling that is known only
+at run time, as `embed`'s file; arithmetic that overflows or divides by zero,
 found at compile time; an effect where none is allowed; a limit. An error
 inside a core clause is reported where the clause was applied. Errors while
 running are the machine's, but for a family none of whose clauses holds at
@@ -793,8 +837,9 @@ sym: no clause's guard holds``.
 
 Warnings have three levels: informative, minor and severe (Thomas,
 2026-10-09). The session collects them, and `march8` writes them to
-standard error, `1:1: informative: …`. One is built so far, the informative
-warning where a union is made (above, "Unions").
+standard error, `1:1: informative: …`. Two are built so far, both
+informative: where a union is made (above, "Unions"), and where clauses of
+different lengths both may match (above).
 
 - **Informative:** what programs can and often do, with a clear downside,
   that could be avoided by writing it another way. A slot that may hold

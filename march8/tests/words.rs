@@ -109,6 +109,15 @@ fn narrowing_says_how_it_rounds() {
         session(&["10.0 300.0 pow", "floor"]).err(),
         Some(Kind::Run(march8::machine::Error::Arithmetic))
     );
+    // Converting does not round, and says what does.
+    for src in ["2.5 i64!", "2.0 i64!", "2.5 f64! i64!"] {
+        let e = Session::new().eval(src).expect_err(src);
+        assert!(
+            e.msg
+                .ends_with("say how it rounds, `round`, `floor`, `ceil` or `trunc`"),
+            "{e}"
+        );
+    }
 }
 
 #[test]

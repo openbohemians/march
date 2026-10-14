@@ -590,16 +590,18 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     namespace (2.2). Then `file-read` and its kin move in (they are plain
     words for now; a `read` chosen by a symbol, `"data.csv" File read`,
     was tried and left, its clauses differing in arity).
-13. **Clauses of different arity** (Thomas, 2026-10-12). A family's clauses
-    need not take as many values as each other; `"data.csv" File read`
-    beside `Stdin read` wants it. When clauses of different lengths match,
-    **the shortest wins**, the most specific among those: a word reaches as
-    little of the stack as it can, and a longer clause never changes what a
-    call to a shorter one did (adding a shorter clause can, which deserves
-    an informative warning). The stage already looks as deep as the longest
-    clause. What constrains it is a choice made at run time, by guards or a
-    union's tag: alternatives must agree in net effect, and the deeper
-    slots merge as a union.
+13. **Clauses of different arity** (Thomas, 2026-10-12; built
+    2026-10-13). A family's clauses need not take as many values as each
+    other: `"data.csv" File read` beside `Stdin read`. When clauses of
+    different lengths match, **the shortest wins**, the most specific among
+    those: a word reaches as little of the stack as it can, and a longer
+    clause never changes what a call to a shorter one did (adding a shorter
+    clause can, which an informative warning says, as it says of a longer
+    clause added under a shorter one with no guards, which is chosen
+    wherever both match). Guarded clauses are tried shortest first. What
+    constrains it is a choice made at run time, by guards or a union's
+    tag: alternatives must agree in net effect, and the deeper slots merge
+    as a union. march8/docs/MACHINE.md, "Clauses of different lengths".
 14. **Types with holes** (2026-10-12). A bracket with type variables, named,
     is a type with holes: `opt: < a nil or > def`, `grid: < n m a vec vec
     > def`. Unapplied in a signature the holes match anything, `< opt

@@ -538,10 +538,19 @@ Settled (Thomas, 2026-10-15):
     parsing word. With them March reads itself by its own words, a step up
     in kind. Very powerful, and an easy way to win an obscure-code contest:
     not to be used lightly (Thomas).
+
+    A recognizer is an entry of its namespace, as a word is, and reaches
+    only where that namespace is imported (17; Thomas, 2026-10-15): a
+    namespace's spellings are its own until it exports them and another
+    imports them, and the core's, `^n` and `_n`, are everywhere. They are
+    tried in the order names are looked up, local, then imported, then
+    the core's, so a program's `log_2` is tried before the core's width.
+    So how a namespace reads hangs on its imports, which come first and
+    hold for the text after them, as a FORTH recognizer holds once it is
+    installed.
 26. **High Stack and Low Stack** (Thomas, to try). The surface March is
     written in, today the intermediate form of section 4, is High Stack;
     Symbolic Forth, the lowest form, is Low Stack.
 
-Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); which
-bracket owns a nested hole (14), to watch; and how far a recognizer
-reaches (25), only where its namespace is imported (17), perhaps.
+Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); and which
+bracket owns a nested hole (14), to watch.

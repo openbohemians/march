@@ -9,6 +9,7 @@
 
 use crate::code::{Blob, Cid, Op, Primitive as P};
 use crate::error::{Error, Kind, Level, Pos, Result, Warning};
+use crate::machine::{self, Machine};
 use crate::prims::{self, Effects, PRIMS, Prim};
 use crate::read::{self, Piece, Tok, Token};
 use crate::types::*;
@@ -445,6 +446,8 @@ pub struct Stage {
     /// Set while a bracket's code runs, where a word of one letter is a type
     /// variable.
     in_bracket: u32,
+    /// The machine primitives are folded on, made when first needed.
+    machine: Option<Machine>,
 }
 
 impl Default for Stage {
@@ -539,6 +542,7 @@ impl Stage {
             warnings: Vec::new(),
             site: None,
             in_bracket: 0,
+            machine: None,
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
             let name: Rc<str> = (*name).into();
@@ -3574,29 +3578,7 @@ impl Stage {
                     .iter()
                     .map(|&t| self.types.subst(t, &env))
                     .collect();
-                let known = self.stack[base..]
-                    .iter()
-                    .all(|j| j.known() || matches!(j.val, Val::Pinned(_)));
-                if known && prims::foldable(p) {
-                    // A pinned input's cell goes: its value is known. They
-                    // are the only cells among the inputs, so on top.
-                    for j in &self.stack[base..] {
-                        if matches!(j.val, Val::Pinned(_)) {
-                            self.code.push(Ins::Op(Op::Prim(P::Drop)));
-                        }
-                    }
-                    let args: Vec<Val> = self
-                        .stack
-                        .drain(base..)
-                        .map(|j| match j.val {
-                            Val::Pinned(v) => *v,
-                            v => v,
-                        })
-                        .collect();
-                    let vals = prims::fold(p, &args).map_err(|(k, m)| self.err(k, m))?;
-                    for (val, ty) in vals.into_iter().zip(outs) {
-                        self.push(ty, val);
-                    }
+                if self.fold(p, base, &outs)? {
                 } else if prims::compile_time_only(p) {
                     return Err(self.err(
                         Kind::Unknown,
@@ -3610,6 +3592,114 @@ impl Stage {
             }
         }
         Ok(())
+    }
+
+    /// Folds a primitive on the values from `base`, if they are all known,
+    /// and says whether it did. A literal has no value at run time, and is
+    /// folded by `prims::fold`; any other value by running the primitive's
+    /// operations on the stage's own machine, so that a primitive has one
+    /// meaning, compiled or folded: running while compiling is running, as
+    /// FORTH's immediate words are. Not a primitive with an effect, whose
+    /// reads are facts of the run and whose writes must happen then, nor
+    /// one whose results have no known value here, as an array has none.
+    fn fold(&mut self, p: Prim, base: usize, outs: &[Type]) -> Result<bool> {
+        let known = self.stack[base..]
+            .iter()
+            .all(|j| j.known() || matches!(j.val, Val::Pinned(_)));
+        let held = |t: &Type| matches!(*t, I64 | F64 | MONEY | BOOL | STRING | SYMBOL);
+        let literal = prims::compile_time_only(p);
+        if !known || prims::effects(p) != 0 || !(literal || outs.iter().all(held)) {
+            return Ok(false);
+        }
+        let args: Vec<Jdg> = self.stack[base..]
+            .iter()
+            .map(|j| match &j.val {
+                Val::Pinned(v) => Jdg {
+                    ty: j.ty,
+                    val: (**v).clone(),
+                },
+                _ => j.clone(),
+            })
+            .collect();
+        let vals = if literal {
+            let vals: Vec<Val> = args.iter().map(|j| j.val.clone()).collect();
+            prims::fold(p, &vals).map_err(|(k, m)| self.err(k, m))?
+        } else {
+            let def = PRIMS.iter().find(|d| d.prim == p).expect("listed");
+            match self.run_now(def.ops, &args, outs) {
+                Ok(vals) => vals,
+                Err(e) => {
+                    let ins: Vec<String> = args.iter().map(value_text).collect();
+                    let outs: Vec<String> = outs.iter().map(|&t| self.types.name(t)).collect();
+                    let kind = match e {
+                        machine::Error::Arithmetic => Kind::Arithmetic,
+                        machine::Error::Limit => Kind::Limit,
+                        _ => Kind::Mismatch,
+                    };
+                    let what = match &outs[..] {
+                        [t] => format!("no {t} result"),
+                        _ => "no result".into(),
+                    };
+                    return Err(self.err(
+                        kind,
+                        format!("`{}` on {} has {what}", def.name, ins.join(" and ")),
+                    ));
+                }
+            }
+        };
+        // A pinned input's cell goes: its value is known. They are the only
+        // cells among the inputs, so on top.
+        for j in &self.stack[base..] {
+            if matches!(j.val, Val::Pinned(_)) {
+                self.code.push(Ins::Op(Op::Prim(P::Drop)));
+            }
+        }
+        self.stack.truncate(base);
+        for (val, &ty) in vals.into_iter().zip(outs) {
+            self.push(ty, val);
+        }
+        Ok(true)
+    }
+
+    /// Runs operations on known values on the stage's machine, and reads
+    /// back their results, of the given types: a number is its cell, and a
+    /// string or a symbol is text, its name.
+    fn run_now(
+        &mut self,
+        ops: &[P],
+        args: &[Jdg],
+        outs: &[Type],
+    ) -> std::result::Result<Vec<Val>, machine::Error> {
+        let m = self.machine.get_or_insert_with(Machine::empty);
+        m.stack.clear();
+        for j in args {
+            let cell = match &j.val {
+                Val::Int(n) => *n as i64 as u64,
+                Val::Float(x) => float_bits(*x),
+                Val::Str(s) | Val::Name(s, _) => m.text_cell(s)?,
+                _ => unreachable!("a known value with a cell"),
+            };
+            m.stack.push(cell);
+        }
+        m.apply(ops)?;
+        let cells = std::mem::take(&mut m.stack);
+        assert_eq!(cells.len(), outs.len(), "a primitive leaves its results");
+        let mut vals = Vec::with_capacity(outs.len());
+        for (&c, &t) in cells.iter().zip(outs) {
+            vals.push(match t {
+                F64 => Val::Float(f64::from_bits(c)),
+                STRING | SYMBOL => {
+                    let s: Rc<str> = m.text(c)?.to_text().ok_or(machine::Error::Memory)?.into();
+                    if t == STRING {
+                        Val::Str(s)
+                    } else {
+                        Val::Name(s, Pos::default())
+                    }
+                }
+                _ => Val::Int((c as i64).into()),
+            });
+        }
+        Ok(vals)
     }
 
     /// `map`: an array and a quotation. The quotation is compiled once, on
@@ -4071,18 +4161,12 @@ impl Stage {
         Ok(())
     }
 
-    /// Folds a primitive on the values from `base`, if they are all known
-    /// and it may be folded; says whether it did.
-    fn fold_now(&mut self, p: Prim, base: usize, outs: &[Type]) -> Result<bool> {
-        if !(prims::foldable(p) && self.stack[base..].iter().all(Jdg::known)) {
-            return Ok(false);
+    /// The length of a string known now, in characters.
+    fn known_length(&self, base: usize) -> Option<u64> {
+        match &self.stack[base].val {
+            Val::Str(s) => Some(s.chars().count() as u64),
+            _ => None,
         }
-        let args: Vec<Val> = self.stack.drain(base..).map(|j| j.val).collect();
-        let vals = prims::fold(p, &args).map_err(|(k, m)| self.err(k, m))?;
-        for (val, &ty) in vals.into_iter().zip(outs) {
-            self.push(ty, val);
-        }
-        Ok(true)
     }
 
     /// `at` on an array or a string. Elements count from 1, and from -1 at
@@ -4090,15 +4174,16 @@ impl Stage {
     /// checked against a length known now; one known only at run time is
     /// settled by `element_index`.
     fn at(&mut self, p: Prim, base: usize, out: Type, len: Option<u64>) -> Result<()> {
-        if self.fold_now(p, base, &[out])? {
-            return Ok(());
-        }
+        let len = len.or(self.known_length(base));
         match self.stack[base + 1].val {
             Val::Int(k) => {
                 let i = self.known_element(base, k, len)?;
                 match i {
                     Some(i) => {
                         self.stack[base + 1].val = Val::Int(i as i128);
+                        if self.fold(p, base, &[out])? {
+                            return Ok(());
+                        }
                         return self.emit_ops(2, &[P::VecAt], &[out]);
                     }
                     // From the end of an array of any length.
@@ -4154,8 +4239,22 @@ impl Stage {
     /// either counting from the end when negative, so `2 -2 slice` drops the
     /// first and the last.
     fn slice(&mut self, p: Prim, base: usize, out: Type) -> Result<()> {
-        if self.fold_now(p, base, &[out])? {
-            return Ok(());
+        let (i, j) = (&self.stack[base + 1].val, &self.stack[base + 2].val);
+        if let (Some(n), Val::Int(i), Val::Int(j)) = (self.known_length(base), i, j) {
+            let (i, j) = (*i, *j);
+            let (n, what) = (n as i128, self.types.name(self.stack[base].ty));
+            let (Some(a), Some(b)) = (prims::element(i, n), prims::end(j, n)) else {
+                return Err(self.err(Kind::Mismatch, format!("{i} to {j} is outside the {what}")));
+            };
+            if a > b {
+                return Err(self.err(Kind::Mismatch, format!("{i} to {j} is outside the {what}")));
+            }
+            self.stack[base + 1].val = Val::Int(a as i128);
+            self.stack[base + 2].val = Val::Int(b as i128);
+            if self.fold(p, base, &[out])? {
+                return Ok(());
+            }
+            return self.emit_ops(3, &[P::Slice], &[out]);
         }
         let (i, j) = (&self.stack[base + 1].val, &self.stack[base + 2].val);
         if let (Val::Int(i), Val::Int(j)) = (i, j)

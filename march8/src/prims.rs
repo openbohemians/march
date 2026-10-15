@@ -4,7 +4,7 @@
 //! March (core/core.march).
 
 use crate::code::Primitive as P;
-use crate::error::{Kind, Pos};
+use crate::error::Kind;
 use crate::stage::Val;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -717,49 +717,6 @@ pub fn describe_effects(e: Effects) -> String {
     parts.join(" and ")
 }
 
-/// Whether applying the primitive to known values may be done at compile
-/// time: never one with an effect, whose reads are facts of the run and
-/// whose writes must happen then.
-pub fn foldable(p: Prim) -> bool {
-    effects(p) == 0
-        && !matches!(
-            p,
-            Prim::AryLength
-                | Prim::ArySlice
-                | Prim::AryAt
-                | Prim::AryConcat
-                | Prim::MapLength
-                | Prim::MapAt
-                | Prim::MapHas
-                | Prim::MapPut
-                | Prim::Empty
-                | Prim::TupleLength
-                | Prim::TupleAt
-                | Prim::TupleSpread
-                | Prim::MapKeys
-                | Prim::MapValues
-                | Prim::SortInts
-                | Prim::GradeInts
-                | Prim::GradeFloats
-                | Prim::GradeMoney
-                | Prim::GradeTexts
-                | Prim::GradeDownInts
-                | Prim::GradeDownFloats
-                | Prim::GradeDownMoney
-                | Prim::GradeDownTexts
-                | Prim::AryKeep
-                | Prim::StrSplit
-                | Prim::StrLines
-                | Prim::StrWords
-                | Prim::StrToI64
-                | Prim::StrToF64
-                | Prim::Embed
-                | Prim::SortFloats
-                | Prim::SortMoney
-                | Prim::SortTexts
-        )
-}
-
 type Folded = Result<Vec<Val>, (Kind, String)>;
 
 fn int(v: &Val) -> i128 {
@@ -841,27 +798,8 @@ fn nearest(n: i128, d: i128) -> Option<f64> {
     Some(if n < 0 { -x } else { x })
 }
 
-fn float(v: &Val) -> f64 {
-    match v {
-        Val::Float(x) => *x,
-        _ => unreachable!("a float"),
-    }
-}
-fn text(v: &Val) -> &str {
-    match v {
-        Val::Str(s) => s,
-        _ => unreachable!("a string"),
-    }
-}
-
 fn overflow(what: &str) -> (Kind, String) {
     (Kind::Arithmetic, format!("{what} overflows"))
-}
-
-/// An i64 result, checked.
-fn i64_of(n: Option<i64>, what: &str) -> Folded {
-    n.map(|n| vec![Val::Int(n.into())])
-        .ok_or_else(|| overflow(what))
 }
 
 fn pow10(n: u32) -> Option<i128> {
@@ -887,8 +825,6 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
         r.map(|(d, s)| vec![Val::Dec(d, s)])
             .ok_or_else(|| overflow("a decimal literal"))
     };
-    let small = |n: i128| i64::try_from(n).expect("an i64 value");
-    let flag = |b: bool| Ok(vec![Val::Int(b as i128)]);
     match p {
         IntAdd => lit(int(&a[0]).checked_add(int(&a[1])), "an integer literal"),
         IntSub => lit(int(&a[0]).checked_sub(int(&a[1])), "an integer literal"),
@@ -914,30 +850,6 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
             })?;
             lit(int(&a[0]).checked_pow(e), "an integer literal")
         }
-        IPow => {
-            let e = u32::try_from(int(&a[1])).map_err(|_| {
-                (
-                    Kind::Arithmetic,
-                    "a negative power of an integer".to_string(),
-                )
-            })?;
-            i64_of(small(int(&a[0])).checked_pow(e), "i64 power")
-        }
-        FSqrt => Ok(vec![Val::Float(float(&a[0]).sqrt())]),
-        FFloor | FCeil | FRound | FTrunc => {
-            let x = float(&a[0]);
-            let y = match p {
-                FFloor => x.floor(),
-                FCeil => x.ceil(),
-                FRound => x.round(),
-                _ => x.trunc(),
-            };
-            // As `f>i` checks: NaN, infinities and values outside i64.
-            if !(y > -9_223_372_036_854_777_856.0 && y < 9_223_372_036_854_775_808.0) {
-                return Err((Kind::Arithmetic, format!("{x:?} has no i64")));
-            }
-            Ok(vec![Val::Int((y as i64).into())])
-        }
         DecFloor | DecCeil | DecRound | DecTrunc => {
             let (d, s) = dec(&a[0]);
             let unit = pow10(s).ok_or_else(|| overflow("a decimal literal"))?;
@@ -951,7 +863,6 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
             };
             Ok(vec![Val::Int(n)])
         }
-        FPow => Ok(vec![Val::Float(float(&a[0]).powf(float(&a[1])))]),
         IntToDec => Ok(vec![Val::Dec(int(&a[0]), 0)]),
         RatioAdd | RatioSub | RatioMul | RatioDiv => {
             let ((x, y), (z, w)) = (fraction(&a[0])?, fraction(&a[1])?);
@@ -1072,38 +983,6 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
                 )),
             }
         }
-        I64Add | MoneyAdd => i64_of(
-            small(int(&a[0])).checked_add(small(int(&a[1]))),
-            "i64 addition",
-        ),
-        I64Sub | MoneySub => i64_of(
-            small(int(&a[0])).checked_sub(small(int(&a[1]))),
-            "i64 subtraction",
-        ),
-        I64Mul => i64_of(
-            small(int(&a[0])).checked_mul(small(int(&a[1]))),
-            "i64 multiplication",
-        ),
-        I64Quot | I64Rem => {
-            let (x, y) = (small(int(&a[0])), small(int(&a[1])));
-            if y == 0 {
-                return Err((Kind::Arithmetic, "division by zero".into()));
-            }
-            let r = if p == I64Quot {
-                x.checked_div(y)
-            } else {
-                x.checked_rem(y)
-            };
-            i64_of(r, "i64 division")
-        }
-        I64DivMod => {
-            let (x, y) = (small(int(&a[0])), small(int(&a[1])));
-            if y == 0 {
-                return Err((Kind::Arithmetic, "division by zero".into()));
-            }
-            let (q, r) = crate::machine::floored(x, y).ok_or_else(|| overflow("i64 division"))?;
-            Ok(vec![Val::Int(q.into()), Val::Int(r.into())])
-        }
         IntDivMod => {
             let (x, y) = (int(&a[0]), int(&a[1]));
             if y == 0 {
@@ -1116,68 +995,7 @@ pub fn fold(p: Prim, a: &[Val]) -> Folded {
             }
             Ok(vec![Val::Int(q), Val::Int(r)])
         }
-        I64Lt | MoneyLt => flag(int(&a[0]) < int(&a[1])),
-        I64Eq | MoneyEq => flag(int(&a[0]) == int(&a[1])),
-        F64Add => Ok(vec![Val::Float(float(&a[0]) + float(&a[1]))]),
-        F64Sub => Ok(vec![Val::Float(float(&a[0]) - float(&a[1]))]),
-        F64Mul => Ok(vec![Val::Float(float(&a[0]) * float(&a[1]))]),
-        F64Div => Ok(vec![Val::Float(float(&a[0]) / float(&a[1]))]),
-        F64Lt => flag(float(&a[0]) < float(&a[1])),
-        F64Eq => flag(float(&a[0]) == float(&a[1])),
-        I64Text => Ok(vec![Val::Str(int(&a[0]).to_string().into())]),
-        I64ToF64 => Ok(vec![Val::Float(int(&a[0]) as f64)]),
-        F64Text => Ok(vec![Val::Str(format!("{:?}", float(&a[0])).into())]),
-        MoneyText => Ok(vec![Val::Str(show_dec(int(&a[0]), 2).into())]),
-        StrShow => {
-            let mut out = String::new();
-            crate::show::quoted(text(&a[0]), &mut out);
-            Ok(vec![Val::Str(out.into())])
-        }
-        StrLower => Ok(vec![Val::Str(text(&a[0]).to_lowercase().into())]),
-        SymEq => flag(matches!((&a[0], &a[1]), (Val::Name(x, _), Val::Name(y, _)) if x == y)),
-        StrToSym => Ok(vec![Val::Name(text(&a[0]).into(), Pos::default())]),
-        SymToStr => match &a[0] {
-            Val::Name(n, _) => Ok(vec![Val::Str(n.clone())]),
-            _ => unreachable!("a symbol"),
-        },
-        SymShow => match &a[0] {
-            Val::Name(n, _) => {
-                let mut out = String::new();
-                crate::show::symbol(n, &mut out);
-                Ok(vec![Val::Str(out.into())])
-            }
-            _ => unreachable!("a symbol"),
-        },
-        StrSnake => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Snake).into())]),
-        StrKebab => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Kebab).into())]),
-        StrCamel => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Camel).into())]),
-        StrPascal => Ok(vec![Val::Str(restyle(text(&a[0]), Style::Pascal).into())]),
-        StrUpper => Ok(vec![Val::Str(text(&a[0]).to_uppercase().into())]),
-        StrConcat => Ok(vec![Val::Str(
-            format!("{}{}", text(&a[0]), text(&a[1])).into(),
-        )]),
-        StrLength => Ok(vec![Val::Int(text(&a[0]).chars().count() as i128)]),
-        StrAt => {
-            let i = int(&a[1]);
-            let n = text(&a[0]).chars().count() as i128;
-            element(i, n)
-                .and_then(|i| text(&a[0]).chars().nth(i))
-                .map(|c| vec![Val::Int(u32::from(c).into())])
-                .ok_or_else(|| (Kind::Mismatch, format!("index {i} is outside the string")))
-        }
-        StrEq => flag(text(&a[0]) == text(&a[1])),
-        StrSlice => {
-            let chars: Vec<char> = text(&a[0]).chars().collect();
-            let n = chars.len() as i128;
-            let (i, j) = (int(&a[1]), int(&a[2]));
-            match (element(i, n), end(j, n)) {
-                (Some(s), Some(e)) if s <= e => Ok(vec![Val::Str(
-                    chars[s..e].iter().collect::<String>().into(),
-                )]),
-                _ => Err((Kind::Mismatch, format!("{i} to {j} is outside the string"))),
-            }
-        }
-        _ => unreachable!("{p:?} is not folded"),
+        _ => unreachable!("{p:?} is not a literal's"),
     }
 }
 

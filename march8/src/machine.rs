@@ -323,6 +323,22 @@ impl Machine {
     pub fn text(&self, r: u64) -> Result<&Text, Error> {
         self.region(r)?.text.as_ref().ok_or(Error::Memory)
     }
+
+    /// The handle of a string with this text.
+    pub fn text_cell(&mut self, s: &str) -> Result<u64, Error> {
+        self.allocate_text(merkle_champ::Sequence::text(s))
+    }
+
+    /// Runs primitives on the stack, outside any word: what the stage does
+    /// to fold a primitive on known values, so that it has one meaning,
+    /// compiled or folded. Only primitives on values: no control, scratch
+    /// stack or marks.
+    pub fn apply(&mut self, ops: &[Primitive]) -> Result<(), Error> {
+        for &p in ops {
+            self.primitive(p)?;
+        }
+        Ok(())
+    }
     /// Writes a value of checker type `t` as March writes it: integers
     /// signed, floats with a point, arrays as `( … )`, maps as `{ … }` sorted
     /// by key, strings as literals that read back (docs/STRINGS.md), except a

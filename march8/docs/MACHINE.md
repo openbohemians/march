@@ -769,7 +769,14 @@ operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`, `ratio#/`) exist only at
 compile time.
 A primitive applied to values all known folds, unless it has an effect
-(`write`).
+(`write`) or makes an array, which has no known value here. It folds by
+running: the stage runs the primitive's own operations on a machine of its
+own and reads the results back, so a primitive has one meaning, compiled or
+folded, as FORTH's immediate words run the same code as the program does
+(the kernel shrink, 2026-10-14). Only the literal primitives, which have no
+value at run time, fold by code of their own (`prims::fold`). A fold that
+fails is an error while compiling: `i64+` on 9223372036854775807 and 1 has
+no i64 result.
 
 A few are handled by the stage itself, because their types are not a
 signature's: the stack words, which move judgments, the values at run time

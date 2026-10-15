@@ -226,6 +226,18 @@ dup2: [ over over ] def
 ==: [ dup2 ] def
 ~~: [ swap2 ] def
 
+-- `x q dip`, written `<>`, applies q with x set aside, and puts x back on
+-- top: Joy's and Factor's `dip`, FORTH's `>r q r>` (Thomas, 2026-10-15).
+-- With it the other stack words are words. `keep` applies q to x and keeps
+-- x; `bi` applies two quotations to one value: `3 [ dup * ] [ 1 + ] bi` is
+-- 9 4.
+
+<>: [ dip ] def
+over: [ < a b -- a b a > [ dup ] dip swap ] def
+rot: [ < a b c -- b c a > [ swap ] dip swap ] def
+keep: [ over [ . ] dip ] def
+bi: [ [ keep ] dip . ] def
+
 -- Signs, as guards, and what they choose between. These clauses have no
 -- `if`: a guard picks the clause (doc/design/TYPES.md 2.12).
 

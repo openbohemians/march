@@ -360,6 +360,37 @@ fn primary(cands: &[Candidate]) -> Option<Candidate> {
     cands.iter().find(|c| c.0 == top).cloned()
 }
 
+/// Shuffles across a value set aside, by `dip`, that the machine does in
+/// one operation: `[ dup ] dip swap` is `over`, `[ swap ] dip swap` `rot`.
+const FUSED: &[([P; 4], P)] = &[
+    ([P::ScratchPush, P::Dup, P::ScratchPop, P::Swap], P::Over),
+    ([P::ScratchPush, P::Swap, P::ScratchPop, P::Swap], P::Rot),
+];
+
+fn fuse(code: Vec<Ins>) -> Vec<Ins> {
+    let prim = |i: &Ins| match i {
+        Ins::Op(Op::Prim(p)) => Some(*p),
+        _ => None,
+    };
+    let mut out: Vec<Ins> = Vec::with_capacity(code.len());
+    for ins in code {
+        out.push(ins);
+        let n = out.len();
+        if n < 4 {
+            continue;
+        }
+        let tail: Vec<_> = out[n - 4..].iter().map(prim).collect();
+        if let Some((_, op)) = FUSED
+            .iter()
+            .find(|(seq, _)| seq.iter().zip(&tail).all(|(a, b)| Some(*a) == *b))
+        {
+            out.truncate(n - 4);
+            out.push(Ins::Op(Op::Prim(*op)));
+        }
+    }
+    out
+}
+
 /// Whether the code from `i` returns at once, perhaps after branches.
 fn returns(ops: &[Op], mut i: usize) -> bool {
     for _ in 0..ops.len() {
@@ -2110,10 +2141,12 @@ impl Stage {
             .then_some(outs)
     }
 
-    /// Seals code as the machine takes it: labels become positions, string
+    /// Seals code as the machine takes it: shuffles across a value set aside
+    /// become the one operation they come to, labels positions, string
     /// literals data objects, a call followed only by a return a tail call,
     /// and a return ends it. The blobs are kept for the session to publish.
     pub fn seal(&mut self, code: Vec<Ins>) -> (Vec<Op>, Cid) {
+        let code = fuse(code);
         let mut at = HashMap::new();
         let mut n = 0u32;
         for ins in &code {
@@ -2561,8 +2594,9 @@ impl Stage {
                 Prim::Dup => (1, 2),
                 Prim::Drop => (1, 0),
                 Prim::Swap => (2, 2),
-                Prim::Over => (2, 3),
-                Prim::Rot => (3, 3),
+                // Its effect is its quotation's and one more, which `effect`
+                // reads where the quotation is written.
+                Prim::Dip => return None,
                 Prim::Swap2 => (4, 4),
                 Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
                 Prim::Each | Prim::EachRight => (2, 0),
@@ -2674,6 +2708,15 @@ impl Stage {
                             }
                             _ => (2, 1),
                         },
+                        // `x q dip` takes and leaves one more than q.
+                        Item::Name(s) if self.is_dip(&s) => {
+                            let (a, b) = match items.pop()? {
+                                Item::Quote(from, to) => self.effect(&toks[from..to], visiting)?,
+                                Item::Name(q) => self.word_effect(&q, visiting)?,
+                                _ => return None,
+                            };
+                            (a + 1, b + 1)
+                        }
                         Item::Name(s) => self.word_effect(&s, visiting)?,
                         Item::Type => return None,
                         Item::Quote(from, to) => self.effect(&toks[from..to], visiting)?,
@@ -3310,27 +3353,7 @@ impl Stage {
                 }
                 self.stack.swap(base, base + 1);
             }
-            Prim::Over => {
-                let j = self.stack[base].clone();
-                match j.known_copy() {
-                    Some(k) => self.stack.push(k),
-                    None => {
-                        let top_runs = !self.stack[base + 1].known();
-                        self.emit(Op::Prim(if top_runs { P::Over } else { P::Dup }));
-                        self.stack.push(j);
-                    }
-                }
-            }
-            Prim::Rot => {
-                let runs: Vec<bool> = self.stack[base..].iter().map(|j| !j.known()).collect();
-                match runs[..] {
-                    [true, true, true] => self.emit(Op::Prim(P::Rot)),
-                    [true, true, false] | [true, false, true] => self.emit(Op::Prim(P::Swap)),
-                    _ => {}
-                }
-                let a = self.stack.remove(base);
-                self.stack.push(a);
-            }
+            Prim::Dip => self.dip(name)?,
             Prim::Swap2 => self.permute(base, &[2, 3, 0, 1]),
             Prim::VecLength => {
                 let k = len(self, 13);
@@ -3894,6 +3917,62 @@ impl Stage {
             self.push(t, Val::Many);
         }
         Ok(())
+    }
+
+    /// `x q dip`: q applied with x set aside, on the scratch stack, and x
+    /// put back on top, so q cannot reach it. It is FORTH's `>r q r>` in one
+    /// word, so nothing can be left aside. A value known at compile time has
+    /// no cell to set aside, and if q leaves no code, neither is x's moved.
+    fn dip(&mut self, name: &str) -> Result<()> {
+        let q = self.words_of(name)?;
+        let x = self.stack.pop().expect("matched");
+        let aside = !x.known();
+        if aside {
+            self.emit(Op::Prim(P::ScratchPush));
+        }
+        let start = self.code.len();
+        self.enter()?;
+        let r = self.run(&q);
+        self.depth -= 1;
+        r?;
+        if aside {
+            if self.code.len() == start {
+                self.code.pop();
+            } else {
+                self.emit(Op::Prim(P::ScratchPop));
+            }
+        }
+        self.stack.push(x);
+        Ok(())
+    }
+
+    /// Whether a word is `dip`, or another name for it: a word whose one
+    /// clause applies it, as `<>` does.
+    fn is_dip(&self, name: &Rc<str>) -> bool {
+        let mut name = name.clone();
+        for _ in 0..DEPTH {
+            let Some(w) = self.words.get(&name) else {
+                return false;
+            };
+            if let Some((p, _)) = &w.prim {
+                return *p == Prim::Dip;
+            }
+            match &w.clauses[..] {
+                [c] if c.sig.is_none() => match &c.body[..] {
+                    [
+                        Token {
+                            tok: Tok::Name(n), ..
+                        },
+                        Token {
+                            tok: Tok::Apply, ..
+                        },
+                    ] => name = n.clone(),
+                    _ => return false,
+                },
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// `map` on a tuple: the quotation is compiled for each position, on its

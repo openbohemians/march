@@ -720,7 +720,9 @@ has one meaning, and an inverse is a word); `^`, power; `mod`, the comparisons, 
 `at`, `concat`, `slice`, `print`, the folds, reductions and `repeat` as families
 of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
 `swap`, and doubled, `==` and `~~`, as FORTH's 2DUP and 2SWAP (`dup2`,
-`swap2`); the guards `zero?`, `positive?` and `negative?`, and `abs`, `min` and
+`swap2`); `<>` as `dip`, and over it `over`, `rot`, `keep`, which applies a
+quotation to a value and keeps the value, and `bi`, which applies two to
+one, `3 [ dup * ] [ 1 + ] bi` leaving 9 4; the guards `zero?`, `positive?` and `negative?`, and `abs`, `min` and
 `max` as clauses chosen by them, with no `if`; `sqrt`; `pow`, x to the y,
 exact for two literals and checked for integers; and `divmod`, the quotient
 and remainder, floored (`-7 3 divmod` is `-3 2`), with `div` and `mod` each
@@ -780,7 +782,10 @@ no i64 result.
 
 A few are handled by the stage itself, because their types are not a
 signature's: the stack words, which move judgments, the values at run time
-among them moving by the scratch stack only if their order changes; `vec-length`, a
+among them moving by the scratch stack only if their order changes; `dip`,
+which compiles its quotation with the value under it out of reach, on the
+scratch stack if it is a value at run time and the quotation has code;
+`vec-length`, a
 constant; `vec-at`, which checks a literal index against the length;
 `vec-concat`, whose length is the sum; the tuple words; and `empty`, whose
 type is the type it is given.
@@ -788,8 +793,11 @@ type is the type it is given.
 ## Code
 
 The stage emits the machine's operations (march7/docs/ENGINE.md), and a
-string literal as a data object and `text`. A final call becomes a tail
-call, and a return ends the word. Code is content-addressed as in march7,
+string literal as a data object and `text`. Shuffles across a value `dip`
+sets aside become the one operation they come to, `[ dup ] dip swap` the
+machine's `over` and `[ swap ] dip swap` its `rot`, so stack words defined
+in March cost what primitives did. A final call becomes a tail call, and a
+return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
 The machine is march7's, with forty-six primitives added: `pick`; checked
@@ -945,7 +953,8 @@ different lengths both may match (above).
   - **So `map` keeps its state off the data stack,** as FORTH keeps a
     loop's on the return stack, which here is the scratch stack. March
     says it with Joy's and Factor's `dip`, written `<>` (Thomas), as `=` is
-    `dup`: `x [ q ] dip` runs q with x set aside, and puts x back on top.
+    `dup`: `x [ q ] dip` runs q with x set aside, and puts x back on top
+    (built 2026-10-15, with `over`, `rot`, `keep` and `bi` over it).
     It is `>r q r>` in one word, balanced by construction, so nothing can
     be left aside and no zero-net rule needs policing; Factor dropped `>r`
     and `r>` for it. While q compiles, x is out of reach, and natively it
@@ -955,9 +964,10 @@ different lengths both may match (above).
     which takes only a lone `<` as a bracket; the list edits below wanted
     it for pairing, which will need another spelling. Thomas first named
     `dip` `_`, which now pulls into a quotation.
-  - **It waits on the machine code** (Thomas). The stage knows both
-    stacks' depths everywhere, so natively both can be registers, and
-    either way costs nothing; where the definitions live is the choice.
+  - **Moving the loops waits on the machine code** (Thomas). The stage
+    knows both stacks' depths everywhere, so natively both can be
+    registers, and either way costs nothing; where the definitions live is
+    the choice.
 - **Deferred terms and rewriting clauses.** `range` and `reverse` build
   arrays. Since everything is a value until `.` applies it, applying a pure
   word could leave a term, "`reverse` of this array", made code only when

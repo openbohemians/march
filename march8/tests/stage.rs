@@ -1,7 +1,7 @@
 //! The symbolic stack machine (docs/MACHINE.md): the staged-types
 //! prototype's cases (march7/docs/STAGED.md), written in March, where a name
 //! applies and a definition is `name: [ … ] def`.
-use march8::{Kind, Op, Session};
+use march8::{Kind, Op, Primitive, Session};
 
 /// The cells left on the stack.
 fn run(src: &str) -> Result<Vec<u64>, Kind> {
@@ -335,6 +335,36 @@ fn over_and_rot_move_judgments() {
         show("oo: [ < f64 i64 > over ] def 1.5 2 oo"),
         "<3> 1.5 2 1.5"
     );
+}
+
+#[test]
+fn dip_sets_a_value_aside() {
+    // `x q dip`, written `<>`: q applied below x, which is put back on top,
+    // out of q's reach.
+    assert_eq!(run("1 2 [ dup ] <>").unwrap(), [1, 1, 2]);
+    assert_eq!(run("1 2 3 [ + ] dip").unwrap(), [3, 3]);
+    assert_eq!(fails("1 [ dup ] dip"), Kind::Mismatch);
+    // Words over it, in the core vocabulary.
+    assert_eq!(run("5 [ 1 + ] keep").unwrap(), [6, 5]);
+    assert_eq!(run("3 [ dup * ] [ 1 + ] bi").unwrap(), [9, 4]);
+    // A word's effect counts dip's quotation and one more.
+    assert_eq!(show("small?: [ [ 10 ] <> gt? ] def 3 small?"), "<1> true");
+    // At run time x waits on the scratch stack, and `over` and `rot`, so
+    // defined, are still the machine's one operation each.
+    use Primitive::*;
+    assert_eq!(
+        code("5", "[ 1 + ] keep"),
+        [
+            Op::Prim(Dup),
+            Op::Prim(ScratchPush),
+            Op::Lit(1),
+            Op::Prim(IAdd),
+            Op::Prim(ScratchPop),
+            Op::Return
+        ]
+    );
+    assert_eq!(code("1 2", "over"), [Op::Prim(Over), Op::Return]);
+    assert_eq!(code("1 2 3", "rot"), [Op::Prim(Rot), Op::Return]);
 }
 
 #[test]

@@ -369,7 +369,14 @@ Settled (Thomas, 2026-10-14), not built:
     bare name is looked up locally, then among the imports, then in the
     core. A path is absolute, so it means the same anywhere. An import
     that meets a local name or another import is an error, settled by
-    naming it. `export#` holds the names that may be reached from outside,
+    naming it. A namespace has one import, which holds for all of it
+    wherever it is written, as if first, and is written first by
+    convention, not by rule (Thomas, 2026-10-15); a second is an error. A
+    word's body is compiled when it is applied, not where it is written,
+    so its names cannot hang on where an import stands, as FORTH's search
+    order does, compiling as it reads. Code that wants other imports is a
+    child namespace with its own. `export#` holds the names that may be
+    reached from outside,
     and with none, all may. It holds for paths as well as imports:
     reaching an unexported entry from outside compiles, with a serious
     warning, so a word is private but not locked out. A namespace's
@@ -540,14 +547,15 @@ Settled (Thomas, 2026-10-15):
     not to be used lightly (Thomas).
 
     A recognizer is an entry of its namespace, as a word is, and reaches
-    only where that namespace is imported (17; Thomas, 2026-10-15): a
-    namespace's spellings are its own until it exports them and another
-    imports them, and the core's, `^n` and `_n`, are everywhere. They are
-    tried in the order names are looked up, local, then imported, then
-    the core's, so a program's `log_2` is tried before the core's width.
-    So how a namespace reads hangs on its imports, which come first and
-    hold for the text after them, as a FORTH recognizer holds once it is
-    installed.
+    only where that namespace is imported (17; Thomas, 2026-10-15), never
+    in the namespace that defines it, so no text reads one way before a
+    definition and another after it: a namespace is read by rules fixed
+    before its text, its import's and the core's, `^n` and `_n`, which are
+    everywhere. Imported ones are tried before the core's, so a program's
+    `log_2`, in a small namespace it imports, is tried before the core's
+    width. The import holds for the whole namespace (17), so the reader
+    finds it first, wherever it is written, reading it by the core's
+    rules alone.
 26. **High Stack and Low Stack** (Thomas, to try). The surface March is
     written in, today the intermediate form of section 4, is High Stack;
     Symbolic Forth, the lowest form, is Low Stack.

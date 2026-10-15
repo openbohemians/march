@@ -19,21 +19,14 @@ fn show(pieces: &[&str]) -> String {
 
 #[test]
 fn stack_words_one_and_two_at_a_time() {
-    // `=` is `dup` and `~` is `swap`; doubled, FORTH's 2DUP and 2SWAP.
+    // `=` is `dup` and `~` is `swap`; two wide, FORTH's 2DUP and 2SWAP.
     assert_eq!(show(&["1 2 = ~"]), "<3> 1 2 2");
-    assert_eq!(show(&["1 2 =="]), "<4> 1 2 1 2");
-    assert_eq!(show(&["1 2 3 4 ~~"]), "<4> 3 4 1 2");
+    assert_eq!(show(&["1 2 =_2"]), "<4> 1 2 1 2");
+    assert_eq!(show(&["1 2 3 4 ~_2"]), "<4> 3 4 1 2");
     // At run time, known or not.
-    assert_eq!(show(&["1 2 3 4", "~~"]), "<4> 3 4 1 2");
-    assert_eq!(show(&["1 2", "3 4 ~~"]), "<4> 3 4 1 2");
-    assert_eq!(show(&["1 2", "== + + +"]), "<1> 6");
-    // A subscript, a width: each value moved is a pair.
-    assert_eq!(show(&["1 2 dup_2"]), "<4> 1 2 1 2");
-    assert_eq!(show(&["1 2 3 4 over_2"]), "<6> 1 2 3 4 1 2");
-    assert_eq!(show(&["1 2 3 4 5 6", "rot_2"]), "<6> 3 4 5 6 1 2");
-    assert_eq!(show(&["1 2 3 [ 10 + ] dip_2"]), "<3> 11 2 3");
-    assert_eq!(show(&["1 2 [ + ] keep_2"]), "<3> 3 1 2");
-    assert_eq!(show(&["3 4", "[ + ] [ * ] bi_2"]), "<2> 7 12");
+    assert_eq!(show(&["1 2 3 4", "~_2"]), "<4> 3 4 1 2");
+    assert_eq!(show(&["1 2", "3 4 ~_2"]), "<4> 3 4 1 2");
+    assert_eq!(show(&["1 2", "=_2 + + +"]), "<1> 6");
 }
 
 #[test]

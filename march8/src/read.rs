@@ -140,12 +140,42 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             col: pos.col + stem.chars().count() as u32,
             ..pos
         };
+        let primed = is_name(stem) && stem.len() > 1 && stem.ends_with('\'');
         let (stem, applies) = if is_name(stem) && !r.symbolic {
             spelled(stem)
         } else {
             (stem, false)
         };
-        piece(stem, applies, marks, pos, at, symbols, &mut open, &mut out)?;
+        // A width and a power are spellings (doc/design/SYMBOLIC-FORTH.md
+        // 21, 22): `dup_2^3` reads as `dup 3 power# . 2 width# .`, applied as
+        // `dup` would be, and `[ dup + ]^3` stays a quotation.
+        let spelling;
+        let mut scripts: Vec<(i128, &str)> = Vec::new();
+        let (stem, applies) = if !r.symbolic && (applies || primed || stem.starts_with(']')) {
+            spelling = crate::symbols::unscripted(&symbolize(stem, symbols));
+            let (base, sub, sup) = crate::symbols::scripts(&spelling);
+            // The power first, by the kind of the word itself: a power of a
+            // width is the width of the power.
+            let counts = [(sup, "power#"), (sub, "width#")]
+                .into_iter()
+                .filter(|(digits, _)| !digits.is_empty())
+                .map(|(digits, word)| digits.parse().ok().map(|n| (n, word)))
+                .collect::<Option<Vec<_>>>();
+            match counts {
+                Some(c)
+                    if !c.is_empty() && (base == "]" || is_name(base) && !is_variable(base)) =>
+                {
+                    scripts = c;
+                    (base, applies && base != "]")
+                }
+                _ => (stem, applies),
+            }
+        } else {
+            (stem, applies)
+        };
+        piece(
+            stem, applies, &scripts, marks, pos, at, symbols, &mut open, &mut out,
+        )?;
     }
     if let Some((o, p)) = open.pop() {
         return Err(Error::new(
@@ -185,13 +215,14 @@ pub fn is_variable(w: &str) -> bool {
     w.len() == 1 && w.as_bytes()[0].is_ascii_lowercase()
 }
 
-/// One word: its token, its own application if it is a name that applies,
-/// and for each mark after it, the first at `at`, an application, `.`, or
-/// `convert` applied, `!`.
+/// One word: its token, its width and power spelled out, its own
+/// application if it is a name that applies, and for each mark after it,
+/// the first at `at`, an application, `.`, or `convert` applied, `!`.
 #[allow(clippy::too_many_arguments)]
 fn piece(
     stem: &str,
     applies: bool,
+    scripts: &[(i128, &str)],
     marks: &str,
     pos: Pos,
     at: Pos,
@@ -240,6 +271,20 @@ fn piece(
         };
         if let Some(tok) = tok {
             out.push(Token { tok, pos });
+        }
+        for &(n, word) in scripts {
+            out.push(Token {
+                tok: Tok::Int(n),
+                pos,
+            });
+            out.push(Token {
+                tok: Tok::Name(word.into()),
+                pos,
+            });
+            out.push(Token {
+                tok: Tok::Apply,
+                pos,
+            });
         }
         if applies {
             out.push(Token {
@@ -617,22 +662,26 @@ mod tests {
     #[test]
     fn scripts_read_as_typed() {
         // A name's trailing subscript and superscript digits are its `_` and
-        // `^` and digits (doc/design/SYMBOLIC-FORTH.md 23), escaped or not.
+        // `^` and digits (doc/design/SYMBOLIC-FORTH.md 23), escaped or not,
+        // and a width and a power are spellings, lowered (21, 22), on a word
+        // applied or passed, and on a quotation; a label and a symbol keep
+        // their names.
         let n = |s: &str| Tok::Name(s.into());
-        assert_eq!(
-            toks("dup₂ dup\\_2 +⁴ x₁₂³ log₂'"),
-            [
-                n("dup_2"),
-                Tok::Apply,
-                n("dup_2"),
-                Tok::Apply,
-                n("+^4"),
-                Tok::Apply,
-                n("x_12^3"),
-                Tok::Apply,
-                n("log_2"),
-            ]
-        );
+        let spelled = |w: &str, k: i128, by: &str| [n(w), Tok::Int(k), n(by), Tok::Apply];
+        let mut want = Vec::new();
+        for _ in 0..2 {
+            want.extend(spelled("dup", 2, "width#"));
+            want.push(Tok::Apply);
+        }
+        want.extend(spelled("+", 4, "power#"));
+        want.push(Tok::Apply);
+        want.extend(spelled("dup", 3, "power#"));
+        want.extend([Tok::Int(2), n("width#"), Tok::Apply, Tok::Apply]);
+        want.extend(spelled("log", 2, "width#"));
+        want.extend([Tok::Open(b'['), n("q"), Tok::Close(b']')]);
+        want.extend([Tok::Int(3), n("power#"), Tok::Apply]);
+        want.extend([n("x_1"), n("Snake_2")]);
+        assert_eq!(toks("dup₂ dup\\_2 +⁴ dup₂³ log₂' [ q ]³ x₁: Snake₂"), want);
     }
 
     #[test]

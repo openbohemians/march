@@ -322,6 +322,10 @@ enum Item {
     Bracket(usize, usize),
     /// A type, given by its name.
     Type,
+    /// An integer, a count for a power or a width.
+    Int(i128),
+    /// Code whose effect is known: a power or a width, made.
+    Code(usize, usize),
     Other,
 }
 
@@ -389,6 +393,67 @@ fn fuse(code: Vec<Ins>) -> Vec<Ins> {
         }
     }
     out
+}
+
+/// The rolls that put values in the order `after`, from `before`, both
+/// from the bottom: from the first out of place, each in turn brought up
+/// to the top, above those placed already. A roll is how many values it
+/// turns, the one brought up the deepest.
+fn rolls(before: &[usize], after: &[usize]) -> Vec<usize> {
+    let mut now = before.to_vec();
+    let placed = now.iter().zip(after).take_while(|(a, b)| a == b).count();
+    let mut out = Vec::new();
+    for x in &after[placed..] {
+        let at = now.iter().position(|v| v == x).expect("a permutation");
+        out.push(now.len() - at);
+        now.remove(at);
+        now.push(*x);
+    }
+    out
+}
+
+/// How many operations a roll of `w` values takes (`Stage::roll`).
+fn roll_cost(w: usize) -> usize {
+    match w {
+        0 | 1 => 0,
+        2 | 3 => 1,
+        w => 3 * (w - 3) + 1,
+    }
+}
+
+/// Whether a value is code, a quotation or a word, which a width does not
+/// widen.
+fn is_code(j: &Jdg) -> bool {
+    match &j.val {
+        Val::Name(..) => true,
+        Val::Quote(q) => !signature(q),
+        _ => false,
+    }
+}
+
+/// Whether two values are the same code, written once.
+fn same_code(a: &Val, b: &Val) -> bool {
+    match (a, b) {
+        (Val::Quote(x), Val::Quote(y)) => Rc::ptr_eq(x, y),
+        (Val::Name(x, _), Val::Name(y, _)) => Rc::ptr_eq(x, y),
+        _ => false,
+    }
+}
+
+/// The effect of code's n-th power, by its kind (doc/design/SYMBOLIC-FORTH.md
+/// 21), if it has one.
+fn power_effect((k, m): (usize, usize), n: usize) -> Option<(usize, usize)> {
+    match (k, m) {
+        (0, 1) => (n > 0).then_some((0, 1)),
+        (2.., 1) => (n > 0 && (n - 1).is_multiple_of(k - 1)).then_some((n, 1)),
+        _ => Some((0..n).fold((0, 0), |(a, b), _| {
+            if k <= b {
+                (a, b - k + m)
+            } else {
+                (a + k - b, m)
+            }
+        })),
+    }
 }
 
 /// Whether the code from `i` returns at once, perhaps after branches.
@@ -479,6 +544,15 @@ pub struct Stage {
     in_bracket: u32,
     /// The machine primitives are folded on, made when first needed.
     machine: Option<Machine>,
+    /// Set while a word is applied wide (doc/design/SYMBOLIC-FORTH.md 22).
+    wide: Option<Wide>,
+}
+
+/// A width being applied: how many values make a group, and the code
+/// handed to the word widened, which runs as written.
+struct Wide {
+    n: usize,
+    outside: Vec<Val>,
 }
 
 impl Default for Stage {
@@ -574,6 +648,7 @@ impl Stage {
             site: None,
             in_bracket: 0,
             machine: None,
+            wide: None,
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
             let name: Rc<str> = (*name).into();
@@ -788,6 +863,9 @@ impl Stage {
     /// `.`: applies the value on top.
     fn apply(&mut self) -> Result<()> {
         let f = self.pop()?;
+        if self.wide.is_some() && is_code(&f) {
+            return self.wide_apply(f);
+        }
         match f.val {
             Val::Name(n, at) => {
                 self.pos = at;
@@ -2500,8 +2578,9 @@ impl Stage {
 
     /// Reorders the judgments from `base`: output k is input `order[k]`.
     /// Known values move for nothing; the values at run time among them,
-    /// if their order changes, go to the scratch stack, the deepest ending
-    /// on top, and are copied back in the new order.
+    /// if their order changes, are rolled into place one by one, or, if
+    /// that is longer, go to the scratch stack, the deepest ending on top,
+    /// and are copied back in the new order.
     fn permute(&mut self, base: usize, order: &[usize]) {
         let present: Vec<usize> = (0..order.len())
             .filter(|&k| !self.stack[base + k].known())
@@ -2512,17 +2591,26 @@ impl Stage {
             .filter(|k| present.contains(k))
             .collect();
         if after != present {
-            for _ in 0..present.len() {
-                self.emit(Op::Prim(P::ScratchPush));
-            }
-            for k in &after {
-                let depth = present.iter().position(|p| p == k).expect("present");
-                self.emit(Op::Lit(depth as u64));
-                self.emit(Op::Prim(P::ScratchAt));
-            }
-            for _ in 0..present.len() {
-                self.emit(Op::Prim(P::ScratchPop));
-                self.emit(Op::Prim(P::Drop));
+            // By rolling each value into place, from the first out of
+            // place, or through the scratch stack, whichever is shorter.
+            let rolls = rolls(&present, &after);
+            if rolls.iter().map(|&w| roll_cost(w)).sum::<usize>() < 5 * present.len() {
+                for w in rolls {
+                    self.roll(w);
+                }
+            } else {
+                for _ in 0..present.len() {
+                    self.emit(Op::Prim(P::ScratchPush));
+                }
+                for k in &after {
+                    let depth = present.iter().position(|p| p == k).expect("present");
+                    self.emit(Op::Lit(depth as u64));
+                    self.emit(Op::Prim(P::ScratchAt));
+                }
+                for _ in 0..present.len() {
+                    self.emit(Op::Prim(P::ScratchPop));
+                    self.emit(Op::Prim(P::Drop));
+                }
             }
         }
         let moved: Vec<Jdg> = order
@@ -2596,7 +2684,8 @@ impl Stage {
                 Prim::Swap => (2, 2),
                 // Its effect is its quotation's and one more, which `effect`
                 // reads where the quotation is written.
-                Prim::Dip => return None,
+                Prim::Dip | Prim::Widen => return None,
+                Prim::QuotePower | Prim::QuoteWidth => (2, 1),
                 Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
                 Prim::Each | Prim::EachRight => (2, 0),
                 Prim::Within => (2, 1),
@@ -2667,7 +2756,8 @@ impl Stage {
         let mut i = 0;
         while i < toks.len() {
             match &toks[i].tok {
-                Tok::Int(_) | Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_) => items.push(Item::Other),
+                Tok::Int(n) => items.push(Item::Int(*n)),
+                Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_) => items.push(Item::Other),
                 Tok::Template(pieces) => {
                     take(&mut items, &mut ins, template_pulls(pieces).len());
                     items.push(Item::Other);
@@ -2707,11 +2797,50 @@ impl Stage {
                             }
                             _ => (2, 1),
                         },
+                        // A power or a width of the code and the count before
+                        // it, as the reader spells `dup_2^3`.
+                        Item::Name(s) if matches!(&*s, "power#" | "width#") => {
+                            let (Some(Item::Int(n)), Some(code)) = (items.pop(), items.pop())
+                            else {
+                                return None;
+                            };
+                            let e = match code {
+                                Item::Quote(from, to) => self.effect(&toks[from..to], visiting)?,
+                                Item::Name(q) => self.word_effect(&q, visiting)?,
+                                Item::Code(a, b) => (a, b),
+                                _ => return None,
+                            };
+                            let n = usize::try_from(n).ok()?;
+                            items.push(if &*s == "power#" {
+                                let (a, b) = power_effect(e, n)?;
+                                Item::Code(a, b)
+                            } else {
+                                Item::Code(e.0 * n, e.1 * n)
+                            });
+                            i += 1;
+                            continue;
+                        }
+                        // `w n widen`, w applied n wide, n times what w does.
+                        Item::Name(s) if &*s == "widen" => {
+                            let (Some(Item::Int(n)), Some(code)) = (items.pop(), items.pop())
+                            else {
+                                return None;
+                            };
+                            let (a, b) = match code {
+                                Item::Quote(from, to) => self.effect(&toks[from..to], visiting)?,
+                                Item::Name(q) => self.word_effect(&q, visiting)?,
+                                Item::Code(a, b) => (a, b),
+                                _ => return None,
+                            };
+                            let n = usize::try_from(n).ok()?;
+                            (a * n, b * n)
+                        }
                         // `x q dip` takes and leaves one more than q.
                         Item::Name(s) if self.is_dip(&s) => {
                             let (a, b) = match items.pop()? {
                                 Item::Quote(from, to) => self.effect(&toks[from..to], visiting)?,
                                 Item::Name(q) => self.word_effect(&q, visiting)?,
+                                Item::Code(a, b) => (a, b),
                                 _ => return None,
                             };
                             (a + 1, b + 1)
@@ -2719,7 +2848,8 @@ impl Stage {
                         Item::Name(s) => self.word_effect(&s, visiting)?,
                         Item::Type => return None,
                         Item::Quote(from, to) => self.effect(&toks[from..to], visiting)?,
-                        Item::Bracket(..) | Item::Other => return None,
+                        Item::Code(a, b) => (a, b),
+                        Item::Bracket(..) | Item::Int(_) | Item::Other => return None,
                     };
                     take(&mut items, &mut ins, a);
                     items.extend((0..b).map(|_| Item::Other));
@@ -3353,6 +3483,9 @@ impl Stage {
                 self.stack.swap(base, base + 1);
             }
             Prim::Dip => self.dip(name)?,
+            Prim::QuotePower => self.quote_power()?,
+            Prim::QuoteWidth => self.quote_width()?,
+            Prim::Widen => self.widen()?,
             Prim::VecLength => {
                 let k = len(self, 13);
                 if !self.stack[base].known() {
@@ -3537,6 +3670,21 @@ impl Stage {
                         return Err(self.err(
                             Kind::Syntax,
                             format!("`{n}` is a variable, one letter, and names no word"),
+                        ));
+                    }
+                    let (base, sub, sup) = crate::symbols::scripts(n);
+                    if !base.is_empty() && (!sub.is_empty() || !sup.is_empty()) {
+                        let what = match (sub, sup) {
+                            (w, "") => format!("{w} wide"),
+                            ("", p) => format!("to the power {p}"),
+                            (w, p) => format!("{w} wide, to the power {p}"),
+                        };
+                        return Err(self.err(
+                            Kind::Syntax,
+                            format!(
+                                "`{n}` is a spelling, `{base}` {what}, and names no word; \
+                                 a meaning of its own is a clause of `power#` or `width#`"
+                            ),
                         ));
                     }
                 }
@@ -3917,44 +4065,52 @@ impl Stage {
         Ok(())
     }
 
-    /// `x q dip`: q applied with x set aside, on the scratch stack, and x
-    /// put back on top, so q cannot reach it. It is FORTH's `>r q r>` in one
-    /// word, so nothing can be left aside. A value known at compile time has
-    /// no cell to set aside, and if q leaves no code, neither is x's moved.
+    /// `x q dip`: q applied with x set aside, out of its reach, and x put
+    /// back on top. It is FORTH's `>r q r>` in one word, so nothing can be
+    /// left aside.
     fn dip(&mut self, name: &str) -> Result<()> {
         let q = self.words_of(name)?;
-        let x = self.stack.pop().expect("matched");
-        let aside = !x.known();
-        if aside {
+        self.aside(1, |s| s.run_code(&q))
+    }
+
+    /// Sets the top `m` values aside while `f` compiles, those at run time
+    /// on the scratch stack, and puts them back. A value known at compile
+    /// time has no cell to set aside, and if `f` leaves no code, none moves.
+    fn aside(&mut self, m: usize, f: impl FnOnce(&mut Self) -> Result<()>) -> Result<()> {
+        self.need(m)?;
+        let set = self.stack.split_off(self.stack.len() - m);
+        let cells = set.iter().filter(|j| !j.known()).count();
+        for _ in 0..cells {
             self.emit(Op::Prim(P::ScratchPush));
         }
         let start = self.code.len();
-        self.enter()?;
-        let r = self.run(&q);
-        self.depth -= 1;
-        r?;
-        if aside {
-            if self.code.len() == start {
-                self.code.pop();
-            } else {
+        f(self)?;
+        if self.code.len() == start {
+            self.code.truncate(start - cells);
+        } else {
+            for _ in 0..cells {
                 self.emit(Op::Prim(P::ScratchPop));
             }
         }
-        self.stack.push(x);
+        self.stack.extend(set);
         Ok(())
     }
 
-    /// Whether a word is `dip`, or another name for it: a word whose one
-    /// clause applies it, as `<>` does.
-    fn is_dip(&self, name: &Rc<str>) -> bool {
+    fn run_code(&mut self, q: &[Token]) -> Result<()> {
+        self.enter()?;
+        let r = self.run(q);
+        self.depth -= 1;
+        r
+    }
+
+    /// A word followed through other names for it, words whose one clause
+    /// applies another, as `<>` does `dip` and `=` `dup`.
+    fn alias_of(&self, name: &Rc<str>) -> Rc<str> {
         let mut name = name.clone();
         for _ in 0..DEPTH {
-            let Some(w) = self.words.get(&name) else {
-                return false;
+            let Some(w) = self.words.get(&name).filter(|w| w.prim.is_none()) else {
+                break;
             };
-            if let Some((p, _)) = &w.prim {
-                return *p == Prim::Dip;
-            }
             match &w.clauses[..] {
                 [c] if c.sig.is_none() => match &c.body[..] {
                     [
@@ -3965,12 +4121,450 @@ impl Stage {
                             tok: Tok::Apply, ..
                         },
                     ] => name = n.clone(),
-                    _ => return false,
+                    _ => break,
                 },
-                _ => return false,
+                _ => break,
             }
         }
-        false
+        name
+    }
+
+    fn is_dip(&self, name: &Rc<str>) -> bool {
+        let name = self.alias_of(name);
+        matches!(
+            self.words.get(&name).and_then(|w| w.prim.as_ref()),
+            Some((Prim::Dip, _))
+        )
+    }
+
+    // ---- Powers and widths (doc/design/SYMBOLIC-FORTH.md 21, 22) ----
+
+    /// The count a power or a width takes, written in the source.
+    fn count(&mut self, word: &str, least: i128) -> Result<usize> {
+        let j = self.stack.pop().expect("matched");
+        match j.val {
+            Val::Int(k) if k >= least && (j.ty == INT_LIT || j.ty == I64) => {
+                usize::try_from(k).map_err(|_| self.err(Kind::Limit, format!("`{word}` of {k}")))
+            }
+            _ => Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "`{word}` takes a count, at least {least}, written in the source, \
+                     and is given {}",
+                    self.describe(&j)
+                ),
+            )),
+        }
+    }
+
+    /// How a word or a quotation reads in a message.
+    fn shown(j: &Jdg) -> String {
+        match &j.val {
+            Val::Name(n, _) => format!("`{n}`"),
+            _ => "the quotation".into(),
+        }
+    }
+
+    /// The effect of a word or a quotation, if it is known.
+    fn code_effect(&self, j: &Jdg) -> Option<(usize, usize)> {
+        match &j.val {
+            Val::Name(n, _) => self.effect_of(n),
+            Val::Quote(q) => self.effect(q, &mut Vec::new()),
+            _ => None,
+        }
+    }
+
+    /// `w n quote-power`: w's n-th power, a quotation, as mathematics takes
+    /// it for w's kind, which its stack effect gives: a value's n copies
+    /// multiplied, `pi^2` being π²; an operation's n operands, `+^4` being
+    /// `+ + +`; and any other word applied n times, `sqrt^2` a fourth root.
+    fn quote_power(&mut self) -> Result<()> {
+        let n = self.count("power#", 0)?;
+        let w = self.stack.pop().expect("matched");
+        let code = self.code_tokens(&w, "power#")?;
+        let shown = Self::shown(&w);
+        let Some((k, m)) = self.code_effect(&w) else {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!("{shown} has no power: its stack effect is not known while compiling"),
+            ));
+        };
+        let (times, products) = match (k, m) {
+            (0, 1) | (2.., 1) if n == 0 => {
+                return Err(self.err(
+                    Kind::NoWord,
+                    format!(
+                        "the power 0 of {shown} is the identity of its operation, \
+                         a clause of `power#`, as `+^0` is 0"
+                    ),
+                ));
+            }
+            (0, 1) => (n, n - 1),
+            (2.., 1) if (n - 1).is_multiple_of(k - 1) => ((n - 1) / (k - 1), 0),
+            (2.., 1) => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "{shown} takes {k} values, so a power of it takes a multiple of {} \
+                         and one more",
+                        k - 1
+                    ),
+                ));
+            }
+            _ => (n, 0),
+        };
+        let at = self.pos;
+        let mut q: Vec<Token> = Vec::new();
+        for _ in 0..times {
+            q.extend(code.iter().cloned());
+        }
+        for _ in 0..products {
+            q.push(Token {
+                tok: Tok::Name("*".into()),
+                pos: at,
+            });
+            q.push(Token {
+                tok: Tok::Apply,
+                pos: at,
+            });
+        }
+        self.push(QUOTE, Val::Quote(q.into()));
+        Ok(())
+    }
+
+    /// `w n quote-width`: w n wide, a quotation, which `widen` applies.
+    fn quote_width(&mut self) -> Result<()> {
+        let n = self.count("width#", 1)?;
+        let w = self.stack.pop().expect("matched");
+        let at = self.pos;
+        let tok = |tok| Token { tok, pos: at };
+        let mut q = match &w.val {
+            Val::Name(name, at) => vec![Token {
+                tok: Tok::Name(name.clone()),
+                pos: *at,
+            }],
+            Val::Quote(c) => {
+                let mut v = vec![tok(Tok::Open(b'['))];
+                v.extend(c.iter().cloned());
+                v.push(tok(Tok::Close(b']')));
+                v
+            }
+            _ => {
+                return Err(self.err(
+                    Kind::NoWord,
+                    format!(
+                        "no word `width#` for {}: it takes a quotation or a word",
+                        self.describe(&w)
+                    ),
+                ));
+            }
+        };
+        q.extend([
+            tok(Tok::Int(n as i128)),
+            tok(Tok::Name("widen".into())),
+            tok(Tok::Apply),
+        ]);
+        self.push(QUOTE, Val::Quote(q.into()));
+        Ok(())
+    }
+
+    /// `w n widen`: w applied n wide. Each value w works on is a group of
+    /// n, but the code handed to it, on the stack now, which runs once, as
+    /// written, on a group's values.
+    fn widen(&mut self) -> Result<()> {
+        let n = self.count("widen", 1)?;
+        let w = self.stack.pop().expect("matched");
+        let code = self.code_tokens(&w, "widen")?;
+        if n == 1 {
+            return self.run_code(&code);
+        }
+        let outside = self
+            .stack
+            .iter()
+            .filter(|j| is_code(j))
+            .map(|j| j.val.clone())
+            .collect();
+        let saved = self.wide.replace(Wide { n, outside });
+        let r = match &w.val {
+            Val::Name(name, at) => {
+                self.pos = *at;
+                self.wide_word(name)
+            }
+            _ => self.wide_quote(&code, true),
+        };
+        self.wide = saved;
+        r
+    }
+
+    fn unwide(&mut self, f: impl FnOnce(&mut Self) -> Result<()>) -> Result<()> {
+        let saved = self.wide.take();
+        let r = f(self);
+        self.wide = saved;
+        r
+    }
+
+    /// `.` while widening: code handed to the word runs as written, and
+    /// the word's own is widened.
+    fn wide_apply(&mut self, f: Jdg) -> Result<()> {
+        let outside = self
+            .wide
+            .as_ref()
+            .is_some_and(|w| w.outside.iter().any(|o| same_code(o, &f.val)));
+        let code = self.code_tokens(&f, ".")?;
+        if outside {
+            return self.unwide(|s| s.run_code(&code));
+        }
+        match &f.val {
+            Val::Name(name, at) => {
+                self.pos = *at;
+                self.wide_word(name)
+            }
+            _ => self.wide_quote(&code, false),
+        }
+    }
+
+    /// A word widened. `dup`, `drop`, `swap` and `dip` move groups as they
+    /// move values, and so does a word made only of them, or one handed
+    /// code: its body is widened in turn. Any other word, as an operation,
+    /// acts lane by lane.
+    fn wide_word(&mut self, name: &Rc<str>) -> Result<()> {
+        let name = self.alias_of(name);
+        let Some(w) = self.words.get(&name) else {
+            return self.apply_word(&name);
+        };
+        match w.prim.as_ref().map(|(p, _)| *p) {
+            Some(Prim::Dup) => return self.wide_dup(),
+            Some(Prim::Drop) => return self.wide_drop(),
+            Some(Prim::Swap) => return self.wide_swap(),
+            Some(Prim::Dip) => return self.wide_dip(),
+            _ => {}
+        }
+        if w.ty.is_some() || w.con.is_some() {
+            return self.unwide(|s| s.apply_word(&name));
+        }
+        let (prim, clauses) = (w.prim.is_some(), w.clauses.clone());
+        let effect = self.effect_of(&name);
+        let moves = self.moves_only(&name, &mut Vec::new());
+        let handed = match effect {
+            Some((k, _)) => self.code_among(k)?,
+            None => true,
+        };
+        if moves || handed {
+            // The clause chosen as a family chooses one, its body widened.
+            let chosen = if prim {
+                None
+            } else {
+                primary(&self.candidates(&clauses))
+            };
+            let Some((_, clause, _)) = chosen else {
+                return Err(self.err(
+                    Kind::NoWord,
+                    format!("no width for `{name}`: it is handed code, and has no body to widen"),
+                ));
+            };
+            return self.run_code(&clause.body);
+        }
+        let (k, m) = effect.expect("known");
+        let code = [
+            Token {
+                tok: Tok::Name(name),
+                pos: self.pos,
+            },
+            Token {
+                tok: Tok::Apply,
+                pos: self.pos,
+            },
+        ];
+        self.lanes(&code, k, m)
+    }
+
+    /// A quotation widened. One written in the word widened moves groups,
+    /// as the word's own code; the quotation widened itself is chosen as a
+    /// word is.
+    fn wide_quote(&mut self, q: &[Token], widened: bool) -> Result<()> {
+        if widened
+            && !self.moves_only_tokens(q, &mut Vec::new())
+            && let Some((k, m)) = self.effect(q, &mut Vec::new())
+            && !self.code_among(k)?
+        {
+            return self.lanes(q, k, m);
+        }
+        self.run_code(q)
+    }
+
+    /// The sizes of the top `k` values while widening, from the top: code
+    /// is one value, and anything else a group of n.
+    fn items(&self, k: usize) -> Result<Vec<usize>> {
+        let n = self.wide.as_ref().expect("widening").n;
+        let mut at = self.stack.len();
+        let mut sizes = Vec::with_capacity(k);
+        for _ in 0..k {
+            let size = if at > self.floor && is_code(&self.stack[at - 1]) {
+                1
+            } else {
+                n
+            };
+            if at < self.floor + size
+                || self.stack[at - size..at]
+                    .iter()
+                    .any(|j| j.val == Val::Many || (size > 1 && is_code(j)))
+            {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!("a width of {n} needs groups of {n} values here"),
+                ));
+            }
+            at -= size;
+            sizes.push(size);
+        }
+        Ok(sizes)
+    }
+
+    fn code_among(&self, k: usize) -> Result<bool> {
+        Ok(self.items(k)?.contains(&1))
+    }
+
+    fn wide_dup(&mut self) -> Result<()> {
+        let s = self.items(1)?[0];
+        for _ in 0..s {
+            self.copy(self.stack.len() - s)?;
+        }
+        Ok(())
+    }
+
+    fn wide_drop(&mut self) -> Result<()> {
+        let s = self.items(1)?[0];
+        for _ in 0..s {
+            if !self.stack.pop().expect("in reach").known() {
+                self.emit(Op::Prim(P::Drop));
+            }
+        }
+        Ok(())
+    }
+
+    fn wide_swap(&mut self) -> Result<()> {
+        let sizes = self.items(2)?;
+        let (a, b) = (sizes[0], sizes[1]);
+        let base = self.stack.len() - a - b;
+        if self.stack[base..].iter().all(|j| !j.known()) {
+            // Each value of the lower, rolled up past the upper.
+            for _ in 0..b {
+                self.roll(a + b);
+            }
+            let lower: Vec<Jdg> = self.stack.drain(base..base + b).collect();
+            self.stack.extend(lower);
+        } else {
+            let order: Vec<usize> = (b..a + b).chain(0..b).collect();
+            self.permute(base, &order);
+        }
+        Ok(())
+    }
+
+    /// Emits code that brings the cell `w - 1` below the top up to the top:
+    /// `swap` for two, `rot` for three, and for more `[ roll ] dip swap`.
+    fn roll(&mut self, w: usize) {
+        match w {
+            0 | 1 => {}
+            2 => self.emit(Op::Prim(P::Swap)),
+            3 => self.emit(Op::Prim(P::Rot)),
+            _ => {
+                self.emit(Op::Prim(P::ScratchPush));
+                self.roll(w - 1);
+                self.emit(Op::Prim(P::ScratchPop));
+                self.emit(Op::Prim(P::Swap));
+            }
+        }
+    }
+
+    fn wide_dip(&mut self) -> Result<()> {
+        let f = self.pop()?;
+        if !is_code(&f) {
+            return Err(self.err(
+                Kind::NoWord,
+                format!(
+                    "no word `dip` for {}: it takes a quotation or a word",
+                    self.describe(&f)
+                ),
+            ));
+        }
+        let s = self.items(1)?[0];
+        self.aside(s, |st| st.wide_apply(f))
+    }
+
+    /// Applies code that takes k values and leaves m to each lane of k
+    /// groups of n, the first values of the groups, then the second, and so
+    /// on, as written, and gathers what each leaves into m groups of n, as
+    /// vectors add.
+    fn lanes(&mut self, code: &[Token], k: usize, m: usize) -> Result<()> {
+        let n = self.wide.as_ref().expect("widening").n;
+        self.need(k * n)?;
+        let base = self.stack.len() - k * n;
+        let order: Vec<usize> = (0..n)
+            .flat_map(|i| (0..k).map(move |g| g * n + i))
+            .collect();
+        self.permute(base, &order);
+        self.unwide(|s| s.lane(code, k, m, n - 1))?;
+        if self.stack.len() != base + m * n {
+            return Err(self.err(
+                Kind::Mismatch,
+                "a word widened must leave what its effect says, in each lane",
+            ));
+        }
+        let order: Vec<usize> = (0..m)
+            .flat_map(|g| (0..n).map(move |i| i * m + g))
+            .collect();
+        self.permute(base, &order);
+        Ok(())
+    }
+
+    /// The lane on top, then, with what it leaves set aside, the lanes
+    /// below it.
+    fn lane(&mut self, code: &[Token], k: usize, m: usize, i: usize) -> Result<()> {
+        let want = self.stack.len() - k + m;
+        self.run_code(code)?;
+        if self.stack.len() != want {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!("a word widened takes {k} values in each lane and leaves {m}"),
+            ));
+        }
+        if i > 0 {
+            self.aside(m, |s| s.lane(code, k, m, i - 1))?;
+        }
+        Ok(())
+    }
+
+    /// Whether a word only moves values: `dup`, `drop`, `swap` and `dip`,
+    /// and words of one clause made only of them, of quotations of them and
+    /// of `.`, as `over`, `keep` and `bi` are. Widened, such a word moves
+    /// groups as it moves values.
+    fn moves_only(&self, name: &Rc<str>, seen: &mut Vec<Rc<str>>) -> bool {
+        let name = self.alias_of(name);
+        let Some(w) = self.words.get(&name) else {
+            return false;
+        };
+        if let Some((p, _)) = &w.prim {
+            return matches!(p, Prim::Dup | Prim::Drop | Prim::Swap | Prim::Dip);
+        }
+        let [c] = &w.clauses[..] else {
+            return false;
+        };
+        if seen.contains(&name) {
+            return false;
+        }
+        let body = c.body.clone();
+        seen.push(name);
+        let r = self.moves_only_tokens(&body, seen);
+        seen.pop();
+        r
+    }
+
+    fn moves_only_tokens(&self, toks: &[Token], seen: &mut Vec<Rc<str>>) -> bool {
+        toks.iter().all(|t| match &t.tok {
+            Tok::Name(n) => self.moves_only(n, seen),
+            Tok::Apply | Tok::Open(b'[') | Tok::Close(b']') => true,
+            _ => false,
+        })
     }
 
     /// `map` on a tuple: the quotation is compiled for each position, on its
@@ -4728,16 +5322,21 @@ impl Stage {
     /// applied as `[ word ]` is.
     fn words_of(&mut self, name: &str) -> Result<Rc<[Token]>> {
         let j = self.stack.pop().expect("matched");
-        match j.val {
-            Val::Quote(q) => Ok(q),
+        self.code_tokens(&j, name)
+    }
+
+    /// The code a quotation or a word is, as `words_of` takes it.
+    fn code_tokens(&self, j: &Jdg, name: &str) -> Result<Rc<[Token]>> {
+        match &j.val {
+            Val::Quote(q) => Ok(q.clone()),
             Val::Name(n, at) => Ok(vec![
                 Token {
-                    tok: Tok::Name(n),
-                    pos: at,
+                    tok: Tok::Name(n.clone()),
+                    pos: *at,
                 },
                 Token {
                     tok: Tok::Apply,
-                    pos: at,
+                    pos: *at,
                 },
             ]
             .into()),
@@ -4745,7 +5344,7 @@ impl Stage {
                 Kind::NoWord,
                 format!(
                     "no word `{name}` for {}: it takes a quotation or a word",
-                    self.describe(&j)
+                    self.describe(j)
                 ),
             )),
         }

@@ -224,8 +224,7 @@ pub fn scripted(word: &str) -> String {
     }
     let name = word.trim_end_matches(['.', '!', ':', '\'']);
     let marks = &word[name.len()..];
-    let (name, sup) = trailing(name, '^');
-    let (name, sub) = trailing(name, '_');
+    let (name, sub, sup) = scripts(name);
     if name.is_empty() {
         return word.to_string();
     }
@@ -235,6 +234,15 @@ pub fn scripted(word: &str) -> String {
     out.extend(sup.bytes().map(|d| digit(&SUPERSCRIPTS, d)));
     out.push_str(marks);
     out
+}
+
+/// A name's width and power (doc/design/SYMBOLIC-FORTH.md 21, 22): what
+/// comes before them, and the digits of each, or none. `dup_2^3` is `dup`,
+/// "2" and "3", and `dup` is itself and two empty strings.
+pub fn scripts(name: &str) -> (&str, &str, &str) {
+    let (name, sup) = trailing(name, '^');
+    let (name, sub) = trailing(name, '_');
+    (name, sub, sup)
 }
 
 /// A name and the digits after its last `mark`, if it ends in the mark and

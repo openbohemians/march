@@ -217,7 +217,7 @@ neq?: [ eq? not ] def
 ≠: [ neq? ] def
 
 -- Stack words. `=` is `dup` and `~` is `swap` (march7/docs/SURFACE.md,
--- on trial since 2026-10-03).
+-- on trial since 2026-10-03), and two wide, `=_2` and `~_2`.
 
 =: [ dup ] def
 ~: [ swap ] def
@@ -234,23 +234,22 @@ rot: [ < a b c -- b c a > [ swap ] dip swap ] def
 keep: [ over [ . ] dip ] def
 bi: [ [ keep ] dip . ] def
 
--- Two wide, each value the word moves a pair, defined as words until the
--- width is a spelling (doc/design/SYMBOLIC-FORTH.md 22): `dup_2`,
--- which `fmt` writes `dup₂`, is FORTH's 2DUP, and `swap_2`, `over_2`
--- and `rot_2` its 2SWAP, 2OVER and 2ROT; `dip_2`, `keep_2` and `bi_2` are
--- Factor's 2dip, 2keep and 2bi. `over_2` and `rot_2` are `over` and `rot`
--- with every word subscripted. Doubled, `=` and `~` are `dup_2` and
--- `swap_2` (Thomas, 2026-10-08).
+-- Powers and widths are spellings (doc/design/SYMBOLIC-FORTH.md 21, 22,
+-- 24): the reader writes `dup_2^3` as `dup 3 power# . 2 width# .`, and
+-- each leaves a quotation. `power#` takes a word's power as mathematics
+-- does for its kind: `sqrt^2` is a fourth root, `+^4` the sum of four,
+-- `three^2` 9. `width#` makes each value a word works on a group:
+-- `=_2` and `dup_2` are FORTH's 2DUP, `~_2` its 2SWAP, `dip_2`, `keep_2`
+-- and `bi_2` Factor's 2dip, 2keep and 2bi, and an operation acts lane by
+-- lane, `1 2 10 20 +_2` being `11 22`. A clause for a word and a count
+-- gives a meaning of its own, as the identities do, which nothing else
+-- knows.
 
-dup_2: [ < a b -- a b a b > over over ] def
-swap_2: [ < a b c d -- c d a b > rot [ rot ] dip ] def
-dip_2: [ swap [ dip ] dip ] def
-over_2: [ < a b c d -- a b c d a b > [ dup_2 ] dip_2 swap_2 ] def
-rot_2: [ < a b c d e f -- c d e f a b > [ swap_2 ] dip_2 swap_2 ] def
-keep_2: [ [ dup_2 ] dip dip_2 ] def
-bi_2: [ [ keep_2 ] dip . ] def
-==: [ dup_2 ] def
-~~: [ swap_2 ] def
+power#: [ < a b > quote-power ] def
+width#: [ < a b > quote-width ] def
+power#: [ < +' 0 > drop drop [ 0 ] ] def
+power#: [ < *' 0 > drop drop [ 1 ] ] def
+power#: [ < ⋅' 0 > drop drop [ 1 ] ] def
 
 -- Signs, as guards, and what they choose between. These clauses have no
 -- `if`: a guard picks the clause (doc/design/TYPES.md 2.12).

@@ -158,6 +158,11 @@ pub enum Prim {
     Swap,
     /// `x q dip`: q applied with x set aside, and x put back on top.
     Dip,
+    /// `w n quote-power`, `w n quote-width`: w's power, and w n wide, as
+    /// quotations; `w n widen` applies w n wide.
+    QuotePower,
+    QuoteWidth,
+    Widen,
     // Compile time.
     Def,
 }
@@ -577,6 +582,9 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::Drop, "drop", "< a -- >", &[]),
     d(Prim::Swap, "swap", "< a b -- b a >", &[]),
     d(Prim::Dip, "dip", "< b c >", &[]),
+    d(Prim::QuotePower, "quote-power", "< b c >", &[]),
+    d(Prim::QuoteWidth, "quote-width", "< b c >", &[]),
+    d(Prim::Widen, "widen", "< b c >", &[]),
     d(Prim::FSqrt, "f64-sqrt", "< f64 -- f64 >", &[P::FSqrt]),
     d(
         Prim::FFloor,
@@ -638,6 +646,9 @@ pub fn custom(p: Prim) -> bool {
             | Drop
             | Swap
             | Dip
+            | QuotePower
+            | QuoteWidth
+            | Widen
             | Def
     )
 }

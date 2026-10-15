@@ -65,10 +65,10 @@ fn a_formatted_file_reads_as_its_source() {
             .map(|t| t.tok)
             .collect()
     };
-    let core = include_str!("../core/core.march");
-    let formatted = symbols.format(core);
-    assert!(formatted.contains("dup₂"));
-    assert_eq!(toks(&formatted), toks(core));
+    let source = format!("{}\n1 2 dup_2 +^4\n", include_str!("../core/core.march"));
+    let formatted = symbols.format(&source);
+    assert!(formatted.contains("dup₂ +⁴"));
+    assert_eq!(toks(&formatted), toks(&source));
 }
 
 #[test]

@@ -475,7 +475,7 @@ Settled (Thomas, 2026-10-15):
     `pi dup^2`, since `dup` is how one gets a copy. `*` stays only in a
     signature, with no count, `t*` any number of t and `a*` the rest of
     the stack: the regular expression's star, which mathematics writes as
-    Σ*. March8 does not have powers yet.
+    Σ*. Built in march8 (2026-10-15).
 22. **A subscript is a width,** a spelling as the power is (Thomas). `w_n`,
     written `wₙ`, is w with each value it works on a group of n, and
     lowers as `^n` does, `=_2` being `= 2 int# ! width# . .`, so no word
@@ -489,9 +489,12 @@ Settled (Thomas, 2026-10-15):
     each group with the first, as vectors add, so `1 2 10 20 +_2` is `11
     22`; the stack words agree, 2DUP being dup in each lane. `width#` leaves
     a quotation, as `power#` does, and the width comes before the power,
-    `dup_2^3` being `dup_2` cubed. So `==` and `~~` go. March8 does not
-    have it yet, and its core.march defines `dup_2` and the rest as words
-    for now.
+    `dup_2^3` being `dup_2` cubed, which is `dup` cubed two wide; so it
+    lowers with the power first, `dup 3 power# . 2 width# .`, the power
+    taken by the kind of the word itself, as `+_2^3` sums three pairs,
+    though `+_2` takes four values. So `==` and `~~` go. Built in march8
+    (2026-10-15), where a group's values at run time move by `pick`, by
+    rolls, or through the scratch stack, `dup_2` being `over over`.
 23. **`fmt` writes them as mathematics does,** by LaTeX's marks, `^` up
     and `_` down: a name's trailing `^` and digits as superscript digits,
     `+^4` as `+⁴`, and its trailing `_` and digits as subscript digits,

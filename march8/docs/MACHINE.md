@@ -721,11 +721,10 @@ has one meaning, and an inverse is a word); `^`, power; `mod`, the comparisons, 
 of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
 `swap`; `<>` as `dip`, and over it `over`, `rot`, `keep`, which applies a
 quotation to a value and keeps the value, and `bi`, which applies two to
-one, `3 [ dup * ] [ 1 + ] bi` leaving 9 4; the same two wide, `dup_2`,
-`swap_2`, `over_2` and `rot_2` as FORTH's 2DUP, 2SWAP, 2OVER and 2ROT, and
-`dip_2`, `keep_2` and `bi_2` as Factor's 2dip, 2keep and 2bi, with `==` and
-`~~` as `dup_2` and `swap_2`, defined as words until the width is built
-as a spelling (doc/design/SYMBOLIC-FORTH.md 22); the guards `zero?`, `positive?` and `negative?`, and `abs`, `min` and
+one, `3 [ dup * ] [ 1 + ] bi` leaving 9 4; `power#` and `width#`, which
+powers and widths are spelled as, each a quotation, with the identities
+`+^0` and `⋅^0` as clauses of their own (doc/design/SYMBOLIC-FORTH.md 21,
+22, 24); the guards `zero?`, `positive?` and `negative?`, and `abs`, `min` and
 `max` as clauses chosen by them, with no `if`; `sqrt`; `pow`, x to the y,
 exact for two literals and checked for integers; and `divmod`, the quotient
 and remainder, floored (`-7 3 divmod` is `-3 2`), with `div` and `mod` each
@@ -785,7 +784,12 @@ no i64 result.
 
 A few are handled by the stage itself, because their types are not a
 signature's: the stack words, which move judgments, the values at run time
-among them moving by the scratch stack only if their order changes; `dip`,
+among them moving, only if their order changes, by rolls or the scratch
+stack, whichever is shorter; `quote-power`, a word's or a quotation's
+power by its kind, from its effect; `widen`, which applies a word with
+each value a group, `dup`, `drop`, `swap` and `dip` moving groups, a
+word made only of them or handed code widened in its body, and any other
+word lane by lane; `dip`,
 which compiles its quotation with the value under it out of reach, on the
 scratch stack if it is a value at run time and the quotation has code;
 `vec-length`, a

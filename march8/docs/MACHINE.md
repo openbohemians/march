@@ -719,10 +719,13 @@ in one word until the compiler fuses the two (Thomas, 2026-10-09: so `-`
 has one meaning, and an inverse is a word); `^`, power; `mod`, the comparisons, `length`,
 `at`, `concat`, `slice`, `print`, the folds, reductions and `repeat` as families
 of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
-`swap`, and doubled, `==` and `~~`, as FORTH's 2DUP and 2SWAP (`dup2`,
-`swap2`); `<>` as `dip`, and over it `over`, `rot`, `keep`, which applies a
+`swap`; `<>` as `dip`, and over it `over`, `rot`, `keep`, which applies a
 quotation to a value and keeps the value, and `bi`, which applies two to
-one, `3 [ dup * ] [ 1 + ] bi` leaving 9 4; the guards `zero?`, `positive?` and `negative?`, and `abs`, `min` and
+one, `3 [ dup * ] [ 1 + ] bi` leaving 9 4; the same two wide, a subscript
+being part of a name (doc/design/SYMBOLIC-FORTH.md 22), `dup_2`, `swap_2`,
+`over_2` and `rot_2` as FORTH's 2DUP, 2SWAP, 2OVER and 2ROT, and `dip_2`,
+`keep_2` and `bi_2` as Factor's 2dip, 2keep and 2bi, with `==` and `~~` as
+`dup_2` and `swap_2`; the guards `zero?`, `positive?` and `negative?`, and `abs`, `min` and
 `max` as clauses chosen by them, with no `if`; `sqrt`; `pow`, x to the y,
 exact for two literals and checked for integers; and `divmod`, the quotient
 and remainder, floored (`-7 3 divmod` is `-3 2`), with `div` and `mod` each

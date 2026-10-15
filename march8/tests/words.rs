@@ -27,6 +27,13 @@ fn stack_words_one_and_two_at_a_time() {
     assert_eq!(show(&["1 2 3 4", "~~"]), "<4> 3 4 1 2");
     assert_eq!(show(&["1 2", "3 4 ~~"]), "<4> 3 4 1 2");
     assert_eq!(show(&["1 2", "== + + +"]), "<1> 6");
+    // A subscript, a width: each value moved is a pair.
+    assert_eq!(show(&["1 2 dup_2"]), "<4> 1 2 1 2");
+    assert_eq!(show(&["1 2 3 4 over_2"]), "<6> 1 2 3 4 1 2");
+    assert_eq!(show(&["1 2 3 4 5 6", "rot_2"]), "<6> 3 4 5 6 1 2");
+    assert_eq!(show(&["1 2 3 [ 10 + ] dip_2"]), "<3> 11 2 3");
+    assert_eq!(show(&["1 2 [ + ] keep_2"]), "<3> 3 1 2");
+    assert_eq!(show(&["3 4", "[ + ] [ * ] bi_2"]), "<2> 7 12");
 }
 
 #[test]

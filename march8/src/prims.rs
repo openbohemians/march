@@ -158,8 +158,6 @@ pub enum Prim {
     Swap,
     /// `x q dip`: q applied with x set aside, and x put back on top.
     Dip,
-    /// `a b c d -- c d a b`: FORTH's 2SWAP.
-    Swap2,
     // Compile time.
     Def,
 }
@@ -579,7 +577,6 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::Drop, "drop", "< a -- >", &[]),
     d(Prim::Swap, "swap", "< a b -- b a >", &[]),
     d(Prim::Dip, "dip", "< b c >", &[]),
-    d(Prim::Swap2, "swap2", "< a b c d -- c d a b >", &[]),
     d(Prim::FSqrt, "f64-sqrt", "< f64 -- f64 >", &[P::FSqrt]),
     d(
         Prim::FFloor,
@@ -641,7 +638,6 @@ pub fn custom(p: Prim) -> bool {
             | Drop
             | Swap
             | Dip
-            | Swap2
             | Def
     )
 }

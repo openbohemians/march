@@ -217,14 +217,10 @@ neq?: [ eq? not ] def
 ≠: [ neq? ] def
 
 -- Stack words. `=` is `dup` and `~` is `swap` (march7/docs/SURFACE.md,
--- on trial since 2026-10-03); doubled, they act on two values at a time,
--- as FORTH's 2DUP and 2SWAP (Thomas, 2026-10-08).
+-- on trial since 2026-10-03).
 
 =: [ dup ] def
 ~: [ swap ] def
-dup2: [ over over ] def
-==: [ dup2 ] def
-~~: [ swap2 ] def
 
 -- `x q dip`, written `<>`, applies q with x set aside, and puts x back on
 -- top: Joy's and Factor's `dip`, FORTH's `>r q r>` (Thomas, 2026-10-15).
@@ -237,6 +233,24 @@ over: [ < a b -- a b a > [ dup ] dip swap ] def
 rot: [ < a b c -- b c a > [ swap ] dip swap ] def
 keep: [ over [ . ] dip ] def
 bi: [ [ keep ] dip . ] def
+
+-- A subscript is part of a name, and on a stack word it is a width, each
+-- value the word moves a pair (doc/design/SYMBOLIC-FORTH.md 22): `dup_2`,
+-- which `fmt` is to write `dup₂`, is FORTH's 2DUP, and `swap_2`, `over_2`
+-- and `rot_2` its 2SWAP, 2OVER and 2ROT; `dip_2`, `keep_2` and `bi_2` are
+-- Factor's 2dip, 2keep and 2bi. `over_2` and `rot_2` are `over` and `rot`
+-- with every word subscripted. Doubled, `=` and `~` are `dup_2` and
+-- `swap_2` (Thomas, 2026-10-08).
+
+dup_2: [ < a b -- a b a b > over over ] def
+swap_2: [ < a b c d -- c d a b > rot [ rot ] dip ] def
+dip_2: [ swap [ dip ] dip ] def
+over_2: [ < a b c d -- a b c d a b > [ dup_2 ] dip_2 swap_2 ] def
+rot_2: [ < a b c d e f -- c d e f a b > [ swap_2 ] dip_2 swap_2 ] def
+keep_2: [ [ dup_2 ] dip dip_2 ] def
+bi_2: [ [ keep_2 ] dip . ] def
+==: [ dup_2 ] def
+~~: [ swap_2 ] def
 
 -- Signs, as guards, and what they choose between. These clauses have no
 -- `if`: a guard picks the clause (doc/design/TYPES.md 2.12).

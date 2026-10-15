@@ -2597,7 +2597,6 @@ impl Stage {
                 // Its effect is its quotation's and one more, which `effect`
                 // reads where the quotation is written.
                 Prim::Dip => return None,
-                Prim::Swap2 => (4, 4),
                 Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
                 Prim::Each | Prim::EachRight => (2, 0),
                 Prim::Within => (2, 1),
@@ -3354,7 +3353,6 @@ impl Stage {
                 self.stack.swap(base, base + 1);
             }
             Prim::Dip => self.dip(name)?,
-            Prim::Swap2 => self.permute(base, &[2, 3, 0, 1]),
             Prim::VecLength => {
                 let k = len(self, 13);
                 if !self.stack[base].known() {

@@ -201,6 +201,9 @@ rules live here, not below:
 | `( 1 2 )` | `[ 1 int# ! 2 int# ! ] seq# !` | a sequence literal |
 | `5 ( _ 1 )` | `5 [ 1 int# ! ] cons . seq# !` | a hole, filled first |
 | `"\_ apples"` | `[ ' apples' ] cons . string !` | a string with a hole |
+| `dup_2`, `dup₂` | `dup_2 .` | a subscript is part of the name |
+| `+^4`, `+⁴` | `+ 4 int# ! power# . .` | a power, by the word's kind |
+| `[ dup + ]^3` | `[ dup . + . ] 3 int# ! power# .` | a quotation's power, a quotation |
 
 A capital marks only that the reader adds no dot, so `Snake.` is what
 `Snake .` is anywhere, the word of that name applied: march8 runs
@@ -426,6 +429,72 @@ Settled (Thomas, 2026-10-14), not built:
     a bool unchecked. This takes away march8's last rule of spelling, a
     name ending in `?`, which must leave a bool and, applied in a
     signature, is held as a guard, as if quoted.
+
+Settled (Thomas, 2026-10-15):
+
+21. **Powers.** `w^n`, written `wⁿ`, is the word's n-th power as
+    mathematics takes it for that kind of thing: n copies of something,
+    joined by an operation. The word's stack effect gives the kind:
+
+    | kind | effect | `w^n` | so |
+    |---|---|---|---|
+    | value | `-- a` | n copies, multiplied | `pi^2` is π², `pi pi ⋅` |
+    | function | `a -- a` | n applications, composed | `sqrt^2` is `sqrt sqrt`, a fourth root |
+    | operation | k values, one left | n operands, joined by it | `+^4` is `+ + +` |
+
+    An operation is counted by its operands, as x³ is three x's and two
+    ⋅'s, so one taking k values is applied (n−1)/(k−1) times, which must
+    be whole. Any other word, a stack word as `swap` or `dup`, is applied
+    n times, as a function is, so `swap^2` and `rot^3` do nothing, as a
+    permutation's power may be the identity; and a word that leaves
+    nothing takes n operands, `print^3`. `^1` is x¹, the word once, or for
+    an operation its one operand left as it is; `^0` is x⁰, the identity:
+    nothing, for a function, and for an operation the value its fold
+    starts from, `+^0` being 0 and `⋅^0` 1, its type from context, as a
+    literal's is. A type's power is its product, so in a signature
+    `i64^3` is three i64s, as ℝ³ is. n is written, a number in the source.
+
+    A power is a quotation, which the word `power#` makes from a word or
+    a quotation and the count, so a quotation's power is the quotation of
+    the power, `[ q ]^n` being `[ q^n ]` by q's kind: `[ dup + ]^3` is
+    `[ dup + dup + dup + ]`, and `[ + ]^3` is `[ + + ]`, as `+^3` is. The
+    superscript changes what a thing is, not whether it runs: a name still
+    applies, and a quotation is still a value, for `.` to apply or `map`
+    to take, `( 1 [ dup + ]^3 . )` being `( 8 )` and `( 1 2 3 ) [ dup + ]^3
+    map` being `( 8 16 24 )`. `power#` needs the effect of what it takes,
+    so the stage expands it, from known code only, as `.` applies only
+    known code (4). Where the effect is not known while compiling, for a
+    family whose clauses take different numbers of values or a symbol
+    applied at run time (19), it is an error, and the words are written
+    out.
+
+    This replaces `w*n`, n copies in a row (march7/docs/SURFACE.md,
+    "Copies and operands"): `^` says all of it, a value's copies being
+    `pi dup^2`, since `dup` is how one gets a copy. `*` stays only in a
+    signature, with no count, `t*` any number of t and `a*` the rest of
+    the stack: the regular expression's star, which mathematics writes as
+    Σ*. March8 does not have powers yet.
+22. **A subscript is part of a name.** `dup_2`, written `dup₂`, is a word
+    with a definition of its own, as log₂ and x₁ are names in mathematics,
+    each meaning what it is defined to mean, so no rule of spelling
+    reaches the lowest form. On a stack word the subscript is a width,
+    each value the word moves a pair: `dup₂` is FORTH's 2DUP, `swap₂` its
+    2SWAP, `over₂` 2OVER and `rot₂` 2ROT, and `dip₂`, `keep₂` and `bi₂` are
+    Factor's 2dip, 2keep and 2bi. `over₂` and `rot₂` are `over` and `rot`
+    with every word subscripted, `[ dup₂ ] dip₂ swap₂` and `[ swap₂ ] dip₂
+    swap₂`. March8's core.march has them, spelled with `_`, and `==` and
+    `~~` are `dup_2` and `swap_2`.
+23. **`fmt` writes them as mathematics does,** by LaTeX's marks, `^` up
+    and `_` down: a name's trailing `^` and digits as superscript digits,
+    `+^4` as `+⁴`, and its trailing `_` and digits as subscript digits,
+    `dup_2` as `dup₂`; only digits, and only at a name's end, so
+    `file_read` stays as it is. The reader reads them back, `₂` as `_2`
+    and `⁴` as `^4`, as it is to read `⟨ ⟩` as `< >`
+    (march8/docs/MACHINE.md), and the ASCII spelling is the one kept, the
+    one typed. The subscript belongs to the name and the power does not,
+    so the subscript comes first, `dup_2^3`, `dup₂³`. March8's escape `\_2`
+    writes `₂` already, and would then make the same name. March8 does not
+    have this yet.
 
 Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); and which
 bracket owns a nested hole (14), to watch.

@@ -234,7 +234,9 @@ fn piece(
                     }
                 }
             }
-            w => Some(number(w, pos)?.unwrap_or_else(|| Tok::Name(symbolize(w, symbols).into()))),
+            w => Some(number(w, pos)?.unwrap_or_else(|| {
+                Tok::Name(crate::symbols::unscripted(&symbolize(w, symbols)).into())
+            })),
         };
         if let Some(tok) = tok {
             out.push(Token { tok, pos });
@@ -613,6 +615,27 @@ mod tests {
     }
 
     #[test]
+    fn scripts_read_as_typed() {
+        // A name's trailing subscript and superscript digits are its `_` and
+        // `^` and digits (doc/design/SYMBOLIC-FORTH.md 23), escaped or not.
+        let n = |s: &str| Tok::Name(s.into());
+        assert_eq!(
+            toks("dup₂ dup\\_2 +⁴ x₁₂³ log₂'"),
+            [
+                n("dup_2"),
+                Tok::Apply,
+                n("dup_2"),
+                Tok::Apply,
+                n("+^4"),
+                Tok::Apply,
+                n("x_12^3"),
+                Tok::Apply,
+                n("log_2"),
+            ]
+        );
+    }
+
+    #[test]
     fn words_numbers_and_brackets() {
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
@@ -753,11 +776,12 @@ mod tests {
 
     #[test]
     fn symbols_inside_words() {
+        // A trailing subscript or superscript digit is then spelled as typed.
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
             toks("x\\_1 \\times a\\times\\times \\infty \\foo y\\^2"),
             [
-                n("x₁"),
+                n("x_1"),
                 Tok::Apply,
                 n("×"),
                 Tok::Apply,
@@ -767,7 +791,7 @@ mod tests {
                 Tok::Apply,
                 n("\\foo"),
                 Tok::Apply,
-                n("y²"),
+                n("y^2"),
                 Tok::Apply,
             ]
         );

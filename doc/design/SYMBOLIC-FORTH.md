@@ -493,8 +493,7 @@ Settled (Thomas, 2026-10-15):
     (march8/docs/MACHINE.md), and the ASCII spelling is the one kept, the
     one typed. The subscript belongs to the name and the power does not,
     so the subscript comes first, `dup_2^3`, `dup₂³`. March8's escape `\_2`
-    writes `₂` already, and would then make the same name. March8 does not
-    have this yet.
+    writes `₂`, and makes the same name. Built in march8 (2026-10-15).
 
 Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); and which
 bracket owns a nested hole (14), to watch.

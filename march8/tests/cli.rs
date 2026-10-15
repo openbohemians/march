@@ -42,6 +42,33 @@ fn fmt_writes_symbols() {
         march8(&["fmt"], "\\times x\\_1 \"\\times;\" -- \\leq\n"),
         "× x₁ \"\\times;\" -- ≤\n"
     );
+    // A name's trailing `_` and `^` and digits, as subscript and superscript
+    // digits, before its marks; not a string's, a comment's or a number's.
+    assert_eq!(
+        march8(
+            &["fmt"],
+            "dup_2 +^4 dup_2^3: file_read 1_000 \"x_1\" -- x_1\n"
+        ),
+        "dup₂ +⁴ dup₂³: file_read 1_000 \"x_1\" -- x_1\n"
+    );
+}
+
+#[test]
+fn a_formatted_file_reads_as_its_source() {
+    use march8::read::read;
+    use march8::symbols::Symbols;
+    let symbols = Symbols::standard();
+    let toks = |s: &str| -> Vec<_> {
+        read(s, &symbols)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.tok)
+            .collect()
+    };
+    let core = include_str!("../core/core.march");
+    let formatted = symbols.format(core);
+    assert!(formatted.contains("dup₂"));
+    assert_eq!(toks(&formatted), toks(core));
 }
 
 #[test]

@@ -236,7 +236,7 @@ bi: [ [ keep ] dip . ] def
 
 -- A subscript is part of a name, and on a stack word it is a width, each
 -- value the word moves a pair (doc/design/SYMBOLIC-FORTH.md 22): `dup_2`,
--- which `fmt` is to write `dup₂`, is FORTH's 2DUP, and `swap_2`, `over_2`
+-- which `fmt` writes `dup₂`, is FORTH's 2DUP, and `swap_2`, `over_2`
 -- and `rot_2` its 2SWAP, 2OVER and 2ROT; `dip_2`, `keep_2` and `bi_2` are
 -- Factor's 2dip, 2keep and 2bi. `over_2` and `rot_2` are `over` and `rot`
 -- with every word subscripted. Doubled, `=` and `~` are `dup_2` and

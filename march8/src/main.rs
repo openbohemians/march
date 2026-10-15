@@ -64,7 +64,8 @@ fn main() {
 const USAGE: &str =
     "usage: march8 [--fuel N] [--types] [--symbolic] [--eval SOURCE | --code SOURCE | FILE]...
        march8                 a REPL, reading lines from the terminal or stdin
-       march8 fmt             rewrites `\\name` escapes as symbols, stdin to stdout
+       march8 fmt             rewrites `\\name` escapes as symbols, and `dup_2` and `+^4`
+                              as `dup₂` and `+⁴`, stdin to stdout
        march8 lower           writes March as Symbolic Forth, the lowest form, stdin to stdout
        --symbolic             reads the sources after it as Symbolic Forth";
 

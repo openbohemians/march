@@ -43,9 +43,10 @@ impl Symbols {
         self.table.iter().map(|(n, s)| (n.as_str(), s.as_str()))
     }
 
-    /// Rewrites each `\name` in code and comments as its symbol. Strings are
-    /// left alone, except the code in their holes, and so is a name that is
-    /// not in the table.
+    /// Rewrites each `\name` in code and comments as its symbol, and a
+    /// name's trailing `_` and digits as subscript digits and `^` and digits
+    /// as superscript digits. Strings are left alone, except the code in
+    /// their holes, and so is a name that is not in the table.
     pub fn format(&self, source: &str) -> String {
         let mut out = String::with_capacity(source.len());
         self.code(source, 0, false, &mut out);
@@ -98,6 +99,14 @@ impl Symbols {
                         .find('\'')
                         .map_or(bytes.len(), |n| i + n + 2);
                     out.push_str(&source[i..end]);
+                    i = end;
+                    token_start = false;
+                    continue;
+                }
+                // A word with no raw text in it, whole, its escapes and then
+                // its end rewritten.
+                if !word.contains('"') {
+                    out.push_str(&scripted(&self.rewrite(word)));
                     i = end;
                     token_start = false;
                     continue;
@@ -198,4 +207,70 @@ impl Symbols {
         let symbol = self.get(&text[1..1 + length])?;
         Some((1 + length, symbol))
     }
+}
+
+const SUBSCRIPTS: [char; 10] = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
+const SUPERSCRIPTS: [char; 10] = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
+
+/// A word as `fmt` writes it (doc/design/SYMBOLIC-FORTH.md 23): a name's
+/// trailing `_` and digits as subscript digits, and `^` and digits after
+/// them as superscript digits, before any marks, so `dup_2` is `dup₂`, `+^4`
+/// is `+⁴` and `dup_2^3:` is `dup₂³:`. Only digits, and only at the end, so
+/// `file_read` is as it was, and so is a number.
+pub fn scripted(word: &str) -> String {
+    let digits = word.strip_prefix('-').unwrap_or(word);
+    if digits.starts_with(|c: char| c.is_ascii_digit()) {
+        return word.to_string();
+    }
+    let name = word.trim_end_matches(['.', '!', ':', '\'']);
+    let marks = &word[name.len()..];
+    let (name, sup) = trailing(name, '^');
+    let (name, sub) = trailing(name, '_');
+    if name.is_empty() {
+        return word.to_string();
+    }
+    let digit = |table: &[char; 10], d: u8| table[(d - b'0') as usize];
+    let mut out = name.to_string();
+    out.extend(sub.bytes().map(|d| digit(&SUBSCRIPTS, d)));
+    out.extend(sup.bytes().map(|d| digit(&SUPERSCRIPTS, d)));
+    out.push_str(marks);
+    out
+}
+
+/// A name and the digits after its last `mark`, if it ends in the mark and
+/// digits; else the name and none.
+fn trailing(name: &str, mark: char) -> (&str, &str) {
+    let stem = name.trim_end_matches(|c: char| c.is_ascii_digit());
+    match stem.strip_suffix(mark) {
+        Some(s) if stem.len() < name.len() => (s, &name[stem.len()..]),
+        _ => (name, ""),
+    }
+}
+
+/// A name as the reader keeps it: its trailing subscript and superscript
+/// digits spelled `_` and `^` and digits, the spelling typed, so `dup₂` is
+/// `dup_2` and `+⁴` is `+^4`.
+pub fn unscripted(name: &str) -> String {
+    let sup_at = name.trim_end_matches(|c| SUPERSCRIPTS.contains(&c)).len();
+    let sub_at = name[..sup_at]
+        .trim_end_matches(|c| SUBSCRIPTS.contains(&c))
+        .len();
+    if sub_at == 0 || sub_at == name.len() {
+        return name.to_string();
+    }
+    let ascii = |s: &str, table: &[char; 10]| -> String {
+        s.chars()
+            .map(|c| (b'0' + table.iter().position(|&t| t == c).expect("a digit") as u8) as char)
+            .collect()
+    };
+    let mut out = name[..sub_at].to_string();
+    if sub_at < sup_at {
+        out.push('_');
+        out.push_str(&ascii(&name[sub_at..sup_at], &SUBSCRIPTS));
+    }
+    if sup_at < name.len() {
+        out.push('^');
+        out.push_str(&ascii(&name[sup_at..], &SUPERSCRIPTS));
+    }
+    out
 }

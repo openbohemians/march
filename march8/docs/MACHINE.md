@@ -844,7 +844,12 @@ to the next, and an error leaves the session as it was. Commands start with
 `:`, which March does not use: `:types` shows each value's type after it, in
 a bracket, so the line reads back as March; `:code SRC` shows the code SRC
 compiles to; `:quit`. `march8 fmt` rewrites `\name` escapes as their symbols,
-from stdin to stdout, in code and comments but not strings.
+from stdin to stdout, in code and comments but not strings, and writes a
+name's trailing `_` and digits as subscript digits and `^` and digits as
+superscript digits, `dup_2` as `dup₂` and `+^4` as `+⁴`, before any marks
+and in code only. The reader reads them back, so a name's spelling is the
+one typed, `dup₂` and `dup\_2` both being `dup_2`
+(doc/design/SYMBOLIC-FORTH.md 23).
 
 ## Errors
 

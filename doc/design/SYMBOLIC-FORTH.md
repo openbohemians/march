@@ -149,7 +149,8 @@ which become spellings above it (decided 2026-10-14, not built):
   math.e |>` being `[ math.pi math.e ]`, and is the intermediate form's
   escape from its own rules of spelling, as Lisp's `quote` is. It writes
   lists of names, `<| math.* io.file.read |>` (6.17), and code as data
-  as it will be stored. A map form, `{| … |}` perhaps, is to come.
+  as it will be stored. A map form, `{| … |}` perhaps, is to come. Built
+  in march8 (2026-10-15).
 
 A signature in the lowest form is two sequences, inputs then outputs, and
 needs no divider: `< a* -- b* >` is `[ a* ] [ b* ]` (Thomas, 2026-10-14),
@@ -363,8 +364,13 @@ Settled (Thomas, 2026-10-14), not built:
     an import (march5). `;` with a dotted name writes at that path,
     making maps on the way, `math.pi [ … ] ;`. Code and data are entries
     alike, the dictionary and the global store being one (2026-09-26), so a
-    variable is an entry. March8 does not have it: there `;` refuses a
-    dotted name.
+    variable is an entry. Built in march8 (2026-10-15), but for a
+    namespace as a value: `;` defines at a path, and a word's names are
+    looked up in its namespace where they are written, so a quotation of
+    `math`'s that `map` runs still finds `math.sq`; a bare name defined by
+    a namespace's code is that namespace's. There a namespace is the words
+    whose paths it begins, not yet a map, so `math .` and `at` on it are
+    still to come.
 
 17. **Import and export** (Thomas): a namespace's map has two keys of
     March's own, `import#` and `export#`, named so as not to take words a
@@ -401,6 +407,11 @@ Settled (Thomas, 2026-10-14), not built:
     held namespaces to compile time, as `.` applying known symbols only
     still does (doc/lineage). So a module is a namespace, its map with
     its imports and exports, and needs no construct of its own (Thomas).
+    Built in march8 (2026-10-15): imports and exports by lists, `<| … |>`,
+    a source's imports run first, two finds of a name are an error, and
+    reaching an unexported word from outside its namespace warns as
+    severe. Not yet: the pairs that name an import, which wait for
+    `map#`, and interfaces by hash, which wait for the store.
 18. **`;` defines**, a meta-op (Thomas). Through all of the above one
     word stayed constant, `def`, applied in every program, so it is named
     for what it is, FORTH's `;`: `sq: [ dup * ] ;` is `: sq dup * ;`

@@ -86,6 +86,9 @@ fn read_form(src: &str, symbols: &Symbols, symbolic: bool) -> Result<Vec<Token>>
 fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<Token>> {
     let mut out = Vec::new();
     let mut open: Vec<(u8, Pos)> = Vec::new();
+    // Each `<| … |>` open: how deep the brackets were, and how words were
+    // read outside it.
+    let mut lowest: Vec<(usize, bool)> = Vec::new();
     loop {
         r.skip_space();
         let Some(c) = r.peek() else {
@@ -121,6 +124,31 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             let s = r.raw(word, pos)?;
             out.push(Token {
                 tok: Tok::Str(s.into()),
+                pos,
+            });
+            continue;
+        }
+        // `<| … |>` is the lowest form's quotation written inline
+        // (doc/design/SYMBOLIC-FORTH.md 3): its words are read as Symbolic
+        // Forth, so nothing applies without a dot, and it is `[ … ]`.
+        if word == "<|" {
+            open.push((b'[', pos));
+            out.push(Token {
+                tok: Tok::Open(b'['),
+                pos,
+            });
+            lowest.push((open.len(), r.symbolic));
+            r.symbolic = true;
+            continue;
+        }
+        if word == "|>" {
+            if lowest.last().map(|l| l.0) != Some(open.len()) {
+                return Err(Error::new(Kind::Syntax, Some(pos), "`|>` closes no `<|`"));
+            }
+            open.pop();
+            r.symbolic = lowest.pop().expect("open").1;
+            out.push(Token {
+                tok: Tok::Close(b']'),
                 pos,
             });
             continue;

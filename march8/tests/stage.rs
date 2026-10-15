@@ -62,14 +62,15 @@ fn a_name_applies_and_a_dot_applies_once_more() {
 
 #[test]
 fn a_dot_inside_a_name_divides_a_path() {
-    // Kept for namespaces, `io.file.read` (doc/design/TYPES.md 3.12): words
-    // do not chain, and no word is defined by such a name.
+    // A path in a namespace, `io.file.read` (doc/design/TYPES.md 3.12):
+    // words do not chain, and a path names a word in its namespace.
     let mut s = Session::new();
     let e = s.eval("( 3 1 2 ) sort.length").unwrap_err();
     assert_eq!(e.kind, Kind::NoWord);
     assert!(e.to_string().contains("`sort length`"), "{e}");
     assert_eq!(show("( 3 1 2 ) sort length"), "<1> 3");
-    assert_eq!(fails("a.b: [ 1 ] ;"), Kind::Syntax);
+    assert_eq!(show("a.bb: [ 1 ] ; a.bb"), "<1> 1");
+    assert_eq!(fails("a..b: [ 1 ] ;"), Kind::Syntax);
 }
 
 #[test]

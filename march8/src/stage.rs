@@ -13,7 +13,7 @@ use crate::machine::{self, Machine};
 use crate::prims::{self, Effects, PRIMS, Prim};
 use crate::read::{self, Piece, Tok, Token};
 use crate::types::*;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 /// What is known of a value at compile time.
@@ -426,6 +426,12 @@ fn roll_cost(w: usize) -> usize {
     }
 }
 
+/// Whether a name is a path in a namespace, `io.file.read`: names joined by
+/// dots.
+fn is_path(name: &str) -> bool {
+    name.contains('.') && name.split('.').all(|p| !p.is_empty())
+}
+
 /// Whether a value is code, a quotation or a word, which a width does not
 /// widen.
 fn is_code(j: &Jdg) -> bool {
@@ -501,6 +507,8 @@ struct Word {
     con: Option<Con>,
     prim: Option<(Prim, Rc<Sig>)>,
     clauses: Vec<Rc<Clause>>,
+    /// Defined by the program, not the core vocabulary alone.
+    user: bool,
 }
 
 /// Words applied inside words, at most this deep.
@@ -551,7 +559,20 @@ pub struct Stage {
     machine: Option<Machine>,
     /// Set while a word is applied wide (doc/design/SYMBOLIC-FORTH.md 22).
     wide: Option<Wide>,
+    /// The namespace of the code being compiled, empty for the root, which
+    /// is where the code was written (doc/design/SYMBOLIC-FORTH.md 16, 17).
+    ns: Rc<str>,
+    /// Code written in a namespace: from where its tokens start, where they
+    /// end, the tokens, kept so the place is not reused, and the namespace.
+    scopes: BTreeMap<usize, Scope>,
+    /// Each namespace's import and export: the paths they name.
+    imports: HashMap<Rc<str>, Rc<[Rc<str>]>>,
+    exports: HashMap<Rc<str>, Rc<[Rc<str>]>>,
 }
+
+/// Code written in a namespace: where its tokens end, the tokens, and the
+/// namespace.
+type Scope = (usize, Rc<[Token]>, Rc<str>);
 
 /// A width being applied: how many values make a group, and the code
 /// handed to the word widened, which runs as written.
@@ -654,6 +675,10 @@ impl Stage {
             in_bracket: 0,
             machine: None,
             wide: None,
+            ns: "".into(),
+            scopes: BTreeMap::new(),
+            imports: HashMap::new(),
+            exports: HashMap::new(),
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
             let name: Rc<str> = (*name).into();
@@ -708,6 +733,7 @@ impl Stage {
         self.effects = 0;
         self.steps = 0;
         self.depth = 0;
+        self.ns = "".into();
     }
 
     /// Ends a compilation: every value left is made a value at run time, and
@@ -765,8 +791,19 @@ impl Stage {
         Ok(self.stack.pop().expect("checked"))
     }
 
-    /// Evaluates code.
+    /// Evaluates code, in the namespace it was written in.
     pub fn run(&mut self, toks: &[Token]) -> Result<()> {
+        let ns = self.scope_of(toks).unwrap_or_else(|| "".into());
+        if ns == self.ns {
+            return self.run_here(toks);
+        }
+        let saved = std::mem::replace(&mut self.ns, ns);
+        let r = self.run_here(toks);
+        self.ns = saved;
+        r
+    }
+
+    fn run_here(&mut self, toks: &[Token]) -> Result<()> {
         let mut i = 0;
         while i < toks.len() {
             let t = &toks[i];
@@ -798,7 +835,8 @@ impl Stage {
                 Tok::Test => self.apply_test()?,
                 Tok::Open(b'[') => {
                     let j = matching(toks, i);
-                    self.push(QUOTE, Val::Quote(toks[i + 1..j].into()));
+                    let q = self.written(toks[i + 1..j].into());
+                    self.push(QUOTE, Val::Quote(q));
                     i = j;
                 }
                 // A bracket is a value, as a quotation is (Thomas,
@@ -856,6 +894,7 @@ impl Stage {
         match f.val {
             Val::Name(n, at) => {
                 self.pos = at;
+                let n = self.lookup(&n)?;
                 self.apply_word(&n)
             }
             // A type is data, and is not called (Thomas, 2026-10-13): `!`
@@ -944,15 +983,20 @@ impl Stage {
 
     fn apply_word(&mut self, name: &Rc<str>) -> Result<()> {
         let Some(w) = self.words.get(name) else {
-            if name.contains('.') && !name.ends_with('.') {
-                return Err(self.err(
-                    Kind::NoWord,
+            if let Some((space, last)) = name.rsplit_once('.')
+                && is_path(name)
+            {
+                let prefix = format!("{space}.");
+                let msg = if self.words.keys().any(|k| k.starts_with(&prefix)) {
+                    format!("no word `{last}` in `{space}`")
+                } else {
                     format!(
-                        "no word `{name}`: a dot inside a word divides a path in a namespace, \
-                         and there are none yet; `{}` applies each in turn",
+                        "no word `{name}`: there is no namespace `{space}`, and `{}` applies \
+                         each in turn",
                         name.split('.').collect::<Vec<_>>().join(" ")
-                    ),
-                ));
+                    )
+                };
+                return Err(self.err(Kind::NoWord, msg));
             }
             return Err(self.err(Kind::NoWord, format!("no word `{name}`")));
         };
@@ -989,6 +1033,212 @@ impl Stage {
         }
     }
 
+    // ---- Namespaces (doc/design/SYMBOLIC-FORTH.md 16, 17) ----
+
+    /// The namespace code was written in, if not the root.
+    fn scope_of(&self, toks: &[Token]) -> Option<Rc<str>> {
+        let at = toks.as_ptr() as usize;
+        let (_, (end, _, ns)) = self.scopes.range(..=at).next_back()?;
+        (!toks.is_empty() && at < *end).then(|| ns.clone())
+    }
+
+    /// Code written here, in the namespace being compiled, which its names
+    /// are looked up in wherever it runs.
+    fn written(&mut self, toks: Rc<[Token]>) -> Rc<[Token]> {
+        let ns = self.ns.clone();
+        self.scope(&toks, ns);
+        toks
+    }
+
+    fn scope(&mut self, toks: &Rc<[Token]>, ns: Rc<str>) {
+        if ns.is_empty() || toks.is_empty() {
+            return;
+        }
+        let at = toks.as_ptr() as usize;
+        let end = at + std::mem::size_of_val(&**toks);
+        self.scopes.insert(at, (end, toks.clone(), ns));
+    }
+
+    /// The word a name applies, from the namespace being compiled: a path
+    /// is itself, and reached from outside its namespace, must be exported;
+    /// a bare name is looked up in the namespace, then among its import,
+    /// then in the core, and found in two of the first is an error.
+    fn lookup(&mut self, name: &Rc<str>) -> Result<Rc<str>> {
+        if is_path(name) {
+            self.reach(name);
+            return Ok(name.clone());
+        }
+        let ns = self.ns.clone();
+        let local = self.local(&ns, name);
+        let imported = self.imported(&ns, name);
+        match (local, &imported[..]) {
+            (Some(l), []) => Ok(l),
+            (None, [i]) => Ok(i.clone()),
+            (None, []) if ns.is_empty() || !self.words.get(name).is_some_and(|w| w.user) => {
+                Ok(name.clone())
+            }
+            (None, []) => Err(self.err(
+                Kind::NoWord,
+                format!("no word `{name}` in `{ns}`, its import, or the core"),
+            )),
+            (l, _) => {
+                let all: Vec<String> = l
+                    .iter()
+                    .map(|p| format!("`{p}`, defined here"))
+                    .chain(imported.iter().map(|p| format!("`{p}`, imported")))
+                    .collect();
+                Err(self.err(
+                    Kind::NoWord,
+                    format!(
+                        "`{name}` names both {}: a path says which",
+                        all.join(", and ")
+                    ),
+                ))
+            }
+        }
+    }
+
+    /// The word a name applies from a namespace, as `lookup` finds it, or
+    /// the name itself where that would be an error.
+    fn resolve_quiet(&self, ns: &str, name: &Rc<str>) -> Rc<str> {
+        if is_path(name) {
+            return name.clone();
+        }
+        let imported = self.imported(ns, name);
+        match (self.local(ns, name), &imported[..]) {
+            (Some(l), []) => l,
+            (None, [i]) => i.clone(),
+            _ => name.clone(),
+        }
+    }
+
+    /// Runs a source: its imports first, wherever they are written, since
+    /// an import holds for all of its namespace (doc/design/SYMBOLIC-FORTH.md
+    /// 17).
+    pub fn run_source(&mut self, toks: &[Token]) -> Result<()> {
+        let mut imports = Vec::new();
+        let mut i = 0;
+        while i < toks.len() {
+            match &toks[i].tok {
+                Tok::Name(n)
+                    if (&**n == "import#" || n.ends_with(".import#"))
+                        && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Open(b'[')) =>
+                {
+                    let j = matching(toks, i + 1);
+                    let defined = toks
+                        .get(j + 1)
+                        .is_some_and(|t| t.tok == Tok::Name(";".into()))
+                        && toks.get(j + 2).is_some_and(|t| t.tok == Tok::Apply);
+                    if defined {
+                        imports.push(i..j + 3);
+                    }
+                    i = j + 1;
+                }
+                Tok::Open(_) => i = matching(toks, i) + 1,
+                _ => i += 1,
+            }
+        }
+        for r in &imports {
+            self.run(&toks[r.clone()])?;
+        }
+        let mut at = 0;
+        for r in imports {
+            self.run(&toks[at..r.start])?;
+            at = r.end;
+        }
+        self.run(&toks[at..])
+    }
+
+    /// A namespace's own word of that name: in the root, one the program
+    /// defined, as a core word is no import's rival.
+    fn local(&self, ns: &str, name: &str) -> Option<Rc<str>> {
+        if ns.is_empty() {
+            let w = self.words.get_key_value(name)?;
+            return w.1.user.then(|| w.0.clone());
+        }
+        let path: Rc<str> = format!("{ns}.{name}").into();
+        self.words.contains_key(&path).then_some(path)
+    }
+
+    /// What a namespace's import makes of a bare name: a path whose last
+    /// part it is, and of `math.*`, `math`'s exported word of that name.
+    fn imported(&self, ns: &str, name: &str) -> Vec<Rc<str>> {
+        let Some(paths) = self.imports.get(ns) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        for p in paths.iter() {
+            let path: Rc<str> = match p.strip_suffix(".*") {
+                Some(space) if self.exported(space, name) => format!("{space}.{name}").into(),
+                Some(_) => continue,
+                None if p.rsplit('.').next() == Some(name) => p.clone(),
+                None => continue,
+            };
+            if self.words.contains_key(&path) && !found.contains(&path) {
+                found.push(path);
+            }
+        }
+        found
+    }
+
+    /// Whether a namespace exports a name: all of them, with no `export#`.
+    fn exported(&self, space: &str, name: &str) -> bool {
+        self.exports
+            .get(space)
+            .is_none_or(|e| e.iter().any(|n| &**n == name))
+    }
+
+    /// Warns of a path reached from outside its namespace that it does not
+    /// export: it compiles, a word being private but not locked out, and a
+    /// namespace's children see its unexported words.
+    fn reach(&mut self, path: &str) {
+        let Some((space, name)) = path.rsplit_once('.') else {
+            return;
+        };
+        let inside = *self.ns == *space || self.ns.starts_with(&format!("{space}."));
+        if !inside && !self.exported(space, name) {
+            self.warn(
+                Level::Severe,
+                format!("`{path}` is reached from outside `{space}`, which does not export it"),
+            );
+        }
+    }
+
+    /// A namespace's import or export set: the paths a quotation names.
+    fn set_names(&mut self, space: &Rc<str>, key: &str, q: &[Token]) -> Result<()> {
+        let mut names: Vec<Rc<str>> = Vec::new();
+        for t in q {
+            match &t.tok {
+                Tok::Name(n) => names.push(n.clone()),
+                Tok::Apply => {}
+                _ => {
+                    return Err(self.err(
+                        Kind::Syntax,
+                        format!("`{key}` takes the names it lists, `<| math.* io.file.read |>`"),
+                    ));
+                }
+            }
+        }
+        let table = if key == "import#" {
+            &mut self.imports
+        } else {
+            &mut self.exports
+        };
+        if table.contains_key(space) {
+            let shown = if space.is_empty() {
+                "the root".to_string()
+            } else {
+                format!("`{space}`")
+            };
+            return Err(self.err(
+                Kind::Syntax,
+                format!("{shown} has its `{key}` already: a namespace has one"),
+            ));
+        }
+        table.insert(space.clone(), names.into());
+        Ok(())
+    }
+
     /// `;` (doc/design/SYMBOLIC-FORTH.md 18): binds the name below to the
     /// value on top, a clause's body or a type, with the clause's signature
     /// between them if it has one, its inputs and outputs in one bracket or
@@ -1010,7 +1260,28 @@ impl Stage {
             }
         };
         sigs.reverse();
+        // A path is where it says; a bare name is in the namespace whose
+        // code defines it.
+        let name: Rc<str> = if is_path(&name) || self.ns.is_empty() {
+            name
+        } else {
+            format!("{}.{name}", self.ns).into()
+        };
+        let (space, key) = name.rsplit_once('.').unwrap_or(("", &name));
+        let space: Rc<str> = space.into();
+        if matches!(key, "import#" | "export#") {
+            return match &value.val {
+                Val::Quote(q) if sigs.is_empty() => self.set_names(&space, key, q),
+                _ => Err(self.err(
+                    Kind::Syntax,
+                    format!("`{key}` takes the names it lists, `<| math.* io.file.read |>`"),
+                )),
+            };
+        }
         self.definable(&name)?;
+        if !self.core {
+            self.word(&name).user = true;
+        }
         let q = match value.val {
             Val::Quote(q) if !signature(&q) => q,
             Val::Type(t) if sigs.is_empty() => return self.name_type(&name, t),
@@ -1022,6 +1293,8 @@ impl Stage {
             }
             _ => return Err(self.err(Kind::Mismatch, usage)),
         };
+        // Its names are looked up in its namespace, wherever it was written.
+        self.scope(&q, space);
         if let Some(Tok::Open(b'<')) = q.first().map(|t| &t.tok) {
             return Err(self.err(
                 Kind::Syntax,
@@ -1078,15 +1351,15 @@ impl Stage {
     }
 
     /// Refuses a name no word may have.
-    fn definable(&self, n: &str) -> Result<()> {
-        if n.contains('.') {
-            // Kept for paths in namespaces (doc/design/TYPES.md 3.12).
+    fn definable(&self, path: &str) -> Result<()> {
+        if path.contains('.') && !is_path(path) {
             return Err(self.err(
                 Kind::Syntax,
-                format!("`{n}` holds a dot, which divides a path in a namespace"),
+                format!("`{path}` has an empty part: a path's parts are names"),
             ));
         }
-        if read::is_variable(n) {
+        let n = path.rsplit('.').next().expect("a part");
+        if read::is_variable(path) {
             return Err(self.err(
                 Kind::Syntax,
                 format!("`{n}` is a variable, one letter, and names no word"),
@@ -2889,6 +3162,7 @@ impl Stage {
 
     /// The effect of tokens of the explicit form.
     fn effect(&self, toks: &[Token], visiting: &mut Vec<Rc<str>>) -> Option<(usize, usize)> {
+        let ns = self.scope_of(toks).unwrap_or_else(|| "".into());
         let mut ins = 0;
         let mut items: Vec<Item> = Vec::new();
         let mut i = 0;
@@ -2920,7 +3194,11 @@ impl Stage {
                     i = j;
                 }
                 Tok::Apply | Tok::Test => {
-                    let (a, b) = match items.pop()? {
+                    let top = match items.pop()? {
+                        Item::Name(s) => Item::Name(self.resolve_quiet(&ns, &s)),
+                        top => top,
+                    };
+                    let (a, b) = match top {
                         Item::Name(s) if self.words.get(&s).is_some_and(|w| w.ty.is_some()) => {
                             items.push(Item::Type);
                             i += 1;
@@ -4369,7 +4647,8 @@ impl Stage {
         match &f.val {
             Val::Name(name, at) => {
                 self.pos = *at;
-                self.wide_word(name)
+                let name = self.lookup(name)?;
+                self.wide_word(&name)
             }
             _ => self.wide_quote(&code, false),
         }

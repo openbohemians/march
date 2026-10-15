@@ -126,6 +126,19 @@ known values. Before a definition's body, a bracket is the clause's
 context. Anywhere else it is a value, so `[ < f64 > ! ] map` converts each
 element, as `[ f64! ] map` does.
 
+**Namespaces** (doc/design/SYMBOLIC-FORTH.md 16, 17): a dot inside a name
+divides a path, and `;` defines at one, `math.sq: [ dup * ] ;`. A word's
+names are looked up in its namespace, then among the namespace's import,
+then in the core, from where the code was written, so a quotation of
+`math`'s that `map` runs still finds `math.sq`; a word of the program's
+root is reached from a namespace by importing it. `import#: <| math.*
+io.file.read |> ;` makes names local, each by its last part, or all that a
+namespace exports; `math.export#: <| pi |> ;` says what may be reached from
+outside, and reaching anything else warns as severe, though it compiles,
+and a namespace's children see all of it. A namespace has one import,
+which holds for all of it: a source's imports run first. A name found in
+two places is an error that a path settles.
+
 **A definition is data:** a name, what it names, and `;` (Thomas,
 2026-10-12; doc/design/SYMBOLIC-FORTH.md 18), FORTH's `: inc 1 + ;` turned
 postfix: `inc: < i64 -- i64 > [ 1 + ] ;`. The name comes first, and

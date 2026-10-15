@@ -91,7 +91,7 @@ impl Session {
             read::read(src, &self.symbols)?
         };
         self.stage.begin(&self.types);
-        self.stage.run(&toks)?;
+        self.stage.run_source(&toks)?;
         let types = self.stage.finish()?;
         let code = std::mem::take(&mut self.stage.code);
         Ok((self.stage.seal(code).0, types))

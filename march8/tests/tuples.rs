@@ -128,14 +128,14 @@ fn an_array_is_wanted_so_positions_are_forgotten() {
 
 #[test]
 fn tuple_types_in_brackets() {
-    let p = "pp: [ < ( i64 string ) > drop 1 ] def pp: [ < ( a b ) > drop 2 ] def";
+    let p = "pp: < ( i64 string ) > [ drop 1 ] ; pp: < ( a b ) > [ drop 2 ] ;";
     // A vec is a tuple whose types are one, so `( a b )` takes `( 1 2 )`.
     assert_eq!(
         show(&[p, "( 1 \"a\" ) pp ( 1 2 ) pp ( \"x\" 2.0 ) pp"]),
         "<3> 1 2 2"
     );
     assert_eq!(
-        show(&["mk: [ < -- ( i64 string ) > ( 1 \"a\" ) ] def mk 2 at"]),
+        show(&["mk: < -- ( i64 string ) > [ ( 1 \"a\" ) ] ; mk 2 at"]),
         "<1> \"a\""
     );
     assert_eq!(show(&["( 1 \"a\" ) < ( i64 string ) > ! length"]), "<1> 2");

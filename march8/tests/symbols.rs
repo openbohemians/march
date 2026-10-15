@@ -18,8 +18,8 @@ fn fails(src: &str) -> march8::Error {
 }
 
 const DOOR: &str = "
-door: [ < Closed Open > drop drop Opened ] def
-door: [ < Opened Close > drop drop Closed ] def
+door: < Closed Open > [ drop drop Opened ] ;
+door: < Opened Close > [ drop drop Closed ] ;
 ";
 
 #[test]
@@ -81,9 +81,9 @@ fn a_family_chooses_by_symbols_at_run_time() {
 #[test]
 fn a_family_applies_itself_to_symbols() {
     let src = "
-is: [ < Socrates Human > drop drop true ] def
-is: [ < x Mortal > drop Human is ] def
-is: [ < x y > drop drop false ] def
+is: < Socrates Human > [ drop drop true ] ;
+is: < x Mortal > [ drop Human is ] ;
+is: < x y > [ drop drop false ] ;
 Socrates Mortal is Zeus Mortal is";
     assert_eq!(show(src), "<2> true < bool > false < bool >");
 }
@@ -104,8 +104,8 @@ fn a_symbol_applies_while_compiling() {
 #[test]
 fn a_clause_on_symbols_written_again_replaces_itself() {
     let src = "
-door: [ < Closed Open > drop drop Opened ] def
-  door: [ < Closed Open > drop drop Ajar ] def
+door: < Closed Open > [ drop drop Opened ] ;
+  door: < Closed Open > [ drop drop Ajar ] ;
 Closed Open door";
     assert_eq!(show(src), "<1> Ajar < sym >");
 }

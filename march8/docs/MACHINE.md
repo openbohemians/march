@@ -12,27 +12,30 @@ time, `map`, and arithmetic lifted over arrays; slice 3 adds recursion,
 instances and tail calls.
 
 ```
-fee: [ < money -- money > 1.10 + ] def
+fee: < money -- money > [ 1.10 + ] ;
 19.99 fee                          → 21.09, exactly: 2109 cents
-sq: [ dup * ] def
+sq: [ dup * ] ;
 3 sq                               → 9, compiled as the literal 9
 { "k" ( 41 2 ) } "k" at 0 at 1 +        → 42
-positive?: [ 0 gt? ] def
-sign: [ < i64 positive? > drop 1 ] def
-sign: [ < i64 > drop 0 ] def
+positive: [ 0 gt? ] ;
+sign: < i64 positive? > [ drop 1 ] ;
+sign: < i64 > [ drop 0 ] ;
 x sign                             → 1 or 0, chosen at run time
 5 sign                             → the literal 1, chosen now
 ( 1 2 3 ) 10 *                     → ( 10 20 30 ): it lifts
-zero?: [ 0 eq? ] def
-fact: [ < i64 zero? > drop 1 ] def
-fact: [ < i64 > dup 1 -+ fact * ] def
+zero: [ 0 eq? ] ;
+fact: < i64 zero? > [ drop 1 ] ;
+fact: < i64 > [ dup 1 -+ fact * ] ;
 10 fact                            → 3628800, by fact's i64 instance
 ```
 
 ## The notation
 
 Words are separated by white space, as in FORTH. `--` starts a comment that
-runs to the end of the line, except inside `< >`. The notation was decided
+runs to the end of the line, except inside `< >`, where it divides inputs
+from outputs. A line of three or more `-` and nothing else opens a block
+comment, and a line of them ending in a period, `---.`, closes it
+(Thomas, 2026-10-15). The notation was decided
 on 2026-10-12 (Thomas), after a comparison of the same programs written
 with a dot after every name applied and without (doc/design/DOTS.md): a
 name applies, as in FORTH, in code and in a bracket alike, and a symbol or
@@ -103,42 +106,46 @@ called (Thomas, 2026-10-13); **`!` converts** by it:
 leaves is the signature, by what each value is:
 
 ```
-case: [ < string Camel > … ] def        a string, and the symbol Camel
-at: [ < a ary i64 -- a > … ] def        one letter is a type variable
-sign: [ < i64 positive? > … ] def       a word ending in ? leaves a bool: a guard
-even: [ < i64 [ 2 mod zero? ] > … ] def     any quotation left is one too
-fib: [ < 0 > … ] def    [ < 0 i64! > … ]    [ < true > … ]    a value left: equal to it
-pair: [ < ( i64 string ) > … ] def      an array of types: a tuple type
+case: < string Camel > [ … ] ;        a string, and the symbol Camel
+at: < a ary i64 -- a > [ … ] ;        one letter is a type variable
+sign: < i64 positive? > [ … ] ;       a word tested, by ?: a guard
+even: < i64 [ 2 mod zero? ] > [ … ] ;     any quotation left is one too
+fib: < 0 > [ … ] ;    < 0 i64! >    < true >    a value left: equal to it
+pair: < ( i64 string ) > [ … ] ;      an array of types: a tuple type
 ```
 
-A word ending in `?` leaves one bool, and the compiler holds it to that
-where its signature is written and wherever it is applied; applied in a
-bracket it is a guard on the inputs before it. A name left in a bracket,
+`?` applies a test, which leaves one bool, and the compiler holds it to
+that (doc/design/SYMBOLIC-FORTH.md 20): `positive?` is `positive ?`, and
+`.` applies the word unchecked. In a bracket a test is a guard on the
+inputs before it. A name left in a bracket,
 unapplied, is a symbol or a variable, so no definition changes what a
 bracket means: a symbol is never a type. Reading a signature takes knowing
 what a constructor takes, `< k i64 map k >` being a map and a key, as
 reading any FORTH does. The code runs while compiling, so it leaves only
-known values. First in a definition's quotation, a bracket is the clause's
+known values. Before a definition's body, a bracket is the clause's
 context. Anywhere else it is a value, so `[ < f64 > ! ] map` converts each
 element, as `[ f64! ] map` does.
 
-**A definition is data:** a name, what it names, and `def` (Thomas,
-2026-10-12): `inc: [ < i64 -- i64 > 1 + ] def`. The name comes first, and
+**A definition is data:** a name, what it names, and `;` (Thomas,
+2026-10-12; doc/design/SYMBOLIC-FORTH.md 18), FORTH's `: inc 1 + ;` turned
+postfix: `inc: < i64 -- i64 > [ 1 + ] ;`. The name comes first, and
 the bracket after it says what kind of thing it names:
 
 ```
-fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def     code
-num: < i64 f64 or money or int# or dec# or ratio# or > def    a type
+fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;     code
+num: < i64 f64 or money or int# or dec# or ratio# or > ;    a type
 ```
 
-A bracket first in the quotation is the clause's signature, its context
-(TYPES.md 2.15): the types of its inputs, then after `--` the outputs it
-promises. Clauses of one name are a family. A type is named, `config: <
-string i64 map > def`, the bracket only saying that it is one, and a named
-class is called by its name in messages. `def` takes nothing else: a value
+A bracket before the body is the clause's signature, its context (TYPES.md
+2.15): the types of its inputs, then after `--` the outputs it promises, or
+the two in two brackets, inputs then outputs, `sq: < i64 > < i64 > [ dup * ]
+;`. Clauses of one name are a family. No name ends in `?`, which tests, or
+in a power or a width, which are spellings. A type is named, `config: <
+string i64 map > ;`, the bracket only saying that it is one, and a named
+class is called by its name in messages. `;` takes nothing else: a value
 computed where it stands, with no bracket to mark where it starts, could
 take the name below it. Constants are quotations, `primes: [ ( 2 3 5 7 ) ]
-def`, folding where they are used.
+;`, folding where they are used.
 
 ## Judgments
 
@@ -194,7 +201,7 @@ equal types are equal numbers.
 | `a` to `z` | type variables, in patterns |
 | `atom` | in patterns, any type that is not a container: a number, a string, a literal. A class, not a type: it binds nothing, so `< atom atom >` takes two of different types |
 | `a b or` | in patterns, a union: any of its types, `i64 f64 or`. Kept canonical, so order and repeats do not matter. It matches a little less well than one of its types alone, and better than `atom` |
-| `num` | the numbers: `num: < i64 f64 or money or int# or dec# or ratio# or > def`, in `core.march` |
+| `num` | the numbers: `num: < i64 f64 or money or int# or dec# or ratio# or > ;`, in `core.march` |
 | `nil` | the type with one value, `nil`: nothing is there, as in `i64 nil or` |
 | `bool` | truth: 0 and 1, `false` and `true`, Iverson's brackets, so an i64 too (TYPES.md 2.16) |
 | `( i64 string )` | a tuple: fixed positions, a type each. Positions of one type are a vec, so `( a b )` takes `( 1 2 )` |
@@ -245,8 +252,8 @@ A family's clauses need not take as many values as each other (Thomas,
 TYPES.md 3.13):
 
 ```
-read: [ < Stdin > drop stdin-read ] def
-read: [ < string File > drop file-read ] def
+read: < Stdin > [ drop stdin-read ] ;
+read: < string File > [ drop file-read ] ;
 
 Stdin read                         standard input's text
 "data.csv" File read               a file's
@@ -280,15 +287,14 @@ Stdin read                         standard input's text
 
 ### Guards: the choice at run time
 
-A word ending in `?` applied in a signature is a **guard**, `< i64
-positive? >`, since it leaves one bool, and so is any quotation left there
-that does, `< i64 [ 2 mod zero? ] >` (TYPES.md 2.2, 2.15). It looks at the
+A word tested in a signature is a **guard**, `< i64 positive? >`, and so
+is any quotation left there, `< i64 [ 2 mod zero? ] >` (TYPES.md 2.2,
+2.15; doc/design/SYMBOLIC-FORTH.md 20). It looks at the
 inputs before it, as many as it takes, without taking them, and leaves a
 `bool` (TYPES.md 2.16). How many it takes comes from its definition, by a
 pass over its words: `positive?`, `[ 0 gt? ]`, takes one, and `lt?` takes
-two, so `< i64 i64 lt? >` compares the two inputs. A word ending in `?`
-that leaves anything but one bool is an error, where its signature says so
-or where it is applied.
+two, so `< i64 i64 lt? >` compares the two inputs. A test that leaves
+anything but one bool is an error where it is applied.
 
 When some clauses that match have guards, the choice has two phases:
 
@@ -325,9 +331,9 @@ A value left in a signature, not taken as a `vec`'s length, is a **value
 pattern**: the input must equal it (TYPES.md 2.12).
 
 ```
-fib: [ < 0 > ] def
-fib: [ < 1 > ] def
-fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def
+fib: < 0 > [ ] ;
+fib: < 1 > [ ] ;
+fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;
 ```
 
 - **It is a guard,** testing the input `eq?` the value, so it is chosen in
@@ -346,7 +352,7 @@ fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def
   *pinned*, a value known at compile time whose cell is still on the
   machine's stack. Passed through, it costs nothing, so `fib`'s `< 0 > ;` is
   no code; copied, the copy is the known value; folded, its cell is dropped
-  and the result is a constant, so `g: [ < 0 > 1 + ] def` compiles that
+  and the result is a constant, so `g: < 0 > [ 1 + ] ;` compiles that
   clause to `drop 1`, and `< "quit" > "bye: " swap concat` to a drop and a
   constant string.
 - Value patterns belong in signatures, among the inputs: one in a bracket
@@ -392,7 +398,7 @@ Lifting is clauses in `core.march`, an array and a number in either
 order for `+`, `-+`, `*` and `/*` ("Arrays as tensors"):
 
 ```
-+: [ < a ary a -- a ary > swap [ over + ] map swap drop ] def
++: < a ary a -- a ary > [ swap [ over + ] map swap drop ] ;
 ```
 
 So `( 1 2 3 ) 1 +` is `( 2 3 4 )`, a literal taking the elements' type, and
@@ -403,8 +409,8 @@ the prototype's original bug, `{ "k" ( 1 2 ) } "k" at 1 +`, lifts.
 A clause defined under a type's name says how a literal becomes that type:
 
 ```
-i64: [ < int# -- i64 > int#>i64 ] def
-money: [ < dec# -- money > dec#>money ] def
+i64: < int# -- i64 > [ int#>i64 ] ;
+money: < dec# -- money > [ dec#>money ] ;
 ```
 
 Converting a literal by the type, `2 i64!`, runs this clause, and so does
@@ -535,7 +541,7 @@ input, short for `\[ _ ]` (march7/docs/STRINGS.md):
 ```
 "1 + 2 = \[ 1 2 + ]"           "1 + 2 = 3", a constant
 1 2 "\_ and \_"                 "1 and 2": the first input is the deepest
-f: [ "<\[ _ 1 + ]>" ] def     5 f is "<6>", 1.5 f is "<2.5>"
+f: [ "<\[ _ 1 + ]>" ] ;     5 f is "<6>", 1.5 f is "<2.5>"
 "H\_2;O"                        "H₂O": a subscript's name and `;` follow
 ```
 
@@ -603,8 +609,8 @@ means nothing is there.
 ```
 { "a" 1 } "a" get               1, of i64 nil or
 { "a" 1 } "z" get               nil, of i64 nil or
-port: [ < i64 > 10 * ] def
-port: [ < nil > drop 80 ] def
+port: < i64 > [ 10 * ] ;
+port: < nil > [ drop 80 ] ;
 m "z" get port                 80, by the clause the tag chooses
 m "a" get 1 +                  no word `+` for nil: each type needs a clause
 ```
@@ -674,7 +680,7 @@ and makes it a call to an **instance**:
 - Recursion through other words is found the same way. Only recursion
   needs an instance; every other word is inlined, so folding is unchanged.
 - Its inputs are values at run time, symbols among them: a rule that asks
-  its own family again, `is: [ < x Mortal > drop Human is ] def`, is a
+  its own family again, `is: < x Mortal > [ drop Human is ] ;`, is a
   word testing symbols as it runs. Known inputs do not unfold through
   recursion, numbers or symbols: `10 fact` calls the instance (TYPES.md
   3.16).
@@ -686,9 +692,9 @@ have finished, their results type the recursion and it is compiled again.
 So the base case need not come first:
 
 ```
-positive?: [ 0 gt? ] def
-down: [ < i64 > ] def                       the base, with no guard
-down: [ < i64 positive? > 1 -+ down ] def  tested first, compiled after
+positive: [ 0 gt? ] ;
+down: < i64 > [ ] ;                       the base, with no guard
+down: < i64 positive? > [ 1 -+ down ] ;  tested first, compiled after
 ```
 
 A literal result, as `fact`'s 1, takes the type of an input it can become,
@@ -836,7 +842,7 @@ stack are always known, and the display writes every value by its type:
 `{ "k" ( 1 2 ) } ( "a" "b" )` shows as written, which march7 could not.
 
 ```sh
-cargo run --offline -- --eval 'fee: [ < money > 1.10 + ] def 19.99 fee'
+cargo run --offline -- --eval 'fee: < money > [ 1.10 + ] ; 19.99 fee'
 # <1> 21.09
 cargo run --offline -- --types --eval '{ "a" ( 1.5 ) } 2'
 # <2> { "a" ( 1.5 ) } < string 1 f64 vec map > 2 < i64 >
@@ -1040,7 +1046,8 @@ different lengths both may match (above).
   LaTeX's `\langle` and `\rangle`). The reader then reads `⟨ ⟩` as `< >`,
   so either form reads back, and the way back is the same rewrite.
 - **Comments in brackets.** `--` divides a bracket's inputs from its
-  outputs, so it cannot begin a comment there (Thomas, 2026-10-09).
+  outputs, so it cannot begin a comment there (Thomas, 2026-10-09), and
+  stays so in High Stack (2026-10-15, to reconsider if it chafes).
 - **More of files.** Writing a file, which cannot be another
   `write` clause, since `write` takes one string and a family's clauses
   take as many; `string error or` from `file-read` once there is an error type;
@@ -1071,7 +1078,7 @@ different lengths both may match (above).
   whose bodies the compiler cannot see; and domains besides `io`, such as
   the global store, with primitives that read.
 - **Quotations at run time:** a quotation is always consumed at compile
-  time, by `.`, `def` or `map`.
+  time, by `.`, `;` or `map`.
 - **Headings:** SURFACE.md's literate headings, as namespaces and contexts
   shared by several clauses, read by the reader.
 - **Saving** a session as an image; tuples and records;

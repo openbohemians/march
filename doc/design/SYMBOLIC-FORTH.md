@@ -167,7 +167,8 @@ sq [ i64 . ] seq# ! [ i64 . ] seq# !
 
 `;` tells these apart by type, since a name is a symbol and a
 sequence is not. And with no divider, `--` begins a comment everywhere,
-inside a quotation as well.
+inside a quotation as well; High Stack keeps it as the divider in a
+signature's bracket (6.9).
 
 A signature has two kinds of hole. Values its code takes from below must
 be known while compiling, since a type depends on no value known only at
@@ -209,7 +210,7 @@ rules live here, not below:
 
 A capital marks only that the reader adds no dot, so `Snake.` is what
 `Snake .` is anywhere, the word of that name applied: march8 runs
-`Foo: [ 1 2 + ] def Foo.` to 3, and `Open.`, with no word `Open`, is an
+`Foo: [ 1 2 + ] ; Foo.` to 3, and `Open.`, with no word `Open`, is an
 error.
 
 ```
@@ -217,9 +218,8 @@ fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;
 fib [ n var . ] seq# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;
 ```
 
-Until these are built, march8 reads the old form,
-`fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def`, and lowers it to
-`fib [ < n > dup . 1 -+ . fib . swap . 2 -+ . fib . + . ] def .`.
+March8 reads it so (2026-10-15), and, until signatures are sequences,
+lowers it to `fib < n > [ dup . 1 -+ . fib . swap . 2 -+ . fib . + . ] ;`.
 
 A surface may come above the intermediate form, as SURFACE.md's headings
 were to be. How many stages there are is still to be discovered; Symbolic
@@ -279,8 +279,21 @@ Settled (Thomas, 2026-10-14), not built:
 8. **Signatures are two sequences**, inputs then outputs, `[ a* -- b* ]`
    being `[ a* ] [ b* ]`, each a sequence of types, `seq# !`; one gives
    the inputs alone. `;` takes them before the body (section 3).
-9. **Comments** run from `--` to the line's end, everywhere, since no
-   divider is needed in a signature.
+9. **Comments** run from `--` to the line's end, everywhere in the
+   lowest form, since no divider is needed in a signature. High Stack
+   keeps `--` as the divider in a signature's bracket, `< i64 -- i64 >`,
+   FORTH's stack comment, and a comment elsewhere (Thomas, 2026-10-15:
+   minor, to reconsider later). A line of three or more `-` and nothing
+   else opens a block comment, and a line of them ending in a period,
+   `---.`, closes it (Thomas), so a block reads as a ruled box:
+
+   ```
+   -------------------------
+   Write block comments here
+   -------------------------.
+   ```
+
+   Built in march8 (2026-10-15).
 10. **`seq#` and `map#`**, the sequence and map literals: what a
     quotation's code leaves, collected, `[ … ] seq# !`, which `( … )`
     writes, or paired, `[ … ] map# !`, which `{ … }` writes; their code
@@ -350,7 +363,7 @@ Settled (Thomas, 2026-10-14), not built:
     an import (march5). `;` with a dotted name writes at that path,
     making maps on the way, `math.pi [ … ] ;`. Code and data are entries
     alike, the dictionary and the global store being one (2026-09-26), so a
-    variable is an entry. March8 does not have it: there `def` refuses a
+    variable is an entry. March8 does not have it: there `;` refuses a
     dotted name.
 
 17. **Import and export** (Thomas): a namespace's map has two keys of
@@ -394,11 +407,12 @@ Settled (Thomas, 2026-10-14), not built:
     turned postfix, the label's colon opening and `;` closing. It binds the
     name below to the value on top, with a signature between them if
     there is one, code and data alike, and adds a clause to the word of
-    that name, as `def` does. So a second `;` on a constant's name adds a
+    that name, as `def` did. So a second `;` on a constant's name adds a
     clause rather than replacing the value: replacing an entry is the
-    global store's write, for the store's design. March8 uses `;` only
-    inside a string, closing a named escape, `\times;`, and still reads
-    `def`.
+    global store's write, for the store's design. Built in march8
+    (2026-10-15), with the signature before the body, in one bracket or
+    in two, inputs then outputs; a body that begins with a signature is
+    refused, saying where it goes.
 
 19. **Symbols applied at run time** (Thomas). `.` applies a symbol known
     while compiling, or one its type bounds: a union of symbols, compiled
@@ -437,7 +451,9 @@ Settled (Thomas, 2026-10-14), not built:
     `positive ?` as `Snake.` is `Snake .`. `.` still applies one, leaving
     a bool unchecked. This takes away march8's last rule of spelling, a
     name ending in `?`, which must leave a bool and, applied in a
-    signature, is held as a guard, as if quoted.
+    signature, is held as a guard, as if quoted. Built in march8
+    (2026-10-15): a name ending in `?` is refused, and the primitives'
+    tests lost theirs, `i64lt`.
 
 Settled (Thomas, 2026-10-15):
 
@@ -524,13 +540,13 @@ Settled (Thomas, 2026-10-15):
     The identities need it, since the stage cannot know that `+`'s is 0:
 
     ```
-    power#: [ < +' 0 > drop drop [ 0 ] ] def       -- +^0 is 0
-    power#: [ < *' 0 > drop drop [ 1 ] ] def       -- ⋅^0 is 1
-    width#: [ < dup' 2 > drop drop [ over over ] ] def
+    power#: < +' 0 > [ drop drop [ 0 ] ] ;          -- +^0 is 0
+    power#: < *' 0 > [ drop drop [ 1 ] ] ;          -- ⋅^0 is 1
+    width#: < dup' 2 > [ drop drop [ over over ] ] ;
     ```
 
-    A sketch: march8 matches numbers and symbols as values, `< 0 >` and
-    `< Up >`, and a quoted word is to be checked.
+    The first two are in march8's core.march, which matches a quoted word
+    as a value, as it does a number or a symbol.
 25. **Recognizers: March defines its spelling rules** (Thomas). The rules
     that read High Stack (26), `^n` and `_n` among them, can be March code,
     recognizers, as FORTH names them, each taking a word's text and giving

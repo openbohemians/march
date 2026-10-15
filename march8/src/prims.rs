@@ -251,14 +251,14 @@ pub const PRIMS: &[PrimDef] = &[
         "< int# int# -- int# int# >",
         &[],
     ),
-    d(Prim::I64Lt, "i64lt?", "< i64 i64 -- bool >", &[P::ILt]),
-    d(Prim::I64Eq, "i64eq?", "< i64 i64 -- bool >", &[P::Eq]),
+    d(Prim::I64Lt, "i64lt", "< i64 i64 -- bool >", &[P::ILt]),
+    d(Prim::I64Eq, "i64eq", "< i64 i64 -- bool >", &[P::Eq]),
     d(Prim::F64Add, "f64+", "< f64 f64 -- f64 >", &[P::FAdd]),
     d(Prim::F64Sub, "f64-", "< f64 f64 -- f64 >", &[P::FSub]),
     d(Prim::F64Mul, "f64*", "< f64 f64 -- f64 >", &[P::FMul]),
     d(Prim::F64Div, "f64/", "< f64 f64 -- f64 >", &[P::FDiv]),
-    d(Prim::F64Lt, "f64lt?", "< f64 f64 -- bool >", &[P::FLt]),
-    d(Prim::F64Eq, "f64eq?", "< f64 f64 -- bool >", &[P::FEq]),
+    d(Prim::F64Lt, "f64lt", "< f64 f64 -- bool >", &[P::FLt]),
+    d(Prim::F64Eq, "f64eq", "< f64 f64 -- bool >", &[P::FEq]),
     d(
         Prim::MoneyAdd,
         "money+",
@@ -273,13 +273,13 @@ pub const PRIMS: &[PrimDef] = &[
     ),
     d(
         Prim::MoneyLt,
-        "money-lt?",
+        "money-lt",
         "< money money -- bool >",
         &[P::ILt],
     ),
     d(
         Prim::MoneyEq,
-        "money-eq?",
+        "money-eq",
         "< money money -- bool >",
         &[P::Eq],
     ),
@@ -329,7 +329,7 @@ pub const PRIMS: &[PrimDef] = &[
     ),
     d(
         Prim::StrEq,
-        "string-eq?",
+        "string-eq",
         "< string string -- bool >",
         &[P::Eq],
     ),
@@ -353,7 +353,7 @@ pub const PRIMS: &[PrimDef] = &[
         &[P::VecLen],
     ),
     d(Prim::MapAt, "map-at", "< k v map k -- v >", &[P::VecAt]),
-    d(Prim::MapHas, "map-has?", "< k v map k -- bool >", &[P::Has]),
+    d(Prim::MapHas, "map-has", "< k v map k -- bool >", &[P::Has]),
     d(
         Prim::MapPut,
         "map-put",
@@ -509,7 +509,7 @@ pub const PRIMS: &[PrimDef] = &[
     // A symbol at run time is its name, an interned string, so symbols
     // compare by the machine's `eq` and convert to and from strings as they
     // are.
-    d(Prim::SymEq, "sym-eq?", "< sym sym -- bool >", &[P::Eq]),
+    d(Prim::SymEq, "sym-eq", "< sym sym -- bool >", &[P::Eq]),
     d(Prim::StrToSym, "string>sym", "< string -- sym >", &[]),
     d(Prim::SymToStr, "sym>string", "< sym -- string >", &[]),
     d(
@@ -612,7 +612,7 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::FPow, "f64-pow", "< f64 f64 -- f64 >", &[P::FPow]),
     d(Prim::IPow, "i64-pow", "< i64 i64 -- i64 >", &[P::IPow]),
     d(Prim::IntPow, "int#-pow", "< int# int# -- int# >", &[]),
-    d(Prim::Def, "def", "< sym a -- >", &[]),
+    d(Prim::Def, ";", "< a >", &[]),
     // `!`: the value below given the type on top (stage.rs, `convert_by`).
     d(Prim::Convert, "convert", "< a b -- a >", &[]),
 ];

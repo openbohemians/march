@@ -3,10 +3,10 @@
 -- runs while compiling, and a transition the table lacks is a compile
 -- error: `Locked Open door` is no word `door` for Locked Open.
 
-door: [ < Closed Open > drop drop Opened ] def
-door: [ < Opened Close > drop drop Closed ] def
-door: [ < Closed Lock > drop drop Locked ] def
-door: [ < Locked Unlock > drop drop Closed ] def
+door: < Closed Open > [ drop drop Opened ] ;
+door: < Opened Close > [ drop drop Closed ] ;
+door: < Closed Lock > [ drop drop Locked ] ;
+door: < Locked Unlock > [ drop drop Closed ] ;
 
 Closed Open door Close door Lock door
 

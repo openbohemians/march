@@ -69,8 +69,30 @@ impl Symbols {
                     .position(u8::is_ascii_whitespace)
                     .map_or(bytes.len(), |n| i + n);
                 let word = &source[i..end];
+                // A line of three or more `-` opens a block comment, written
+                // as it is, escapes aside, through the line that closes it.
+                let line_start = source[..i].rfind('\n').map_or(0, |n| n + 1);
+                let line_end = source[i..].find('\n').map_or(bytes.len(), |n| i + n);
+                if source[line_start..i].trim().is_empty()
+                    && crate::read::opens_block(&source[i..line_end])
+                {
+                    let mut end = line_end;
+                    while end < bytes.len() {
+                        let next = source[end + 1..]
+                            .find('\n')
+                            .map_or(bytes.len(), |n| end + 1 + n);
+                        let closing = crate::read::closes_block(&source[end + 1..next]);
+                        end = next;
+                        if closing {
+                            break;
+                        }
+                    }
+                    out.push_str(&self.rewrite(&source[i..end]));
+                    i = end;
+                    continue;
+                }
                 // A `--` word starts a comment, which runs to the end of the line.
-                if word == "--" {
+                if word.starts_with("--") {
                     let end = source[i..].find('\n').map_or(bytes.len(), |n| i + n);
                     out.push_str(&self.rewrite(&source[i..end]));
                     i = end;

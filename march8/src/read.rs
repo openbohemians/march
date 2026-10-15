@@ -19,6 +19,10 @@ pub enum Tok {
     /// `.`, which applies the value on top; the reader puts one after each
     /// name that applies, and `!` is `convert` applied.
     Apply,
+    /// `?`, which applies the value on top as a test, leaving one bool,
+    /// or in a signature holds it as a guard (doc/design/SYMBOLIC-FORTH.md
+    /// 20): `positive?` is `positive ?`.
+    Test,
     /// `[`, `(`, `{` or `<`.
     Open(u8),
     /// `]`, `)`, `}` or `>`.
@@ -95,6 +99,10 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             break;
         };
         let pos = r.pos();
+        if r.alone().is_some_and(opens_block) {
+            r.skip_block(pos)?;
+            continue;
+        }
         if hole.is_some() && open.is_empty() && c == ']' {
             r.bump();
             if out.is_empty() {
@@ -134,7 +142,9 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         // `x y < i64 f64 > !`. So no name ends in either. A dot inside a word
         // is part of it: `2.5` is a number, and in a name it divides a path
         // in a namespace, `io.file.read` (doc/design/TYPES.md 3.12).
-        let stem = word.trim_end_matches(['.', '!']);
+        // A `?` there tests (doc/design/SYMBOLIC-FORTH.md 20): `positive?`
+        // is `positive ?`, applied as a test in place of its own application.
+        let stem = word.trim_end_matches(['.', '!', '?']);
         let marks = &word[stem.len()..];
         let at = Pos {
             col: pos.col + stem.chars().count() as u32,
@@ -142,9 +152,12 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         };
         let primed = is_name(stem) && stem.len() > 1 && stem.ends_with('\'');
         let (stem, applies) = if is_name(stem) && !r.symbolic {
-            spelled(stem)
+            let (stem, applies) = spelled(stem);
+            (stem, applies && !marks.starts_with('?'))
         } else {
-            (stem, false)
+            // `;` defines, a meta-op in Symbolic Forth as `!` is
+            // (doc/design/SYMBOLIC-FORTH.md 18).
+            (stem, stem == ";")
         };
         // A width and a power are spellings (doc/design/SYMBOLIC-FORTH.md
         // 21, 22): `dup_2^3` reads as `dup 3 power# . 2 width# .`, applied as
@@ -185,6 +198,19 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         ));
     }
     Ok(out)
+}
+
+/// Whether a line opens a block comment: three or more `-`, and nothing
+/// else (Thomas, 2026-10-15). The block runs to a line that closes it.
+pub fn opens_block(line: &str) -> bool {
+    let t = line.trim();
+    t.len() >= 3 && t.bytes().all(|b| b == b'-')
+}
+
+/// Whether a line closes a block comment: three or more `-` and a period,
+/// `---.`.
+pub fn closes_block(line: &str) -> bool {
+    line.trim().strip_suffix('.').is_some_and(opens_block)
 }
 
 /// Whether a word is a name: not a number or a bracket.
@@ -304,7 +330,7 @@ fn piece(
                 });
             }
             out.push(Token {
-                tok: Tok::Apply,
+                tok: if m == '?' { Tok::Test } else { Tok::Apply },
                 pos,
             });
         }
@@ -426,6 +452,36 @@ impl<'a> Reader<'a> {
     fn skip_line(&mut self) {
         while self.peek().is_some_and(|c| c != '\n') {
             self.bump();
+        }
+    }
+    /// The rest of the line, if only white space comes before it on it.
+    fn alone(&self) -> Option<&'a str> {
+        let start = self.src[..self.at].rfind('\n').map_or(0, |i| i + 1);
+        if !self.src[start..self.at].trim().is_empty() {
+            return None;
+        }
+        let end = self.src[self.at..]
+            .find('\n')
+            .map_or(self.src.len(), |i| self.at + i);
+        Some(&self.src[self.at..end])
+    }
+    /// Skips a block comment, from the line that opens it through the line
+    /// that closes it.
+    fn skip_block(&mut self, pos: Pos) -> Result<()> {
+        self.skip_line();
+        loop {
+            if self.bump().is_none() {
+                return Err(Error::new(
+                    Kind::Unfinished,
+                    Some(pos),
+                    "a block comment is never closed: a line of `---.` closes it",
+                ));
+            }
+            let closing = self.alone().is_some_and(closes_block);
+            self.skip_line();
+            if closing {
+                return Ok(());
+            }
         }
     }
     fn word(&mut self) -> &'a str {
@@ -586,9 +642,10 @@ pub fn lower(toks: &[Token]) -> String {
         }
         match &t.tok {
             Tok::Name(n)
-                if &**n == "convert" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
+                if (&**n == "convert" || &**n == ";")
+                    && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
             {
-                out.push('!');
+                out.push(if &**n == ";" { ';' } else { '!' });
                 i += 1;
             }
             tok => out.push_str(&lowered(tok)),
@@ -608,6 +665,7 @@ fn lowered(tok: &Tok) -> String {
         Tok::Str(s) => format!("\"{}\"", text(s)),
         Tok::Name(n) => n.to_string(),
         Tok::Apply => ".".into(),
+        Tok::Test => "?".into(),
         Tok::Open(b) | Tok::Close(b) => (*b as char).to_string(),
         Tok::Dashes => "--".into(),
         Tok::Template(pieces) => {
@@ -685,6 +743,18 @@ mod tests {
     }
 
     #[test]
+    fn block_comments() {
+        // A line of three or more `-` opens a block comment, and one ending
+        // in a period closes it; a line of them with more on it, or with no
+        // period, is no edge of a block.
+        let src = "1\n  -----\n  2 \"x\n----\n--- 3\n  -----.\n4\n--- 5\n6";
+        assert_eq!(toks(src), [Tok::Int(1), Tok::Int(4), Tok::Int(6)]);
+        let e = read("1\n---\n2", &Symbols::standard()).unwrap_err();
+        assert_eq!(e.kind, Kind::Unfinished);
+        assert_eq!(e.pos, Some(Pos { line: 2, col: 1 }));
+    }
+
+    #[test]
     fn words_numbers_and_brackets() {
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
@@ -738,7 +808,7 @@ mod tests {
     fn names_apply_and_symbols_are_spelled() {
         // A name applies, in a bracket too; a capitalized one is a symbol,
         // as are `name:`, a label, and `name'`; one lowercase letter is a
-        // variable.
+        // variable; and `name?` is tested, not applied.
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
             toks("dup Snake fib: +' < string Camel a ary odd? > σ'"),
@@ -755,8 +825,8 @@ mod tests {
                 n("a"),
                 n("ary"),
                 Tok::Apply,
-                n("odd?"),
-                Tok::Apply,
+                n("odd"),
+                Tok::Test,
                 Tok::Close(b'>'),
                 n("σ"),
             ]

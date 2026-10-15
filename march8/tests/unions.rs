@@ -30,15 +30,15 @@ fn typed(pieces: &[&str]) -> String {
 const M: &str = "{ \"a\" 1 \"b\" 2 }";
 
 /// `b` leaves a string for a positive number, and 1 otherwise.
-const B: &str = "positive?: [ 0 gt? ] def
-    bb: [ < i64 positive? > drop \"yes\" ] def
-    bb: [ < i64 > drop 1 i64! ] def";
+const B: &str = "positive: [ 0 gt? ] ;
+    bb: < i64 positive? > [ drop \"yes\" ] ;
+    bb: < i64 > [ drop 1 i64! ] ;";
 
 #[test]
 fn nil_is_its_own_value() {
     assert_eq!(typed(&["nil"]), "<1> nil < nil >");
     assert_eq!(show(&["nil show"]), "<1> \"nil\"");
-    assert_eq!(show(&["kk: [ < atom > drop 1 ] def nil kk"]), "<1> 1");
+    assert_eq!(show(&["kk: < atom > [ drop 1 ] ; nil kk"]), "<1> 1");
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn get_leaves_a_value_or_nil() {
 
 #[test]
 fn a_word_is_applied_to_each_type_by_the_tag() {
-    let port = "port: [ < i64 > 10 * ] def port: [ < nil > drop 80 ] def";
+    let port = "port: < i64 > [ 10 * ] ; port: < nil > [ drop 80 ] ;";
     assert_eq!(
         show(&[port, &format!("{M} \"a\" get port {M} \"z\" get port")]),
         "<2> 10 80"
@@ -71,8 +71,8 @@ fn a_word_is_applied_to_each_type_by_the_tag() {
     assert_eq!(show(&[B, "3", "bb show"]), "<1> \"\\\"yes\\\"\"");
     // Two unions: each of the first's types, then each of the second's.
     let add = format!("{M} \"a\" get {M} \"b\" get");
-    let both = "add: [ < i64 i64 > + ] def add: [ < i64 nil > drop ] def
-        add: [ < nil a > swap drop ] def";
+    let both = "add: < i64 i64 > [ + ] ; add: < i64 nil > [ drop ] ;
+        add: < nil a > [ swap drop ] ;";
     assert_eq!(show(&[both, &format!("{add} add")]), "<1> 3");
     assert_eq!(
         show(&[both, &format!("{M} \"z\" get {M} \"b\" get add")]),
@@ -107,7 +107,7 @@ fn some_words_take_a_union_whole() {
         .unwrap()
         .0;
     assert!(!ops.contains(&Op::Prim(Primitive::UnionTag)));
-    let k = "kk: [ < atom > drop 1 ] def ww: [ < i64 nil or > drop 2 ] def";
+    let k = "kk: < atom > [ drop 1 ] ; ww: < i64 nil or > [ drop 2 ] ;";
     assert_eq!(
         show(&[
             k,
@@ -141,9 +141,9 @@ fn a_union_made_at_run_time_is_noted() {
     s.eval("drop 3 bb -3 bb").unwrap();
     assert!(s.take_warnings().is_empty());
     assert_eq!(s.show(), "<2> \"yes\" 1");
-    let named = "positive?: [ 0 gt? ] def
-        gg: [ < i64 positive? -- i64 string or > drop \"yes\" ] def
-        gg: [ < i64 -- i64 string or > drop 1 i64! ] def";
+    let named = "positive: [ 0 gt? ] ;
+        gg: < i64 positive? -- i64 string or > [ drop \"yes\" ] ;
+        gg: < i64 -- i64 string or > [ drop 1 i64! ] ;";
     let mut s = Session::new();
     s.eval(named).unwrap();
     s.eval("3").unwrap();

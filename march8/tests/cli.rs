@@ -51,6 +51,11 @@ fn fmt_writes_symbols() {
         ),
         "dup₂ +⁴ dup₂³: file_read 1_000 \"x_1\" -- x_1\n"
     );
+    // A block comment is written as it is, escapes aside.
+    assert_eq!(
+        march8(&["fmt"], "---\nx_1 \"a \\leq\n---.\nx_1\n"),
+        "---\nx_1 \"a ≤\n---.\nx₁\n"
+    );
 }
 
 #[test]
@@ -75,15 +80,12 @@ fn a_formatted_file_reads_as_its_source() {
 fn lower_writes_symbolic_forth() {
     // Every application a dot, and `!` converting (doc/design/TYPES.md 2.2).
     assert_eq!(
-        march8(&["lower"], "sq: [ dup * ] def\n3 sq 2 f64!\n"),
-        "sq [ dup . * . ] def .\n3 sq . 2 f64 . !\n"
+        march8(&["lower"], "sq: [ dup * ] ;\n3 sq 2 f64!\n"),
+        "sq [ dup . * . ] ;\n3 sq . 2 f64 . !\n"
     );
     // And `--symbolic` runs it.
     assert_eq!(
-        march8(
-            &["--symbolic", "--eval", "sq [ dup . * . ] def . 3 sq ."],
-            ""
-        ),
+        march8(&["--symbolic", "--eval", "sq [ dup . * . ] ; 3 sq ."], ""),
         "<1> 9\n"
     );
 }

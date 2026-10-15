@@ -2,19 +2,19 @@
 -- Run it with `march8 examples/summary.march < examples/fruit.csv`.
 
 -- A field's number, or none.
-or-zero: [ < nil > drop 0.0 ] def
-or-zero: [ < f64 > ] def
-number?: [ < nil > drop false ] def
-number?: [ < f64 > drop true ] def
+or-zero: < nil > [ drop 0.0 ] ;
+or-zero: < f64 > [ ] ;
+number: < nil > [ drop false ] ;
+number: < f64 > [ drop true ] ;
 
 -- A column is its name, then its fields. A mean divides by the count,
 -- an i64, made an f64.
-numeric?: [ < string ary > rest [ f64! number? ] map true [ and ] fold ] def
-numbers: [ < string ary > rest [ f64! or-zero ] map ] def
-mean: [ < f64 ary > dup sum swap length f64! /* ] def
+numeric: < string ary > [ rest [ f64! number? ] map true [ and ] fold ] ;
+numbers: < string ary > [ rest [ f64! or-zero ] map ] ;
+mean: < f64 ary > [ dup sum swap length f64! /* ] ;
 
-report: [ < string ary numeric? > dup first swap numbers dup sum swap mean
-  "\_: total \_, average \_\n;" write ] def
-report: [ < string ary > drop ] def
+report: < string ary numeric? > [ dup first swap numbers dup sum swap mean
+  "\_: total \_, average \_\n;" write ] ;
+report: < string ary > [ drop ] ;
 
 Stdin read lines [ "," split ] map transpose [ report ] each

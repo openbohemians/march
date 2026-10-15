@@ -35,7 +35,7 @@ fn a_power_by_the_kind_of_word() {
     assert_eq!(show(&["5 +^1"]), "<1> 5");
     // A function, applied n times; a value, its copies multiplied.
     assert_eq!(show(&["16.0 sqrt^2"]), "<1> 2.0");
-    assert_eq!(show(&["three: [ 3 ] def three^2"]), "<1> 9");
+    assert_eq!(show(&["three: [ 3 ] ; three^2"]), "<1> 9");
     // A stack word, applied n times: a permutation's power.
     assert_eq!(show(&["1 2 swap^2"]), "<2> 1 2");
     assert_eq!(show(&["1 2 3 rot^3"]), "<3> 1 2 3");
@@ -97,9 +97,9 @@ fn a_width_moves_values_at_run_time_as_the_stack_words_do() {
 
 #[test]
 fn no_word_is_named_by_a_spelling() {
-    let (kind, msg) = fails("dup_2: [ over over ] def");
+    let (kind, msg) = fails("dup_2: [ over over ] ;");
     assert_eq!(kind, Kind::Syntax);
     assert!(msg.contains("`dup_2` is a spelling, `dup` 2 wide"), "{msg}");
-    let (_, msg) = fails("sq^2: [ 1 ] def");
+    let (_, msg) = fails("sq^2: [ 1 ] ;");
     assert!(msg.contains("to the power 2"), "{msg}");
 }

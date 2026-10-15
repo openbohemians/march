@@ -109,7 +109,7 @@ pub enum Con {
 pub struct Types {
     terms: Vec<Term>,
     index: HashMap<Term, Type>,
-    /// The names `def` gave classes, which messages use: no value has a
+    /// The names `;` gave classes, which messages use: no value has a
     /// class's type, so the name never hides a value's own.
     classes: HashMap<Type, String>,
     /// Tuples' types by position, each row once.

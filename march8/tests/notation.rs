@@ -44,7 +44,7 @@ fn names_apply_and_symbols_are_spelled() {
         show(&["\"Hello World\" Snake case ( 1 2 3 ) +' reduce"]),
         "<2> \"hello_world\" 6"
     );
-    let step = "step: [ < i64 Up > drop 1 + ] def step: [ < i64 Down > drop 1 -+ ] def";
+    let step = "step: < i64 Up > [ drop 1 + ] ; step: < i64 Down > [ drop 1 -+ ] ;";
     assert_eq!(show(&[step, "5 Up step Down step Down step"]), "<1> 4");
 }
 
@@ -69,32 +69,36 @@ fn a_type_is_built_by_words() {
     );
     assert!(error("1 2 < i64 i64 > .").contains("a signature is not called"));
     // A bracket reads as code does, so the same text means the same there.
-    let n = "size: [ < string i64 map -- i64 > length ] def";
+    let n = "size: < string i64 map -- i64 > [ length ] ;";
     assert_eq!(show(&[n, "string i64 map empty size"]), "<1> 0");
     // A type is defined as any value is, bracketed or not.
-    let real = "real: i64 f64 or def half: [ < real > 2 div ] def";
+    let real = "real: i64 f64 or ; half: < real > [ 2 div ] ;";
     assert_eq!(show(&[real, "7 half 3.0 half"]), "<2> 3 1.5");
 }
 
 #[test]
-fn a_word_ending_in_a_question_mark_leaves_a_bool() {
-    // So applied in a bracket it is a guard on the inputs before it.
-    let sign = "sign: [ < i64 positive? > drop 1 ] def sign: [ < i64 > drop 0 ] def";
+fn a_question_mark_tests() {
+    // `?` applies the value on top as a test, which leaves one bool
+    // (doc/design/SYMBOLIC-FORTH.md 20): `positive?` is `positive ?`. Applied
+    // in a bracket it is a guard on the inputs before it.
+    let sign = "sign: < i64 positive? > [ drop 1 ] ; sign: < i64 > [ drop 0 ] ;";
     assert_eq!(show(&[sign, "5 sign -5 sign"]), "<2> 1 0");
-    // A signature that promises anything else is refused, and so is a word
-    // that leaves anything else.
-    let e = error("big?: [ < i64 -- i64 > 100 + ] def");
+    // A quotation tests too, and guards.
+    assert_eq!(show(&["5 [ 0 gt ]?"]), "<1> true");
+    let big = "big: < i64 [ 100 gt ]? > [ drop 1 ] ; big: < i64 > [ drop 0 ] ;";
+    assert_eq!(show(&[big, "500 big 5 big"]), "<2> 1 0");
+    // A test leaves one bool; `.` applies the word unchecked.
+    let e = error("two: [ dup ] ; 3 two?");
     assert!(
-        e.contains("`big?` ends in `?`, so it leaves one bool"),
+        e.contains("`two?` tests, so it leaves one bool, and it leaves 2 values"),
         "{e}"
     );
-    let e = error("two?: [ dup ] def 3 two?");
-    assert!(
-        e.contains("`two?` ends in `?`, so it leaves one bool, and it leaves 2 values"),
-        "{e}"
-    );
-    let e = error("num?: [ 1 + ] def 3 num?");
+    let e = error("succ: [ 1 + ] ; 3 succ?");
     assert!(e.contains("and it leaves 4 (int#)"), "{e}");
+    assert_eq!(show(&["two: [ dup ] ; 3 two"]), "<2> 3 3");
+    // No word's name ends in `?`, which tests.
+    let e = error("big?: < i64 -- i64 > [ 100 + ] ;");
+    assert!(e.contains("`big?` is `big` tested"), "{e}");
 }
 
 #[test]
@@ -102,18 +106,18 @@ fn a_definition_names_first() {
     // Code in a quotation; `name'` is the same symbol as `name:`, and one
     // letter is a variable, which names no word.
     assert_eq!(
-        show(&["sq: [ dup * ] def cube' [ dup sq * ] def 3 sq 2 cube"]),
+        show(&["sq: [ dup * ] ; cube' [ dup sq * ] ; 3 sq 2 cube"]),
         "<2> 9 8"
     );
     // A type in a bracket: the name is a class, read in other brackets.
-    let real = "real: < i64 f64 or > def half: [ < real > 2 div ] def";
+    let real = "real: < i64 f64 or > ; half: < real > [ 2 div ] ;";
     assert_eq!(show(&[real, "7 half 3.0 half"]), "<2> 3 1.5");
-    assert!(error("x: [ 1 ] def").contains("`x` is a variable"));
+    assert!(error("x: [ 1 ] ;").contains("`x` is a variable"));
     // Anything else is no definition: a value computed in place could take
     // the name below it.
-    let e = error("xx: 5 def");
+    let e = error("xx: 5 ;");
     assert!(
-        e.contains("`def` takes a name, then a quotation or a type"),
+        e.contains("`;` takes a name, its signature if it has one, then a quotation or a type"),
         "{e}"
     );
 }
@@ -135,13 +139,13 @@ fn a_bracket_is_a_value() {
     );
     // A clause's context is taken when it is defined, so a bracket first in
     // the rest of its body is a value again.
-    let e = "ee: [ < i64 > drop < string i64 map > empty length ] def";
+    let e = "ee: < i64 > [ drop < string i64 map > empty length ] ;";
     assert_eq!(show(&[e, "5 ee"]), "<1> 0");
 }
 
 #[test]
 fn messages_name_symbols() {
-    let door = "door: [ < Closed Open > drop drop Opened ] def";
+    let door = "door: < Closed Open > [ drop drop Opened ] ;";
     let e = error(&format!("{door} Locked Open door"));
     assert!(e.contains("no word `door` for Locked Open"), "{e}");
     // A capital where a word was meant makes a symbol, and says so.

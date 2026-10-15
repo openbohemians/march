@@ -140,6 +140,11 @@ fn source_text(toks: &[Token]) -> String {
     while i < toks.len() {
         let word = match &toks[i].tok {
             Tok::Apply => ".".into(),
+            Tok::Test => "?".into(),
+            Tok::Name(s) if toks.get(i + 1).is_some_and(|t| t.tok == Tok::Test) => {
+                i += 1;
+                format!("{s}?")
+            }
             Tok::Name(s) if toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) => {
                 i += 1;
                 if &**s == "convert" {
@@ -788,27 +793,9 @@ impl Stage {
                     let v = self.types.intern(Term::Var(s.as_bytes()[0] - b'a'));
                     self.push(TYPE, Val::Type(v));
                 }
-                // And a word ending in `?` applied is a guard, as if quoted:
-                // it leaves a bool, so it tests the inputs before it
-                // (Thomas, 2026-10-09, 2026-10-12).
-                Tok::Name(s)
-                    if self.in_bracket > 0
-                        && s.ends_with('?')
-                        && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
-                {
-                    i += 1;
-                    let q: Rc<[Token]> = vec![
-                        t.clone(),
-                        Token {
-                            tok: Tok::Apply,
-                            pos: t.pos,
-                        },
-                    ]
-                    .into();
-                    self.push(QUOTE, Val::Quote(q));
-                }
                 Tok::Name(s) => self.push(SYMBOL, Val::Name(s.clone(), t.pos)),
                 Tok::Apply => self.apply()?,
+                Tok::Test => self.apply_test()?,
                 Tok::Open(b'[') => {
                     let j = matching(toks, i);
                     self.push(QUOTE, Val::Quote(toks[i + 1..j].into()));
@@ -817,8 +804,8 @@ impl Stage {
                 // A bracket is a value, as a quotation is (Thomas,
                 // 2026-10-12): a type, or, of more than one type, a
                 // signature, which applied gives the values below their
-                // types, `x y < i64 f64 > .`. Only first in a definition's
-                // quotation is it the clause's context, read by `def`.
+                // types, `x y < i64 f64 > .`. Before a definition's body it
+                // is the clause's context, read by `;`.
                 Tok::Open(b'<') => {
                     let j = matching(toks, i);
                     let sig = self.bracket(&toks[i + 1..j])?;
@@ -978,7 +965,6 @@ impl Stage {
                 _ => j.ty == NIL,
             }
         };
-        let question = name.ends_with('?');
         if let Some(c) = w.con
             && (typeish || (w.prim.is_none() && w.clauses.is_empty()))
         {
@@ -997,42 +983,194 @@ impl Stage {
             self.push(TYPE, Val::Type(t));
             Ok(())
         } else if !w.clauses.is_empty() {
-            self.family(name)?;
-            if question {
-                self.leaves_bool(name)?;
-            }
-            Ok(())
+            self.family(name)
         } else {
             Err(self.err(Kind::NoWord, format!("no word `{name}`")))
         }
     }
 
-    /// A word ending in `?` leaves one bool (Thomas, 2026-10-12): it can be
-    /// a guard, in a bracket or anywhere.
-    fn leaves_bool(&self, name: &Rc<str>) -> Result<()> {
-        let outs = self.effect_of(name).map(|(_, o)| o);
-        let top = self.stack.last().filter(|_| self.stack.len() > self.floor);
-        match (outs, top) {
-            (Some(1) | None, Some(j)) if j.ty == BOOL => Ok(()),
-            (Some(o), _) if o != 1 => Err(self.err(
-                Kind::Mismatch,
-                format!(
-                    "`{name}` ends in `?`, so it leaves one bool, and it leaves {}",
-                    values(o)
-                ),
-            )),
-            (_, Some(j)) => Err(self.err(
-                Kind::Mismatch,
-                format!(
-                    "`{name}` ends in `?`, so it leaves one bool, and it leaves {}",
-                    self.describe(j)
-                ),
-            )),
-            (_, None) => Err(self.err(
-                Kind::Mismatch,
-                format!("`{name}` ends in `?`, so it leaves one bool, and it leaves none"),
-            )),
+    /// `;` (doc/design/SYMBOLIC-FORTH.md 18): binds the name below to the
+    /// value on top, a clause's body or a type, with the clause's signature
+    /// between them if it has one, its inputs and outputs in one bracket or
+    /// in two (section 3): `sq: [ dup * ] ;`, `fib: < n > [ … ] ;`,
+    /// `sq: < i64 > < i64 > [ dup * ] ;` and `num: < i64 f64 or > ;`.
+    fn semicolon(&mut self) -> Result<()> {
+        let usage = "`;` takes a name, its signature if it has one, then a quotation or a type";
+        let value = self.stack.pop().expect("matched");
+        let mut sigs = Vec::new();
+        let (name, named_at) = loop {
+            let Ok(j) = self.pop() else {
+                return Err(self.err(Kind::Mismatch, usage));
+            };
+            match &j.val {
+                Val::Name(n, at) => break (n.clone(), *at),
+                Val::Type(_) => sigs.push(j),
+                Val::Quote(q) if signature(q) => sigs.push(j),
+                _ => return Err(self.err(Kind::Mismatch, usage)),
+            }
+        };
+        sigs.reverse();
+        self.definable(&name)?;
+        let q = match value.val {
+            Val::Quote(q) if !signature(&q) => q,
+            Val::Type(t) if sigs.is_empty() => return self.name_type(&name, t),
+            Val::Name(n, _)
+                if sigs.is_empty() && self.words.get(&n).is_some_and(|w| w.ty.is_some()) =>
+            {
+                let t = self.words[&n].ty.expect("a type");
+                return self.name_type(&name, t);
+            }
+            _ => return Err(self.err(Kind::Mismatch, usage)),
+        };
+        if let Some(Tok::Open(b'<')) = q.first().map(|t| &t.tok) {
+            return Err(self.err(
+                Kind::Syntax,
+                format!("a clause's signature comes before its body: `{name}: < … > [ … ] ;`"),
+            ));
         }
+        let at = named_at;
+        let sig = match &sigs[..] {
+            [] => None,
+            [s] => Some(self.sig_of(s)?),
+            [ins, outs] => {
+                let (ins, outs) = (self.sig_of(ins)?, self.sig_of(outs)?);
+                if ins.outs.is_some() || outs.outs.is_some() || !outs.guards.is_empty() {
+                    return Err(self.err(
+                        Kind::Syntax,
+                        "two signatures are the inputs, then the outputs, with no `--` in either",
+                    ));
+                }
+                Some(Sig {
+                    outs: Some(outs.ins),
+                    ..ins
+                })
+            }
+            _ => {
+                return Err(self.err(
+                    Kind::Syntax,
+                    "a clause has at most two signatures, its inputs and its outputs",
+                ));
+            }
+        };
+        let core = self.core;
+        self.define(
+            &name,
+            Clause {
+                sig,
+                body: q,
+                at,
+                core,
+            },
+        )
+    }
+
+    /// A signature from its value: a type, its one input, or a bracket.
+    fn sig_of(&mut self, j: &Jdg) -> Result<Sig> {
+        match &j.val {
+            Val::Type(t) => Ok(Sig {
+                ins: vec![*t],
+                guards: Vec::new(),
+                outs: None,
+            }),
+            Val::Quote(q) => self.bracket(&q[1..q.len() - 1]),
+            _ => unreachable!("a signature"),
+        }
+    }
+
+    /// Refuses a name no word may have.
+    fn definable(&self, n: &str) -> Result<()> {
+        if n.contains('.') {
+            // Kept for paths in namespaces (doc/design/TYPES.md 3.12).
+            return Err(self.err(
+                Kind::Syntax,
+                format!("`{n}` holds a dot, which divides a path in a namespace"),
+            ));
+        }
+        if read::is_variable(n) {
+            return Err(self.err(
+                Kind::Syntax,
+                format!("`{n}` is a variable, one letter, and names no word"),
+            ));
+        }
+        if let Some(stem) = n.strip_suffix('?').filter(|s| !s.is_empty()) {
+            return Err(self.err(
+                Kind::Syntax,
+                format!(
+                    "`{n}` is `{stem}` tested, `{stem} ?`, and names no word: name it `{stem}`"
+                ),
+            ));
+        }
+        let (base, sub, sup) = crate::symbols::scripts(n);
+        if !base.is_empty() && (!sub.is_empty() || !sup.is_empty()) {
+            let what = match (sub, sup) {
+                (w, "") => format!("{w} wide"),
+                ("", p) => format!("to the power {p}"),
+                (w, p) => format!("{w} wide, to the power {p}"),
+            };
+            return Err(self.err(
+                Kind::Syntax,
+                format!(
+                    "`{n}` is a spelling, `{base}` {what}, and names no word; \
+                     a meaning of its own is a clause of `power#` or `width#`"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// `?`: applies the value on top as a test, which leaves one bool
+    /// (doc/design/SYMBOLIC-FORTH.md 20). In a signature, whose code runs
+    /// over types, the test is held as a guard on the clause's inputs, and
+    /// `?` applies it when the guard runs.
+    fn apply_test(&mut self) -> Result<()> {
+        let f = self.pop()?;
+        if !is_code(&f) {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "{} is no test: `?` applies a word or a quotation",
+                    self.describe(&f)
+                ),
+            ));
+        }
+        if self.in_bracket > 0 {
+            let at = self.pos;
+            let tok = |tok| Token { tok, pos: at };
+            let mut q = match &f.val {
+                Val::Name(n, p) => vec![Token {
+                    tok: Tok::Name(n.clone()),
+                    pos: *p,
+                }],
+                Val::Quote(c) => {
+                    let mut v = vec![tok(Tok::Open(b'['))];
+                    v.extend(c.iter().cloned());
+                    v.push(tok(Tok::Close(b']')));
+                    v
+                }
+                _ => unreachable!("code"),
+            };
+            q.push(tok(Tok::Test));
+            self.push(QUOTE, Val::Quote(q.into()));
+            return Ok(());
+        }
+        let shown = match &f.val {
+            Val::Name(n, _) => format!("`{n}?`"),
+            _ => "a quotation tested".into(),
+        };
+        let outs = self.code_effect(&f).map(|(_, o)| o);
+        self.stack.push(f);
+        self.apply()?;
+        let top = self.stack.last().filter(|_| self.stack.len() > self.floor);
+        let left = match (outs, top) {
+            (Some(1) | None, Some(j)) if j.ty == BOOL => return Ok(()),
+            (Some(o), _) if o != 1 => values(o),
+            (_, Some(j)) => self.describe(j),
+            (_, None) => "none".into(),
+        };
+        Err(self.err(
+            Kind::Mismatch,
+            format!("{shown} tests, so it leaves one bool, and it leaves {left}"),
+        ))
     }
 
     /// How a judgment reads in a message.
@@ -2528,10 +2666,10 @@ impl Stage {
                     self.depth -= 1;
                     r
                 }),
-                // A value pattern is the input `eq?` the value.
+                // A value pattern is the input `eq` the value.
                 Test::Equals(v) => {
                     self.stack.push(v.clone());
-                    self.apply_word(&"eq?".into())
+                    self.apply_word(&"eq".into())
                 }
             };
             let found = std::mem::replace(&mut self.effects, outer);
@@ -2693,7 +2831,7 @@ impl Stage {
                 Prim::AryRemove => (2, 1),
                 Prim::VecSpread | Prim::TupleSpread => return None,
                 Prim::Range | Prim::Reverse => (1, 1),
-                Prim::Def => (2, 0),
+                Prim::Def => return None,
                 Prim::Convert => (2, 1),
                 _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
             });
@@ -2781,7 +2919,7 @@ impl Stage {
                     items.push(Item::Other);
                     i = j;
                 }
-                Tok::Apply => {
+                Tok::Apply | Tok::Test => {
                     let (a, b) = match items.pop()? {
                         Item::Name(s) if self.words.get(&s).is_some_and(|w| w.ty.is_some()) => {
                             items.push(Item::Type);
@@ -2870,7 +3008,7 @@ impl Stage {
         while i < toks.len() {
             match &toks[i].tok {
                 Tok::Int(_) | Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_) | Tok::Name(_) => n += 1,
-                Tok::Apply => {
+                Tok::Apply | Tok::Test => {
                     if let Some(Tok::Name(s)) = i.checked_sub(1).map(|k| &toks[k].tok)
                         && let Some((a, b)) = self.word_effect(s, &mut Vec::new())
                     {
@@ -3092,12 +3230,11 @@ impl Stage {
     /// A bracket, `< … >`, is code, a comprehension of types (Thomas,
     /// 2026-10-09), read as all code is: a type's name gives the type, and a
     /// constructor builds one, `a ary` (2026-10-12). A variable, one letter,
-    /// is a type variable, and a word ending in `?` applied is a guard, as
-    /// it leaves a bool. What the code leaves is the signature, by what each
-    /// value is: a type, inputs of that type; a value, a literal, a symbol,
-    /// `true`, inputs equal to it; a quotation, a guard, which tests the
-    /// inputs before it. `--` divides the inputs from the outputs, which are
-    /// types.
+    /// is a type variable, and a word tested, `positive?`, is a guard. What
+    /// the code leaves is the signature, by what each value is: a type,
+    /// inputs of that type; a value, a literal, a symbol, `true`, inputs
+    /// equal to it; a quotation, a guard, which tests the inputs before it.
+    /// `--` divides the inputs from the outputs, which are types.
     pub fn bracket(&mut self, toks: &[Token]) -> Result<Sig> {
         // The `--` of this bracket, not of one inside it.
         let mut depth = 0;
@@ -3317,7 +3454,7 @@ impl Stage {
         Ok(())
     }
 
-    /// `def` on a type: the name is a name for it, as `num: < i64 f64 or > def`
+    /// `;` on a type: the name is a name for it, as `num: < i64 f64 or > ;`
     /// names a class, in a bracket or applied to a value.
     fn name_type(&mut self, name: &Rc<str>, t: Type) -> Result<()> {
         let w = self.word(name);
@@ -3653,92 +3790,7 @@ impl Stage {
                 let words: Vec<Token> = q.iter().chain(r.iter()).cloned().collect();
                 self.push(QUOTE, Val::Quote(words.into()));
             }
-            Prim::Def => {
-                // The name first, then what it names (Thomas, 2026-10-12):
-                // `fib: [ … ] def`, `num: < i64 f64 or > def`.
-                let quote = self.stack.pop().expect("matched");
-                let name = self.stack.pop().expect("matched");
-                if let Val::Name(n, _) = &name.val {
-                    if n.contains('.') {
-                        // Kept for paths in namespaces (doc/design/TYPES.md 3.12).
-                        return Err(self.err(
-                            Kind::Syntax,
-                            format!("`{n}` holds a dot, which divides a path in a namespace"),
-                        ));
-                    }
-                    if read::is_variable(n) {
-                        return Err(self.err(
-                            Kind::Syntax,
-                            format!("`{n}` is a variable, one letter, and names no word"),
-                        ));
-                    }
-                    let (base, sub, sup) = crate::symbols::scripts(n);
-                    if !base.is_empty() && (!sub.is_empty() || !sup.is_empty()) {
-                        let what = match (sub, sup) {
-                            (w, "") => format!("{w} wide"),
-                            ("", p) => format!("to the power {p}"),
-                            (w, p) => format!("{w} wide, to the power {p}"),
-                        };
-                        return Err(self.err(
-                            Kind::Syntax,
-                            format!(
-                                "`{n}` is a spelling, `{base}` {what}, and names no word; \
-                                 a meaning of its own is a clause of `power#` or `width#`"
-                            ),
-                        ));
-                    }
-                }
-                let typed = match &quote.val {
-                    Val::Type(t) => Some(*t),
-                    Val::Name(n, _) => self.words.get(n).and_then(|w| w.ty),
-                    _ => None,
-                };
-                if let (Val::Name(name, _), Some(t)) = (&name.val, typed) {
-                    return self.name_type(name, t);
-                }
-                let (Val::Name(name, _), Val::Quote(q)) = (name.val, quote.val) else {
-                    return Err(self.err(
-                        Kind::Mismatch,
-                        "`def` takes a name, then a quotation or a type",
-                    ));
-                };
-                let at = q.first().map_or(self.pos, |t| t.pos);
-                let (sig, body) = match q.first().map(|t| &t.tok) {
-                    Some(Tok::Open(b'<')) => {
-                        let j = matching(&q, 0);
-                        let sig = self.bracket(&q[1..j])?;
-                        (Some(sig), q[j + 1..].into())
-                    }
-                    _ => (None, q.clone()),
-                };
-                if name.ends_with('?')
-                    && let Some(Sig {
-                        outs: Some(outs), ..
-                    }) = &sig
-                    && outs[..] != [BOOL]
-                {
-                    let promised: Vec<String> = outs.iter().map(|&t| self.types.name(t)).collect();
-                    self.pos = at;
-                    return Err(self.err(
-                        Kind::Mismatch,
-                        format!(
-                            "`{name}` ends in `?`, so it leaves one bool, and its signature \
-                             promises `{}`",
-                            promised.join(" ")
-                        ),
-                    ));
-                }
-                let core = self.core;
-                self.define(
-                    &name,
-                    Clause {
-                        sig,
-                        body,
-                        at,
-                        core,
-                    },
-                )?;
-            }
+            Prim::Def => self.semicolon()?,
             _ => {
                 let outs: Vec<Type> = sig
                     .outs

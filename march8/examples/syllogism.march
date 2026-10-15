@@ -3,9 +3,9 @@
 -- `is` is compiled as a word of its own, which tests its symbols as it
 -- runs.
 
-is: [ < Socrates Human > drop drop true ] def
-is: [ < Plato Human > drop drop true ] def
-is: [ < x Mortal > drop Human is ] def
-is: [ < x y > drop drop false ] def
+is: < Socrates Human > [ drop drop true ] ;
+is: < Plato Human > [ drop drop true ] ;
+is: < x Mortal > [ drop Human is ] ;
+is: < x y > [ drop drop false ] ;
 
 Socrates Mortal is Zeus Mortal is Plato Human is

@@ -20,8 +20,8 @@ fn fails(src: &str) -> march8::Error {
 }
 
 const MOVE: &str = "
-step: [ < Up > drop 1 ] def
-step: [ < i64 Down > drop drop 2 ] def
+step: < Up > [ drop 1 ] ;
+step: < i64 Down > [ drop drop 2 ] ;
 ";
 
 #[test]
@@ -39,15 +39,15 @@ fn a_family_takes_as_many_values_as_its_clause() {
 #[test]
 fn the_shortest_clause_wins() {
     let src = "
-add: [ < i64 i64 > + ] def
-add: [ < i64 > 10 * ] def
+add: < i64 i64 > [ + ] ;
+add: < i64 > [ 10 * ] ;
 2 3 add";
     assert_eq!(show(src), "<2> 2 30");
     // Among clauses of one length, the most specific, as ever.
     let src = "
-name: [ < string Kind > drop drop \"long\" ] def
-name: [ < i64 > drop \"i64\" ] def
-name: [ < a > drop \"any\" ] def
+name: < string Kind > [ drop drop \"long\" ] ;
+name: < i64 > [ drop \"i64\" ] ;
+name: < a > [ drop \"any\" ] ;
 \"x\" Kind name 7 name";
     assert_eq!(show(src), r#"<3> "x" "any" "i64""#);
 }
@@ -56,9 +56,9 @@ name: [ < a > drop \"any\" ] def
 fn a_shorter_clause_is_warned_of() {
     // Adding a shorter clause may change what a call did, so it is said.
     let mut s = Session::new();
-    s.eval("add: [ < i64 i64 > + ] def").unwrap();
+    s.eval("add: < i64 i64 > [ + ] ;").unwrap();
     assert!(s.take_warnings().is_empty());
-    s.eval("add: [ < i64 > 10 * ] def").unwrap();
+    s.eval("add: < i64 > [ 10 * ] ;").unwrap();
     let w = s.take_warnings();
     assert_eq!(w.len(), 1, "{w:?}");
     assert_eq!(w[0].level, Level::Informative);
@@ -73,7 +73,7 @@ fn a_shorter_clause_is_warned_of() {
     // A longer clause under a shorter one with no guards is not chosen
     // where that one matches.
     let mut s = Session::new();
-    s.eval("add: [ < i64 > 10 * ] def add: [ < i64 i64 > + ] def")
+    s.eval("add: < i64 > [ 10 * ] ; add: < i64 i64 > [ + ] ;")
         .unwrap();
     let w = s.take_warnings();
     assert_eq!(w.len(), 1, "{w:?}");
@@ -88,7 +88,7 @@ fn a_shorter_clause_is_warned_of() {
     // Not where they cannot both match: other symbols, other types.
     let mut s = Session::new();
     s.eval(MOVE).unwrap();
-    s.eval("step: [ < string > drop 3 ] def").unwrap();
+    s.eval("step: < string > [ drop 3 ] ;").unwrap();
     assert!(s.take_warnings().is_empty());
 }
 
@@ -106,8 +106,8 @@ fn a_choice_at_run_time_must_leave_the_stack_as_deep() {
     // Clauses that agree in what they leave can be chosen between: the
     // value beneath the shorter's is left as it was, or replaced, a union.
     let src = "
-turn: [ < Left > drop 1 ] def
-turn: [ < i64 Right > drop 2 * 0 ] def
+turn: < Left > [ drop 1 ] ;
+turn: < i64 Right > [ drop 2 * 0 ] ;
 5 \"Right\" words first sym! turn";
     assert_eq!(show(src), "<2> 10 0");
     let src = src.replace("\"Right\"", "\"Left\"");

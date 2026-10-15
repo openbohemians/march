@@ -126,7 +126,7 @@ fn multiplying_is_the_dot_operator() {
     assert_eq!(show(&["2 3 ⋅ 2.5 2 ⋅ ( 1 2 ) 3 ⋅"]), "<3> 6 5.0 ( 3 6 )");
     // A middle dot or a bullet alone reads as `⋅`; inside a name it stays.
     assert_eq!(show(&["2 3 · 2 3 ∙"]), "<2> 6 6");
-    assert_eq!(show(&["col·lecció: [ 1 ] def col·lecció"]), "<1> 1");
+    assert_eq!(show(&["col·lecció: [ 1 ] ; col·lecció"]), "<1> 1");
     assert_eq!(show(&["2 3 \\cdot"]), "<1> 6");
 }
 
@@ -356,7 +356,7 @@ fn a_string_converts_to_the_number_it_writes() {
     s.eval("\"42\" i64! \" 2.5 \" f64! \"x\" i64!").unwrap();
     assert_eq!(s.show_typed(), "<3> 42 < i64 > 2.5 < f64 > nil < nil >");
     // At run time, `i64 nil or`, for clauses to take apart.
-    let n = "nn: [ < i64 > ] def nn: [ < nil > drop 0 ] def";
+    let n = "nn: < i64 > [ ] ; nn: < nil > [ drop 0 ] ;";
     assert_eq!(
         show(&[n, "\"42\" \"nope\"", "i64! nn swap i64! nn"]),
         "<2> 0 42"

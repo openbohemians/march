@@ -59,8 +59,8 @@ const EXAMPLES: [&str; 4] = [
 #[test]
 fn every_application_is_a_dot() {
     assert_eq!(
-        lowered("fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def"),
-        "fib [ < n > dup . 1 -+ . fib . swap . 2 -+ . fib . + . ] def ."
+        lowered("fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;"),
+        "fib < n > [ dup . 1 -+ . fib . swap . 2 -+ . fib . + . ] ;"
     );
     // A symbol, a label or a word passed is a symbol, and a type is given
     // by applying its word, then `!` converts.
@@ -102,7 +102,7 @@ fn the_examples_lower_and_run_the_same() {
 fn symbolic_forth_runs() {
     let mut s = Session::new();
     s.symbolic = true;
-    s.eval("sq [ dup . * . ] def . 3 sq . 2.5 sq . 2 f64 ! \"42\" i64 !")
+    s.eval("sq [ dup . * . ] ; 3 sq . 2.5 sq . 2 f64 ! \"42\" i64 !")
         .unwrap();
     assert_eq!(s.show(), "<4> 9 6.25 2.0 42");
     // `!` is `convert .`, a convenience: the word that structures a value

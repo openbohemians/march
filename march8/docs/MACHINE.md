@@ -943,12 +943,18 @@ different lengths both may match (above).
     for words whose meaning on an array is not their meaning on each
     element, `length`, `show`, `split`, as APL's each `¨` is.
   - **So `map` keeps its state off the data stack,** as FORTH keeps a
-    loop's on the return stack, which here is the scratch stack. March has
-    no words for it yet; candidates are arrows, `->` and `<-` moving a value
-    there and back and `=>` and `<=` copying, `=` being `dup` (Thomas), or
-    Joy's and Factor's `dip`, balanced by construction. The stage would
-    track judgments there, keep `each`'s own state apart, and hold a word
-    to the zero-net rule.
+    loop's on the return stack, which here is the scratch stack. March
+    says it with Joy's and Factor's `dip`, written `<>` (Thomas), as `=` is
+    `dup`: `x [ q ] dip` runs q with x set aside, and puts x back on top.
+    It is `>r q r>` in one word, balanced by construction, so nothing can
+    be left aside and no zero-net rule needs policing; Factor dropped `>r`
+    and `r>` for it. While q compiles, x is out of reach, and natively it
+    stays in a register. Arrows were the other candidates, `->` and `<-`
+    moving and `=>` and `<=` copying (Thomas), but `->` and `<-` are wanted
+    for list edits and `<=` reads as ≤. `<>` is a name to march8's reader,
+    which takes only a lone `<` as a bracket; the list edits below wanted
+    it for pairing, which will need another spelling. Thomas first named
+    `dip` `_`, which now pulls into a quotation.
   - **It waits on the machine code** (Thomas). The stage knows both
     stacks' depths everywhere, so natively both can be registers, and
     either way costs nothing; where the definitions live is the choice.
@@ -1025,7 +1031,7 @@ different lengths both may match (above).
   on). Its ASCII pairs point the way the elements move: `+>` and `<+` add an
   element at the front and the end, `->` and `<-` remove a suffix and a
   prefix if there, `<->` both, `~>` and `<~` interleave, `><` concatenates
-  and `<>` pairs. A typeable system, but it must be checked against `<` and
+  and `<>` pairs, though `<>` is now `dip` (2026-10-15). A typeable system, but it must be checked against `<` and
   `>` as brackets (a word that only contains them is no bracket), and
   against what March's words already say (`insert`, `remove`, `concat`).
 - **More of tuples, and records.** `rest`, `most`, `slice` and `concat` on

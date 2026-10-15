@@ -55,7 +55,8 @@ every application is marked:
 
 This is **Symbolic Forth**, the lowest form (Thomas, 2026-10-13;
 SYMBOLIC-FORTH.md): symbols, numbers among them, sets of them in one
-bracket, `[ … ]`, and the meta-ops `[`, `]`, `.` and `!` (2026-10-14).
+bracket, `[ … ]`, and the meta-ops `[`, `]`, `.`, `!` and `;`, which
+defines (2026-10-14).
 Every name is a symbol until `.` applies it. `i64 .` is
 the type: every type is given by a word, so types need no spelling of
 their own (one that bottoms out might show as `i64'`, were it ever shown).
@@ -611,7 +612,10 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     to settle, by a longer prefix, as in Elixir. Symbols stay one global
     namespace (2.2). Then `file-read` and its kin move in (they are plain
     words for now; a `read` chosen by a symbol, `"data.csv" File read`,
-    was tried and left, its clauses differing in arity).
+    was tried and left, its clauses differing in arity). Settled for the
+    lowest form (2026-10-14): namespaces are maps all the way down, and `.`
+    reads a dotted name's path (SYMBOLIC-FORTH.md 6.16); importing and
+    exporting are a namespace's keys `import#` and `export#` (6.17).
 13. **Clauses of different arity** (Thomas, 2026-10-12; built
     2026-10-13). A family's clauses need not take as many values as each
     other: `"data.csv" File read` beside `Stdin read`. When clauses of

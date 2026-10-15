@@ -4,10 +4,10 @@ Status: design note, 2026-10-13, from a conversation with Thomas. A first
 account of March's lowest form; a precise specification is to come.
 March8 reads and writes it: `march8 lower` writes any March in Symbolic
 Forth, `--symbolic` reads it, and march8/tests/symbolic.rs is its litmus
-test (section 5). Revised 2026-10-14: one bracket, a quotation; four
+test (section 5). Revised 2026-10-14: one bracket, a quotation; five
 meta-ops; numbers as symbols; signatures as two sequences; holes as sugar;
-text made by `string !`; and no rules of spelling. March8 does not have
-these yet.
+text made by `string !`; namespaces as maps, with imports and exports;
+and no rules of spelling. March8 does not have these yet.
 
 ## 1. What it is
 
@@ -35,34 +35,39 @@ Everything in Symbolic Forth is a symbol, a quotation, or a meta-op
   value on top, a symbol the word its name is defined as, a quotation
   evaluated; and **`!` structures** the value below by the type on top, a
   number symbol into a concrete i64, `2 i64 !`, or a quotation into a
-  sequence, `[ … ] seq# !`.
+  sequence, `[ … ] seq# !`; and **`;` defines**, binding the name below
+  to the value on top, `sq [ dup . * . ] ;`. `.` is the store's one read,
+  and `;` its one write.
 
 Besides these the reader knows only white space, the quotes of a symbol
 with spaces in it, `'…'`, a quote inside doubled, `'it''s'`, and comments,
-from `--` to the line's end. No
-rule of spelling is left: a name means what is done with it, never how it
-is written (Thomas, 2026-10-14).
+from `--` to the line's end. A meta-op stands alone between white space,
+so inside a symbol `.`, `!` and `;` are characters. No rule of spelling is left
+in reading: a name means what is done with it, never how it is written
+(Thomas, 2026-10-14). The one place spelling counts is lookup: `.` applies
+a dotted name by its path, `math.pi .` (6.16).
 
 A side note on the equivalence: every meta-op but `.` could be a
-primitive word applied, `!` as `convert .` and `]` as `close-bracket .`
-(a word that, as FORTH's `;` is, runs even while a set is being
-gathered). A primitive is needed either way, so the lowest level takes
+primitive word applied, `!` as `convert .`, `;` as `def .`, and `]` as
+`close-bracket .` (a word that, as FORTH's immediate words do, runs even
+while a set is being gathered). A primitive is needed either way, so the lowest level takes
 these few as meta-ops; what can be said is the same (Thomas,
 2026-10-14). `.` cannot be a word applied: applying it would need
 application already.
 
 ```
 1 i64 ! 1 i64 ! + .
-sq [ dup . * . ] def .
-sq [ i64 . ] seq# ! [ i64 . ] seq# ! [ dup . * . ] def .
-fib [ n var . ] seq# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] def .
+sq [ dup . * . ] ;
+sq [ i64 . ] seq# ! [ i64 . ] seq# ! [ dup . * . ] ;
+fib [ n var . ] seq# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;
 Closed Open door . Close door . Lock door . Locked eq? .
 ```
 
 Nothing applies unless a dot says so: `3 int# ! dup .` is 3 and 3, and
-`3 int# ! dup` leaves 3 and the symbol `dup`. A definition is data, and
-`def` applied: a symbol, what it names, `sq [ dup . * . ] def .`, and,
-before that, a signature if it has one (section 3).
+`3 int# ! dup` leaves 3 and the symbol `dup`. A definition is data and
+`;`: a symbol, what it names, and between them a signature if it has one
+(section 3), `sq [ dup . * . ] ;`, which is FORTH's `: sq dup * ;` turned
+postfix.
 
 Its nearest kin are Joy, where a program is a list and `i` applies one,
 and FORTH's own words; the difference is that every name is a symbol, and
@@ -125,22 +130,30 @@ which become spellings above it (decided 2026-10-14, not built):
   string with holes is a quotation of its pieces made text,
   `[ '1 + 2 = ' 1 int# ! 2 int# ! + . ] string !`, as `seq# !` makes a
   sequence of one (6.15).
+- **`<| … |>`** is the lowest form's quotation written inline, a pure
+  container of symbols (Thomas, 2026-10-14): its contents are read as
+  Symbolic Forth, so nothing applies without a dot, a number is a symbol,
+  and a capital marks nothing. It lowers word for word, `<| math.pi
+  math.e |>` being `[ math.pi math.e ]`, and is the intermediate form's
+  escape from its own rules of spelling, as Lisp's `quote` is. It writes
+  lists of names, `<| math.* io.file.read |>` (6.17), and code as data
+  as it will be stored. A map form, `{| … |}` perhaps, is to come.
 
 A signature in the lowest form is two sequences, inputs then outputs, and
 needs no divider: `< a* -- b* >` is `[ a* ] [ b* ]` (Thomas, 2026-10-14),
 each a sequence of types, `[ a* ] seq# ! [ b* ] seq# !`. One sequence
 gives the inputs alone, and the stage finds the outputs; `[ n var . ]
-seq# ! [ ] seq# !` declares that there are none. `def` takes a clause's
+seq# ! [ ] seq# !` declares that there are none. `;` takes a clause's
 signature before its body, so no bracket is read by where it stands:
 
 ```
-sq [ dup . * . ] def .                         -- name, body
-fib [ n var . ] seq# ! [ … ] def .             -- name, inputs, body
+sq [ dup . * . ] ;                         -- name, body
+fib [ n var . ] seq# ! [ … ] ;             -- name, inputs, body
 sq [ i64 . ] seq# ! [ i64 . ] seq# !
-   [ dup . * . ] def .                         -- name, inputs, outputs, body
+   [ dup . * . ] ;                         -- name, inputs, outputs, body
 ```
 
-`def`'s clauses tell these apart by type, since a name is a symbol and a
+`;` tells these apart by type, since a name is a symbol and a
 sequence is not. And with no divider, `--` begins a comment everywhere,
 inside a quotation as well.
 
@@ -173,6 +186,7 @@ rules live here, not below:
 | `2 i64!` | `2 i64 . !` | `!` structures by a type |
 | `10`, `1.5`, `1:2` | `10 int# !`, `1.5 dec# !`, `1:2 ratio# !` | a number's spelling gives its kind |
 | `< i64 -- i64 >` | `[ i64 . ] seq# ! [ i64 . ] seq# !` | a signature is two sequences |
+| `<\| sq math.pi \|>` | `[ sq math.pi ]` | the lowest form inline |
 | `( 1 2 )` | `[ 1 int# ! 2 int# ! ] seq# !` | a sequence literal |
 | `5 ( _ 1 )` | `5 [ 1 int# ! ] cons . seq# !` | a hole, filled first |
 | `"\_ apples"` | `[ ' apples' ] cons . string !` | a string with a hole |
@@ -183,11 +197,12 @@ A capital marks only that the reader adds no dot, so `Snake.` is what
 error.
 
 ```
-fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def
-fib [ n var . ] seq# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] def .
+fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;
+fib [ n var . ] seq# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;
 ```
 
-March8 lowers as before until these are built:
+Until these are built, march8 reads the old form,
+`fib: [ < n > dup 1 -+ fib swap 2 -+ fib + ] def`, and lowers it to
 `fib [ < n > dup . 1 -+ . fib . swap . 2 -+ . fib . + . ] def .`.
 
 A surface may come above the intermediate form, as SURFACE.md's headings
@@ -247,7 +262,7 @@ Settled (Thomas, 2026-10-14), not built:
    structuring.
 8. **Signatures are two sequences**, inputs then outputs, `[ a* -- b* ]`
    being `[ a* ] [ b* ]`, each a sequence of types, `seq# !`; one gives
-   the inputs alone. `def` takes them before the body (section 3).
+   the inputs alone. `;` takes them before the body (section 3).
 9. **Comments** run from `--` to the line's end, everywhere, since no
    divider is needed in a signature.
 10. **`seq#` and `map#`**, the sequence and map literals: what a
@@ -305,13 +320,66 @@ Settled (Thomas, 2026-10-14), not built:
     the pieces with `concat` one at a time, which copies the growing
     string at each piece.
 
+16. **Namespaces** are maps all the way down (Thomas): a namespace's
+    entries are words, data, or more namespaces, and a dot inside a name
+    divides the path, `math.pi` (TYPES.md 3.12). The reader keeps a dotted
+    name whole, and until applied it is a plain symbol, passed as `Open`
+    is; `.` reads the path, walking the maps to the entry at its end. That
+    is the one place spelling counts, and it is lookup's, not reading's. A
+    number's dot is never a path, since a number is structured, never
+    applied. What it means is explicit, `math . pi at . .`, the map, its
+    entry, applied, and `math.pi .` names that. So a namespace is a value:
+    `math .` leaves the map, to pass, merge or compare, and in a
+    merkle-champ store it has an identity, its content hash, which can pin
+    an import (march5). `;` with a dotted name writes at that path,
+    making maps on the way, `math.pi [ … ] ;`. Code and data are entries
+    alike, the dictionary and the global store being one (2026-09-26), so a
+    variable is an entry. March8 does not have it: there `def` refuses a
+    dotted name.
+
+17. **Import and export** (Thomas): a namespace's map has two keys of
+    March's own, `import#` and `export#`, named so as not to take words a
+    program wants, `csv.export`; a trailing `#` marks March's own names,
+    as in `int#` and `seq#`. Setting them is a definition of data:
+
+    ```
+    import#: <| math.* io.file.read |> ;     -- each local by its last part
+    import#: <| circle math.pi |> map#! ;    -- or named, as pairs
+    export#: <| pi e sin cos |> ;
+    ```
+
+    `import#` makes names local, each by its last part or by the name
+    paired with it, and `math.*` makes local all that `math` exports. A
+    bare name is looked up locally, then among the imports, then in the
+    core. A path is absolute, so it means the same anywhere. An import
+    that meets a local name or another import is an error, settled by
+    naming it. `export#` holds the names that may be reached from outside,
+    and with none, all may. It holds for paths as well as imports:
+    reaching an unexported entry from outside compiles, with a serious
+    warning, so a word is private but not locked out. A namespace's
+    children see its unexported entries, so tests in `math.test` need no
+    warning. A namespace's interface is the hash of its exported entries,
+    so a change to a private word changes nothing an importer pinned. The
+    lineage: march2's `<` imports and `>` exports, never built past whole
+    namespaces; march5's exports, interface hashes and lookup order, which
+    held namespaces to compile time, as `.` applying known symbols only
+    still does (doc/lineage). So a module is a namespace, its map with
+    its imports and exports, and needs no construct of its own (Thomas).
+18. **`;` defines**, a meta-op (Thomas). Through all of the above one
+    word stayed constant, `def`, applied in every program, so it is named
+    for what it is, FORTH's `;`: `sq: [ dup * ] ;` is `: sq dup * ;`
+    turned postfix, the label's colon opening and `;` closing. It binds the
+    name below to the value on top, with a signature between them if
+    there is one, code and data alike, and adds a clause to the word of
+    that name, as `def` does. So a second `;` on a constant's name adds a
+    clause rather than replacing the value: replacing an entry is the
+    global store's write, for the store's design. March8 uses `;` only
+    inside a string, closing a named escape, `\times;`, and still reads
+    `def`.
+
 Open:
 
-16. **Namespaces.** A namespace is a map, so an ordered set of pairs, and
-    may need no notation of its own: only a way to confine `.` to a
-    namespace, which may well be a mode of the system (Thomas). Meanwhile
-    a dot inside a word divides a path, `io.file.read` (TYPES.md 3.12).
-17. **Symbols applied at run time.** A symbol known only as the program
+19. **Symbols applied at run time.** A symbol known only as the program
     runs names a word that is not chosen yet. Applying one would take the
     words themselves at run time, a dictionary as FORTH has, or a choice
     among the words a symbol's type allows.

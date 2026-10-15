@@ -7,7 +7,9 @@ Forth, `--symbolic` reads it, and march8/tests/symbolic.rs is its litmus
 test (section 5). Revised 2026-10-14: one bracket, a quotation; six
 meta-ops; numbers as symbols; signatures as two sequences; holes as sugar;
 text made by `string !`; namespaces as maps, with imports and exports;
-and no rules of spelling. March8 does not have these yet.
+and no rules of spelling. March8 does not have these yet. Revised
+2026-10-15: powers and widths as spellings, recognizers, spelling rules
+defined in March, and the names High Stack and Low Stack (section 6).
 
 ## 1. What it is
 
@@ -201,7 +203,7 @@ rules live here, not below:
 | `( 1 2 )` | `[ 1 int# ! 2 int# ! ] seq# !` | a sequence literal |
 | `5 ( _ 1 )` | `5 [ 1 int# ! ] cons . seq# !` | a hole, filled first |
 | `"\_ apples"` | `[ ' apples' ] cons . string !` | a string with a hole |
-| `dup_2`, `dup₂` | `dup_2 .` | a subscript is part of the name |
+| `dup_2`, `dup₂` | `dup 2 int# ! width# . .` | a width, by the word |
 | `+^4`, `+⁴` | `+ 4 int# ! power# . .` | a power, by the word's kind |
 | `[ dup + ]^3` | `[ dup . + . ] 3 int# ! power# .` | a quotation's power, a quotation |
 
@@ -474,16 +476,22 @@ Settled (Thomas, 2026-10-15):
     signature, with no count, `t*` any number of t and `a*` the rest of
     the stack: the regular expression's star, which mathematics writes as
     Σ*. March8 does not have powers yet.
-22. **A subscript is part of a name.** `dup_2`, written `dup₂`, is a word
-    with a definition of its own, as log₂ and x₁ are names in mathematics,
-    each meaning what it is defined to mean, so no rule of spelling
-    reaches the lowest form. On a stack word the subscript is a width,
-    each value the word moves a pair: `dup₂` is FORTH's 2DUP, `swap₂` its
-    2SWAP, `over₂` 2OVER and `rot₂` 2ROT, and `dip₂`, `keep₂` and `bi₂` are
-    Factor's 2dip, 2keep and 2bi. `over₂` and `rot₂` are `over` and `rot`
-    with every word subscripted, `[ dup₂ ] dip₂ swap₂` and `[ swap₂ ] dip₂
-    swap₂`. March8's core.march has them, spelled with `_`, and `==` and
-    `~~` are `dup_2` and `swap_2`.
+22. **A subscript is a width,** a spelling as the power is (Thomas). `w_n`,
+    written `wₙ`, is w with each value it works on a group of n, and
+    lowers as `^n` does, `=_2` being `= 2 int# ! width# . .`, so no word
+    needs defining at each width: `=_2` and `dup_2` are FORTH's 2DUP, `~_2`
+    its 2SWAP, `over_2` 2OVER and `rot_2` 2ROT, and `dip_2`, `keep_2` and
+    `bi_2` are Factor's 2dip, 2keep and 2bi. The stage widens a word as it
+    powers one: inside `w_n`, w's own words act on groups, and a quotation
+    handed to w is not widened but runs once, as written, on the group's
+    values. So `keep_2` is 2keep, though `keep`'s own `over [ . ] dip` moves
+    a pair past a quotation. An operation acts lane by lane, the first of
+    each group with the first, as vectors add, so `1 2 10 20 +_2` is `11
+    22`; the stack words agree, 2DUP being dup in each lane. `width#` leaves
+    a quotation, as `power#` does, and the width comes before the power,
+    `dup_2^3` being `dup_2` cubed. So `==` and `~~` go. March8 does not
+    have it yet, and its core.march defines `dup_2` and the rest as words
+    for now.
 23. **`fmt` writes them as mathematics does,** by LaTeX's marks, `^` up
     and `_` down: a name's trailing `^` and digits as superscript digits,
     `+^4` as `+⁴`, and its trailing `_` and digits as subscript digits,
@@ -491,9 +499,46 @@ Settled (Thomas, 2026-10-15):
     `file_read` stays as it is. The reader reads them back, `₂` as `_2`
     and `⁴` as `^4`, as it is to read `⟨ ⟩` as `< >`
     (march8/docs/MACHINE.md), and the ASCII spelling is the one kept, the
-    one typed. The subscript belongs to the name and the power does not,
-    so the subscript comes first, `dup_2^3`, `dup₂³`. March8's escape `\_2`
-    writes `₂`, and makes the same name. Built in march8 (2026-10-15).
+    one typed, the width first, `dup_2^3` as `dup₂³`. March8's escape `\_2`
+    writes `₂`, and is the same spelling. Built in march8 (2026-10-15).
+24. **No name ends in a power or a width** (Thomas). The reader takes
+    `^n` and `_n` off, so a word named `dup_2` could never be reached, and
+    defining one is an error that says what the spelling means. FORTH
+    lets a word redefine a number, searching its dictionary first; here
+    what a spelling lowers to would then hang on what happens to be
+    defined, and one definition would change every use unseen. A
+    specific meaning is a clause instead, of `power#` or `width#`, for
+    that word and that count: a family chooses its most specific clause,
+    so the clause wins over the general rule, as FORTH's dictionary wins
+    over its numbers, while the reader still lowers by spelling alone.
+    The identities need it, since the stage cannot know that `+`'s is 0:
 
-Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); and which
-bracket owns a nested hole (14), to watch.
+    ```
+    power#: [ < +' 0 > drop drop [ 0 ] ] def       -- +^0 is 0
+    power#: [ < *' 0 > drop drop [ 1 ] ] def       -- ⋅^0 is 1
+    width#: [ < dup' 2 > drop drop [ over over ] ] def
+    ```
+
+    A sketch: march8 matches numbers and symbols as values, `< 0 >` and
+    `< Up >`, and a quoted word is to be checked.
+25. **Recognizers: March defines its spelling rules** (Thomas). The rules
+    that read High Stack (26), `^n` and `_n` among them, can be March code,
+    recognizers, as FORTH names them, each taking a word's text and giving
+    what it lowers to, and a program may add its own: `log_2` can be a
+    spelling of its own, base 2's log, more specific than the width, where
+    24 refuses it as a name. A definition still cannot change how text
+    reads, only a spelling rule, which says that it is one, so reading hangs
+    on spelling rules alone and the litmus test holds: `march8 lower` still
+    writes any program in Low Stack. In FORTH a recognizer is a word that
+    takes a token's text and says how to interpret or compile it, by which
+    Gforth reads its numbers; Lisp's kin is the reader macro, Factor's the
+    parsing word. With them March reads itself by its own words, a step up
+    in kind. Very powerful, and an easy way to win an obscure-code contest:
+    not to be used lightly (Thomas).
+26. **High Stack and Low Stack** (Thomas, to try). The surface March is
+    written in, today the intermediate form of section 4, is High Stack;
+    Symbolic Forth, the lowest form, is Low Stack.
+
+Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); which
+bracket owns a nested hole (14), to watch; and how far a recognizer
+reaches (25), only where its namespace is imported (17), perhaps.

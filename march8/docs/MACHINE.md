@@ -926,6 +926,32 @@ different lengths both may match (above).
 
 ## Not yet
 
+- **Loops in March, the kernel shrink** (2026-10-14). `map`, `zip`,
+  `table` and `within` are about 470 lines of Rust, which could be words in
+  `core.march` over `each`, the one loop the stage types. What was found:
+  - **`map` is no comprehension.** In a literal, what a pass leaves is
+    gathered on the data stack, between the next element and the values
+    below the array, so `( 100 ( 1 2 3 ) [ over + ] each )` is a scan,
+    `( 100 101 103 106 )`. Comprehensions stay as they are, the general
+    case: each pass sees what the last left, and the literal takes all.
+  - **`map` follows Joy's rule** (Thomas): each element in isolation, on
+    the stack below the map, what the quotation consumes restored and its
+    one result collected, so `100 ( 1 2 3 ) [ + ] map` would be `100 ( 101
+    102 103 )`, as in Joy, where it is an error now. The stage restores by
+    copying what the quotation takes, which it knows: `[ + ]` in isolation
+    is `over +`. Lifting stays clauses over `map`, which is still needed
+    for words whose meaning on an array is not their meaning on each
+    element, `length`, `show`, `split`, as APL's each `¨` is.
+  - **So `map` keeps its state off the data stack,** as FORTH keeps a
+    loop's on the return stack, which here is the scratch stack. March has
+    no words for it yet; candidates are arrows, `->` and `<-` moving a value
+    there and back and `=>` and `<=` copying, `=` being `dup` (Thomas), or
+    Joy's and Factor's `dip`, balanced by construction. The stage would
+    track judgments there, keep `each`'s own state apart, and hold a word
+    to the zero-net rule.
+  - **It waits on the machine code** (Thomas). The stage knows both
+    stacks' depths everywhere, so natively both can be registers, and
+    either way costs nothing; where the definitions live is the choice.
 - **Deferred terms and rewriting clauses.** `range` and `reverse` build
   arrays. Since everything is a value until `.` applies it, applying a pure
   word could leave a term, "`reverse` of this array", made code only when

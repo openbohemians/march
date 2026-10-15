@@ -55,8 +55,8 @@ every application is marked:
 
 This is **Symbolic Forth**, the lowest form (Thomas, 2026-10-13;
 SYMBOLIC-FORTH.md): symbols, numbers among them, sets of them in one
-bracket, `[ … ]`, and the meta-ops `[`, `]`, `.`, `!` and `;`, which
-defines (2026-10-14).
+bracket, `[ … ]`, and the meta-ops `[`, `]`, `.`, `?`, which tests, `!`
+and `;`, which defines (2026-10-14).
 Every name is a symbol until `.` applies it. `i64 .` is
 the type: every type is given by a word, so types need no spelling of
 their own (one that bottoms out might show as `i64'`, were it ever shown).

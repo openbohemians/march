@@ -4,7 +4,7 @@ Status: design note, 2026-10-13, from a conversation with Thomas. A first
 account of March's lowest form; a precise specification is to come.
 March8 reads and writes it: `march8 lower` writes any March in Symbolic
 Forth, `--symbolic` reads it, and march8/tests/symbolic.rs is its litmus
-test (section 5). Revised 2026-10-14: one bracket, a quotation; five
+test (section 5). Revised 2026-10-14: one bracket, a quotation; six
 meta-ops; numbers as symbols; signatures as two sequences; holes as sugar;
 text made by `string !`; namespaces as maps, with imports and exports;
 and no rules of spelling. March8 does not have these yet.
@@ -33,7 +33,9 @@ Everything in Symbolic Forth is a symbol, a quotation, or a meta-op
   what takes it, since its type changes only how it is held.
 - **The meta-ops**: `[` and `]` mark a quotation; **`.` applies** the
   value on top, a symbol the word its name is defined as, a quotation
-  evaluated; and **`!` structures** the value below by the type on top, a
+  evaluated; **`?` tests**, applying the value on top as a test, which
+  must leave one bool, `x 0 int# ! lt ?`, and in a signature is a guard
+  (section 3); **`!` structures** the value below by the type on top, a
   number symbol into a concrete i64, `2 i64 !`, or a quotation into a
   sequence, `[ … ] seq# !`; and **`;` defines**, binding the name below
   to the value on top, `sq [ dup . * . ] ;`. `.` is the store's one read,
@@ -42,16 +44,16 @@ Everything in Symbolic Forth is a symbol, a quotation, or a meta-op
 Besides these the reader knows only white space, the quotes of a symbol
 with spaces in it, `'…'`, a quote inside doubled, `'it''s'`, and comments,
 from `--` to the line's end. A meta-op stands alone between white space,
-so inside a symbol `.`, `!` and `;` are characters. No rule of spelling is left
-in reading: a name means what is done with it, never how it is written
+so inside a symbol `.`, `?`, `!` and `;` are characters. No rule of
+spelling is left in reading: a name means what is done with it, never how it is written
 (Thomas, 2026-10-14). The one place spelling counts is lookup: `.` applies
 a dotted name by its path, `math.pi .` (6.16).
 
 A side note on the equivalence: every meta-op but `.` could be a
-primitive word applied, `!` as `convert .`, `;` as `def .`, and `]` as
-`close-bracket .` (a word that, as FORTH's immediate words do, runs even
-while a set is being gathered). A primitive is needed either way, so the lowest level takes
-these few as meta-ops; what can be said is the same (Thomas,
+primitive word applied, `?` as `test .`, `!` as `convert .`, `;` as
+`def .`, and `]` as `close-bracket .` (a word that, as FORTH's immediate
+words do, runs even while a set is being gathered). A primitive is needed
+either way, so the lowest level takes these few as meta-ops; what can be said is the same (Thomas,
 2026-10-14). `.` cannot be a word applied: applying it would need
 application already.
 
@@ -87,7 +89,15 @@ where above the lowest form one lowercase letter is one.
 So types need no spelling of their own, and types and words are one
 namespace. In a signature a type must be given, `i64 .`, not named: there
 a symbol left bare is a value to match, `Open`, so a bare `i64` would be
-read by its spelling, or by what happens to be defined.
+read by its spelling, or by what happens to be defined. A test is marked
+too, `positive ?`, a guard (6.20). Each role has its mark:
+
+```
+[ i64 . ] seq# !                                 -- applied: a type
+[ Open ] seq# !                                  -- bare: a value to match
+[ i64 . positive ? ] seq# !                      -- tested: a guard
+[ i64 . [ 2 int# ! mod . zero ? ] ? ] seq# !     -- a quotation as a test
+```
 
 A type is data, and is not called. Structuring a value by it is the
 meta-op `!`: `2 i64 . !`, or, since `!` takes a type's symbol too,
@@ -184,6 +194,7 @@ rules live here, not below:
 | `[ 2 + ]` | `[ 2 int# ! + . ]` | a quotation |
 | `[ 2 + ].` | `[ 2 int# ! + . ] .` | a dot at a word's end applies once more |
 | `2 i64!` | `2 i64 . !` | `!` structures by a type |
+| `positive?` | `positive ?` | `?` tests |
 | `10`, `1.5`, `1:2` | `10 int# !`, `1.5 dec# !`, `1:2 ratio# !` | a number's spelling gives its kind |
 | `< i64 -- i64 >` | `[ i64 . ] seq# ! [ i64 . ] seq# !` | a signature is two sequences |
 | `<\| sq math.pi \|>` | `[ sq math.pi ]` | the lowest form inline |
@@ -377,9 +388,44 @@ Settled (Thomas, 2026-10-14), not built:
     inside a string, closing a named escape, `\times;`, and still reads
     `def`.
 
-Open:
+19. **Symbols applied at run time** (Thomas). `.` applies a symbol known
+    while compiling, or one its type bounds: a union of symbols, compiled
+    as a switch among known words, or a named signature, `adjustment:
+    < price -- price >` (Thomas, 2026-09-26), whose words are compiled at
+    that shape into a table, FORTH's `execute` with the check done first.
+    Any other symbol is data, and runs by immediate mode, through a word
+    of the system, as ANS FORTH's `EVALUATE` runs text. In immediate mode
+    every value is concrete, so the stage chooses the clause, checks it
+    and compiles it for the stack it finds, then runs it; the code
+    compiled before checks the stack handed back, or names the shape it
+    expects. The compilation is cached, by the symbol and the types it
+    met, so immediate mode is March's JIT, with no machinery of its own
+    (Thomas). A program that evaluates carries the stage with it, as
+    FORTH carries its outer interpreter, and one that does not, does not.
+    The language stays static, and the dynamism is FORTH's own, on
+    request. Unlike FORTH's, a word is a family whose clause is chosen by
+    type, so a word named at run time may have no body compiled for the
+    types it meets: that is why the stage must be there.
 
-19. **Symbols applied at run time.** A symbol known only as the program
-    runs names a word that is not chosen yet. Applying one would take the
-    words themselves at run time, a dictionary as FORTH has, or a choice
-    among the words a symbol's type allows.
+    A future idea (Thomas): a pure word's results may be cached too, by a
+    memoization modifier, which is easy in context-oriented code, where
+    the inputs already choose a clause; and the system could choose what
+    to memoize by profiling as it runs.
+
+20. **`?` tests**, a sixth meta-op (Thomas): it applies the value on top
+    as a test, which must leave one bool. When it runs depends on where
+    its inputs are: in code they are on the stack, so `x 0 int# ! lt ?`
+    leaves a bool then; in a signature the code runs while compiling,
+    over types, so the test is held as a guard on the clause's inputs,
+    looking at them without taking them, and is decided at run time,
+    unless its inputs are known, when march8 already decides it while
+    compiling. So `?` puts the context into play at run time (Thomas).
+    Test words lose the `?` from their names, `positive`, `zero`, `lt`,
+    and the intermediate form keeps today's spelling, `positive?` being
+    `positive ?` as `Snake.` is `Snake .`. `.` still applies one, leaving
+    a bool unchecked. This takes away march8's last rule of spelling, a
+    name ending in `?`, which must leave a bool and, applied in a
+    signature, is held as a guard, as if quoted.
+
+Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); and which
+bracket owns a nested hole (14), to watch.

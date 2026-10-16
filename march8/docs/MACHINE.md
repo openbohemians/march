@@ -88,6 +88,14 @@ than it passes symbols, and symbols are what a state machine's states, a
 style for `case` or a logic program's atoms are made of, so they read
 without marks.
 
+Open (Thomas, 2026-10-16): `map` and `or` are each one word, and the stage
+looks at what is on top to choose: a type, a type's name or `nil` builds a
+type, and anything else maps over an array or joins truths. That is an
+exception to how a name chooses. A signature takes types as it takes any
+value, `< type type -- type >`, so each can be a family, a clause taking
+types beside the clauses taking values, once `nil` matches `type` where a
+type is wanted, since it stands for its type.
+
 **`.` calls** what is on top: a **symbol**, the word its name is defined
 as, or a **quotation**, evaluated: `[ 2 + ].`. Nothing else is called.
 
@@ -147,7 +155,10 @@ taking a capture, in order, as a symbol: `12kg` is `12 1000 *`. Imported
 recognizers are tried before the core's width and power, and never in
 their own namespace. A word that two match is an error. They are defined
 first, as imports are, and the stage reads a word by one when it reaches
-it, in the namespace of its code.
+it, in the namespace of its code. The design has since made a recognizer
+a word whose name is a pattern, its captures on the stack,
+`/log_([0-9]+)/: < f64 sym -- f64 > [ i64 ! log-base ] ;` (2026-10-16);
+march8 is to follow.
 
 **A definition is data:** a name, what it names, and `;` (Thomas,
 2026-10-12; doc/design/SYMBOLIC-FORTH.md 18), FORTH's `: inc 1 + ;` turned

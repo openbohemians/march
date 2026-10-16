@@ -645,30 +645,37 @@ Settled (Thomas, 2026-10-15):
     `recognize#` to a namespace, as the import pairs will be, mended the
     slot but kept the key, and is dropped with it.
 
-    March8 has the first form, by Rust's `regex` crate, which matches in
-    linear time (Thomas: March wants regular expressions anyway, if only as
-    a module). March may come to have a pattern syntax of its own, a regex
-    then an optional module, which March itself never needs (Thomas,
-    2026-10-16). There `recognize#` clauses are defined first, as imports
-    are (17), never read their own namespace, and the core's text is read
-    by the core's rules alone. March8 learns a body's namespace only at
-    `;`, so the stage, not the reader, reads a word by a recognizer, when
-    it reaches the word in its code's namespace, as it looks up a name. A
-    quotation holding such a word has its template's stack effect. So
-    `march8 lower` still writes the core's reading. Lowering a program that
-    imports recognizers waits until a namespace's text is its own. A
-    captured name, `(.+)`, is a symbol applied in the body's namespace, not
-    where the word was written, as a passed `sq'` is (16); that is to be
-    settled when namespaces become values. The cost: about 25 ns a word
-    where recognizers are imported, and none elsewhere. The core's own `^n`
-    and `_n` stay in the reader. Moving march8 to pattern words is to do.
+    Built in march8 (2026-10-16), by Rust's `regex` crate, which matches
+    in linear time (Thomas: March wants regular expressions anyway, if only
+    as a module). March may come to have a pattern syntax of its own, a
+    regex then an optional module, which March itself never needs (Thomas,
+    2026-10-16). A source's patterns are known before it runs, and the
+    core's text is read by the core's rules alone. A pattern word's code is
+    its captures, then its word, the pattern's path, applied, so its
+    signature, family and effect are a word's; a symbol becomes a number
+    only where it is known, so a clause typed `sym` is checked where it is
+    applied, not where defined. Each group must capture in every match: an
+    optional group is refused, for now. Only `*` imports a pattern word;
+    an export names it by its pattern, `export#: <| /log_([0-9]+)/ |>`.
+    March8 learns a body's namespace only at `;`, so the stage, not the
+    reader, reads a word by a pattern, when it reaches the word in its
+    code's namespace, as it looks up a name. So `march8 lower` still
+    writes the core's reading, and writes the pattern's name as a symbol,
+    which `;` reads back. Lowering a program that uses pattern words waits
+    until a namespace's text is its own. A captured name, `(.+)`, is a
+    symbol applied in the body's namespace, not where the word was
+    written, as a passed `sq'` is (16); that is to be settled when
+    namespaces become values. The cost, measured for the first form,
+    whose matching this keeps: about 25 ns a word where patterns are
+    known, and none elsewhere. The core's own `^n` and `_n` stay in the
+    reader.
 26. **High Stack and Low Stack** (Thomas, to try). The surface March is
     written in, today the intermediate form of section 4, is High Stack;
     Symbolic Forth, the lowest form, is Low Stack.
 
 Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); which
 bracket owns a nested hole (14), to watch; for pattern words (25), what
-a group that may not match leaves, the word that makes a pattern in Low
-Stack, and how an import or export list names one alone; and `map` and
+a group that may not match leaves, refused for now, the word that makes
+a pattern in Low Stack, and how an import names one alone; and `map` and
 `or` as families, a clause taking types beside those taking values, in
 place of march8's look at what is on top (march8 docs/MACHINE.md).

@@ -428,9 +428,41 @@ fn roll_cost(w: usize) -> usize {
 }
 
 /// Whether a name is a path in a namespace, `io.file.read`: names joined by
-/// dots.
+/// dots, the last of which may be a pattern, `logs./log_([0-9]+)/`.
 fn is_path(name: &str) -> bool {
-    name.contains('.') && name.split('.').all(|p| !p.is_empty())
+    let path = match pattern_at(name) {
+        Some(0) => return false,
+        Some(p) => &name[..p - 1],
+        None if name.contains('.') => name,
+        None => return false,
+    };
+    path.split('.').all(|p| !p.is_empty())
+}
+
+/// Where a pattern word's pattern starts in its name: `/…/`, after the path
+/// of its namespace if it has one (doc/design/SYMBOLIC-FORTH.md 25).
+fn pattern_at(name: &str) -> Option<usize> {
+    let p = name.find('/')?;
+    (name.len() - p > 2 && name.ends_with('/') && (p == 0 || name[..p].ends_with('.'))).then_some(p)
+}
+
+/// A name's namespace and its last part, `io.file` and `read`: a pattern's
+/// dots are its own, so `logs./log.(.+)/` is `logs` and `/log.(.+)/`.
+fn split_path(name: &str) -> (&str, &str) {
+    match pattern_at(name) {
+        Some(0) => ("", name),
+        Some(p) => (&name[..p - 1], &name[p..]),
+        None => name.rsplit_once('.').unwrap_or(("", name)),
+    }
+}
+
+/// A pattern as an error names it, by its namespace.
+fn whose(space: &str, key: &str) -> String {
+    if space.is_empty() {
+        format!("the root's `{key}`")
+    } else {
+        format!("`{space}`'s `{key}`")
+    }
 }
 
 /// Whether a value is code, a quotation or a word, which a width does not
@@ -569,33 +601,34 @@ pub struct Stage {
     /// Each namespace's import and export: the paths they name.
     imports: HashMap<Rc<str>, Rc<[Rc<str>]>>,
     exports: HashMap<Rc<str>, Rc<[Rc<str>]>>,
-    /// Each namespace's recognizers, its clauses of `recognize#`.
-    recognizers: HashMap<Rc<str>, Recognizers>,
-    /// Words a recognizer has read, by its namespace and the word's text:
-    /// the template filled, kept so that a word read again is the same code.
+    /// Each namespace's patterns, the names of its pattern words.
+    patterns: HashMap<Rc<str>, Patterns>,
+    /// Words a pattern has read, by its namespace and the word's text: its
+    /// captures and its word, kept so that a word read again is the same
+    /// code.
     recognized: HashMap<(Rc<str>, Rc<str>), Code>,
 }
 
 /// Code, as tokens.
 type Code = Rc<[Token]>;
 
-/// A word a recognizer reads: the recognizer's namespace, its place there,
-/// and the word's text.
+/// A word a pattern reads: the pattern's namespace, its place there, and
+/// the word's text.
 type Reading = (Rc<str>, usize, Rc<str>);
 
-/// A namespace's recognizers (doc/design/SYMBOLIC-FORTH.md 25): their
-/// patterns as one set, to match a word against all at once, and each one.
-struct Recognizers {
+/// A namespace's patterns (doc/design/SYMBOLIC-FORTH.md 25): as one set, to
+/// match a word against all at once, and each one.
+struct Patterns {
     set: RegexSet,
-    each: Vec<Recognizer>,
+    each: Vec<Pattern>,
 }
 
-/// A pattern, as written and as matched, the whole word, and the template
-/// it reads a word as.
-struct Recognizer {
-    pattern: Rc<str>,
+/// A pattern, as written, `/log_([0-9]+)/`, and as matched, the whole word,
+/// and the word it names, its clauses a family.
+struct Pattern {
+    key: Rc<str>,
     re: Regex,
-    template: Rc<[Token]>,
+    word: Rc<str>,
 }
 
 /// Code written in a namespace: where its tokens end, the tokens, and the
@@ -613,12 +646,6 @@ impl Default for Stage {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Whether two tokens are a hole, `_` applied, which a recognizer's
-/// template fills with a capture.
-fn is_hole(t: &Tok, next: &Tok) -> bool {
-    matches!(t, Tok::Name(n) if &**n == "_") && *next == Tok::Apply
 }
 
 /// Whether a quotation is a bracket alone, as a bracket in code is pushed.
@@ -713,7 +740,7 @@ impl Stage {
             scopes: BTreeMap::new(),
             imports: HashMap::new(),
             exports: HashMap::new(),
-            recognizers: HashMap::new(),
+            patterns: HashMap::new(),
             recognized: HashMap::new(),
         };
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
@@ -848,11 +875,11 @@ impl Stage {
             if self.steps > STEPS {
                 return Err(self.err(Kind::Limit, "compiling took too many steps"));
             }
-            // A recognizer the namespace imports reads a word in place of the
-            // core (doc/design/SYMBOLIC-FORTH.md 25): its template, the
-            // word's code, runs here, or with `'` is passed.
+            // A pattern the namespace knows reads a word in place of the core
+            // (doc/design/SYMBOLIC-FORTH.md 25): its code, its captures and
+            // its word, runs here, or with `'` is passed.
             if let Some(w) = t.word
-                && !self.recognizers.is_empty()
+                && !self.patterns.is_empty()
                 && let Some(q) = self.recognize(&toks[i..i + w.len as usize])?
             {
                 if w.applies {
@@ -1166,16 +1193,18 @@ impl Stage {
         }
     }
 
-    /// Runs a source: its imports and recognizers first, wherever they are
-    /// written, since an import holds for all of its namespace and a
-    /// namespace is read by rules fixed before its text
-    /// (doc/design/SYMBOLIC-FORTH.md 17, 25).
+    /// Runs a source: its imports first, wherever they are written, since an
+    /// import holds for all of its namespace (doc/design/SYMBOLIC-FORTH.md
+    /// 17); and its patterns known first, as they hold for all of theirs, so
+    /// no word reads one way before its pattern and another after (25).
     pub fn run_source(&mut self, toks: &[Token]) -> Result<()> {
         let mut imports = Vec::new();
         let mut i = 0;
         while i < toks.len() {
             match &toks[i].tok {
-                Tok::Name(n) if matches!(n.rsplit('.').next(), Some("import#" | "recognize#")) => {
+                Tok::Name(n)
+                    if split_path(n).1 == "import#" || pattern_at(split_path(n).1) == Some(0) =>
+                {
                     let mut j = i + 1;
                     while toks.get(j).is_some_and(|t| matches!(t.tok, Tok::Open(_))) {
                         j = matching(toks, j) + 1;
@@ -1183,11 +1212,21 @@ impl Stage {
                     let defined = j > i + 1
                         && toks.get(j).is_some_and(|t| t.tok == Tok::Name(";".into()))
                         && toks.get(j + 1).is_some_and(|t| t.tok == Tok::Apply);
-                    if defined {
+                    if !defined {
+                        i += 1;
+                    } else if split_path(n).1 == "import#" {
                         imports.push(i..j + 2);
                         i = j + 2;
                     } else {
-                        i += 1;
+                        self.pos = toks[i].pos;
+                        let (space, key) = split_path(n);
+                        let space: Rc<str> = if space.is_empty() {
+                            self.ns.clone()
+                        } else {
+                            space.into()
+                        };
+                        self.pattern(&space, key)?;
+                        i = j + 2;
                     }
                 }
                 Tok::Open(_) => i = matching(toks, i) + 1,
@@ -1248,9 +1287,10 @@ impl Stage {
     /// export: it compiles, a word being private but not locked out, and a
     /// namespace's children see its unexported words.
     fn reach(&mut self, path: &str) {
-        let Some((space, name)) = path.rsplit_once('.') else {
+        let (space, name) = split_path(path);
+        if space.is_empty() {
             return;
-        };
+        }
         let inside = *self.ns == *space || self.ns.starts_with(&format!("{space}."));
         if !inside && !self.exported(space, name) {
             self.warn(
@@ -1295,99 +1335,81 @@ impl Stage {
         Ok(())
     }
 
-    /// A clause of `recognize#` (doc/design/SYMBOLIC-FORTH.md 25): a
-    /// pattern, which matches a whole word, and a template, the code the
-    /// word reads as, each hole taking what the pattern captures, in order,
-    /// as a symbol: `recognize#: < 'log_([0-9]+)' > [ _ int# ! log-base ] ;`.
-    fn recognizer(&mut self, space: &Rc<str>, sigs: &[Jdg], value: Jdg) -> Result<()> {
-        let usage = "`recognize#` takes a pattern, then a template: \
-                     `recognize#: < 'log_([0-9]+)' > [ _ int# ! log-base ] ;`";
-        let pattern = match sigs {
-            [
-                Jdg {
-                    val: Val::Quote(q), ..
-                },
-            ] => match &q[..] {
-                [_, t, _] => match &t.tok {
-                    Tok::Str(p) => p.clone(),
-                    _ => return Err(self.err(Kind::Syntax, usage)),
-                },
-                _ => return Err(self.err(Kind::Syntax, usage)),
-            },
-            _ => return Err(self.err(Kind::Syntax, usage)),
+    /// A pattern word's pattern, known to its namespace
+    /// (doc/design/SYMBOLIC-FORTH.md 25): a regular expression between
+    /// slashes, `/log_([0-9]+)/`, which matches a whole word, and each of
+    /// whose groups captures in every match, so the word's effect is fixed.
+    /// How many groups it has.
+    fn pattern(&mut self, space: &Rc<str>, key: &str) -> Result<usize> {
+        let word: Rc<str> = if space.is_empty() {
+            key.into()
+        } else {
+            format!("{space}.{key}").into()
         };
-        let template = match value.val {
-            Val::Quote(q) if !signature(&q) => q,
-            _ => return Err(self.err(Kind::Syntax, usage)),
-        };
+        if let Some(r) = self.patterns.get(space)
+            && let Some(p) = r.each.iter().find(|p| p.word == word)
+        {
+            return Ok(p.re.captures_len() - 1);
+        }
+        if !space.is_empty() && space.split('.').any(str::is_empty) {
+            return Err(self.err(
+                Kind::Syntax,
+                format!("`{word}` has an empty part: a path's parts are names"),
+            ));
+        }
+        let pattern = key[1..key.len() - 1].replace("\\/", "/");
         let re = Regex::new(&format!("^(?:{pattern})$")).map_err(|e| {
             let e = e.to_string();
             let why = e
                 .lines()
                 .find_map(|l| l.strip_prefix("error: "))
                 .unwrap_or(&e);
-            self.err(Kind::Syntax, format!("`{pattern}` is no pattern: {why}"))
+            self.err(Kind::Syntax, format!("`{key}` is no pattern: {why}"))
         })?;
-        let captures = re.captures_len() - 1;
-        let holes = template
-            .windows(2)
-            .filter(|w| is_hole(&w[0].tok, &w[1].tok))
-            .count();
-        if holes != captures {
+        if re.static_captures_len() != Some(re.captures_len()) {
             return Err(self.err(
                 Kind::Syntax,
                 format!(
-                    "`{pattern}` captures {captures}, and its template has {}: \
-                     each hole takes a capture, in order",
-                    match holes {
-                        1 => "1 hole".to_string(),
-                        h => format!("{h} holes"),
-                    }
+                    "`{key}` has a group that may not match: each group captures in every \
+                     match, so the word's effect is fixed"
                 ),
             ));
         }
-        // Its names are looked up in its namespace, wherever it is read.
-        self.scope(&template, space.clone());
-        let each = Recognizer {
-            pattern,
-            re,
-            template,
-        };
+        let groups = re.captures_len() - 1;
         let r = self
-            .recognizers
+            .patterns
             .entry(space.clone())
-            .or_insert_with(|| Recognizers {
+            .or_insert_with(|| Patterns {
                 set: RegexSet::empty(),
                 each: Vec::new(),
             });
-        r.each.push(each);
-        r.set = RegexSet::new(r.each.iter().map(|r| r.re.as_str())).expect("each compiles");
+        r.each.push(Pattern {
+            key: key.into(),
+            re,
+            word,
+        });
+        r.set = RegexSet::new(r.each.iter().map(|p| p.re.as_str())).expect("each compiles");
         self.recognized.clear();
-        Ok(())
+        Ok(groups)
     }
 
-    /// The namespaces whose recognizers read the code of `ns`: those its
-    /// import names, by `recognize#` or by `*` when they export it, but never
-    /// `ns` itself, so no text reads one way before a recognizer and another
-    /// after.
-    fn recognizing<'a>(&'a self, ns: &'a str) -> impl Iterator<Item = &'a Rc<str>> + 'a {
+    /// The namespaces whose patterns read the code of `ns`, and whether each
+    /// is `ns` itself: its own, as a word is used where it is defined, and
+    /// those its import names by `*`.
+    fn recognizing<'a>(&'a self, ns: &'a str) -> impl Iterator<Item = (&'a Rc<str>, bool)> + 'a {
+        let own = self.patterns.get_key_value(ns).map(|(k, _)| (k, true));
         let paths = self.imports.get(ns).map_or(&[][..], |p| &p[..]);
-        paths.iter().filter_map(move |p| {
-            let space = match p.strip_suffix(".*") {
-                Some(s) if self.exported(s, "recognize#") => s,
-                Some(_) => return None,
-                None if &**p == "recognize#" => "",
-                None => p.strip_suffix(".recognize#")?,
-            };
-            let (k, _) = self.recognizers.get_key_value(space)?;
-            (space != ns).then_some(k)
-        })
+        own.into_iter().chain(paths.iter().filter_map(move |p| {
+            let space = p.strip_suffix(".*")?;
+            let (k, _) = self.patterns.get_key_value(space)?;
+            (space != ns).then_some((k, false))
+        }))
     }
 
-    /// Which recognizer reads a word in a namespace, given the tokens the
-    /// core read it as: one at most, its namespace and its place there, and
-    /// the word's text, since a word matching two, in one namespace or in
-    /// two, is an error.
+    /// Which pattern reads a word in a namespace, given the tokens the core
+    /// read it as: one at most, its namespace and its place there, and the
+    /// word's text, since a word matching two, in one namespace or in two,
+    /// is an error. An imported namespace's pattern reads if it is exported.
     fn reader(&self, ns: &str, toks: &[Token]) -> Result<Option<Reading>> {
         let mut spaces = self.recognizing(ns).peekable();
         if spaces.peek().is_none() {
@@ -1395,24 +1417,23 @@ impl Stage {
         }
         let text = read::text(toks);
         let mut found: Vec<(Rc<str>, usize)> = Vec::new();
-        for space in spaces {
-            let r = &self.recognizers[space];
+        for (space, own) in spaces {
+            let r = &self.patterns[space];
             if !r.set.is_match(&text) || found.iter().any(|(s, _)| s == space) {
                 continue;
             }
-            found.extend(r.set.matches(&text).into_iter().map(|k| (space.clone(), k)));
+            found.extend(
+                r.set
+                    .matches(&text)
+                    .into_iter()
+                    .filter(|&k| own || self.exported(space, &r.each[k].key))
+                    .map(|k| (space.clone(), k)),
+            );
         }
         if let [_, _, ..] = &found[..] {
             let all: Vec<String> = found
                 .iter()
-                .map(|(space, k)| {
-                    let p = &self.recognizers[space].each[*k].pattern;
-                    if space.is_empty() {
-                        format!("the root's `{p}`")
-                    } else {
-                        format!("`{space}`'s `{p}`")
-                    }
-                })
+                .map(|(space, k)| whose(space, &self.patterns[space].each[*k].key))
                 .collect();
             return Err(self.err(
                 Kind::Syntax,
@@ -1425,47 +1446,61 @@ impl Stage {
         Ok(found.pop().map(|(space, k)| (space, k, text.into())))
     }
 
-    /// The code a recognizer reads a word as, if one the namespace imports
-    /// matches it: its template, each hole filled with a capture.
+    /// The code a pattern reads a word as, if one the namespace knows
+    /// matches it: its captures, then its word applied. A word that is also
+    /// a name here, defined or imported, is an error, as two imports are.
     fn recognize(&mut self, toks: &[Token]) -> Result<Option<Code>> {
         let ns = self.ns.clone();
         let Some((space, k, text)) = self.reader(&ns, toks)? else {
             return Ok(None);
         };
+        let p = &self.patterns[&space].each[k];
+        let (pattern, word) = (whose(&space, &p.key), p.word.clone());
+        let named = match (self.local(&ns, &text), self.imported(&ns, &text).pop()) {
+            (Some(_), _) => Some("defined here".to_string()),
+            (None, Some(path)) => Some(format!("imported, `{path}`")),
+            (None, None) => None,
+        };
+        if let Some(named) = named {
+            return Err(self.err(
+                Kind::Syntax,
+                format!("`{text}` is {named}, and matches {pattern}: a word is read one way"),
+            ));
+        }
+        if self.words.get(&word).is_none_or(|w| w.clauses.is_empty()) {
+            return Err(self.err(
+                Kind::NoWord,
+                format!(
+                    "`{text}` matches {pattern}, whose word is not defined yet: a pattern \
+                     holds for all of its namespace, its word once defined"
+                ),
+            ));
+        }
         let key = (space.clone(), text.clone());
         if let Some(q) = self.recognized.get(&key) {
             return Ok(Some(q.clone()));
         }
-        let q: Code = self.fill(&space, k, &text).into();
+        let q: Code = self.reading(&space, k, &text, toks[0].pos).into();
         self.scope(&q, space);
         self.recognized.insert(key, q.clone());
         Ok(Some(q))
     }
 
-    /// A recognizer's template, each hole filled with what its pattern
-    /// captures from a word, in order, as a symbol, `''` for a group that
-    /// matched nothing.
-    fn fill(&self, space: &str, k: usize, text: &str) -> Vec<Token> {
-        let r = &self.recognizers[space].each[k];
-        let caps = r.re.captures(text).expect("it matched");
-        let mut caps = caps.iter().skip(1).map(|c| c.map_or("", |c| c.as_str()));
-        let t = &r.template;
-        let mut q = Vec::with_capacity(t.len());
-        let mut i = 0;
-        while i < t.len() {
-            if t.get(i + 1).is_some_and(|n| is_hole(&t[i].tok, &n.tok)) {
-                q.push(Token {
-                    tok: Tok::Name(caps.next().expect("a capture for each hole").into()),
-                    pos: t[i].pos,
-                    word: None,
-                });
-                i += 2;
-            } else {
-                q.push(t[i].clone());
-                i += 1;
-            }
-        }
-        q
+    /// The code a pattern reads a word as: what its groups capture, in
+    /// order, each a symbol, `'2'` of `log_2`, then its word applied.
+    fn reading(&self, space: &str, k: usize, text: &str, pos: Pos) -> Vec<Token> {
+        let p = &self.patterns[space].each[k];
+        let caps = p.re.captures(text).expect("it matched");
+        let token = |tok| Token {
+            tok,
+            pos,
+            word: None,
+        };
+        caps.iter()
+            .skip(1)
+            .map(|c| token(Tok::Name(c.expect("each group captures").as_str().into())))
+            .chain([token(Tok::Name(p.word.clone())), token(Tok::Apply)])
+            .collect()
     }
 
     /// `;` (doc/design/SYMBOLIC-FORTH.md 18): binds the name below to the
@@ -1496,7 +1531,7 @@ impl Stage {
         } else {
             format!("{}.{name}", self.ns).into()
         };
-        let (space, key) = name.rsplit_once('.').unwrap_or(("", &name));
+        let (space, key) = split_path(&name);
         let space: Rc<str> = space.into();
         if matches!(key, "import#" | "export#") {
             return match &value.val {
@@ -1507,18 +1542,26 @@ impl Stage {
                 )),
             };
         }
-        if key == "recognize#" {
-            return self.recognizer(&space, &sigs, value);
-        }
-        self.definable(&name)?;
+        // A pattern names the words it matches (doc/design/SYMBOLIC-FORTH.md
+        // 25), their clauses one family, each taking the captures last.
+        let groups = if pattern_at(key) == Some(0) {
+            Some(self.pattern(&space, key)?)
+        } else {
+            self.definable(&name)?;
+            None
+        };
         if !self.core {
             self.word(&name).user = true;
         }
         let q = match value.val {
             Val::Quote(q) if !signature(&q) => q,
-            Val::Type(t) if sigs.is_empty() => return self.name_type(&name, t),
+            Val::Type(t) if sigs.is_empty() && groups.is_none() => {
+                return self.name_type(&name, t);
+            }
             Val::Name(n, _)
-                if sigs.is_empty() && self.words.get(&n).is_some_and(|w| w.ty.is_some()) =>
+                if sigs.is_empty()
+                    && groups.is_none()
+                    && self.words.get(&n).is_some_and(|w| w.ty.is_some()) =>
             {
                 let t = self.words[&n].ty.expect("a type");
                 return self.name_type(&name, t);
@@ -1557,6 +1600,18 @@ impl Stage {
                 ));
             }
         };
+        if let (Some(groups), Some(sig)) = (groups, &sig)
+            && sig.ins.len() < groups
+        {
+            return Err(self.err(
+                Kind::Syntax,
+                format!(
+                    "`{key}` captures {groups}, and its signature takes {}: the captures are \
+                     its last inputs",
+                    sig.ins.len()
+                ),
+            ));
+        }
         let core = self.core;
         self.define(
             &name,
@@ -3414,22 +3469,14 @@ impl Stage {
         let mut items: Vec<Item> = Vec::new();
         let mut i = 0;
         while i < toks.len() {
-            // A word a recognizer reads does what its code does.
+            // A word a pattern reads does what its code does.
             if let Some(w) = toks[i].word
-                && !self.recognizers.is_empty()
+                && !self.patterns.is_empty()
                 && let Some((space, k, text)) =
                     self.reader(ns, &toks[i..i + w.len as usize]).ok()?
             {
-                // Templates that read each other's words have no effect known.
-                let key: Rc<str> = format!("{space}.recognize# {text}").into();
-                if visiting.contains(&key) {
-                    return None;
-                }
-                visiting.push(key);
-                let q = self.fill(&space, k, &text);
-                let e = self.effect_in(&q, &space, visiting);
-                visiting.pop();
-                let (a, b) = e?;
+                let q = self.reading(&space, k, &text, toks[i].pos);
+                let (a, b) = self.effect_in(&q, &space, visiting)?;
                 if w.applies {
                     take(&mut items, &mut ins, a);
                     items.extend((0..b).map(|_| Item::Other));
@@ -5270,7 +5317,7 @@ impl Stage {
     /// clauses say how to make one; otherwise it must have the type already,
     /// or forget into it.
     fn convert(&mut self, i: usize, t: Type) -> Result<()> {
-        // A symbol that writes a number, as a recognizer's capture `2` does,
+        // A symbol that writes a number, as a pattern's capture `2` does,
         // is that number given a type (doc/design/SYMBOLIC-FORTH.md 7).
         if let Val::Name(n, at) = &self.stack[i].val
             && !matches!(t, SYMBOL | STRING)
@@ -5286,6 +5333,17 @@ impl Stage {
             return self.convert(i, t);
         }
         let have = self.stack[i].ty;
+        // One known only at run time is a number only once known, as a
+        // capture is where its pattern word is applied.
+        if have == SYMBOL && !matches!(t, SYMBOL | STRING) && !self.stack[i].known() {
+            return Err(self.err(
+                Kind::Unknown,
+                format!(
+                    "a symbol becomes {} only where it is known, while compiling",
+                    self.types.name(t)
+                ),
+            ));
+        }
         if have != t
             && !self.types.is_literal(have)
             && i + 1 == self.stack.len()

@@ -293,12 +293,14 @@ fn spelled(w: &str) -> (&str, bool) {
     }
 }
 
-/// Whether a recognizer may read a word (doc/design/SYMBOLIC-FORTH.md 25):
-/// one the core reads as a name, `12kg` among them, but not `;` or `_`; and
-/// if so, whether it applies, as a name does.
+/// Whether a pattern may read a word (doc/design/SYMBOLIC-FORTH.md 25): one
+/// the core reads as a name, `12kg` among them, but not `;` or `_`, or a
+/// label, `name:`, a name being defined; and if so, whether it applies, as a
+/// name does.
 fn readable(stem: &str, marks: &str) -> Option<bool> {
     let first = stem.chars().next()?;
     if matches!(stem, ";" | "_")
+        || stem.len() > 1 && stem.ends_with(':')
         || "[](){}<>".contains(first)
         || !matches!(number(stem, Pos::default()), Ok(None))
     {

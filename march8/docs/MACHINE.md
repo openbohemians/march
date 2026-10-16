@@ -147,18 +147,22 @@ and a namespace's children see all of it. A namespace has one import,
 which holds for all of it: a source's imports run first. A name found in
 two places is an error that a path settles.
 
-**Recognizers** (doc/design/SYMBOLIC-FORTH.md 25): a namespace's clauses
-of `recognize#`, each a pattern and a template, `units.recognize#: <
-'([0-9]+)kg' > [ _ int# ! 1000 * ] ;`. Where `units` is imported, a word
-the pattern matches, the whole of it, reads as the template, each hole
-taking a capture, in order, as a symbol: `12kg` is `12 1000 *`. Imported
-recognizers are tried before the core's width and power, and never in
-their own namespace. A word that two match is an error. They are defined
-first, as imports are, and the stage reads a word by one when it reaches
-it, in the namespace of its code. The design has since made a recognizer
-a word whose name is a pattern, its captures on the stack,
-`/log_([0-9]+)/: < f64 sym -- f64 > [ i64 ! log-base ] ;` (2026-10-16);
-march8 is to follow.
+**Recognizers** (doc/design/SYMBOLIC-FORTH.md 25): words whose names are
+patterns, regular expressions between slashes that match a whole word,
+`units./([0-9]+)kg/: < sym > [ int# ! 1000 * ] ;`. A word a pattern matches
+is its captures, each a symbol, in order, then the pattern's word applied:
+`12kg` is `'12'` and the word, so `12 1000 *`. The signature takes the
+captures last, and to the word's user `log_2` of
+`/log_([0-9]+)/: < f64 sym -- f64 > [ i64 ! log-base ] ;` is
+`< f64 -- f64 >`. Clauses of one pattern are a family. A pattern reads its own namespace,
+and where that namespace is imported by `*` and exports it, by its pattern,
+before the core's width and power. Each group must capture in every match,
+so the effect is fixed. A word that two patterns match, or that is also a
+name defined or imported, is an error. A source's patterns are known before
+it runs, so a word they match is never read another way; the stage reads a
+word by one when it reaches it, in the namespace of its code. A symbol
+becomes a number where it is known, so a clause typed `sym` is checked
+where it is applied.
 
 **A definition is data:** a name, what it names, and `;` (Thomas,
 2026-10-12; doc/design/SYMBOLIC-FORTH.md 18), FORTH's `: inc 1 + ;` turned

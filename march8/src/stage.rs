@@ -206,38 +206,47 @@ fn value_text(j: &Jdg) -> String {
     }
 }
 
-/// An open array or map literal: its bracket, where its elements start, the
-/// floor outside it, and where each `_` that pulls a value from below it is
-/// written, in reading order; it takes as many inputs.
+/// An open array, map or string literal: its bracket, where its elements
+/// start, and the floor outside it.
 struct Literal {
     bracket: u8,
     start: usize,
     floor: usize,
-    pulls: Vec<Pos>,
 }
 
-/// Where each `_` in a string's holes is.
-fn template_pulls(pieces: &[Piece]) -> Vec<Pos> {
+/// The arguments of a bracket being applied (doc/design/SYMBOLIC-FORTH.md
+/// 14): its own `_`s, by their tokens' addresses, and the values they take,
+/// the deepest first. Those known only at run time wait on the scratch
+/// stack, the deepest on top, as `dip`'s value does.
+struct Args {
+    owns: Vec<usize>,
+    vals: Vec<Jdg>,
+    next: usize,
+}
+
+/// A string's arguments: the `_`s of its holes.
+fn template_args(pieces: &[Piece]) -> Vec<usize> {
     pieces
         .iter()
         .filter_map(|p| match p {
-            Piece::Hole(toks) => Some(pulls_in(toks)),
+            Piece::Hole(toks) => Some(args_in(toks)),
             Piece::Text(_) => None,
         })
         .flatten()
         .collect()
 }
 
-/// Where each `_` in a literal's words is, not counting those of literals
-/// inside it.
-fn pulls_in(toks: &[Token]) -> Vec<Pos> {
+/// A bracket's arguments: the `_`s of its code, in the order written, by
+/// their tokens' addresses. Those of a bracket inside it are that
+/// bracket's, and those of a string's holes the string's.
+fn args_in(toks: &[Token]) -> Vec<usize> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < toks.len() {
         match &toks[i].tok {
-            Tok::Open(b'(' | b'{') => i = matching(toks, i),
+            Tok::Open(_) => i = matching(toks, i),
             Tok::Name(n) if &**n == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) => {
-                out.push(toks[i].pos);
+                out.push(&toks[i] as *const Token as usize);
             }
             _ => {}
         }
@@ -386,6 +395,15 @@ fn fuse(code: Vec<Ins>) -> Vec<Ins> {
     for ins in code {
         out.push(ins);
         let n = out.len();
+        // A value set aside and taken straight back, as a bracket's
+        // argument used first is, never moved.
+        if n >= 2
+            && prim(&out[n - 2]) == Some(P::ScratchPush)
+            && prim(&out[n - 1]) == Some(P::ScratchPop)
+        {
+            out.truncate(n - 2);
+            continue;
+        }
         if n < 4 {
             continue;
         }
@@ -561,6 +579,8 @@ pub struct Stage {
     floor: usize,
     /// Open array and map literals.
     literals: Vec<Literal>,
+    /// The arguments of the brackets being applied, the innermost last.
+    args: Vec<Args>,
     /// Families being applied, with the types they were applied to, so that
     /// one applying itself to the same types is caught.
     active: Vec<Key>,
@@ -721,6 +741,7 @@ impl Stage {
             code: Vec::new(),
             floor: 0,
             literals: Vec::new(),
+            args: Vec::new(),
             active: Vec::new(),
             pos: Pos::default(),
             steps: 0,
@@ -791,6 +812,7 @@ impl Stage {
         self.code.clear();
         self.floor = 0;
         self.literals.clear();
+        self.args.clear();
         self.active.clear();
         self.frames.clear();
         self.effects = 0;
@@ -902,7 +924,7 @@ impl Stage {
                 Tok::Name(s)
                     if &**s == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
                 {
-                    self.pull(t.pos)?;
+                    self.arg(t as *const Token as usize)?;
                     i += 1;
                 }
                 // In a bracket, a variable, one lowercase letter, is a type
@@ -942,19 +964,18 @@ impl Stage {
                         bracket: b'(',
                         start: self.stack.len(),
                         floor: self.floor,
-                        pulls: Vec::new(),
                     });
                     self.floor = self.stack.len();
                 }
+                // A literal is applied where it stands, so its arguments are
+                // taken here (doc/design/SYMBOLIC-FORTH.md 14).
                 Tok::Open(b) => {
-                    let pulls = pulls_in(&toks[i + 1..matching(toks, i)]);
-                    self.need(pulls.len())?;
+                    self.take_args(args_in(&toks[i + 1..matching(toks, i)]))?;
                     self.emit(Op::Prim(P::Mark));
                     self.literals.push(Literal {
                         bracket: *b,
                         start: self.stack.len(),
                         floor: self.floor,
-                        pulls,
                     });
                     self.floor = self.stack.len();
                 }
@@ -992,12 +1013,7 @@ impl Stage {
                 "a signature is not called: `!` gives the values below its types, \
                  `x y < i64 f64 > !`",
             )),
-            Val::Quote(q) => {
-                self.enter()?;
-                let r = self.run(&q);
-                self.depth -= 1;
-                r
-            }
+            Val::Quote(q) => self.run_code(&q),
             // Which word a name applies is chosen while compiling.
             Val::Run if f.ty == SYMBOL => Err(self.err(
                 Kind::Mismatch,
@@ -1041,6 +1057,17 @@ impl Stage {
             }
         };
         self.need(1)?;
+        // `string !` of a quotation is text of what its code leaves.
+        if t == STRING
+            && let Some(Jdg {
+                val: Val::Quote(q), ..
+            }) = self.stack.last()
+            && !signature(q)
+        {
+            let q = q.clone();
+            self.stack.pop();
+            return self.quote_text(&q);
+        }
         if self.types.is_pattern(t) {
             let sig = Sig {
                 ins: vec![t],
@@ -2184,6 +2211,7 @@ impl Stage {
             self.floor,
             self.literals.len(),
             self.effects,
+            self.args.len(),
         );
         self.active.push(key);
         let r = self.resolve(name, arity, at, false);
@@ -2196,6 +2224,7 @@ impl Stage {
                 self.floor = saved.2;
                 self.literals.truncate(saved.3);
                 self.effects = saved.4;
+                self.args.truncate(saved.5);
                 self.call_instance(name, arity)
             }
             r => r,
@@ -3236,7 +3265,7 @@ impl Stage {
             self.pos = g.pos;
             let r = match &g.test {
                 Test::Quote(q) => self.enter().and_then(|()| {
-                    let r = self.run(q);
+                    let r = self.run_quote(q);
                     self.depth -= 1;
                     r
                 }),
@@ -3499,8 +3528,15 @@ impl Stage {
                 Tok::Int(n) => items.push(Item::Int(*n)),
                 Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_) => items.push(Item::Other),
                 Tok::Template(pieces) => {
-                    take(&mut items, &mut ins, template_pulls(pieces).len());
+                    take(&mut items, &mut ins, template_args(pieces).len());
                     items.push(Item::Other);
+                }
+                // An argument, taken before the code ran.
+                Tok::Name(s)
+                    if &**s == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
+                {
+                    items.push(Item::Other);
+                    i += 1;
                 }
                 Tok::Name(s) => items.push(Item::Name(s.clone())),
                 Tok::Open(b'[') => {
@@ -3513,11 +3549,15 @@ impl Stage {
                     items.push(Item::Bracket(i + 1, j));
                     i = j;
                 }
+                // A literal takes its arguments, and its code reaches no
+                // further.
                 Tok::Open(_) => {
                     let j = matching(toks, i);
-                    if self.effect_in(&toks[i + 1..j], ns, visiting)?.0 != 0 {
+                    let k = args_in(&toks[i + 1..j]).len();
+                    if self.effect_in(&toks[i + 1..j], ns, visiting)?.0 != k {
                         return None;
                     }
+                    take(&mut items, &mut ins, k);
                     items.push(Item::Other);
                     i = j;
                 }
@@ -3608,7 +3648,9 @@ impl Stage {
             }
             i += 1;
         }
-        Some((ins, items.len()))
+        // Its arguments are taken first, so they are inputs beneath those its
+        // code reaches.
+        Some((ins + args_in(toks).len(), items.len()))
     }
 
     /// How many values a bracket in a body types when `!` converts by it:
@@ -3659,13 +3701,13 @@ impl Stage {
 
     fn clause_body(&mut self, c: &Clause, env: Env) -> Result<()> {
         let Some(sig) = &c.sig else {
-            return self.run(&c.body);
+            return self.run_quote(&c.body);
         };
         self.settle(sig, &env)?;
         let base = self.stack.len() - sig.ins.len();
         let floor = self.floor;
         self.floor = base;
-        let r = self.run(&c.body);
+        let r = self.run_quote(&c.body);
         self.floor = floor;
         r?;
         if let Some(outs) = &sig.outs {
@@ -4595,7 +4637,7 @@ impl Stage {
         let below = self.stack.clone();
         self.push(e, Val::Run);
         self.enter()?;
-        let r = self.run(&q);
+        let r = self.run_quote(&q);
         self.depth -= 1;
         r?;
         let kept = self.stack.len() == below.len() + 1
@@ -4701,7 +4743,7 @@ impl Stage {
         let below = self.stack.clone();
         self.push(e, Val::Run);
         self.enter()?;
-        let r = self.run(&q);
+        let r = self.run_quote(&q);
         self.depth -= 1;
         r?;
         if let Some(t) = collect {
@@ -4777,9 +4819,65 @@ impl Stage {
 
     fn run_code(&mut self, q: &[Token]) -> Result<()> {
         self.enter()?;
-        let r = self.run(q);
+        let r = self.run_quote(q);
         self.depth -= 1;
         r
+    }
+
+    /// Applies a bracket's code, its `_`s taking its arguments first
+    /// (doc/design/SYMBOLIC-FORTH.md 14).
+    fn run_quote(&mut self, q: &[Token]) -> Result<()> {
+        let owns = args_in(q);
+        if owns.is_empty() {
+            return self.run(q);
+        }
+        self.take_args(owns)?;
+        let n = self.args.len();
+        let r = self.run(q);
+        self.args.truncate(n - 1);
+        r
+    }
+
+    /// Takes a bracket's arguments from the top of the stack, one for each
+    /// of its `_`s: those known only at run time go to the scratch stack,
+    /// so its code may reach below them.
+    fn take_args(&mut self, owns: Vec<usize>) -> Result<()> {
+        let k = owns.len();
+        self.need(k)?;
+        let mut vals = Vec::with_capacity(k);
+        for _ in 0..k {
+            let j = self.stack.pop().expect("needed");
+            if !j.known() {
+                self.emit(Op::Prim(P::ScratchPush));
+            }
+            vals.push(j);
+        }
+        vals.reverse();
+        self.args.push(Args {
+            owns,
+            vals,
+            next: 0,
+        });
+        Ok(())
+    }
+
+    /// `_`: the next argument of the bracket it is written in, the first
+    /// written the deepest.
+    fn arg(&mut self, at: usize) -> Result<()> {
+        let Some(f) = self.args.iter().rposition(|f| f.owns.contains(&at)) else {
+            return Err(self.err(
+                Kind::Syntax,
+                "`_` is an argument of the bracket it is written in, and this one is in none",
+            ));
+        };
+        let f = &mut self.args[f];
+        let j = f.vals[f.next].clone();
+        f.next += 1;
+        if !j.known() {
+            self.emit(Op::Prim(P::ScratchPop));
+        }
+        self.stack.push(j);
+        Ok(())
     }
 
     /// A word followed through other names for it, words whose one clause
@@ -5276,7 +5374,7 @@ impl Stage {
             let below = self.stack.clone();
             self.push(e, Val::Run);
             self.enter()?;
-            let r = self.run(q);
+            let r = self.run_quote(q);
             self.depth -= 1;
             r?;
             let kept = self.stack.len() == below.len() + 1
@@ -5327,7 +5425,7 @@ impl Stage {
             self.emit(Op::Prim(P::VecAt));
             self.push(es[k], Val::Run);
             self.enter()?;
-            let r = self.run(q);
+            let r = self.run_quote(q);
             self.depth -= 1;
             r?;
         }
@@ -5509,7 +5607,7 @@ impl Stage {
             self.push(e, Val::Run);
         }
         let r = self.enter().and_then(|()| {
-            let r = self.run(&q);
+            let r = self.run_quote(&q);
             self.depth -= 1;
             r
         });
@@ -5729,7 +5827,7 @@ impl Stage {
         self.push(a, Val::Run);
         self.push(b, Val::Run);
         self.enter()?;
-        let r = self.run(q);
+        let r = self.run_quote(q);
         self.depth -= 1;
         r?;
         let kept = self.stack.len() == below.len() + 1
@@ -6097,7 +6195,7 @@ impl Stage {
             self.stack.truncate(base);
             self.push(e, Val::Run);
             let r = self.enter().and_then(|()| {
-                let r = self.run(q);
+                let r = self.run_quote(q);
                 self.depth -= 1;
                 r
             });
@@ -6277,15 +6375,7 @@ impl Stage {
         self.emit(Op::Prim(op));
         self.push(ty, Val::Run);
         self.floor = lit.floor;
-        // The values it pulled are its inputs: it takes them.
-        for _ in 0..lit.pulls.len() {
-            let i = self.stack.len() - 2;
-            if !self.stack[i].known() {
-                self.emit(Op::Prim(P::Swap));
-                self.emit(Op::Prim(P::Drop));
-            }
-            self.stack.remove(i);
-        }
+        self.args.pop();
         Ok(())
     }
 
@@ -6317,79 +6407,29 @@ impl Stage {
         Ok(())
     }
 
-    /// `_` in a literal: a copy of one of the values below it, its inputs,
-    /// the first `_` written taking the deepest. A value at run time is
-    /// found from the literal's mark, so the copy is exact even above a run.
-    fn pull(&mut self, pos: Pos) -> Result<()> {
-        let Some((li, k)) = self
-            .literals
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(li, l)| l.pulls.iter().position(|&p| p == pos).map(|k| (li, k)))
-        else {
-            return Err(self.err(
-                Kind::Syntax,
-                "`_` takes a value from below an array literal, and it is in none",
-            ));
-        };
-        let lit = &self.literals[li];
-        let (start, inputs, string) = (lit.start, lit.pulls.len(), lit.bracket == b'"');
-        let i = start - inputs + k;
-        // A string makes no mark: nothing above its inputs is a run, so a copy
-        // finds them by counting.
-        if string {
-            return self.copy(i);
-        }
-        let j = self.stack[i].clone();
-        if !j.known() {
-            let below = self.stack[i + 1..start]
-                .iter()
-                .filter(|j| !j.known())
-                .count();
-            let marks = self.literals[li + 1..]
-                .iter()
-                .filter(|l| l.bracket != b'"')
-                .count();
-            self.emit(Op::Lit(below as u64));
-            self.emit(Op::Lit(marks as u64));
-            self.emit(Op::Prim(P::MarkPick));
-        }
-        self.stack.push(j);
-        Ok(())
-    }
-
-    /// A string with holes: each hole's code runs, its value is written in
-    /// by `>string`, and the pieces are joined by `concat`, so on known values
-    /// the string is a constant. `_` in a hole pulls an input from below the
-    /// string, as in an array literal, and the string takes its inputs.
+    /// A string with holes: each hole's code runs, and its value is written
+    /// in by `>string`. A string is applied where it stands, so the `_`s of
+    /// its holes are its arguments, taken first (doc/design/SYMBOLIC-FORTH.md
+    /// 14), and a hole reaches only them and what it makes.
     fn template(&mut self, pieces: &[Piece], pos: Pos) -> Result<()> {
-        let pulls = template_pulls(pieces);
-        let n = pulls.len();
-        self.need(n)?;
+        self.take_args(template_args(pieces))?;
+        let n = self.args.len();
+        let start = self.stack.len();
         self.literals.push(Literal {
             bracket: b'"',
-            start: self.stack.len(),
+            start,
             floor: self.floor,
-            pulls,
         });
         let r = self.pieces(pieces, pos);
         let lit = self.literals.pop().expect("pushed");
+        self.args.truncate(n - 1);
         self.floor = lit.floor;
         r?;
-        for _ in 0..n {
-            let i = self.stack.len() - 2;
-            if !self.stack[i].known() {
-                self.emit(Op::Prim(P::Swap));
-                self.emit(Op::Prim(P::Drop));
-            }
-            self.stack.remove(i);
-        }
-        Ok(())
+        self.join_text(start)
     }
 
     fn pieces(&mut self, pieces: &[Piece], pos: Pos) -> Result<()> {
-        for (k, piece) in pieces.iter().enumerate() {
+        for piece in pieces {
             match piece {
                 Piece::Text(t) => self.push(STRING, Val::Str(t.clone())),
                 Piece::Hole(toks) => {
@@ -6410,10 +6450,90 @@ impl Stage {
                     self.apply_word(&">string".into())?;
                 }
             }
-            if k > 0 {
-                self.floor = self.stack.len() - 2;
-                self.apply_word(&"concat".into())?;
+        }
+        Ok(())
+    }
+
+    /// `string !` of a quotation (doc/design/SYMBOLIC-FORTH.md 15): its code
+    /// runs where it stands, taking its arguments, and each value it leaves
+    /// is written, in order, into one string, a string as its text and any
+    /// other value by `>string`. Its code reaches only its arguments and what
+    /// it makes, as a string's holes do.
+    fn quote_text(&mut self, q: &[Token]) -> Result<()> {
+        self.take_args(args_in(q))?;
+        let n = self.args.len();
+        let start = self.stack.len();
+        self.literals.push(Literal {
+            bracket: b'"',
+            start,
+            floor: self.floor,
+        });
+        self.floor = start;
+        let r = self.enter().and_then(|()| {
+            let r = self.run(q);
+            self.depth -= 1;
+            r
+        });
+        let lit = self.literals.pop().expect("pushed");
+        self.args.truncate(n - 1);
+        self.floor = lit.floor;
+        r?;
+        if self.stack[start..].iter().any(|j| j.val == Val::Many) {
+            return Err(self.err(
+                Kind::Mismatch,
+                "`string !` writes the values its code leaves, and a run of them is gathered \
+                 by `( … )` first",
+            ));
+        }
+        // Each in turn brought to the top and written, from the deepest, so
+        // they end in their order.
+        if self.stack[start..].iter().any(|j| j.ty != STRING) {
+            for _ in start..self.stack.len() {
+                let j = self.stack.remove(start);
+                if !j.known() {
+                    let above = self.stack[start..].iter().filter(|j| !j.known()).count();
+                    self.roll(above + 1);
+                }
+                let ty = j.ty;
+                self.stack.push(j);
+                if ty != STRING {
+                    let floor = std::mem::replace(&mut self.floor, self.stack.len() - 1);
+                    let r = self.apply_word(&">string".into());
+                    self.floor = floor;
+                    r?;
+                }
             }
+        }
+        self.join_text(start)
+    }
+
+    /// Joins the strings from `start` into one: those known join now, and
+    /// the rest in one buffer at run time.
+    fn join_text(&mut self, start: usize) -> Result<()> {
+        let mut pieces: Vec<Jdg> = Vec::new();
+        for j in self.stack.drain(start..) {
+            match (pieces.last_mut(), &j.val) {
+                (
+                    Some(Jdg {
+                        val: Val::Str(a), ..
+                    }),
+                    Val::Str(b),
+                ) => *a = format!("{a}{b}").into(),
+                _ => pieces.push(j),
+            }
+        }
+        self.stack.extend(pieces);
+        let n = self.stack.len() - start;
+        if n == 0 {
+            self.push(STRING, Val::Str("".into()));
+        } else if n > 1 {
+            for i in start..self.stack.len() {
+                self.materialize(i)?;
+            }
+            self.emit(Op::Lit(n as u64));
+            self.emit(Op::Prim(P::TextJoin));
+            self.stack.truncate(start);
+            self.push(STRING, Val::Run);
         }
         Ok(())
     }

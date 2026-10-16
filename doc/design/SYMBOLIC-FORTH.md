@@ -11,7 +11,8 @@ and no rules of spelling. March8 does not have these yet. Revised
 2026-10-15: powers and widths as spellings, recognizers, spelling rules
 defined in March, and the names High Stack and Low Stack (section 6).
 Revised 2026-10-16: a recognizer is a word whose name is a pattern, its
-captures on the stack (section 25).
+captures on the stack (section 25); `_` marks a bracket's arguments, so
+March has no closures (section 14).
 
 ## 1. What it is
 
@@ -126,8 +127,8 @@ which become spellings above it (decided 2026-10-14, not built):
   sequence gathers what it leaves: `1 2 [ + . ] seq# !` is `( 3 )`. How
   many it takes and leaves is the code's effect, which the stage knows
   while compiling (Thomas, 2026-10-14). `[ + ] seq# !` takes nothing: it
-  holds the symbol `+`, since nothing applies without a dot. A surface's
-  `_` is sugar above this: a hole, filled before anything runs (6.14).
+  holds the symbol `+`, since nothing applies without a dot. A `_` in it
+  is one of its arguments, taken where it stands (6.14).
   March8 does not have this yet: there `( … )` is sealed, and `5 ( 1 + )`
   is an error.
 - **`{ … }`** is a map literal, `[ … ] map# !`: a set of pairs (section
@@ -205,8 +206,8 @@ rules live here, not below:
 | `< i64 -- i64 >` | `[ i64 . ] seq# ! [ i64 . ] seq# !` | a signature is two sequences |
 | `<\| sq math.pi \|>` | `[ sq math.pi ]` | the lowest form inline |
 | `( 1 2 )` | `[ 1 int# ! 2 int# ! ] seq# !` | a sequence literal |
-| `5 ( _ 1 )` | `5 [ 1 int# ! ] cons . seq# !` | a hole, filled first |
-| `"\_ apples"` | `[ ' apples' ] cons . string !` | a string with a hole |
+| `5 ( _ 1 )` | `5 [ _ . 1 int# ! ] seq# !` | `_`, an argument |
+| `"\_ apples"` | `[ _ . ' apples' ] string !` | a string with an argument |
 | `dup_2`, `dup₂` | `dup 2 int# ! width# . .` | a width, by the word |
 | `+^4`, `+⁴` | `+ 4 int# ! power# . .` | a power, by the word's kind |
 | `[ dup + ]^3` | `[ dup . + . ] 3 int# ! power# .` | a quotation's power, a quotation |
@@ -313,44 +314,66 @@ Settled (Thomas, 2026-10-14), not built:
     reader, so the lowest form has none, and a symbol and the string made
     from it hold the same text.
 13. **A pull takes.** `_` takes a value from below, and a copy is `dup`,
-    as everywhere. March8's pulls copy, read from the literal's mark
-    (`mark-pick`), so that one in a loop reads the same value each pass,
-    `10 ( xs [ _ + ] each )`. A hole is filled first (14), so the value is
-    written into the loop's code instead, `( xs [ 10 + ] each )`, and
+    as everywhere. March8's pulls copied, read from the literal's mark
+    (`mark-pick`), so that one in a loop read the same value each pass,
+    `10 ( xs [ _ + ] each )`. A `_` belongs to the bracket it is written in
+    (14), so in that loop it is the element; a value from outside is
+    written in, `( xs [ 10 + ] each )`, or reached on the stack, and
     `mark-pick` goes.
-14. **Holes are sugar.** The surface fills a bracket's holes first,
-    before anything runs: `1 2 3 [ _ _ + _ / ]` is `[ 1 2 + 3 / ]`, so
-    `[ 1 ]` (Thomas). The first `_` takes the deepest value. The lowest form
-    has no holes. It needs only a way to put a value into a quotation, the
-    ordinary sequence word that puts one at the front, `cons`, as Joy's
-    does, `10 [ + . ] cons .` being `[ 10 + . ]`, and `compose`, which
-    joins two quotations:
+14. **`_` marks a bracket's arguments** (Thomas, 2026-10-16). A bracket
+    with k `_`s takes k values from below when it is applied, and each `_`
+    puts the next of them where it stands, the first written the deepest:
+    `[ _ _ + _ / ]` is an anonymous word of three inputs, and
+    `1 2 3 [ _ _ + _ / ] .` is `1 2 + 3 /`. A quotation is applied by `.`
+    or by what takes it, so its `_`s are filled then; a sequence, a map and
+    a string are applied where they stand, so theirs are filled there:
+    `5 ( _ 1 )` is `( 5 1 )`, and `1 2 "\_ and \_"` is "1 and 2". A word's
+    body is a quotation, so its `_`s are the word's inputs. A `_` belongs
+    to the innermost bracket it is written in, so `( xs [ _ 1 + ] each )`
+    adds 1 to each element, the element being the inner quotation's
+    argument. The arguments are taken first, so the code may still reach
+    below them: `[ _ + ]` applied is `+`. Scala's `_ + _` and Clojure's
+    `#(+ %1 %2)` are the kin.
+
+    Nothing is captured: a quotation holds no value from where it was
+    made, so March has no closures. A value from outside reaches a
+    quotation on the stack, as in Joy, or is written in when it is known.
+    In the lowest form `_ .` is a word, and the stage moves the arguments
+    while compiling, a value known only at run time through the scratch
+    stack, as `dip`'s is:
 
     ```
-    5 ( _ 1 )                5 [ 1 int# ! ] cons . seq# !
-    10 ( xs [ _ + ] each )   10 [ [ + . ] cons . xs . swap . each . ] seq# !
-    1 2 "\_ and \_"          1 2 [ ] cons . [ ' and ' ] swap . compose . cons . string !
+    5 ( _ 1 )                5 [ _ . 1 int# ! ] seq# !
+    1 2 "\_ and \_"          1 2 [ _ . ' and ' _ . ] string !
+    [ _ 2 / ]                [ _ . 2 int# ! / . ]
     ```
 
-    The lowering builds from the last hole back to the first, and since the
-    first `_` takes the deepest, the last hole's value is on top, so each
-    `cons` finds its value there with no shuffling. A quotation that holds
-    a value known only at run time is a closure: its code is known, so the
-    stage compiles it, and `.` still applies known code only (4). March8
-    has `compose`, of quotations known while compiling, but not `cons`.
-    A hole in a nested bracket belongs to the outermost bracket, so the
-    lowering fills it there, and an inner quotation keeps no holes for
-    later; to watch (Thomas, 2026-10-14). Since this is sugar, another
-    surface may choose otherwise with no change below.
+    This replaces holes filled first (2026-10-14): a bracket's values
+    written into its code where it stood, a hole in a nested bracket the
+    outermost's, lowered by Joy's `cons` and `compose`. A quotation made
+    where a value was known only at run time then held it, a closure,
+    which every word that moves or takes a quotation would have to carry
+    (Thomas: "Aren't they just anonymous words? The `_` are the
+    arguments?"). Since this is sugar, another surface may choose
+    otherwise with no change below.
+
+    Built in march8 (2026-10-16): a quotation, a word's body, a literal
+    and a string each take their arguments, and `mark-pick` is gone. A
+    run-time argument used first never moves; one used later waits on the
+    scratch stack. `march8 lower` still writes `( … )` and `"…"` as they
+    are, until `seq#` and `string !` are the lowest form's.
 15. **Strings with holes.** `string !` makes text of a quotation, as
     `seq# !` makes a sequence: it runs the code where it stands and writes
     each value the code leaves, in order, into one string, `'…'` symbols as
     their text and other values as `>string` writes them. It is an
     emitter: one pass into one buffer, with no sequence made first and no
     chain of joins; pieces known while compiling fold. A sequence made a
-    string is another thing, the sequence written, `( 1 2 )`. March8 joins
-    the pieces with `concat` one at a time, which copies the growing
-    string at each piece.
+    string is another thing, the sequence written, `( 1 2 )`. Built in
+    march8 (2026-10-16): `"…"` and `[ … ] string !` join their pieces in
+    one buffer, the machine's `text-join`, where march8 had joined them
+    with `concat` one at a time, copying the growing string at each piece.
+    As `( … )` is in march8, its code reaches only its arguments and what
+    it makes, for now.
 
 16. **Namespaces** are maps all the way down (Thomas): a namespace's
     entries are words, data, or more namespaces, and a dot inside a name
@@ -673,7 +696,7 @@ Settled (Thomas, 2026-10-15):
     written in, today the intermediate form of section 4, is High Stack;
     Symbolic Forth, the lowest form, is Low Stack.
 
-Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); which
-bracket owns a nested hole (14), to watch; for pattern words (25), what
-a group that may not match leaves, refused for now, the word that makes
-a pattern in Low Stack, and how an import names one alone.
+Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); and for
+pattern words (25), what a group that may not match leaves, refused for
+now, the word that makes a pattern in Low Stack, and how an import names
+one alone.

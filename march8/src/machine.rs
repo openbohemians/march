@@ -763,18 +763,6 @@ impl Machine {
                     let v = self.scratch[i];
                     self.push(v)?;
                 }
-                Instruction::Prim(Primitive::MarkPick) => {
-                    let m = usize::try_from(self.pop()?).map_err(|_| Error::Stack)?;
-                    let j = usize::try_from(self.pop()?).map_err(|_| Error::Stack)?;
-                    let i = self.marks.len().checked_sub(m + 1).ok_or(Error::Stack)?;
-                    if i < mbase {
-                        return Err(Error::Stack);
-                    }
-                    let depth = self.marks[i] as usize;
-                    let at = depth.checked_sub(j + 1).ok_or(Error::Stack)?;
-                    let v = *self.stack.get(at).ok_or(Error::Stack)?;
-                    self.push(v)?;
-                }
                 Instruction::Prim(Primitive::Mark) => {
                     if self.marks.len() >= 65536 {
                         return Err(Error::Stack);
@@ -1454,6 +1442,17 @@ impl Machine {
                 let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
                 self.push(r)?;
             }
+            TextJoin => {
+                let n = usize::try_from(self.pop()?).map_err(|_| Error::Stack)?;
+                let at = self.stack.len().checked_sub(n).ok_or(Error::Stack)?;
+                let mut out = String::new();
+                for &t in &self.stack[at..] {
+                    out.push_str(&self.text(t)?.to_text().ok_or(Error::Memory)?);
+                }
+                self.stack.truncate(at);
+                let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
+                self.push(r)?;
+            }
             SymShow => {
                 let s = self.pop()?;
                 let text = self.text(s)?.to_text().ok_or(Error::Memory)?;
@@ -1553,8 +1552,8 @@ impl Machine {
                 let r = self.allocate_text(merkle_champ::Sequence::text(&s))?;
                 self.push(r)?;
             }
-            Execute | ScratchPush | ScratchPop | ScratchPeek | ScratchAt | MarkPick | Mark
-            | Gather | MapGather => {
+            Execute | ScratchPush | ScratchPop | ScratchPeek | ScratchAt | Mark | Gather
+            | MapGather => {
                 unreachable!()
             }
         }

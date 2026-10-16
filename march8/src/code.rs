@@ -148,9 +148,6 @@ pub enum Primitive {
     // ( n -- a ) The array 1 to n; ( a -- a ) an array in reverse.
     Range = 84,
     Reverse = 85,
-    // ( j m -- x ) A copy of the cell j below the mark m from the innermost,
-    // in this frame: what an array literal pulls from below it with `_`.
-    MarkPick = 86,
     // Money as text, from its cents: `21.09`; a string as a literal that
     // reads back, quoted and escaped.
     MoneyText = 87,
@@ -221,6 +218,9 @@ pub enum Primitive {
     // ( sym -- s ) A symbol as March reads it back: `Locked`, `x'`, or
     // `"two words" sym!`.
     SymShow = 124,
+    // ( t1 … tn n -- t ) n texts joined into one, in one buffer: a string
+    // with holes, or `string !` of a quotation.
+    TextJoin = 125,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -310,7 +310,6 @@ impl Primitive {
         (Self::ScratchAt, "scratch-at"),
         (Self::Range, "range"),
         (Self::Reverse, "reverse"),
-        (Self::MarkPick, "mark-pick"),
         (Self::MoneyText, "money>text"),
         (Self::StringShow, "string-show"),
         (Self::SortInts, "sort-ints"),
@@ -349,6 +348,7 @@ impl Primitive {
         (Self::Camel, "camel-case"),
         (Self::Pascal, "pascal-case"),
         (Self::SymShow, "symbol-show"),
+        (Self::TextJoin, "text-join"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

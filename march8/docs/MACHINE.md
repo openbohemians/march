@@ -70,7 +70,7 @@ reads them back to the same tokens, and runs them to the same results.
 | `a.b` | one word: a dot inside a word is part of it, a number's point, `2.5`, or in a name a path in a namespace, `io.file.read` (TYPES.md 3.12), kept for namespaces and defining no word yet. Dots between names once chained them, `a.b.` for `a. b.` (2026-10-09), which left no spelling for a path (Thomas, 2026-10-10) |
 | `[ … ]` | a quotation: its words, unevaluated |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
-| `_` | in a literal, a copy of a value from below it (Comprehensions) |
+| `_` | an argument of the bracket it is written in, taken when the bracket is applied, the first written the deepest (Comprehensions) |
 | `< … >` | a bracket: code whose values are a type or a signature, a comprehension of types |
 
 **Literals, symbols and words** (Thomas, 2026-10-12). Literals spell
@@ -561,12 +561,19 @@ filter, flat-map and scan, with one loop:
 - **A collecting body may read the values below its element,** which are
   elements already collected, of the element type, as a scan reads the last;
   it may not take them.
-- **`_` pulls a value from below the literal.** The first `_` written takes
-  the deepest, so `1 2 ( _ _ div )` is `( 1 2 div )`, as march7 decided for
-  string holes; the literal takes what it pulls, its inputs. A pull copies,
-  so one in a loop reads the same value each pass, and it is found from the
-  literal's mark (`mark-pick`), exact even above a run:
-  `10 ( xs [ _ + ] each )` adds 10 to each element.
+- **`_` is an argument of the bracket it is written in**
+  (doc/design/SYMBOLIC-FORTH.md 14; Thomas, 2026-10-16). A bracket with k
+  `_`s takes k values from below when it is applied, and each `_` puts the
+  next where it stands, the first written the deepest, so
+  `1 2 ( _ _ div )` is `( 1 2 div )`. A literal or a string is applied
+  where it stands, and a quotation by `.` or by what takes it, so
+  `[ _ _ + _ * ]` is an anonymous word of three inputs, and a word's body
+  takes the word's inputs. A `_` in a nested bracket is that bracket's:
+  `( xs [ _ 10 + ] each )` adds 10 to each element. Nothing is captured,
+  so there are no closures; a value from outside is written in or reached
+  on the stack. The arguments are taken first, so the code may reach
+  below them, and those known only at run time wait on the scratch stack,
+  as `dip`'s value does; one used first never moves.
 
 Outside a literal the rules stay strict: a loop keeps its shape, and clauses
 chosen at run time leave as many values. A value that may be absent outside a
@@ -589,13 +596,17 @@ f: [ "<\[ _ 1 + ]>" ] ;     5 f is "<6>", 1.5 f is "<2.5>"
   after it (`"\[ n ]apples"`), and strings nest.
 - **The stage** pushes each piece: the text, and each hole's value written
   in by `>string`, a string's own text or any other value as `show` writes
-  it; and joins them with `concat`. On known values everything folds, and
-  the string is one constant. A hole leaves one value and reaches only what
-  it makes.
-- **`_` in a hole** pulls an input from below the string, as in an array
-  literal, the first written taking the deepest, and the string takes its
-  inputs, so a word whose body is such a string takes them. A string makes
-  no mark: nothing above its inputs is a run, so a pull is a plain copy.
+  it; and joins them in one buffer, `text-join`, not a chain of `concat`s.
+  Pieces known while compiling join then, so on known values the string is
+  one constant. A hole leaves one value and reaches only its string's
+  arguments and what it makes.
+- **`_` in a hole** is an argument of the string, taken where the string
+  stands, the first written the deepest, so a word whose body is such a
+  string takes them.
+- **`string !` of a quotation** is text of the values its code leaves, in
+  order, each written as a hole's is, `1 2 [ _ " and " _ ] string !` being
+  `"1 and 2"` (doc/design/SYMBOLIC-FORTH.md 15). Its code reaches only its
+  arguments and what it makes, as a hole's does.
 - **`show`,** in `core.march`, writes a value as the display does, so it
   reads back: a string quoted, money with its cents, an array in
   parentheses, element by element, and a map in braces, sorted by key (Thomas,
@@ -856,7 +867,7 @@ The machine is march7's, with forty-six primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
-`mark-pick`, which reads below an array literal's mark; `money>text` and
+`text-join`, which joins texts in one buffer; `money>text` and
 `string-show`; `sort-ints`, `sort-floats` and `sort-texts`; `f64-sqrt`,
 `f64-pow` and `i64-pow`; `f64-floor`, `f64-ceil` and `f64-round`;
 `vector-insert` and `vector-remove`; `union-make`, `union-tag` and
@@ -1020,7 +1031,7 @@ different lengths both may match (above).
     for list edits and `<=` reads as ≤. `<>` is a name to march8's reader,
     which takes only a lone `<` as a bracket; the list edits below wanted
     it for pairing, which will need another spelling. Thomas first named
-    `dip` `_`, which now pulls into a quotation.
+    `dip` `_`, which now marks a bracket's arguments.
   - **Moving the loops waits on the machine code** (Thomas). The stage
     knows both stacks' depths everywhere, so natively both can be
     registers, and either way costs nothing; where the definitions live is

@@ -1,6 +1,6 @@
 //! Comprehensions (docs/MACHINE.md): inside an array literal, what code
 //! leaves is collected, as many values as it leaves, so `each` with the
-//! literal maps, filters, repeats and scans; `_.` pulls values from below.
+//! literal maps, filters, repeats and scans; `_.` takes its arguments.
 use march8::{Kind, Session};
 
 fn session(pieces: &[&str]) -> Result<Session, Kind> {
@@ -47,15 +47,17 @@ fn each_inside_a_literal_collects() {
 #[test]
 fn pulls_take_values_from_below() {
     // The first `_.` takes the deepest, so the literal reads as the code it
-    // replaces; the literal takes what it pulls.
+    // replaces; the literal takes its arguments where it stands.
     assert_eq!(show(&["1 2 ( _ _ div )"]), "<1> ( 0 )");
     assert_eq!(show(&["1.0 2 ( _ _ div )"]), "<1> ( 0.5 )");
-    // A pull in a loop reads the same value each time, known or not.
-    assert_eq!(show(&["10 ( ( 1 2 3 ) [ _ + ] each )"]), "<1> ( 11 12 13 )");
+    // A `_` in a loop's quotation is that quotation's argument, the
+    // element; a value from outside is written in.
+    assert_eq!(show(&["( ( 1 2 3 ) [ _ 10 + ] each )"]), "<1> ( 11 12 13 )");
     assert_eq!(
-        show(&["10", "( ( 1 2 3 ) [ _ + ] each )"]),
+        show(&["( 1 2 3 )", "( _ [ 10 _ + ] each )"]),
         "<1> ( 11 12 13 )"
     );
+    assert!(session(&["10 ( ( 1 2 3 ) [ _ + ] each )"]).is_err());
     // An array known only at run time, filtered.
     assert_eq!(
         show(&[KEEP, "( 9 1 4 0 )", "( _ keep' each )"]),

@@ -583,9 +583,70 @@ Settled (Thomas, 2026-10-15):
     width. The import holds for the whole namespace (17), so the reader
     finds it first, wherever it is written, reading it by the core's
     rules alone.
+
+    A recognizer is a pattern and a template (Thomas, 2026-10-15): the
+    pattern a regular expression, which matches a whole word, and the
+    template the word's code, each hole taking what the pattern captures,
+    in order, as a symbol, which `int# !` makes a number (7). The key says
+    the text is a pattern, so it needs no `regex!`. A regex as a value can
+    come later, in a module of its own. A FORTH recognizer is a word, and
+    one could run anything while reading; a pattern and a template can only
+    turn text into code:
+
+    ```
+    logs.recognize#: < 'log_([0-9]+)' > [ _ int# ! log-base ] ;
+    import#: <| logs.* |> ;
+    1024 log_2                       -- 1024 2 log-base
+    ```
+
+    The template is code of the recognizer's namespace, whose names are
+    looked up there. It runs where the word stands, and with `'` it is
+    passed, as a name is. As a recognizer, the core's width would be
+    `'(.+)_([0-9]+)'` and `[ _ _ int# ! width# . . ]`, the word widened,
+    then applied. A recognizer reads a word the core reads as a name,
+    `12kg` among them, but not a number, `;` or `_`. It sees the word as
+    typed without its marks, `log_2` for `log₂'`. A namespace's
+    `recognize#` comes with `logs.*` when it is exported, or by naming it,
+    `logs.recognize#`. A word that two recognizers match, of one namespace
+    or of two, is an error (Thomas), so the order of clauses never counts.
+
+    Built in march8 (2026-10-15), by Rust's `regex` crate, which matches in
+    linear time (Thomas: March wants regular expressions anyway, if only as
+    a module). March may come to have a recognizer syntax of its own, a
+    regex then an optional module, which March itself never needs
+    (Thomas, 2026-10-16). Recognizers are defined first, as imports are (17), and the
+    core's text is read by the core's rules alone. March8 learns a body's
+    namespace only at `;`, so the stage, not the reader, reads a word by a
+    recognizer, when it reaches the word in its code's namespace, as it
+    looks up a name. A quotation holding such a word has its template's
+    stack effect. So `march8 lower` still writes the core's reading.
+    Lowering a program that imports recognizers waits until a namespace's
+    text is its own. A captured name, `(.+)`, is a symbol applied in the
+    template's namespace, not where the word was written, as a passed `sq'`
+    is (16); that is to be settled when namespaces become values. The
+    cost: about 25 ns a word where recognizers are imported, and none
+    elsewhere. The core's own `^n` and `_n` stay in the reader.
+
+    Open (Thomas, 2026-10-16): the pattern stands where a signature would,
+    so under this key `< >` means something else. A key may give meaning
+    to its value, as `import#` does to its list, the `<| … |>` sparing it
+    a reading of its own; it should not change what a slot means, each
+    such exception a cost, though one may be made on purpose where it
+    keeps a program from harm. The way out is the import pairs' form, a
+    map from pattern to template, one `recognize#` to a namespace as one
+    `import#` is, its templates in the lowest form, since `<| … |>` reads
+    Symbolic Forth:
+
+    ```
+    logs.recognize#: <| 'log_([0-9]+)' [ _ . int# . ! log-base . ] |> map#! ;
+    ```
+
+    It waits on `map#`, with the import pairs, and moves with them; a
+    recognizer syntax of March's own would have its say too.
 26. **High Stack and Low Stack** (Thomas, to try). The surface March is
     written in, today the intermediate form of section 4, is High Stack;
     Symbolic Forth, the lowest form, is Low Stack.
 
-Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); and which
-bracket owns a nested hole (14), to watch.
+Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); which
+bracket owns a nested hole (14), to watch; and whether a recognizer's
+pattern leaves the signature's slot for a map (25).

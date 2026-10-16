@@ -8,3 +8,7 @@ sha2 = "0.10"
 
 # Persistent arrays, strings and maps (march7/docs/ARRAYS.md).
 merkle-champ = "0.2"
+
+# Recognizers' patterns, matched in linear time
+# (doc/design/SYMBOLIC-FORTH.md 25).
+regex = "1"

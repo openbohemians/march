@@ -139,6 +139,16 @@ and a namespace's children see all of it. A namespace has one import,
 which holds for all of it: a source's imports run first. A name found in
 two places is an error that a path settles.
 
+**Recognizers** (doc/design/SYMBOLIC-FORTH.md 25): a namespace's clauses
+of `recognize#`, each a pattern and a template, `units.recognize#: <
+'([0-9]+)kg' > [ _ int# ! 1000 * ] ;`. Where `units` is imported, a word
+the pattern matches, the whole of it, reads as the template, each hole
+taking a capture, in order, as a symbol: `12kg` is `12 1000 *`. Imported
+recognizers are tried before the core's width and power, and never in
+their own namespace. A word that two match is an error. They are defined
+first, as imports are, and the stage reads a word by one when it reaches
+it, in the namespace of its code.
+
 **A definition is data:** a name, what it names, and `;` (Thomas,
 2026-10-12; doc/design/SYMBOLIC-FORTH.md 18), FORTH's `: inc 1 + ;` turned
 postfix: `inc: < i64 -- i64 > [ 1 + ] ;`. The name comes first, and

@@ -30,6 +30,7 @@ fn placeless(t: Token) -> Tok {
                             .map(|t| Token {
                                 tok: placeless(t.clone()),
                                 pos: Pos { line: 0, col: 0 },
+                                word: None,
                             })
                             .collect(),
                     ),

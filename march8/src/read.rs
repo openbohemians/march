@@ -45,6 +45,17 @@ pub enum Piece {
 pub struct Token {
     pub tok: Tok,
     pub pos: Pos,
+    /// On the first token of a word read as a name, the word as written.
+    pub word: Option<Word>,
+}
+
+/// A word read as a name, for a recognizer to read in place of the core
+/// (doc/design/SYMBOLIC-FORTH.md 25): how many tokens the core read it as
+/// before its marks, whose text `text` gives, and whether it applies.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Word {
+    pub len: u8,
+    pub applies: bool,
 }
 
 fn closer(open: u8) -> u8 {
@@ -115,7 +126,11 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         }
         if c == '"' {
             let tok = r.string(symbols, hole.is_some() && open.is_empty())?;
-            out.push(Token { tok, pos });
+            out.push(Token {
+                tok,
+                pos,
+                word: None,
+            });
             continue;
         }
         let word = r.word();
@@ -125,6 +140,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             out.push(Token {
                 tok: Tok::Str(s.into()),
                 pos,
+                word: None,
             });
             continue;
         }
@@ -136,6 +152,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             out.push(Token {
                 tok: Tok::Open(b'['),
                 pos,
+                word: None,
             });
             lowest.push((open.len(), r.symbolic));
             r.symbolic = true;
@@ -150,6 +167,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             out.push(Token {
                 tok: Tok::Close(b']'),
                 pos,
+                word: None,
             });
             continue;
         }
@@ -158,6 +176,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             out.push(Token {
                 tok: Tok::Dashes,
                 pos,
+                word: None,
             });
             continue;
         }
@@ -179,6 +198,11 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             ..pos
         };
         let primed = is_name(stem) && stem.len() > 1 && stem.ends_with('\'');
+        let readable = if r.symbolic {
+            None
+        } else {
+            readable(stem, marks)
+        };
         let (stem, applies) = if is_name(stem) && !r.symbolic {
             let (stem, applies) = spelled(stem);
             (stem, applies && !marks.starts_with('?'))
@@ -214,9 +238,15 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         } else {
             (stem, applies)
         };
+        let start = out.len();
         piece(
             stem, applies, &scripts, marks, pos, at, symbols, &mut open, &mut out,
         )?;
+        if let Some(applies) = readable {
+            let marked: usize = marks.chars().map(|m| if m == '!' { 2 } else { 1 }).sum();
+            let len = (out.len() - start - marked) as u8;
+            out[start].word = Some(Word { len, applies });
+        }
     }
     if let Some((o, p)) = open.pop() {
         return Err(Error::new(
@@ -261,6 +291,57 @@ fn spelled(w: &str) -> (&str, bool) {
     } else {
         (w, !(w.starts_with(char::is_uppercase) || is_variable(w)))
     }
+}
+
+/// Whether a recognizer may read a word (doc/design/SYMBOLIC-FORTH.md 25):
+/// one the core reads as a name, `12kg` among them, but not `;` or `_`; and
+/// if so, whether it applies, as a name does.
+fn readable(stem: &str, marks: &str) -> Option<bool> {
+    let first = stem.chars().next()?;
+    if matches!(stem, ";" | "_")
+        || "[](){}<>".contains(first)
+        || !matches!(number(stem, Pos::default()), Ok(None))
+    {
+        return None;
+    }
+    Some(spelled(stem).1 && !marks.starts_with('?'))
+}
+
+/// A word's text as a recognizer reads it, from the tokens the core read it
+/// as: spelled as typed, without its marks, so `log₂'`, read `log 2 width#
+/// .`, is `log_2`.
+pub fn text(toks: &[Token]) -> std::borrow::Cow<'_, str> {
+    // A name the core keeps as written, `12kg'`, has its mark yet.
+    let name = match toks.first().map(|t| &t.tok) {
+        Some(Tok::Name(n)) if is_name(n) => n,
+        Some(Tok::Name(n)) => spelled(n).0,
+        _ => "",
+    };
+    if toks.len() < 3 {
+        return name.into();
+    }
+    let mut out = name.to_string();
+    let (mut sub, mut sup) = (None, None);
+    for (k, t) in toks.iter().enumerate().skip(1) {
+        match &t.tok {
+            Tok::Int(n)
+                if toks
+                    .get(k + 1)
+                    .is_some_and(|t| matches!(&t.tok, Tok::Name(w) if &**w == "width#")) =>
+            {
+                sub = Some(n)
+            }
+            Tok::Int(n) => sup = Some(n),
+            _ => {}
+        }
+    }
+    if let Some(n) = sub {
+        out.push_str(&format!("_{n}"));
+    }
+    if let Some(n) = sup {
+        out.push_str(&format!("^{n}"));
+    }
+    out.into()
 }
 
 /// Whether a name is a variable: one lowercase letter, `a` to `z`, a type
@@ -324,26 +405,34 @@ fn piece(
             })),
         };
         if let Some(tok) = tok {
-            out.push(Token { tok, pos });
+            out.push(Token {
+                tok,
+                pos,
+                word: None,
+            });
         }
         for &(n, word) in scripts {
             out.push(Token {
                 tok: Tok::Int(n),
                 pos,
+                word: None,
             });
             out.push(Token {
                 tok: Tok::Name(word.into()),
                 pos,
+                word: None,
             });
             out.push(Token {
                 tok: Tok::Apply,
                 pos,
+                word: None,
             });
         }
         if applies {
             out.push(Token {
                 tok: Tok::Apply,
                 pos,
+                word: None,
             });
         }
         for (k, m) in marks.chars().enumerate() {
@@ -355,11 +444,13 @@ fn piece(
                 out.push(Token {
                     tok: Tok::Name("convert".into()),
                     pos,
+                    word: None,
                 });
             }
             out.push(Token {
                 tok: if m == '?' { Tok::Test } else { Tok::Apply },
                 pos,
+                word: None,
             });
         }
     }
@@ -394,7 +485,7 @@ fn symbolize(w: &str, symbols: &Symbols) -> String {
 
 /// A number, if the word is one: digits with an optional `-`, and for a
 /// decimal a point with digits on both sides.
-fn number(w: &str, pos: Pos) -> Result<Option<Tok>> {
+pub(crate) fn number(w: &str, pos: Pos) -> Result<Option<Tok>> {
     let digits = w.strip_prefix('-').unwrap_or(w);
     if digits.starts_with(|c: char| c.is_ascii_digit()) && digits.contains(':') {
         return ratio(w, pos).map(Some);
@@ -597,10 +688,12 @@ impl<'a> Reader<'a> {
                                 Token {
                                     tok: Tok::Name("_".into()),
                                     pos: here,
+                                    word: None,
                                 },
                                 Token {
                                     tok: Tok::Apply,
                                     pos: here,
+                                    word: None,
                                 },
                             ];
                             pieces.push(Piece::Text(std::mem::take(&mut s).into()));
@@ -768,6 +861,34 @@ mod tests {
         want.extend([Tok::Int(3), n("power#"), Tok::Apply]);
         want.extend([n("x_1"), n("Snake_2")]);
         assert_eq!(toks("dup₂ dup\\_2 +⁴ dup₂³ log₂' [ q ]³ x₁: Snake₂"), want);
+    }
+
+    #[test]
+    fn a_name_keeps_its_word_for_recognizers() {
+        // Its text as typed, without marks, the tokens the core read it as
+        // before them, and whether it applies (doc/design/SYMBOLIC-FORTH.md
+        // 25). A number, a bracket and the meta-ops have none.
+        let toks = read("log₂' dup_2³. 12kg' Snake 3 [ _ ] ;", &Symbols::standard()).unwrap();
+        let words: Vec<_> = (0..toks.len())
+            .filter_map(|i| {
+                let w = toks[i].word?;
+                Some((
+                    text(&toks[i..i + w.len as usize]).into_owned(),
+                    w.len,
+                    w.applies,
+                ))
+            })
+            .collect();
+        let w = |t: &str, len, applies| (t.to_string(), len, applies);
+        assert_eq!(
+            words,
+            [
+                w("log_2", 4, false),
+                w("dup_2^3", 8, true),
+                w("12kg", 1, false),
+                w("Snake", 1, false),
+            ]
+        );
     }
 
     #[test]

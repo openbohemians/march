@@ -676,6 +676,4 @@ Settled (Thomas, 2026-10-15):
 Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); which
 bracket owns a nested hole (14), to watch; for pattern words (25), what
 a group that may not match leaves, refused for now, the word that makes
-a pattern in Low Stack, and how an import names one alone; and `map` and
-`or` as families, a clause taking types beside those taking values, in
-place of march8's look at what is on top (march8 docs/MACHINE.md).
+a pattern in Low Stack, and how an import names one alone.

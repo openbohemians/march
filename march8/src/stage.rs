@@ -1081,20 +1081,17 @@ impl Stage {
             }
             return Err(self.err(Kind::NoWord, format!("no word `{name}`")));
         };
-        // `map` builds a type from types, and maps over an array otherwise.
-        let typeish = self.stack.len() > self.floor && {
-            let j = &self.stack[self.stack.len() - 1];
-            match &j.val {
-                Val::Type(_) => true,
-                Val::Name(n, _) => self.words.get(n).is_some_and(|w| w.ty.is_some()),
-                _ => j.ty == NIL,
+        // A word that builds types and does something else too, `map` and
+        // `or`, is a family: its constructor is the clause that takes types,
+        // chosen as any clause is, by what it takes.
+        if let Some(c) = w.con {
+            let alone = w.prim.is_none() && w.clauses.is_empty();
+            if alone || self.constructs(c) {
+                return self.construct(c);
             }
-        };
-        if let Some(c) = w.con
-            && (typeish || (w.prim.is_none() && w.clauses.is_empty()))
-        {
-            self.construct(c)
-        } else if let Some((p, sig)) = w.prim.clone() {
+        }
+        let w = &self.words[name];
+        if let Some((p, sig)) = w.prim.clone() {
             self.prim(name, p, &sig)
         } else if w.ty == Some(NIL) {
             // A type with one value is that value, `nil`, which stands for
@@ -1831,6 +1828,13 @@ impl Stage {
     /// or it is a literal, converted by `t`'s clause for it.
     fn annotate(&mut self, i: usize, t: Type) -> Result<()> {
         let have = self.stack[i].ty;
+        if t == TYPE && have == NIL && self.stack[i].known() {
+            self.stack[i] = Jdg {
+                ty: TYPE,
+                val: Val::Type(NIL),
+            };
+            return Ok(());
+        }
         // A class is checked, and the value keeps its type.
         let fits = |s: &mut Self| s.match_slot(t, have, &mut Env::default()).is_some();
         if have == t || (self.types.is_class(t) && fits(self)) {
@@ -1969,6 +1973,11 @@ impl Stage {
     fn match_slot(&mut self, p: Type, have: Type, env: &mut Env) -> Option<i32> {
         if let Term::Or(..) = self.types.term(p) {
             return self.match_union(p, have, env);
+        }
+        // A type with one value is that value, `nil`, which stands for its
+        // type where a type is wanted, `i64 nil or`.
+        if p == TYPE && have == NIL {
+            return Some(4);
         }
         if self.types.is_literal(have) {
             return match self.types.term(p) {
@@ -4009,6 +4018,24 @@ impl Stage {
     }
 
     /// Applies a constructor: `100 i64 vec` is a type.
+    /// Whether the values on top are what a constructor takes, as its
+    /// signature says: `< type type -- type >` for `map` and `or`, `nil`
+    /// standing for its type.
+    fn constructs(&mut self, c: Con) -> bool {
+        let ins = match c {
+            Con::Ary => vec![TYPE],
+            Con::Map | Con::Or => vec![TYPE, TYPE],
+            // A length or a variable, then a type: `vec` builds types alone.
+            Con::Vec => return true,
+        };
+        let sig = Sig {
+            ins,
+            guards: Vec::new(),
+            outs: Some(vec![TYPE]),
+        };
+        self.match_sig(&sig).is_some()
+    }
+
     fn construct(&mut self, c: Con) -> Result<()> {
         let t = match c {
             Con::Ary => {
@@ -4075,9 +4102,6 @@ impl Stage {
         match &j.val {
             Val::Type(t) => Ok(*t),
             _ if j.ty == NIL => Ok(NIL),
-            Val::Name(n, _) if self.words.get(n).is_some_and(|w| w.ty.is_some()) => {
-                Ok(self.words[n].ty.expect("checked"))
-            }
             _ => Err(self.err(
                 Kind::Mismatch,
                 format!("expected a type, found {}", self.describe(&j)),

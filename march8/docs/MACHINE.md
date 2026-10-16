@@ -88,13 +88,14 @@ than it passes symbols, and symbols are what a state machine's states, a
 style for `case` or a logic program's atoms are made of, so they read
 without marks.
 
-Open (Thomas, 2026-10-16): `map` and `or` are each one word, and the stage
-looks at what is on top to choose: a type, a type's name or `nil` builds a
-type, and anything else maps over an array or joins truths. That is an
-exception to how a name chooses. A signature takes types as it takes any
-value, `< type type -- type >`, so each can be a family, a clause taking
-types beside the clauses taking values, once `nil` matches `type` where a
-type is wanted, since it stands for its type.
+`map` and `or` are families (Thomas, 2026-10-16): each builds a type
+from types, its constructor the clause whose signature is
+`< type type -- type >`, chosen as any clause is, by what it takes, and
+otherwise maps over an array or joins truths. No value is both a type and
+an array or a truth, so `i64 true or` is no word. `nil` stands for its type
+where a type is wanted, in any family: it matches `type`, so `i64 nil or`
+is a union. A symbol is no type until applied: in Symbolic Forth
+`string . i64 . or .`, not `string i64 or .`.
 
 **`.` calls** what is on top: a **symbol**, the word its name is defined
 as, or a **quotation**, evaluated: `[ 2 + ].`. Nothing else is called.

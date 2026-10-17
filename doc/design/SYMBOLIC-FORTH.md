@@ -12,7 +12,9 @@ and no rules of spelling. March8 does not have these yet. Revised
 defined in March, and the names High Stack and Low Stack (section 6).
 Revised 2026-10-16: a recognizer is a word whose name is a pattern, its
 captures on the stack (section 25); `_` marks a bracket's arguments, so
-March has no closures (section 14).
+March has no closures (section 14). Revised 2026-10-17: no bracket is
+sealed, and a letter names a bracket's input by its place from the top
+(section 14).
 
 ## 1. What it is
 
@@ -89,7 +91,8 @@ from strings to i64s. A type that bottoms out might show as `i64'`, were
 it ever shown, but it never is, since every type is given by a word: even
 `i64` might one day be `64 int .`, as `string` might be `utf8 str .`. A
 type variable is given by a word too, `n var .` (Thomas, 2026-10-14),
-where above the lowest form one lowercase letter is one.
+where above the lowest form one lowercase letter is one in a signature,
+and in a body names an input by its place (section 14).
 
 So types need no spelling of their own, and types and words are one
 namespace. In a signature a type must be given, `i64 .`, not named: there
@@ -362,6 +365,55 @@ Settled (Thomas, 2026-10-14), not built:
     run-time argument used first never moves; one used later waits on the
     scratch stack. `march8 lower` still writes `( … )` and `"…"` as they
     are, until `seq#` and `string !` are the lowest form's.
+
+    No bracket is sealed (Thomas, 2026-10-17): a quotation and a literal
+    alike take what their code needs, so `[ + ]` takes two and `1 2 ( + )`
+    is `( 3 )`, and concatenation stays composition. A `_` makes an order
+    easy, `[ _ foo _ bar ]` for `[ swap foo swap bar ]` when `foo` leaves
+    one value; it does not declare what a bracket takes, so `( _ _ + )` is
+    `( + )`. Sealing every bracket, each taking only its `_`s, would put
+    them in every word that takes an input, `sq: [ _ dup * ] ;`. March8's
+    literals are still sealed (section 3).
+
+    **A letter names an input by its place** (Thomas, 2026-10-17). In a
+    bracket one lowercase letter is the input at its place from the top,
+    `a` the top, `b` the next, and so on, and written again it is a copy:
+    `[ b a / ]` is `/`, `[ a b / ]` is `swap /`, and `[ b a b + ]` needs
+    no `swap` or `dup`. Letters written in the stack's order give the
+    plain word, as a stack picture `( b a -- )` reads. A bracket takes as
+    many inputs as its highest letter, as q's `{x+y}` does, and drops
+    those it does not name, so `[ c ]` takes three and keeps the deepest.
+    A letter means the same place in every bracket, then, and code pasted
+    from one into another still works, which counting from the deepest
+    would not give (Thomas). `x`, `y` and `z` are `a`, `b` and `c`, as
+    math names its first three; whether `w` down to `n` name the fourth to
+    the thirteenth, as `d` to `m` do, is open, and either way no letter
+    names two places. Math's `i`, `j`, `k` and `n` lie deep, so
+    `[ n 2 * ]` takes more than a dozen inputs; the stage refuses it where
+    it is given fewer, saying which place `n` is.
+
+    Letters and `_`s count from opposite ends: a `_` is the next in
+    written order, the first the deepest, and a letter a place from the
+    top, so `[ _ _ / ]` and `[ b a / ]` are both `/`. Each has its use,
+    `_` in a string, whose written order is its reading order,
+    `1 2 "\_ and \_"`, and letters in code; a bracket uses one or the
+    other, and a string is one bracket. In a string a letter is written in
+    a hole, `5 "\[ a ] is \[ a ]"` being "5 is 5": `\a` would clash with
+    the escapes, `\n;` being a newline while `n` is a place, and `\( a )`
+    would be a sequence written into the string. Letters belong to the innermost bracket they are written in, as
+    `_`s do, so a bracket means the same wherever it is pasted, and
+    nothing is captured. In a signature a letter is still a type variable,
+    filled by matching (section 2), so in `at: < a ary i64 -- a > [ … ]`
+    the signature's `a` and the body's are two variables. Not built yet.
+
+    Names can be an editor's (Thomas, 2026-10-17, an idea). A letter being
+    only a place, a word may carry a key naming its places, and an editor
+    show the names where the letters are, `qty price *` for `b a *`, while
+    the source holds the letters. Names are then presentation, as Unison
+    keeps names apart from code and de Bruijn indices keep a term
+    nameless: renaming changes no code, and a name never clashes with a
+    word. Where the key is kept is open, perhaps a signature's labels,
+    `< qty: i64 price: f64 >`.
 15. **Strings with holes.** `string !` makes text of a quotation, as
     `seq# !` makes a sequence: it runs the code where it stands and writes
     each value the code leaves, in order, into one string, `'…'` symbols as
@@ -699,4 +751,6 @@ Settled (Thomas, 2026-10-15):
 Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); and for
 pattern words (25), what a group that may not match leaves, refused for
 now, the word that makes a pattern in Low Stack, and how an import names
-one alone.
+one alone; and for letters (14), whether `w` down to `n` name places, how
+a body's letter is written in the lowest form, and where a key of names
+is kept.

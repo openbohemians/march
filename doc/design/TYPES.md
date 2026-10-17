@@ -87,7 +87,8 @@ bullet below).
   symbol, `Snake`, `Closed`, as Haskell's constructors, Rust's variants and
   Elixir's atoms are capitalized, so programs of symbols, a state machine or
   facts and rules, read without marks: `Socrates Is Human fact`. One
-  lowercase letter is a variable, a type variable in a bracket and a logic
+  lowercase letter is a variable, a type variable in a signature, an input
+  by its place from the top in a body (SYMBOLIC-FORTH.md 6.14), and a logic
   program's variable, `x Is Mortal if x Is Human rule`, and names no word.
   `name:` labels what follows, a name being defined or a key, and `name'` is
   the symbol where a word is passed rather than applied, `+' reduce`, or a

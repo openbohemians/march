@@ -83,16 +83,19 @@ bullet below).
   same programs written with a dot after each name applied and without
   showed code applying words far more often than it passes symbols: a CSV
   summary had 57 dots and needs 8 marks without them (DOTS.md, the
-  comparison). So the mark goes on the rarer thing. A capitalized name is a
+  comparison). So the mark goes on the rarer thing. A capitalized name was a
   symbol, `Snake`, `Closed`, as Haskell's constructors, Rust's variants and
   Elixir's atoms are capitalized, so programs of symbols, a state machine or
-  facts and rules, read without marks: `Socrates Is Human fact`. One
+  facts and rules, read without marks: `Socrates Is Human fact`. Since
+  2026-10-17 a capital marks nothing (Thomas): `Snake` is a word, and a
+  namespace of symbols imports the old rule as a pattern word, so they read
+  there as before (SYMBOLIC-FORTH.md 6.27). One
   lowercase letter is a variable, a type variable in a signature, an input
   by its place from the top in a body (SYMBOLIC-FORTH.md 6.14), and a logic
   program's variable, `x Is Mortal if x Is Human rule`, and names no word.
   `name:` labels what follows, a name being defined or a key, and `name'` is
-  the symbol where a word is passed rather than applied, `+' reduce`, or a
-  script has no capitals. A dot at the end of a word applies once more, `[
+  the symbol, where a word is passed rather than applied, `+' reduce`, or
+  any symbol is written, `Snake'`. A dot at the end of a word applies once more, `[
   2 + ].`, and a `!` converts, `2 i64!`. (From 2026-10-08 a dot after a word applied it, `sq.`,
   every name being a symbol until then; Thomas's rule that a word of
   punctuation alone applies was weighed on the way, and holds here anyway.)
@@ -124,11 +127,12 @@ bullet below).
   a literal (`0`), a converted one (`0 i64!`) or `true`; a quotation, a
   guard on the inputs before it; a word ending in `?` applied, a guard too,
   as such a word leaves one bool, which the compiler holds it to (Thomas,
-  2026-10-12); a symbol, `< string Camel >`, inputs equal to it; and a
+  2026-10-12); a symbol, `< string Camel' >`, inputs equal to it; and a
   variable, a type variable. No definition elsewhere changes what a bracket
-  means: types come from words and symbols are capitalized, so a symbol is
+  means: types come from words and a symbol is marked, so a symbol is
   never a type (from 2026-10-09 `camel!` marked a symbol, and any other
-  name left was a type's). Reading a signature takes knowing what a
+  name left was a type's; to 2026-10-17 a capital marked one, and a bare
+  `Camel` is now a word, meaning what it leaves). Reading a signature takes knowing what a
   constructor takes, `< k i64 map k >` being a map and a key, as reading
   FORTH does. Symbols need no declaring and are one namespace: a symbol has
   no definition, only clauses that match it, which belong to families. A
@@ -144,11 +148,11 @@ bullet below).
   plain call behind. After lowering, `.` is an ordinary call instruction
   and the types are gone, so cells stay bare and fast.
 - **March8 reads an intermediate form** (Thomas, 2026-10-13). Names apply
-  without a dot, a capital or a prime marks a symbol, one letter a
-  variable, `name:` a label: all of it notation over Symbolic Forth, where
-  everything is a number, a symbol, `.` or `!`. It lowers to it by
-  spelling alone: `fib` is `fib .`, `Snake`, `+'` and `fib:` are the
-  symbols `Snake`, `+` and `fib`, and `2 i64!` is `2 i64 . !`. Both forms
+  without a dot, a prime marks a symbol, one letter a variable, `name:` a
+  label: all of it notation over Symbolic Forth, where everything is a
+  number, a symbol, `.` or `!`. It lowers to it by spelling alone: `fib` is
+  `fib .`, `Snake'`, `+'` and `fib:` are the symbols `Snake`, `+` and
+  `fib`, and `2 i64!` is `2 i64 . !`. Both forms
   call with `.` and convert with `!`; one could as well call with `!`, a
   command, and the choice is only that (Thomas).
   Symbolic Forth is the litmus test of a notation: what cannot be said in
@@ -284,7 +288,9 @@ an error.
 ### 2.10 Literals
 
 Literals take their type from context, with no implicit promotion
-(SURFACE.md). At a compile stage a literal is undecided: its type is a
+(SURFACE.md). A symbol taken as a string, a value known only at run time
+too, is no promotion: it is text until a type structures it
+(SYMBOLIC-FORTH.md 6.28). At a compile stage a literal is undecided: its type is a
 **literal type** (`lit#` is a placeholder name). Thomas: it is "just another
 type signature `< f64 lit# >`", so literal handling is clauses, open like
 any family.

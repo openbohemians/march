@@ -102,22 +102,18 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
     }
 }
 
-/// A symbol as March reads it back: a capitalized name as it is, any other
-/// name with a prime, `x'`, and text that is no name as a string made a
-/// symbol, `"two words" sym!`.
+/// A symbol as March reads it back: a name with a prime, `x'`, `Snake'`,
+/// and text that is no name quoted, `'two words'`.
 pub fn symbol(s: &str, out: &mut String) {
     let reads = |spelled: &str| {
         let none = Symbols::parse("").expect("an empty table");
         matches!(read(spelled, &none).as_deref(), Ok([t]) if t.tok == Tok::Name(s.into()))
     };
-    if s.starts_with(char::is_uppercase) && reads(s) {
-        out.push_str(s);
-    } else if reads(&format!("{s}'")) {
+    if !s.contains('\'') && reads(&format!("{s}'")) {
         out.push_str(s);
         out.push('\'');
     } else {
-        quoted(s, out);
-        out.push_str(" sym!");
+        crate::read::quote(s, out);
     }
 }
 

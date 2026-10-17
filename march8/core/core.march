@@ -385,11 +385,14 @@ skip: < a ary string or i64 > [ over length min 1 + over length slice ] ;
 -- it, as a macro would. Paths are from where march8 runs. The clauses take
 -- one value or two, and the shortest that matches wins (TYPES.md 3.13).
 -- With namespaces the primitives become `io.file.read` and the like
--- (TYPES.md 3.12).
+-- (TYPES.md 3.12). `Stdin` and `File` are words that leave their symbols
+-- (doc/design/SYMBOLIC-FORTH.md 27).
 
-read: < Stdin > [ drop stdin-read ] ;
-read: < string File > [ drop file-read ] ;
-embed: < string File > [ drop file-embed ] ;
+Stdin: Stdin' ;
+File: File' ;
+read: < Stdin' > [ drop stdin-read ] ;
+read: < string File' > [ drop file-read ] ;
+embed: < string File' > [ drop file-embed ] ;
 
 -- Text: `split` at each separator (between characters, for ""), `lines`,
 -- and `words` at runs of white space, as Haskell's are; `lower` and `upper`,
@@ -403,15 +406,21 @@ lower: < string ary > [ [ lower ] map ] ;
 upper: < string ary > [ [ upper ] map ] ;
 
 -- `case`: a string in a case style, chosen by a symbol (Thomas, 2026-10-09):
--- `"Hello World" Snake case` is "hello_world". A capitalized name is a
--- symbol, in a bracket too, so the clauses are the styles, and anyone may
--- add one.
-case: < string Lower -- string > [ drop string-lower ] ;
-case: < string Upper -- string > [ drop string-upper ] ;
-case: < string Snake -- string > [ drop string-snake ] ;
-case: < string Kebab -- string > [ drop string-kebab ] ;
-case: < string Camel -- string > [ drop string-camel ] ;
-case: < string Pascal -- string > [ drop string-pascal ] ;
+-- `"Hello World" Snake case` is "hello_world". Each style is a symbol, and
+-- a word that leaves it (doc/design/SYMBOLIC-FORTH.md 27), so the clauses
+-- are the styles, and anyone may add one.
+Lower: Lower' ;
+Upper: Upper' ;
+Snake: Snake' ;
+Kebab: Kebab' ;
+Camel: Camel' ;
+Pascal: Pascal' ;
+case: < string Lower' -- string > [ drop string-lower ] ;
+case: < string Upper' -- string > [ drop string-upper ] ;
+case: < string Snake' -- string > [ drop string-snake ] ;
+case: < string Kebab' -- string > [ drop string-kebab ] ;
+case: < string Camel' -- string > [ drop string-camel ] ;
+case: < string Pascal' -- string > [ drop string-pascal ] ;
 
 -- `thru`: the integers from a to b, both included, counting down when a is
 -- the larger (SYMBOL's `..`); `‥`, two dots as one character, is its glyph.

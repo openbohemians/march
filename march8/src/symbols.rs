@@ -115,11 +115,20 @@ impl Symbols {
                     token_start = false;
                     continue;
                 }
-                // A raw string runs to the next `'`; `'` alone quotes a word.
+                // A quoted symbol runs to the next `'` not doubled
+                // (doc/design/SYMBOLIC-FORTH.md 6.12); `'` alone quotes a
+                // word.
                 if b == b'\'' && word.len() > 1 {
-                    let end = source[i + 1..]
-                        .find('\'')
-                        .map_or(bytes.len(), |n| i + n + 2);
+                    let mut end = bytes.len();
+                    let mut j = i + 1;
+                    while let Some(n) = source[j..].find('\'') {
+                        if bytes.get(j + n + 1) == Some(&b'\'') {
+                            j += n + 2;
+                        } else {
+                            end = j + n + 1;
+                            break;
+                        }
+                    }
                     out.push_str(&source[i..end]);
                     i = end;
                     token_start = false;

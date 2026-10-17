@@ -14,7 +14,8 @@ Revised 2026-10-16: a recognizer is a word whose name is a pattern, its
 captures on the stack (section 25); `_` marks a bracket's arguments, so
 March has no closures (section 14). Revised 2026-10-17: no bracket is
 sealed, and a letter names a bracket's input by its place from the top
-(section 14).
+(section 14); a capital marks nothing, and a symbol taken as text is a
+string (sections 27 and 28).
 
 ## 1. What it is
 
@@ -196,8 +197,7 @@ rules live here, not below:
 | Intermediate | Symbolic Forth | |
 |---|---|---|
 | `dup` | `dup .` | a name applies |
-| `Snake` | `Snake` | a capital marks a symbol |
-| `Snake.` | `Snake .` | a symbol applied: the word it names |
+| `Snake` | `Snake .` | a capital marks nothing (6.27) |
 | `+'` | `+` | a prime marks a word passed |
 | `fib:` | `fib` | a label is a symbol |
 | `a` | `a var .` | one lowercase letter is a variable |
@@ -215,10 +215,8 @@ rules live here, not below:
 | `+^4`, `+⁴` | `+ 4 int# ! power# . .` | a power, by the word's kind |
 | `[ dup + ]^3` | `[ dup . + . ] 3 int# ! power# .` | a quotation's power, a quotation |
 
-A capital marks only that the reader adds no dot, so `Snake.` is what
-`Snake .` is anywhere, the word of that name applied: march8 runs
-`Foo: [ 1 2 + ] ; Foo.` to 3, and `Open.`, with no word `Open`, is an
-error.
+A capital marks nothing (6.27): `Snake` is a name and applies, so
+`Foo: [ 1 2 + ] ; Foo` runs to 3, and a symbol is quoted, `Snake'`.
 
 ```
 fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;
@@ -536,7 +534,7 @@ Settled (Thomas, 2026-10-14), not built:
     compiling. So `?` puts the context into play at run time (Thomas).
     Test words lose the `?` from their names, `positive`, `zero`, `lt`,
     and the intermediate form keeps today's spelling, `positive?` being
-    `positive ?` as `Snake.` is `Snake .`. `.` still applies one, leaving
+    `positive ?` as `[ 2 + ].` is `[ 2 + ] .`. `.` still applies one, leaving
     a bool unchecked. This takes away march8's last rule of spelling, a
     name ending in `?`, which must leave a bool and, applied in a
     signature, is held as a guard, as if quoted. Built in march8
@@ -747,6 +745,50 @@ Settled (Thomas, 2026-10-15):
 26. **High Stack and Low Stack** (Thomas, to try). The surface March is
     written in, today the intermediate form of section 4, is High Stack;
     Symbolic Forth, the lowest form, is Low Stack.
+27. **A capital marks nothing** (Thomas, 2026-10-17). Words are
+    case-sensitive, so a capital need not mark a symbol: `Snake` is a name
+    like any and applies, and `Snake.` goes. A symbol is quoted where it
+    is used, `Snake'` or `'Snake'`, or given by a word that leaves it,
+    `Snake: Snake' ;`, as a Lisp keyword evaluates to itself. A namespace
+    of symbols, a state machine or facts and rules, imports the old rule
+    as a pattern word (25) whose capture is the word itself,
+    `/([A-Z][A-Za-z0-9]*)/: < sym -- sym > [ ] ;`, and there
+    `Socrates Is Human fact` reads without marks as before; a capitalized
+    word defined in it clashes with the pattern, as among facts it should.
+    In a signature a bare `Open` is applied and means what it leaves, its
+    symbol if it is such a word; written `Open'` it needs no definition,
+    and a reader tells it from a type by its spelling (TYPES.md 2.2). This
+    takes a rule of spelling out of the intermediate form. Built in
+    march8 (2026-10-17): `;` binds a symbol as it does code; the core's
+    symbols are words, `Stdin`, `File` and `case`'s styles;
+    examples/door.march defines its states and events, and
+    examples/syllogism.march reads its capitals by the pattern word.
+    `lower` does not yet write what a pattern word reads (25, open), so
+    the syllogism is not run lowered.
+28. **A symbol taken as text is a string** (Thomas, 2026-10-17). A symbol
+    is text until a type structures it (section 1), so a word that takes a
+    string takes a symbol and makes it one: `'hello' length` and
+    `hello' length` are both 5. It holds for a symbol known only at run
+    time, a `sym` input, as for one written. Values are not promoted
+    (TYPES.md 2.10) because precision is lost and families are made
+    ambiguous, and neither happens here: a symbol has no structure to
+    lose, and a family's `sym` clause, the exact one, is chosen first. A
+    symbol costs nothing either way: it is its name, interned, at run time
+    as a string is, so only its type changes. It goes one way: a string used as a symbol does
+    not become one, which would intern any text, and a symbol compared
+    with a string is compared as a string, so a fact read as text from a
+    file matches one written in code. Built in march8 (2026-10-17):
+    `'…'` reads as a symbol, a quote in it doubled, and is shown so when
+    it is no name, `'two words'`; a hole writes a symbol as its text.
+
+    The other way is explicit: `sym !` makes a symbol of a string, at run
+    time too (section 4, built 2026-10-13), and that is what dynamic
+    symbols are for (Thomas: "are dynamic symbols essential?"): data
+    choosing a clause by symbol, as the door's events read as text choose
+    its transitions as it runs, `"Unlock Open" words [ sym! ] map`. For
+    those the stage folds nothing; the clauses are tested at run time.
+    Text that chooses no clause can stay a string, already a cell as a
+    map's key, strings being interned.
 
 Open: a map form of `<| … |>`, `{| … |}` perhaps (section 3); and for
 pattern words (25), what a group that may not match leaves, refused for

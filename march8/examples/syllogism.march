@@ -1,7 +1,11 @@
 -- All men are mortal; Socrates is a man; so Socrates is mortal. Facts and
 -- a rule as clauses of one family. The rule applies the family again, so
 -- `is` is compiled as a word of its own, which tests its symbols as it
--- runs.
+-- runs. A capital marks nothing in March, so the program reads its
+-- capitalized names as symbols by a pattern word whose capture is the name
+-- itself (doc/design/SYMBOLIC-FORTH.md 25, 27).
+
+/([A-Z][A-Za-z0-9]*)/: < sym -- sym > [ ] ;
 
 is: < Socrates Human > [ drop drop true ] ;
 is: < Plato Human > [ drop drop true ] ;

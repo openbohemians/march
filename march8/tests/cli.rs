@@ -56,6 +56,11 @@ fn fmt_writes_symbols() {
         march8(&["fmt"], "---\nx_1 \"a \\leq\n---.\nx_1\n"),
         "---\nx_1 \"a ≤\n---.\nx₁\n"
     );
+    // A quoted symbol is written as it is, to its quote not doubled.
+    assert_eq!(
+        march8(&["fmt"], "'it''s \\times' \\times\n"),
+        "'it''s \\times' ×\n"
+    );
 }
 
 #[test]

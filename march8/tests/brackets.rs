@@ -22,8 +22,8 @@ fn show(pieces: &[&str]) -> String {
 
 #[test]
 fn a_symbol_chooses_a_clause() {
-    // `case`'s clauses are its styles: `< string Snake >`, a string and the
-    // symbol `Snake`, spelled the same outside a bracket.
+    // `case`'s clauses are its styles: `< string Snake' >`, a string and the
+    // symbol `Snake`, which the word `Snake` leaves (SYMBOLIC-FORTH.md 27).
     assert_eq!(
         show(&[
             "\"Hello World\" Snake case \"helloWorld\" Kebab case \"hello_world\" Camel case \
@@ -38,9 +38,9 @@ fn a_symbol_chooses_a_clause() {
         s.compile("\"hello_world\"").unwrap().0
     );
     // A style with no clause is no word, said where `case` is applied.
-    let e = s.eval("\"x\" Title case").unwrap_err();
+    let e = s.eval("\"x\" Title' case").unwrap_err();
     assert_eq!(e.kind, Kind::NoWord);
-    assert!(e.to_string().starts_with("1:11: no word `case`"), "{e}");
+    assert!(e.to_string().starts_with("1:12: no word `case`"), "{e}");
     // A type defined later by the symbol's name changes nothing: the clause
     // has the symbol, and so does the call.
     assert_eq!(
@@ -48,7 +48,7 @@ fn a_symbol_chooses_a_clause() {
         "<1> \"helloWorld\""
     );
     // Any family can choose by symbols, of one arity.
-    let w = "step: < i64 Up > [ drop 1 + ] ; step: < i64 Down > [ drop 1 -+ ] ;";
+    let w = "Up: Up' ; Down: Down' ; step: < i64 Up > [ drop 1 + ] ; step: < i64 Down > [ drop 1 -+ ] ;";
     assert_eq!(show(&[w, "5 Up step 5 Down step"]), "<2> 6 4");
 }
 

@@ -1,7 +1,11 @@
 -- A door as a state machine: a state and an event make the next state.
 -- The states and events are symbols. Known while compiling, the machine
 -- runs while compiling, and a transition the table lacks is a compile
--- error: `Locked Open door` is no word `door` for Locked Open.
+-- error: `Locked Open door` is no word `door` for Locked' Open'. Each
+-- symbol is a word that leaves it (doc/design/SYMBOLIC-FORTH.md 27).
+
+Closed: Closed' ;  Opened: Opened' ;  Locked: Locked' ;
+Open: Open' ;  Close: Close' ;  Lock: Lock' ;  Unlock: Unlock' ;
 
 door: < Closed Open > [ drop drop Opened ] ;
 door: < Opened Close > [ drop drop Closed ] ;

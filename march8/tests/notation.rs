@@ -38,13 +38,13 @@ fn error(src: &str) -> String {
 #[test]
 fn names_apply_and_symbols_are_spelled() {
     assert_eq!(show(&["3 dup +"]), "<1> 6");
-    // A symbol, capitalized or marked, chooses a clause; a word passed is
-    // its symbol.
+    // A symbol chooses a clause, marked or left by a word, `Snake`
+    // (SYMBOLIC-FORTH.md 27); a word passed is its symbol.
     assert_eq!(
         show(&["\"Hello World\" Snake case ( 1 2 3 ) +' reduce"]),
         "<2> \"hello_world\" 6"
     );
-    let step = "step: < i64 Up > [ drop 1 + ] ; step: < i64 Down > [ drop 1 -+ ] ;";
+    let step = "Up: Up' ; Down: Down' ; step: < i64 Up > [ drop 1 + ] ; step: < i64 Down > [ drop 1 -+ ] ;";
     assert_eq!(show(&[step, "5 Up step Down step Down step"]), "<1> 4");
 }
 
@@ -117,7 +117,9 @@ fn a_definition_names_first() {
     // the name below it.
     let e = error("xx: 5 ;");
     assert!(
-        e.contains("`;` takes a name, its signature if it has one, then a quotation or a type"),
+        e.contains(
+            "`;` takes a name, its signature if it has one, then a quotation, a type or a symbol"
+        ),
         "{e}"
     );
 }
@@ -145,10 +147,10 @@ fn a_bracket_is_a_value() {
 
 #[test]
 fn messages_name_symbols() {
-    let door = "door: < Closed Open > [ drop drop Opened ] ;";
-    let e = error(&format!("{door} Locked Open door"));
-    assert!(e.contains("no word `door` for Locked Open"), "{e}");
-    // A capital where a word was meant makes a symbol, and says so.
+    let door = "door: < Closed' Open' > [ drop drop Opened' ] ;";
+    let e = error(&format!("{door} Locked' Open' door"));
+    assert!(e.contains("no word `door` for Locked' Open'"), "{e}");
+    // A capital where a word was meant is no word, and says which was.
     let e = error("3 Dup +");
-    assert!(e.contains("(`Dup` is a symbol; the word is `dup`)"), "{e}");
+    assert!(e.contains("no word `Dup`; the word is `dup`"), "{e}");
 }

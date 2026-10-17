@@ -126,10 +126,10 @@ impl PartialEq for Test {
     }
 }
 
-/// Whether a name is spelled as one that does not apply: a symbol,
-/// capitalized, or a variable, one letter.
+/// Whether a name is spelled as one that does not apply: a variable, one
+/// letter.
 fn unapplied(n: &str) -> bool {
-    n.starts_with(char::is_uppercase) || read::is_variable(n)
+    read::is_variable(n)
 }
 
 /// Tokens as they are written, for a message: a name and its application
@@ -157,7 +157,11 @@ fn source_text(toks: &[Token]) -> String {
                 }
             }
             Tok::Name(s) if unapplied(s) => s.to_string(),
-            Tok::Name(s) => format!("{s}'"),
+            Tok::Name(s) => {
+                let mut out = String::new();
+                crate::show::symbol(s, &mut out);
+                out
+            }
             Tok::Int(n) => n.to_string(),
             Tok::Dec(d, s) => prims::show_dec(*d, *s),
             Tok::Ratio(t) => prims::show_ratio(t),
@@ -1106,7 +1110,7 @@ impl Stage {
                 };
                 return Err(self.err(Kind::NoWord, msg));
             }
-            return Err(self.err(Kind::NoWord, format!("no word `{name}`")));
+            return Err(self.err(Kind::NoWord, format!("no word `{name}`{}", self.typo(name))));
         };
         // A word that builds types and does something else too, `map` and
         // `or`, is a family: its constructor is the clause that takes types,
@@ -1533,7 +1537,8 @@ impl Stage {
     /// in two (section 3): `sq: [ dup * ] ;`, `fib: < n > [ … ] ;`,
     /// `sq: < i64 > < i64 > [ dup * ] ;` and `num: < i64 f64 or > ;`.
     fn semicolon(&mut self) -> Result<()> {
-        let usage = "`;` takes a name, its signature if it has one, then a quotation or a type";
+        let usage =
+            "`;` takes a name, its signature if it has one, then a quotation, a type or a symbol";
         let value = self.stack.pop().expect("matched");
         let mut sigs = Vec::new();
         let (name, named_at) = loop {
@@ -1590,6 +1595,14 @@ impl Stage {
                 let t = self.words[&n].ty.expect("a type");
                 return self.name_type(&name, t);
             }
+            // A symbol is data, which `;` binds as it does code: the word
+            // leaves it, `Human: Human' ;` (doc/design/SYMBOLIC-FORTH.md 18,
+            // 27).
+            Val::Name(n, pos) if value.ty == SYMBOL => Rc::from([Token {
+                tok: Tok::Name(n),
+                pos,
+                word: None,
+            }]),
             _ => return Err(self.err(Kind::Mismatch, usage)),
         };
         // Its names are looked up in its namespace, wherever it was written.
@@ -1776,7 +1789,7 @@ impl Stage {
             Val::Float(x) => format!("{x:?} (f64)"),
             Val::Str(s) => format!("{s:?}"),
             Val::Type(t) => format!("the type `{}`", self.types.name(*t)),
-            Val::Name(n, _) => format!("the symbol `{n}`{}", self.typo(n)),
+            Val::Name(n, _) => format!("the symbol `{n}`"),
             Val::Quote(_) => "a quotation".into(),
             Val::Many => format!("a run of {}", self.types.name(j.ty)),
             Val::Pinned(v) => self.describe(&Jdg {
@@ -1794,8 +1807,7 @@ impl Stage {
             return "no values".into();
         }
         let top = &self.stack[self.stack.len() - n..];
-        let mut out = top
-            .iter()
+        top.iter()
             .map(|j| match &j.val {
                 Val::Name(s, _) if j.ty == SYMBOL => {
                     let mut out = String::new();
@@ -1805,17 +1817,11 @@ impl Stage {
                 _ => self.types.name(j.ty),
             })
             .collect::<Vec<_>>()
-            .join(" ");
-        for j in top {
-            if let Val::Name(s, _) = &j.val {
-                out.push_str(&self.typo(s));
-            }
-        }
-        out
+            .join(" ")
     }
 
-    /// A note for a capitalized symbol that a word is spelled like: `Dup`,
-    /// written for `dup`, is a symbol and applies nothing.
+    /// A note for a capitalized name that a word is spelled like: `Dup`,
+    /// written for `dup`.
     fn typo(&self, n: &str) -> String {
         let mut cs = n.chars();
         let Some(c) = cs.next().filter(|c| c.is_uppercase()) else {
@@ -1823,7 +1829,7 @@ impl Stage {
         };
         let word: String = c.to_lowercase().chain(cs).collect();
         if self.words.contains_key(word.as_str()) {
-            format!(" (`{n}` is a symbol; the word is `{word}`)")
+            format!("; the word is `{word}`")
         } else {
             String::new()
         }
@@ -1877,6 +1883,13 @@ impl Stage {
         }
         if self.forgets(t, have) {
             self.stack[i].ty = t;
+            // A symbol is its name, interned, at run time as a string is, so
+            // only a known one changes.
+            if t == STRING
+                && let Val::Name(n, _) = &self.stack[i].val
+            {
+                self.stack[i].val = Val::Str(n.clone());
+            }
             return Ok(());
         }
         if self.types.is_literal(have) {
@@ -1929,6 +1942,9 @@ impl Stage {
                 (Term::Vec(n, e), Term::Vec(m, f)) => n == m && self.forgets(e, f),
                 (Term::Map(k, v), Term::Map(k2, v2)) => self.forgets(k, k2) && self.forgets(v, v2),
                 (Term::Base(Base::I64), Term::Base(Base::Bool)) => true,
+                // A symbol is text, its name, a string once taken as one
+                // (doc/design/SYMBOLIC-FORTH.md 28).
+                (Term::Base(Base::String), Term::Base(Base::Symbol)) => true,
                 _ => false,
             }
     }
@@ -2138,6 +2154,9 @@ impl Stage {
             }
             // A bool is an i64, 0 or 1: matched a little less well than one.
             (Term::Base(Base::I64), Term::Base(Base::Bool)) => Some(6),
+            // A symbol is a string where one is taken, matched a little less
+            // well than one (doc/design/SYMBOLIC-FORTH.md 28).
+            (Term::Base(Base::String), Term::Base(Base::Symbol)) => Some(6),
             (Term::Base(a), Term::Base(b)) => (a == b).then_some(8),
             (Term::Nat(a), Term::Nat(b)) => (a == b).then_some(8),
             (Term::Ary(e), Term::Ary(f)) => Some(8 + self.unify(e, f, env)?),

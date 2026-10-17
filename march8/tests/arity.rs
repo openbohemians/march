@@ -20,6 +20,7 @@ fn fails(src: &str) -> march8::Error {
 }
 
 const MOVE: &str = "
+Up: Up' ;  Down: Down' ;
 step: < Up > [ drop 1 ] ;
 step: < i64 Down > [ drop drop 2 ] ;
 ";
@@ -33,7 +34,7 @@ fn a_family_takes_as_many_values_as_its_clause() {
     // shorter can match.
     let e = fails(&format!("{MOVE} Down step"));
     assert_eq!(e.kind, Kind::NoWord);
-    assert!(e.msg.contains("no word `step` for Down"), "{e}");
+    assert!(e.msg.contains("no word `step` for Down'"), "{e}");
 }
 
 #[test]
@@ -45,10 +46,10 @@ add: < i64 > [ 10 * ] ;
     assert_eq!(show(src), "<2> 2 30");
     // Among clauses of one length, the most specific, as ever.
     let src = "
-name: < string Kind > [ drop drop \"long\" ] ;
+name: < string Kind' > [ drop drop \"long\" ] ;
 name: < i64 > [ drop \"i64\" ] ;
 name: < a > [ drop \"any\" ] ;
-\"x\" Kind name 7 name";
+\"x\" Kind' name 7 name";
     assert_eq!(show(src), r#"<3> "x" "any" "i64""#);
 }
 
@@ -88,8 +89,18 @@ fn a_shorter_clause_is_warned_of() {
     // Not where they cannot both match: other symbols, other types.
     let mut s = Session::new();
     s.eval(MOVE).unwrap();
-    s.eval("step: < string > [ drop 3 ] ;").unwrap();
+    s.eval("step: < f64 > [ drop 3 ] ;").unwrap();
     assert!(s.take_warnings().is_empty());
+    // A string they can, a symbol being one where a string is taken
+    // (doc/design/SYMBOLIC-FORTH.md 28).
+    s.eval("step: < string > [ drop 4 ] ;").unwrap();
+    let w = s.take_warnings();
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(
+        w[0].msg.contains("`< string >`, takes fewer values"),
+        "{}",
+        w[0]
+    );
 }
 
 #[test]
@@ -106,6 +117,7 @@ fn a_choice_at_run_time_must_leave_the_stack_as_deep() {
     // Clauses that agree in what they leave can be chosen between: the
     // value beneath the shorter's is left as it was, or replaced, a union.
     let src = "
+Left: Left' ;  Right: Right' ;
 turn: < Left > [ drop 1 ] ;
 turn: < i64 Right > [ drop 2 * 0 ] ;
 5 \"Right\" words first sym! turn";
@@ -120,8 +132,8 @@ fn reading_is_one_family() {
     let mut s = Session::new();
     s.eval("\"Cargo.toml\" File read lines first").unwrap();
     assert_eq!(s.show(), "<1> \"[package]\"");
-    let e = s.eval("\"x\" Close read").unwrap_err();
-    assert!(e.msg.contains("no word `read` for string Close"), "{e}");
+    let e = s.eval("\"x\" Close' read").unwrap_err();
+    assert!(e.msg.contains("no word `read` for string Close'"), "{e}");
 }
 
 #[test]

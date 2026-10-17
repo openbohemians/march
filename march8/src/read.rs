@@ -135,10 +135,14 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         }
         let word = r.word();
         if word.len() > 1 && word.starts_with('\'') {
-            // A raw string runs to the next `'`, spaces and all.
-            let s = r.raw(word, pos)?;
+            // A quoted symbol runs to the next `'` not doubled, spaces and
+            // all (doc/design/SYMBOLIC-FORTH.md 6.12): text until a type
+            // structures it, a string where one is taken (28).
+            r.at -= word.len();
+            r.col = pos.col;
+            let s = r.quoted(pos)?;
             out.push(Token {
-                tok: Tok::Str(s.into()),
+                tok: Tok::Name(s.into()),
                 pos,
                 word: None,
             });
@@ -280,16 +284,17 @@ fn is_name(w: &str) -> bool {
 }
 
 /// A name, and whether it applies (Thomas, 2026-10-12): a name applies, as
-/// in FORTH, everywhere, and a symbol or a variable is spelled as one. A
-/// capitalized name is a symbol, `Snake`; one lowercase letter is a
-/// variable, `a`; `name:` labels what follows, a name being defined or a
-/// key; and `name'` is a symbol, a word passed rather than applied, `+'`.
+/// in FORTH, everywhere, and a symbol or a variable is spelled as one. One
+/// lowercase letter is a variable, `a`; `name:` labels what follows, a name
+/// being defined or a key; and `name'` is a symbol, a word passed rather
+/// than applied, `+'`. A capital marks nothing (doc/design/SYMBOLIC-FORTH.md
+/// 27): `Snake` applies, and the symbol is `Snake'`.
 fn spelled(w: &str) -> (&str, bool) {
     let marked = |m: char| w.len() > m.len_utf8() && w.ends_with(m);
     if marked(':') || marked('\'') {
         (&w[..w.len() - 1], false)
     } else {
-        (w, !(w.starts_with(char::is_uppercase) || is_variable(w)))
+        (w, !is_variable(w))
     }
 }
 
@@ -612,27 +617,24 @@ impl<'a> Reader<'a> {
         }
         &self.src[start..self.at]
     }
-    fn raw(&mut self, word: &str, pos: Pos) -> Result<String> {
-        if let Some(end) = word[1..].find('\'') {
-            if end + 2 != word.len() {
-                return Err(Error::new(
-                    Kind::Syntax,
-                    Some(pos),
-                    "text runs on after a raw string's closing `'`",
-                ));
-            }
-            return Ok(word[1..=end].to_string());
-        }
-        let mut s = word[1..].to_string();
+    /// A quoted symbol, from its opening `'`: its text as it is, newlines
+    /// among it, a quote in it doubled, `'it''s'`.
+    fn quoted(&mut self, pos: Pos) -> Result<String> {
+        self.bump();
+        let mut s = String::new();
         loop {
             match self.bump() {
+                Some('\'') if self.peek() == Some('\'') => {
+                    self.bump();
+                    s.push('\'');
+                }
                 Some('\'') => break,
                 Some(c) => s.push(c),
                 None => {
                     return Err(Error::new(
                         Kind::Unfinished,
                         Some(pos),
-                        "a raw string is never closed",
+                        "a quoted symbol is never closed",
                     ));
                 }
             }
@@ -641,7 +643,7 @@ impl<'a> Reader<'a> {
             return Err(Error::new(
                 Kind::Syntax,
                 Some(pos),
-                "text runs on after a raw string's closing `'`",
+                "text runs on after a quoted symbol's closing `'`",
             ));
         }
         Ok(s)
@@ -778,6 +780,23 @@ pub fn lower(toks: &[Token]) -> String {
     out
 }
 
+/// A symbol in Symbolic Forth: its name, or quoted if it reads otherwise,
+/// `'two words'`.
+fn symbol(n: &str, out: &mut String) {
+    let none = Symbols::parse("").expect("an empty table");
+    match read_symbolic(n, &none).as_deref() {
+        Ok([t]) if t.tok == Tok::Name(n.into()) && !n.contains('\'') => out.push_str(n),
+        _ => quote(n, out),
+    }
+}
+
+/// Text as a quoted symbol, a quote in it doubled: `'it''s'`.
+pub fn quote(n: &str, out: &mut String) {
+    out.push('\'');
+    out.push_str(&n.replace('\'', "''"));
+    out.push('\'');
+}
+
 /// One token in Symbolic Forth.
 fn lowered(tok: &Tok) -> String {
     let text = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"");
@@ -786,7 +805,11 @@ fn lowered(tok: &Tok) -> String {
         Tok::Dec(d, s) => crate::prims::show_dec(*d, *s),
         Tok::Ratio(t) => crate::prims::show_ratio(t),
         Tok::Str(s) => format!("\"{}\"", text(s)),
-        Tok::Name(n) => n.to_string(),
+        Tok::Name(n) => {
+            let mut s = String::new();
+            symbol(n, &mut s);
+            s
+        }
         Tok::Apply => ".".into(),
         Tok::Test => "?".into(),
         Tok::Open(b) | Tok::Close(b) => (*b as char).to_string(),
@@ -845,8 +868,8 @@ mod tests {
         // A name's trailing subscript and superscript digits are its `_` and
         // `^` and digits (doc/design/SYMBOLIC-FORTH.md 23), escaped or not,
         // and a width and a power are spellings, lowered (21, 22), on a word
-        // applied or passed, and on a quotation; a label and a symbol keep
-        // their names.
+        // applied or passed, and on a quotation; a label keeps its name, and
+        // a capital marks nothing, so `Snake₂` is `Snake` two wide (27).
         let n = |s: &str| Tok::Name(s.into());
         let spelled = |w: &str, k: i128, by: &str| [n(w), Tok::Int(k), n(by), Tok::Apply];
         let mut want = Vec::new();
@@ -861,7 +884,9 @@ mod tests {
         want.extend(spelled("log", 2, "width#"));
         want.extend([Tok::Open(b'['), n("q"), Tok::Close(b']')]);
         want.extend([Tok::Int(3), n("power#"), Tok::Apply]);
-        want.extend([n("x_1"), n("Snake_2")]);
+        want.push(n("x_1"));
+        want.extend(spelled("Snake", 2, "width#"));
+        want.push(Tok::Apply);
         assert_eq!(toks("dup₂ dup\\_2 +⁴ dup₂³ log₂' [ q ]³ x₁: Snake₂"), want);
     }
 
@@ -888,7 +913,7 @@ mod tests {
                 w("log_2", 4, false),
                 w("dup_2^3", 8, true),
                 w("12kg", 1, false),
-                w("Snake", 1, false),
+                w("Snake", 2, true),
             ]
         );
     }
@@ -957,14 +982,17 @@ mod tests {
 
     #[test]
     fn names_apply_and_symbols_are_spelled() {
-        // A name applies, in a bracket too; a capitalized one is a symbol,
-        // as are `name:`, a label, and `name'`; one lowercase letter is a
-        // variable; and `name?` is tested, not applied.
+        // A name applies, in a bracket too, a capitalized one as any
+        // (doc/design/SYMBOLIC-FORTH.md 27); `name:`, a label, and `name'`
+        // are symbols; one lowercase letter is a variable; and `name?` is
+        // tested, not applied.
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("dup Snake fib: +' < string Camel a ary odd? > σ'"),
+            toks("dup Snake Snake' fib: +' < string Camel' a ary odd? > σ'"),
             [
                 n("dup"),
+                Tok::Apply,
+                n("Snake"),
                 Tok::Apply,
                 n("Snake"),
                 n("fib"),
@@ -999,7 +1027,7 @@ mod tests {
     fn dots_at_the_end_apply_once_more() {
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("1.5. Snake. vec.. [ ]. .."),
+            toks("1.5. Snake'. vec.. [ ]. .."),
             [
                 Tok::Dec(15, 1),
                 Tok::Apply,
@@ -1069,11 +1097,14 @@ mod tests {
 
     #[test]
     fn strings_and_escapes() {
+        // A string's escapes are decoded; a quoted symbol has none, and
+        // doubles a quote in it (doc/design/SYMBOLIC-FORTH.md 6.12).
+        assert_eq!(toks("'it''s'"), [Tok::Name("it's".into())]);
         assert_eq!(
             toks(r#""a b\n;\"\\" 'C:\new' "\#x2603;\times;""#),
             [
                 Tok::Str("a b\n\"\\".into()),
-                Tok::Str("C:\\new".into()),
+                Tok::Name("C:\\new".into()),
                 Tok::Str("☃×".into()),
             ]
         );

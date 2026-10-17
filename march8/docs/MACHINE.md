@@ -48,7 +48,7 @@ every name a symbol until `.` applies it, a type given by applying its
 word, `i64 .`, and converting `!`, a convenience for `convert .`, the word
 `convert` applied, which takes a type or a type's symbol: `2 i64 !`. March8 reads the
 intermediate form and lowers it by spelling alone: `fib` is `fib .`,
-`Snake` and `+'` are symbols, and `2 i64!` is `2 i64 . !`. `march8 lower`
+`Snake'` and `+'` are symbols, and `2 i64!` is `2 i64 . !`. `march8 lower`
 writes any March in Symbolic Forth, and `--symbolic` reads it; the litmus
 test, `tests/symbolic.rs`, lowers the core vocabulary and the examples,
 reads them back to the same tokens, and runs them to the same results.
@@ -58,12 +58,13 @@ reads them back to the same tokens, and runs them to the same results.
 | `1`, `-2` | an integer literal |
 | `1.10` | a decimal literal: exact digits until its type is known |
 | `1:2`, `12:30:15` | a ratio literal: whole numbers between colons, a sign only in front, kept as written (Thomas, 2026-10-13). Of two terms it is a number, `1:2` one half; of more, it is for what takes it to read |
-| `"text"`, `'raw'` | a string, with march7's escapes (`\n;`, `\#x2603;`, `\times;`) and holes (`\[ code ]`, `\_`) |
+| `"text"` | a string, with march7's escapes (`\n;`, `\#x2603;`, `\times;`) and holes (`\[ code ]`, `\_`) |
+| `'text'` | a quoted symbol: its text as it is, spaces and newlines among it, a quote in it doubled, `'it''s'` (doc/design/SYMBOLIC-FORTH.md 6.12); a string wherever one is taken (6.28) |
 | `name` | a name, applied: a primitive, a family, a constructor, or a type's name, which gives the type |
-| `Name` | a capitalized name: a symbol, a value that does nothing until applied |
+| `Name` | a capitalized name, a name like any: it applies (doc/design/SYMBOLIC-FORTH.md 6.27) |
 | `a` | one lowercase letter: a variable, a type variable in a bracket; it names no word |
 | `name:` | a label: the symbol `name`, written where a name is defined or a key given |
-| `name'` | the symbol `name`, for a word passed rather than applied, `+' reduce`, or a script without capitals |
+| `name'` | the symbol `name`, for a word passed rather than applied, `+' reduce`, or any symbol, `Snake'` |
 | `\name` | a symbol table entry, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
 | `.` | applies the value on top, a word or a quotation; each dot at the end of a word applies once more: `[ 2 + ].` |
 | `!` | converts the value below by the type on top, `convert` applied: `2 i64!`, `x y < i64 f64 > !` (Thomas, 2026-10-13) |
@@ -74,8 +75,9 @@ reads them back to the same tokens, and runs them to the same results.
 | `< … >` | a bracket: code whose values are a type or a signature, a comprehension of types |
 
 **Literals, symbols and words** (Thomas, 2026-10-12). Literals spell
-themselves. A symbol is a pure literal, a name with no structure, and is
-capitalized: `"Hello World" Snake case`, `Closed Open door`. Everything else
+themselves. A symbol is a pure literal, a name with no structure, written
+with a prime, `Closed'`, or left by a word, as the core's `Snake: Snake' ;`
+leaves it for `"Hello World" Snake case`. Everything else
 is structure, and structure is built by words, types included: `i64` is a
 word giving the type, as `64 int` might build it one day, and `ary`, `vec`,
 `map` and `or` build types from types, `string i64 map`. So types and words
@@ -83,10 +85,21 @@ are one namespace, not two spelled alike, and a name reads the same
 everywhere. (For a day a bracket read names as types and code read them as
 words, the bracket deciding which a name was; and capitals cannot serve
 types and symbols both, since in a bracket one would be taken for the
-other.) A capital marks the rarer thing: code applies words far more often
-than it passes symbols, and symbols are what a state machine's states, a
-style for `case` or a logic program's atoms are made of, so they read
-without marks.
+other.) Until 2026-10-17 a capital marked a symbol, the rarer thing, since
+code applies words far more often than it passes symbols. Now a capital
+marks nothing (Thomas): words are case-sensitive, so a module defines the
+symbols it needs as words that leave them, and they resolve as words do,
+by namespace and import. A program made of symbols, a logic program's
+atoms, reads its capitals as symbols by a pattern word whose capture is the
+name, `/([A-Z][A-Za-z0-9]*)/: < sym -- sym > [ ] ;`, as
+examples/syllogism.march does.
+
+A symbol is text until a type structures it, so a word that takes a string
+takes a symbol, known while compiling or only at run time: `hello' length`
+is 5, a symbol and a string compare as strings, and a hole writes a symbol
+as its text (doc/design/SYMBOLIC-FORTH.md 6.28). The exact clause comes
+first, `< sym >` before `< string >`. It goes one way: a string becomes a
+symbol only by `sym!`.
 
 `map` and `or` are families (Thomas, 2026-10-16): each builds a type
 from types, its constructor the clause whose signature is
@@ -291,8 +304,8 @@ A family's clauses need not take as many values as each other (Thomas,
 TYPES.md 3.13):
 
 ```
-read: < Stdin > [ drop stdin-read ] ;
-read: < string File > [ drop file-read ] ;
+read: < Stdin' > [ drop stdin-read ] ;
+read: < string File' > [ drop file-read ] ;
 
 Stdin read                         standard input's text
 "data.csv" File read               a file's
@@ -383,7 +396,7 @@ fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;
   that type: `< 0 >` takes an i64, an f64 or money, and `< 0.5 >` an f64.
   The input keeps its own type. `< 0 i64! >` takes an i64 only, as `0 i64!`
   is an i64 in code.
-- **Strings and symbols too:** `< "quit" >`, `< Closed Open >`. A symbol
+- **Strings and symbols too:** `< "quit" >`, `< Closed' Open' >`. A symbol
   at run time is its name, an interned string, so the test is one `eq`:
   a state machine's table is chosen from while compiling on known states,
   and tested as it runs on states read from data, `"Open" sym!`.
@@ -595,8 +608,9 @@ f: [ "<\[ _ 1 + ]>" ] ;     5 f is "<6>", 1.5 f is "<2.5>"
   word would start with the hole's own brackets closed, so text resumes right
   after it (`"\[ n ]apples"`), and strings nest.
 - **The stage** pushes each piece: the text, and each hole's value written
-  in by `>string`, a string's own text or any other value as `show` writes
-  it; and joins them in one buffer, `text-join`, not a chain of `concat`s.
+  in by `>string`, a string's own text, a symbol's, or any other value as
+  `show` writes it; and joins them in one buffer, `text-join`, not a chain
+  of `concat`s.
   Pieces known while compiling join then, so on known values the string is
   one constant. A hole leaves one value and reaches only its string's
   arguments and what it makes.
@@ -822,8 +836,9 @@ filter starts `Stdin read lines`; `"notes.txt" File embed` a file's text
 while compiling, so what follows folds on it (TYPES.md 2.15). The
 primitives beneath are `stdin-read`, `file-read` and `file-embed`; with
 namespaces they become `io.file.read` and its kin (TYPES.md 3.12). `case` puts a string in a style named by a
-symbol: `"Hello World" Snake case` is "hello_world", and `lower`, `upper`,
-`kebab`, `camel` and `pascal` the others, chosen while compiling.
+symbol: `"Hello World" Snake case` is "hello_world", and `Lower`, `Upper`,
+`Kebab`, `Camel` and `Pascal` the others, each a word that leaves its
+symbol, chosen while compiling.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`, `ratio#/`) exist only at

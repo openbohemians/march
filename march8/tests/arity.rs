@@ -127,20 +127,10 @@ turn: < i64 Right > [ drop 2 * 0 ] ;
 }
 
 #[test]
-fn reading_is_one_family() {
-    // `Stdin read` takes one value, `"path" File read` two (TYPES.md 3.13).
-    let mut s = Session::new();
-    s.eval("\"Cargo.toml\" File read lines first").unwrap();
-    assert_eq!(s.show(), "<1> \"[package]\"");
-    let e = s.eval("\"x\" Close' read").unwrap_err();
-    assert!(e.msg.contains("no word `read` for string Close'"), "{e}");
-}
-
-#[test]
 fn a_clause_that_needs_known_values_is_checked_where_applied() {
-    // `embed` reads its file while compiling, so its clause cannot be
-    // compiled on a path known only at run time when it is defined.
-    let e = fails("\"Cargo.toml\" words first File embed");
+    // `io.file.embed` reads its file while compiling, so its clause cannot
+    // be compiled on a path known only at run time when it is defined.
+    let e = fails("\"Cargo.toml\" words first io.file.embed");
     assert_eq!(e.kind, Kind::Unknown);
     assert!(e.msg.contains("its file must be known then"), "{e}");
 }

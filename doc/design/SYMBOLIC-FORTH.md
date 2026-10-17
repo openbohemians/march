@@ -759,8 +759,9 @@ Settled (Thomas, 2026-10-15):
     symbol if it is such a word; written `Open'` it needs no definition,
     and a reader tells it from a type by its spelling (TYPES.md 2.2). This
     takes a rule of spelling out of the intermediate form. Built in
-    march8 (2026-10-17): `;` binds a symbol as it does code; the core's
-    symbols are words, `Stdin`, `File` and `case`'s styles;
+    march8 (2026-10-17): `;` binds a symbol as it does code; the core
+    defines none, reading and case styles being words of namespaces,
+    `io.file.read` and `case.snake` (TYPES.md 3.12);
     examples/door.march defines its states and events, and
     examples/syllogism.march reads its capitals by the pattern word.
     `lower` does not yet write what a pattern word reads (25, open), so

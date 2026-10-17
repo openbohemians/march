@@ -328,12 +328,12 @@ fn text_words() {
         "<3> ( \"a\" \"b\" \"\" \"c\" ) ( \"a\" \"b\" \"c\" ) ( \"line 1\" \"line 2\" )"
     );
     assert_eq!(
-        show(&["\"  the  cat sat \" words \"Hello\" lower ( \"a\" \"b\" ) upper"]),
+        show(&["\"  the  cat sat \" words \"Hello\" case.lower ( \"a\" \"b\" ) case.upper"]),
         "<3> ( \"the\" \"cat\" \"sat\" ) \"hello\" ( \"A\" \"B\" )"
     );
     // At run time too.
     assert_eq!(
-        show(&["\"x y\"", "words \"ÉTÉ\"", "lower"]),
+        show(&["\"x y\"", "words \"ÉTÉ\"", "case.lower"]),
         "<2> ( \"x\" \"y\" ) \"été\""
     );
 }

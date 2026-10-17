@@ -118,17 +118,13 @@ Closed Open door";
 #[test]
 fn a_capital_marks_nothing() {
     // A capitalized name is a word like any (doc/design/SYMBOLIC-FORTH.md
-    // 27): the core's `Snake` leaves its symbol, and a name that is no word
-    // says which word it is spelled like.
+    // 27), and one that is no word says which word it is spelled like.
     let plain = |src: &str| {
         let mut s = Session::new();
         s.eval(src).unwrap_or_else(|e| panic!("{src}: {e}"));
         s.show()
     };
-    assert_eq!(
-        plain("Snake \"Hello World\" Snake case"),
-        "<2> Snake' \"hello_world\""
-    );
+    assert_eq!(plain("Twice: [ 2 * ] ; 3 Twice"), "<1> 6");
     let e = Session::new().eval("3 Dup").unwrap_err();
     assert_eq!(e.kind, Kind::NoWord);
     assert!(e.msg.contains("no word `Dup`; the word is `dup`"), "{e}");
@@ -155,7 +151,7 @@ fn a_symbol_taken_as_text_is_a_string() {
     // string takes it (doc/design/SYMBOLIC-FORTH.md 28), known while
     // compiling or only at run time.
     assert_eq!(
-        show("hello' length 'two words' upper"),
+        show("hello' length 'two words' case.upper"),
         "<2> 5 < i64 > \"TWO WORDS\" < string >"
     );
     assert_eq!(

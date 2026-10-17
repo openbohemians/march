@@ -22,30 +22,35 @@ fn show(pieces: &[&str]) -> String {
 
 #[test]
 fn a_symbol_chooses_a_clause() {
-    // `case`'s clauses are its styles: `< string Snake' >`, a string and the
-    // symbol `Snake`, which the word `Snake` leaves (SYMBOLIC-FORTH.md 27).
+    // A family's clauses can be its styles: `< string Snake >`, a string and
+    // the symbol `Snake`, which the word `Snake` leaves (SYMBOLIC-FORTH.md
+    // 27).
+    let style = "Snake: Snake' ; Kebab: Kebab' ; \
+                 style: < string Snake -- string > [ drop case.snake ] ; \
+                 style: < string Kebab -- string > [ drop case.kebab ] ;";
     assert_eq!(
         show(&[
-            "\"Hello World\" Snake case \"helloWorld\" Kebab case \"hello_world\" Camel case \
-             \"HTTPServer error\" Pascal case \"Hi\" Upper case"
+            style,
+            "\"Hello World\" Snake style \"helloWorld\" Kebab style"
         ]),
-        "<5> \"hello_world\" \"hello-world\" \"helloWorld\" \"HttpServerError\" \"HI\""
+        "<2> \"hello_world\" \"hello-world\""
     );
-    // Chosen while compiling: a known string's case is a constant.
+    // Chosen while compiling: a known string's style is a constant.
     let mut s = Session::new();
+    s.eval(style).unwrap();
     assert_eq!(
-        s.compile("\"Hello World\" Snake case").unwrap().0,
+        s.compile("\"Hello World\" Snake style").unwrap().0,
         s.compile("\"hello_world\"").unwrap().0
     );
-    // A style with no clause is no word, said where `case` is applied.
-    let e = s.eval("\"x\" Title' case").unwrap_err();
+    // A style with no clause is no word, said where `style` is applied.
+    let e = s.eval("\"x\" Title' style").unwrap_err();
     assert_eq!(e.kind, Kind::NoWord);
-    assert!(e.to_string().starts_with("1:12: no word `case`"), "{e}");
+    assert!(e.to_string().starts_with("1:12: no word `style`"), "{e}");
     // A type defined later by the symbol's name changes nothing: the clause
     // has the symbol, and so does the call.
     assert_eq!(
-        show(&["camel: < i64 > ;", "\"hello world\" Camel case"]),
-        "<1> \"helloWorld\""
+        show(&[style, "snake: < i64 > ;", "\"hello world\" Snake style"]),
+        "<1> \"hello_world\""
     );
     // Any family can choose by symbols, of one arity.
     let w = "Up: Up' ; Down: Down' ; step: < i64 Up > [ drop 1 + ] ; step: < i64 Down > [ drop 1 -+ ] ;";

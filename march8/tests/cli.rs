@@ -120,12 +120,12 @@ fn scan_gives_the_running_reductions() {
 
 #[test]
 fn stdin_read_reads_standard_input() {
-    // `Stdin read` is all of standard input, as a string.
+    // `io.stdin.read` is all of standard input, as a string.
     let out = march8(
-        &["--eval", "Stdin read lines length"],
+        &["--eval", "io.stdin.read lines length"],
         "apple,3\npear,5\nfig,1\n",
     );
     assert_eq!(out, "<1> 3\n");
-    let out = march8(&["--eval", "Stdin read words"], "one two\nthree\n");
+    let out = march8(&["--eval", "io.stdin.read words"], "one two\nthree\n");
     assert_eq!(out, "<1> ( \"one\" \"two\" \"three\" )\n");
 }

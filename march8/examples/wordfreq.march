@@ -1,8 +1,8 @@
 -- Word frequencies: march8's first real program (2026-10-09). Run it with
 -- `march8 examples/wordfreq.march`.
 
--- The words come from core's `words`, split at white space, and `lower`,
--- so "The" and "the" count together. (The first version split the text
+-- The words come from core's `words`, split at white space, and
+-- `case.lower`, so "The" and "the" count together. (The first version split the text
 -- itself, by value patterns, recursion and a comprehension: commit f7ce8a0.)
 
 -- Counting: a word's count so far is `i64 nil or`, nil before its first.
@@ -23,4 +23,4 @@ with-count: < string i64 map i64 > [ over keys sort [ show-if ] each drop drop ]
 ranked: < string i64 map > [ dup values sort last range reverse [ over swap with-count ] each drop ] ;
 
 "The cat and the hat
-and the bat sat on the mat" words lower frequencies dup report "--\n;" write ranked
+and the bat sat on the mat" words case.lower frequencies dup report "--\n;" write ranked

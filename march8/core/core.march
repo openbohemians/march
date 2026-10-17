@@ -379,48 +379,35 @@ take: < a ary string or i64 > [ over length min 1 swap slice ] ;
 skip: < a ary string or i64 negative? > [ - over length min over length swap -+ 1 swap slice ] ;
 skip: < a ary string or i64 > [ over length min 1 + over length slice ] ;
 
--- Reading: `Stdin read` is standard input's text, and `"data.csv" File
--- read` a file's, when the program runs, an effect; `"notes.txt" File
--- embed` a file's text while compiling, so that what follows can fold on
--- it, as a macro would. Paths are from where march8 runs. The clauses take
--- one value or two, and the shortest that matches wins (TYPES.md 3.13).
--- With namespaces the primitives become `io.file.read` and the like
--- (TYPES.md 3.12). `Stdin` and `File` are words that leave their symbols
--- (doc/design/SYMBOLIC-FORTH.md 27).
+-- Reading, in the core's first namespaces (TYPES.md 3.12): `io.stdin.read`
+-- is standard input's text, and `"data.csv" io.file.read` a file's, when
+-- the program runs, an effect; `"notes.txt" io.file.embed` a file's text
+-- while compiling, so that what follows can fold on it, as a macro would.
+-- Paths are from where march8 runs.
 
-Stdin: Stdin' ;
-File: File' ;
-read: < Stdin' > [ drop stdin-read ] ;
-read: < string File' > [ drop file-read ] ;
-embed: < string File' > [ drop file-embed ] ;
+io.stdin.read: < -- string > [ stdin-read ] ;
+io.file.read: < string -- string > [ file-read ] ;
+io.file.embed: < string -- string > [ file-embed ] ;
 
 -- Text: `split` at each separator (between characters, for ""), `lines`,
--- and `words` at runs of white space, as Haskell's are; `lower` and `upper`,
--- element by element over an array of strings.
+-- and `words` at runs of white space, as Haskell's are.
 split: < string string -- string ary > [ string-split ] ;
 lines: < string -- string ary > [ string-lines ] ;
 words: < string -- string ary > [ string-words ] ;
-lower: < string -- string > [ string-lower ] ;
-upper: < string -- string > [ string-upper ] ;
-lower: < string ary > [ [ lower ] map ] ;
-upper: < string ary > [ [ upper ] map ] ;
 
--- `case`: a string in a case style, chosen by a symbol (Thomas, 2026-10-09):
--- `"Hello World" Snake case` is "hello_world". Each style is a symbol, and
--- a word that leaves it (doc/design/SYMBOLIC-FORTH.md 27), so the clauses
--- are the styles, and anyone may add one.
-Lower: Lower' ;
-Upper: Upper' ;
-Snake: Snake' ;
-Kebab: Kebab' ;
-Camel: Camel' ;
-Pascal: Pascal' ;
-case: < string Lower' -- string > [ drop string-lower ] ;
-case: < string Upper' -- string > [ drop string-upper ] ;
-case: < string Snake' -- string > [ drop string-snake ] ;
-case: < string Kebab' -- string > [ drop string-kebab ] ;
-case: < string Camel' -- string > [ drop string-camel ] ;
-case: < string Pascal' -- string > [ drop string-pascal ] ;
+-- `case`: a string in a case style (Thomas, 2026-10-09), each a word of
+-- the namespace, so anyone may add one: `"Hello World" case.snake` is
+-- "hello_world", and imported, `case.*` or `case.snake` alone, it is
+-- `snake`. `lower` and `upper` go element by element over an array of
+-- strings too.
+case.lower: < string -- string > [ string-lower ] ;
+case.upper: < string -- string > [ string-upper ] ;
+case.lower: < string ary > [ [ lower ] map ] ;
+case.upper: < string ary > [ [ upper ] map ] ;
+case.snake: < string -- string > [ string-snake ] ;
+case.kebab: < string -- string > [ string-kebab ] ;
+case.camel: < string -- string > [ string-camel ] ;
+case.pascal: < string -- string > [ string-pascal ] ;
 
 -- `thru`: the integers from a to b, both included, counting down when a is
 -- the larger (SYMBOL's `..`); `‥`, two dots as one character, is its glyph.

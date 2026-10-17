@@ -76,8 +76,8 @@ reads them back to the same tokens, and runs them to the same results.
 
 **Literals, symbols and words** (Thomas, 2026-10-12). Literals spell
 themselves. A symbol is a pure literal, a name with no structure, written
-with a prime, `Closed'`, or left by a word, as the core's `Snake: Snake' ;`
-leaves it for `"Hello World" Snake case`. Everything else
+with a prime, `Closed'`, or left by a word a module defines for it,
+`Human: Human' ;`. Everything else
 is structure, and structure is built by words, types included: `i64` is a
 word giving the type, as `64 int` might build it one day, and `ary`, `vec`,
 `map` and `or` build types from types, `string i64 map`. So types and words
@@ -304,12 +304,15 @@ A family's clauses need not take as many values as each other (Thomas,
 TYPES.md 3.13):
 
 ```
-read: < Stdin' > [ drop stdin-read ] ;
-read: < string File' > [ drop file-read ] ;
+step: < Up' > [ drop 1 ] ;
+step: < i64 Down' > [ drop drop 2 ] ;
 
-Stdin read                         standard input's text
-"data.csv" File read               a file's
+5 Up' step                         5 1: the shorter takes one value
+5 Down' step                       2
 ```
+
+(The first such family was `read`, `Stdin read` beside `"data.csv" File
+read`; reading is by namespace now, `io.stdin.read` and `io.file.read`.)
 
 - **When clauses of different lengths match, the shortest wins,** the most
   specific among those. A word reaches as little of the stack as it can,
@@ -320,7 +323,7 @@ Stdin read                         standard input's text
   for `2 3`, leaving 2.
 - **Guarded clauses are tried shortest first,** each length in the order
   defined, so a shorter clause whose guard fails gives way to a longer:
-  `"x" File read` tests `Stdin` against File, known now, and drops it.
+  `5 Down' step` tests `Up'` against Down', known now, and drops it.
 - **An application takes as many values as the longest clause that may be
   chosen,** which is what an instance of a recursive family takes; a
   clause's body still cannot reach below its own signature.
@@ -328,7 +331,7 @@ Stdin read                         standard input's text
   the stack as deep,** whichever is chosen; the values beneath the shorter
   clause's are left as they were, and merge with what the longer leaves
   there, as a union if they differ. Otherwise it is an error: ``clauses
-  of `read` taking 1 and 2 values are chosen between at run time``.
+  of `step` taking 1 and 2 values are chosen between at run time``.
 - **Their effect,** for a guard's arity, is one only if all agree in what
   they add to the stack: the longest's inputs, and as many more or fewer
   outputs.
@@ -822,23 +825,23 @@ from a to b, both included, counting down when a is the larger, its glyph
 `sum` and `prod`, with their glyphs `∑` and `∏`, a fold from 0 and from 1;
 and `⊤` and `⊥` for `true` and `false`. Text: `split` at a separator
 (between characters, for ""), `lines`, `words` at white space, as
-Haskell's are, and `lower` and `upper`, element by element over arrays of
-strings. A string converts to the number it writes, `"42" i64!`, by
+Haskell's are. A string converts to the number it writes, `"42" i64!`, by
 clauses for strings under `i64` and `f64`: `i64 nil or`, the value tagged
 at run time or nil, and on a known string the value or nil itself. An i64
 converts to an f64, `12 i64! f64!`; an f64 to an i64 only by narrowing,
 which says how it rounds. `le?`, `ge?` and `neq?`, with
 `≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that
-NaN is at most and at least nothing. Reading is a family whose clauses
-take one value or two (above): `Stdin read` is standard input's text and
-`"data.csv" File read` a file's, when the program runs, an effect, so a
-filter starts `Stdin read lines`; `"notes.txt" File embed` a file's text
-while compiling, so what follows folds on it (TYPES.md 2.15). The
-primitives beneath are `stdin-read`, `file-read` and `file-embed`; with
-namespaces they become `io.file.read` and its kin (TYPES.md 3.12). `case` puts a string in a style named by a
-symbol: `"Hello World" Snake case` is "hello_world", and `Lower`, `Upper`,
-`Kebab`, `Camel` and `Pascal` the others, each a word that leaves its
-symbol, chosen while compiling.
+NaN is at most and at least nothing. Reading is by the core's first
+namespaces (TYPES.md 3.12): `io.stdin.read` is standard input's text and
+`"data.csv" io.file.read` a file's, when the program runs, an effect, so a
+filter starts `io.stdin.read lines`; `"notes.txt" io.file.embed` a file's
+text while compiling, so what follows folds on it (TYPES.md 2.15). The
+primitives beneath are `stdin-read`, `file-read` and `file-embed`. The
+`case` namespace puts a string in a style: `case.lower` and `case.upper`,
+element by element over arrays of strings too, and `"Hello World"
+case.snake` is "hello_world", with `case.kebab`, `case.camel` and
+`case.pascal`; imported, all of them or one alone, they are `lower`,
+`snake` and the rest, and anyone may add one.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
 operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`, `ratio#/`) exist only at

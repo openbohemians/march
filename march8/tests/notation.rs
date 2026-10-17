@@ -38,10 +38,10 @@ fn error(src: &str) -> String {
 #[test]
 fn names_apply_and_symbols_are_spelled() {
     assert_eq!(show(&["3 dup +"]), "<1> 6");
-    // A symbol chooses a clause, marked or left by a word, `Snake`
-    // (SYMBOLIC-FORTH.md 27); a word passed is its symbol.
+    // A path names a word, and a word passed is its symbol; a symbol,
+    // marked or left by a word (SYMBOLIC-FORTH.md 27), chooses a clause.
     assert_eq!(
-        show(&["\"Hello World\" Snake case ( 1 2 3 ) +' reduce"]),
+        show(&["\"Hello World\" case.snake ( 1 2 3 ) +' reduce"]),
         "<2> \"hello_world\" 6"
     );
     let step = "Up: Up' ; Down: Down' ; step: < i64 Up > [ drop 1 + ] ; step: < i64 Down > [ drop 1 -+ ] ;";

@@ -117,3 +117,30 @@ fn reaching_what_is_not_exported_is_a_severe_warning() {
         .unwrap();
     assert!(s.take_warnings().is_empty());
 }
+
+#[test]
+fn the_core_names_its_words_by_namespace() {
+    // Reading and case styles are words of the core's namespaces (TYPES.md
+    // 3.12), not families chosen by symbols.
+    assert_eq!(
+        show("\"Cargo.toml\" io.file.read lines first \"Hello World\" case.snake"),
+        "<2> \"[package]\" \"hello_world\""
+    );
+    assert_eq!(
+        show(
+            "\"helloWorld\" case.kebab \"hello_world\" case.camel \"HTTPServer error\" case.pascal"
+        ),
+        "<3> \"hello-world\" \"helloWorld\" \"HttpServerError\""
+    );
+    // Imported, a style is its last name, and anyone may add one.
+    assert_eq!(
+        show("case.shout: [ upper \"!\" concat ] ; import#: <| case.* |> ; \"hi\" snake shout"),
+        "<1> \"HI!\""
+    );
+    // One alone, too.
+    assert_eq!(
+        show("import#: <| case.lower |> ; \"Hi\" lower ( \"A\" ) lower"),
+        "<2> \"hi\" ( \"a\" )"
+    );
+    assert_eq!(error("\"Hi\" lower").0, Kind::NoWord);
+}

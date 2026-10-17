@@ -17,4 +17,4 @@ report: < string ary numeric? > [ dup first swap numbers dup sum swap mean
   "\_: total \_, average \_\n;" write ] ;
 report: < string ary > [ drop ] ;
 
-Stdin read lines [ "," split ] map transpose [ report ] each
+io.stdin.read lines [ "," split ] map transpose [ report ] each

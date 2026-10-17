@@ -617,15 +617,24 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     march2 had (`<` imports, `>` exports, a namespace pushed on the stack:
     doc/lineage/march2.md). Collisions between imports are the programmer's
     to settle, by a longer prefix, as in Elixir. Symbols stay one global
-    namespace (2.2). Then `file-read` and its kin move in (they are plain
-    words for now; a `read` chosen by a symbol, `"data.csv" File read`,
-    was tried and left, its clauses differing in arity). Settled for the
+    namespace (2.2). Then `file-read` and its kin move in. Built in march8
+    (2026-10-17), the core's first namespaces: `io.stdin.read`,
+    `io.file.read` and `io.file.embed`, and `case.lower`, `case.upper`,
+    `case.snake`, `case.kebab`, `case.camel` and `case.pascal`, imported,
+    all or one alone, as `lower` and the rest (Thomas). They
+    replace a `read` and a `case` chosen by symbols, `"data.csv" File
+    read` and `"Hello World" Snake case`: once a capital marked nothing
+    (SYMBOLIC-FORTH.md 6.27), each symbol needed a word of the core's, for
+    one family only (Thomas: "Do you think `"Hello World" Snake case` is
+    really better than say `"Hello World" case.snake`?"). Settled for the
     lowest form (2026-10-14): namespaces are maps all the way down, and `.`
     reads a dotted name's path (SYMBOLIC-FORTH.md 6.16); importing and
     exporting are a namespace's keys `import#` and `export#` (6.17).
 13. **Clauses of different arity** (Thomas, 2026-10-12; built
     2026-10-13). A family's clauses need not take as many values as each
-    other: `"data.csv" File read` beside `Stdin read`. When clauses of
+    other: `5 Down' step` beside `5 Up' step`, `< i64 Down' >` taking two
+    and `< Up' >` one (first `"data.csv" File read` beside `Stdin read`,
+    reading by namespace since 3.12). When clauses of
     different lengths match, **the shortest wins**, the most specific among
     those: a word reaches as little of the stack as it can, and a longer
     clause never changes what a call to a shorter one did (adding a shorter

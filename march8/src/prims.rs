@@ -613,8 +613,9 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::IPow, "i64-pow", "< i64 i64 -- i64 >", &[P::IPow]),
     d(Prim::IntPow, "int#-pow", "< int# int# -- int# >", &[]),
     d(Prim::Def, ";", "< a >", &[]),
-    // `!`: the value below given the type on top (stage.rs, `convert_by`).
-    d(Prim::Convert, "convert", "< a b -- a >", &[]),
+    // `!`, a meta-op, as `;` is (doc/design/SYMBOLIC-FORTH.md 6.5): the
+    // value below given the type on top (stage.rs, `convert_by`).
+    d(Prim::Convert, "!", "< a b -- a >", &[]),
 ];
 
 /// Whether the stage handles the primitive itself, rather than by its

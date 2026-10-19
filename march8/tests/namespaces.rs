@@ -48,55 +48,55 @@ fn a_word_looks_up_names_in_its_namespace_where_written() {
 fn an_import_makes_names_local() {
     // Each path by its last part, and `math.*` all that `math` exports.
     assert_eq!(
-        show(&format!("{MATH} import#: <| math.* |> ; 2 sq pi *")),
+        show(&format!("{MATH} import#: [| math.* |] ; 2 sq pi *")),
         "<1> 12"
     );
     assert_eq!(
-        show(&format!("{MATH} import#: <| math.pi |> ; pi")),
+        show(&format!("{MATH} import#: [| math.pi |] ; pi")),
         "<1> 3"
     );
     // A namespace's own import, for its words.
-    let app = "io.get: [ 7 ] ; app.import#: <| io.get |> ; app.main: [ get 1 + ] ;";
+    let app = "io.get: [ 7 ] ; app.import#: [| io.get |] ; app.main: [ get 1 + ] ;";
     assert_eq!(show(&format!("{app} app.main")), "<1> 8");
     // An import holds for all of its namespace, wherever it is written.
     assert_eq!(
-        show(&format!("{MATH} pi import#: <| math.pi |> ;")),
+        show(&format!("{MATH} pi import#: [| math.pi |] ;")),
         "<1> 3"
     );
 }
 
 #[test]
 fn a_name_found_twice_is_an_error() {
-    let (kind, msg) = error("a.ff: [ 1 ] ; b.ff: [ 2 ] ; import#: <| a.* b.* |> ; ff");
+    let (kind, msg) = error("a.ff: [ 1 ] ; b.ff: [ 2 ] ; import#: [| a.* b.* |] ; ff");
     assert_eq!(kind, Kind::NoWord);
     assert!(
         msg.contains("`ff` names both `a.ff`, imported, and `b.ff`, imported"),
         "{msg}"
     );
-    let (_, msg) = error("math.pi: [ 3 ] ; pi: [ 4 ] ; import#: <| math.pi |> ; pi");
+    let (_, msg) = error("math.pi: [ 3 ] ; pi: [ 4 ] ; import#: [| math.pi |] ; pi");
     assert!(
         msg.contains("`pi`, defined here, and `math.pi`, imported"),
         "{msg}"
     );
     // A path says which.
     assert_eq!(
-        show("math.pi: [ 3 ] ; pi: [ 4 ] ; import#: <| math.pi |> ; math.pi"),
+        show("math.pi: [ 3 ] ; pi: [ 4 ] ; import#: [| math.pi |] ; math.pi"),
         "<1> 3"
     );
 }
 
 #[test]
 fn a_namespace_has_one_import() {
-    let (kind, msg) = error("import#: <| a.x |> ; import#: <| b.y |> ;");
+    let (kind, msg) = error("import#: [| a.x |] ; import#: [| b.y |] ;");
     assert_eq!(kind, Kind::Syntax);
     assert!(msg.contains("the root has its `import#` already"), "{msg}");
 }
 
 #[test]
 fn reaching_what_is_not_exported_is_a_severe_warning() {
-    let math = "math.pi: [ 3 ] ; math.ee: [ 2 ] ; math.export#: <| pi |> ;";
+    let math = "math.pi: [ 3 ] ; math.ee: [ 2 ] ; math.export#: [| pi |] ;";
     let mut s = Session::new();
-    s.eval(&format!("{math} import#: <| math.* |> ; pi math.ee"))
+    s.eval(&format!("{math} import#: [| math.* |] ; pi math.ee"))
         .unwrap();
     assert_eq!(s.show(), "<2> 3 2");
     let w = s.take_warnings();
@@ -109,7 +109,7 @@ fn reaching_what_is_not_exported_is_a_severe_warning() {
         w[0].msg
     );
     // `math.*` brings only what `math` exports.
-    let (kind, _) = error(&format!("{math} import#: <| math.* |> ; ee"));
+    let (kind, _) = error(&format!("{math} import#: [| math.* |] ; ee"));
     assert_eq!(kind, Kind::NoWord);
     // A namespace's children see its unexported words.
     let mut s = Session::new();
@@ -134,12 +134,12 @@ fn the_core_names_its_words_by_namespace() {
     );
     // Imported, a style is its last name, and anyone may add one.
     assert_eq!(
-        show("case.shout: [ upper \"!\" concat ] ; import#: <| case.* |> ; \"hi\" snake shout"),
+        show("case.shout: [ upper \"!\" concat ] ; import#: [| case.* |] ; \"hi\" snake shout"),
         "<1> \"HI!\""
     );
     // One alone, too.
     assert_eq!(
-        show("import#: <| case.lower |> ; \"Hi\" lower ( \"A\" ) lower"),
+        show("import#: [| case.lower |] ; \"Hi\" lower ( \"A\" ) lower"),
         "<2> \"hi\" ( \"a\" )"
     );
     assert_eq!(error("\"Hi\" lower").0, Kind::NoWord);

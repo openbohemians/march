@@ -83,14 +83,18 @@ fn a_formatted_file_reads_as_its_source() {
 
 #[test]
 fn lower_writes_symbolic_forth() {
-    // Every application a dot, and `!` converting (doc/design/TYPES.md 2.2).
+    // Every application a dot, `!` converting (doc/design/TYPES.md 2.2), and
+    // a number a symbol given its kind (doc/design/SYMBOLIC-FORTH.md 6.7).
     assert_eq!(
         march8(&["lower"], "sq: [ dup * ] ;\n3 sq 2 f64!\n"),
-        "sq [ dup . * . ] ;\n3 sq . 2 f64 . !\n"
+        "sq [ dup . * . ] ;\n3 int# ! sq . 2 int# ! f64 . !\n"
     );
     // And `--symbolic` runs it.
     assert_eq!(
-        march8(&["--symbolic", "--eval", "sq [ dup . * . ] ; 3 sq ."], ""),
+        march8(
+            &["--symbolic", "--eval", "sq [ dup . * . ] ; 3 int# ! sq ."],
+            ""
+        ),
         "<1> 9\n"
     );
 }

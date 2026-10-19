@@ -1,7 +1,7 @@
 //! Symbolic Forth, the lowest form (doc/design/TYPES.md 2.2; Thomas,
-//! 2026-10-13): numbers, symbols, `.` and `!`. Every name is a symbol until
-//! `.` applies it, a type is given by applying its word, `i64 .`, and `!`
-//! converts. The form march8 reads is an intermediate one over it, and this
+//! 2026-10-13): symbols, `.` and `!`. Every name is a symbol until `.`
+//! applies it, a type is given by applying its word, `i64 .`, `!` converts,
+//! and a number is a symbol given its kind, `10 int# !`. The form march8 reads is an intermediate one over it, and this
 //! is its litmus test: all of it lowers to Symbolic Forth and reads back the
 //! same, and the lowered programs run.
 use march8::read::{Piece, Tok, Token, lower, read, read_symbolic};
@@ -61,19 +61,42 @@ const EXAMPLES: [&str; 4] = [
 fn every_application_is_a_dot() {
     assert_eq!(
         lowered("fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;"),
-        "fib < n > [ dup . 1 -+ . fib . swap . 2 -+ . fib . + . ] ;"
+        "fib < n > [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;"
     );
     // A symbol, a label or a word passed is a symbol, and a type is given
-    // by applying its word, then `!` converts.
+    // by applying its word, then `!` converts. A number is a symbol given
+    // its kind (doc/design/SYMBOLIC-FORTH.md 6.7).
     assert_eq!(
         lowered("Closed' Open' door ( 1 2 ) +' reduce 2 i64! x y < i64 f64 > !"),
-        "Closed Open door . ( 1 2 ) + reduce . 2 i64 . ! x y < i64 . f64 . > !"
+        "Closed Open door . ( 1 int# ! 2 int# ! ) + reduce . 2 int# ! i64 . ! \
+         x y < i64 . f64 . > !"
+    );
+    assert_eq!(
+        lowered("-2 1.10 1:2 12:30:15 '10' dup_2 [ dup + ]^3"),
+        "-2 int# ! 1.10 dec# ! 1:2 ratio# ! 12:30:15 ratio# ! 10 \
+         dup 2 int# ! width# . . [ dup . + . ] 3 int# ! power# ."
     );
     // Strings keep their escapes, and a hole its code, lowered too.
     assert_eq!(
         lowered(r#""say \"hi\" \\ \_ and \[ 1 2 + ]""#),
-        r#""say \"hi\" \\ \[ _ . ] and \[ 1 2 + . ]""#
+        r#""say \"hi\" \\ \[ _ . ] and \[ 1 int# ! 2 int# ! + . ]""#
     );
+}
+
+#[test]
+fn the_lowest_form_written_inline() {
+    // `[| … |]` is a quotation read as Symbolic Forth (SYMBOLIC-FORTH.md
+    // 3), brackets inside it and all.
+    assert_eq!(
+        toks("dup [| sq math.pi 2 [ dup . ] |] dup", false),
+        toks("dup . [ sq math.pi 2 [ dup . ] ] dup .", true)
+    );
+    // Only `|]` closes it, and it closes nothing else.
+    let error = |src| read(src, &Symbols::standard()).unwrap_err().msg;
+    assert_eq!(error("[| sq ]"), "`]` closes the `[|` at 1:1");
+    assert_eq!(error("[ sq |]"), "`|]` closes the `[` at 1:1");
+    assert_eq!(error("sq |]"), "`|]` closes nothing");
+    assert_eq!(error("[| sq"), "`[|` is never closed");
 }
 
 #[test]
@@ -105,23 +128,33 @@ fn the_examples_lower_and_run_the_same() {
 fn symbolic_forth_runs() {
     let mut s = Session::new();
     s.symbolic = true;
-    s.eval("sq [ dup . * . ] ; 3 sq . 2.5 sq . 2 f64 ! \"42\" i64 !")
+    s.eval("sq [ dup . * . ] ; 3 int# ! sq . 2.5 dec# ! sq . 2 int# ! f64 ! \"42\" i64 !")
         .unwrap();
     assert_eq!(s.show(), "<4> 9 6.25 2.0 42");
-    // `!` is `convert .`, a convenience: the word that structures a value
-    // by a type, applied.
+    // `!` is a meta-op, as `;` is (doc/design/SYMBOLIC-FORTH.md 6.5): it
+    // structures the value below by the type on top, given or named, and no
+    // word `convert` remains.
     let mut s = Session::new();
     s.symbolic = true;
-    s.eval("7 i64 convert . 7 f64 !").unwrap();
+    s.eval("7 int# ! i64 . ! 7 int# ! f64 !").unwrap();
     assert_eq!(s.show_typed(), "<2> 7 < i64 > 7.0 < f64 >");
+    let e = s.eval("7 int# ! i64 . convert .").unwrap_err();
+    assert_eq!(e.kind, march8::Kind::NoWord);
+    // Digits mark nothing (6.7): a number unstructured is a symbol, shown
+    // quoted, as March reads it, and any symbol of digits is a number by its
+    // kind, or by a type.
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval("10 10 int# ! '10' i64 !").unwrap();
+    assert_eq!(s.show_typed(), "<3> '10' < sym > 10 < i64 > 10 < i64 >");
     // There, nothing applies unless a dot says so: a name is a symbol, a
     // value, at run time too.
     let mut s = Session::new();
     s.symbolic = true;
-    s.eval("3 dup .").unwrap();
+    s.eval("3 int# ! dup .").unwrap();
     assert_eq!(s.show(), "<2> 3 3");
     let mut s = Session::new();
     s.symbolic = true;
-    s.eval("3 dup Snake").unwrap();
+    s.eval("3 int# ! dup Snake").unwrap();
     assert_eq!(s.show_typed(), "<3> 3 < i64 > dup' < sym > Snake' < sym >");
 }

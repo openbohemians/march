@@ -23,19 +23,19 @@ const OPS: &str = "ops./times([0-9]+)/: < i64 sym -- i64 > [ int# ! * ] ;";
 #[test]
 fn a_pattern_word_reads_a_word_where_imported() {
     assert_eq!(
-        show(&format!("{OPS} import#: <| ops.* |> ; 5 times3")),
+        show(&format!("{OPS} import#: [| ops.* |] ; 5 times3")),
         "<1> 15"
     );
     // A word the core reads as a symbol, as it does a number's kin.
     let units = "units./([0-9]+)kg/: < sym > [ int# ! 1000 * ] ;";
     assert_eq!(
-        show(&format!("{units} import#: <| units.* |> ; 12kg 2kg +")),
+        show(&format!("{units} import#: [| units.* |] ; 12kg 2kg +")),
         "<1> 14000"
     );
     // In a namespace's words, by its own import.
     assert_eq!(
         show(&format!(
-            "{OPS} app.import#: <| ops.* |> ; app.main: [ 5 times3 ] ; app.main"
+            "{OPS} app.import#: [| ops.* |] ; app.main: [ 5 times3 ] ; app.main"
         )),
         "<1> 15"
     );
@@ -43,7 +43,7 @@ fn a_pattern_word_reads_a_word_where_imported() {
     // captures.
     assert_eq!(
         show(&format!(
-            "{OPS} import#: <| ops.* |> ; ( 1 2 3 ) [ times3 ] map 5 [ times2 ]^3 ."
+            "{OPS} import#: [| ops.* |] ; ( 1 2 3 ) [ times3 ] map 5 [ times2 ]^3 ."
         )),
         "<2> ( 3 6 9 ) 40"
     );
@@ -77,7 +77,7 @@ fn an_imported_pattern_comes_before_the_core() {
     // `add_2` would be `add` two wide.
     let ops = "ops./add_([0-9]+)/: < i64 sym -- i64 > [ int# ! + ] ;";
     assert_eq!(
-        show(&format!("{ops} import#: <| ops.* |> ; 5 add_2 add₃")),
+        show(&format!("{ops} import#: [| ops.* |] ; 5 add_2 add₃")),
         "<1> 10"
     );
     let (kind, _) = error("5 add_2");
@@ -87,12 +87,12 @@ fn an_imported_pattern_comes_before_the_core() {
 #[test]
 fn a_body_names_words_of_its_namespace() {
     let ops = "ops.sq: [ dup * ] ; ops./sq([0-9]+)/: < sym > [ int# ! sq ] ;";
-    assert_eq!(show(&format!("{ops} import#: <| ops.* |> ; sq7")), "<1> 49");
+    assert_eq!(show(&format!("{ops} import#: [| ops.* |] ; sq7")), "<1> 49");
 }
 
 #[test]
 fn a_recognized_word_takes_marks_as_a_name_does() {
-    let src = format!("{OPS} import#: <| ops.* |> ; 5 times3' .");
+    let src = format!("{OPS} import#: [| ops.* |] ; 5 times3' .");
     assert_eq!(show(&src), "<1> 15");
 }
 
@@ -101,12 +101,12 @@ fn a_pattern_holds_for_all_of_its_namespace() {
     // A word applied later reads by it wherever it is written.
     assert_eq!(
         show(&format!(
-            "import#: <| ops.* |> ; main: [ 5 times3 ] ; {OPS} main"
+            "import#: [| ops.* |] ; main: [ 5 times3 ] ; {OPS} main"
         )),
         "<1> 15"
     );
     // Before its word is defined, a word it matches is not read another way.
-    let (kind, msg) = error(&format!("import#: <| ops.* |> ; 5 times3 {OPS}"));
+    let (kind, msg) = error(&format!("import#: [| ops.* |] ; 5 times3 {OPS}"));
     assert_eq!(kind, Kind::NoWord);
     assert!(msg.contains("whose word is not defined yet"), "{msg}");
 }
@@ -115,13 +115,13 @@ fn a_pattern_holds_for_all_of_its_namespace() {
 fn an_export_holds_for_patterns() {
     let ops = format!("{OPS} ops.ee: [ 1 ] ;");
     let (kind, _) = error(&format!(
-        "{ops} ops.export#: <| ee |> ; import#: <| ops.* |> ; 5 times3"
+        "{ops} ops.export#: [| ee |] ; import#: [| ops.* |] ; 5 times3"
     ));
     assert_eq!(kind, Kind::NoWord);
     // Exported by its pattern, it is imported.
     assert_eq!(
         show(&format!(
-            "{ops} ops.export#: <| ee /times([0-9]+)/ |> ; import#: <| ops.* |> ; 5 times3"
+            "{ops} ops.export#: [| ee /times([0-9]+)/ |] ; import#: [| ops.* |] ; 5 times3"
         )),
         "<1> 15"
     );
@@ -130,7 +130,7 @@ fn an_export_holds_for_patterns() {
 #[test]
 fn a_word_is_read_one_way() {
     let (kind, msg) = error(&format!(
-        "{OPS} ops./t(.*)/: < sym > [ drop ] ; import#: <| ops.* |> ; 5 times3"
+        "{OPS} ops./t(.*)/: < sym > [ drop ] ; import#: [| ops.* |] ; 5 times3"
     ));
     assert_eq!(kind, Kind::Syntax);
     assert!(
@@ -138,7 +138,7 @@ fn a_word_is_read_one_way() {
         "{msg}"
     );
     let (_, msg) = error(&format!(
-        "{OPS} more./(.+)3/: < sym > [ drop ] ; import#: <| ops.* more.* |> ; 5 times3"
+        "{OPS} more./(.+)3/: < sym > [ drop ] ; import#: [| ops.* more.* |] ; 5 times3"
     ));
     assert!(
         msg.contains("`times3` matches both `ops`'s `/times([0-9]+)/`, and `more`'s `/(.+)3/`"),
@@ -146,7 +146,7 @@ fn a_word_is_read_one_way() {
     );
     // A name defined or imported, as two imports are.
     let (kind, msg) = error(&format!(
-        "{OPS} import#: <| ops.* |> ; times3: [ 0 ] ; 5 times3"
+        "{OPS} import#: [| ops.* |] ; times3: [ 0 ] ; 5 times3"
     ));
     assert_eq!(kind, Kind::Syntax);
     assert!(
@@ -173,8 +173,8 @@ fn a_pattern_is_checked_when_defined() {
 
 #[test]
 fn a_pattern_keeps_its_dots_and_slashes() {
-    let dots = "ops./(.+)\\.kg/: < sym > [ drop 1 ] ; import#: <| ops.* |> ; a.kg";
+    let dots = "ops./(.+)\\.kg/: < sym > [ drop 1 ] ; import#: [| ops.* |] ; a.kg";
     assert_eq!(show(dots), "<1> 1");
-    let slash = "ops./km\\/(.+)/: < sym > [ int# ! ] ; import#: <| ops.* |> ; km/5";
+    let slash = "ops./km\\/(.+)/: < sym > [ int# ! ] ; import#: [| ops.* |] ; km/5";
     assert_eq!(show(slash), "<1> 5");
 }

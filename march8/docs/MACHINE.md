@@ -42,11 +42,13 @@ name applies, as in FORTH, in code and in a bracket alike, and a symbol or
 a variable is spelled as one.
 
 It is an **intermediate form** (Thomas, 2026-10-13). Below it is Symbolic
-Forth, where everything is a number, a symbol, `.` or `!` (TYPES.md 2.2,
+Forth, where everything is a symbol, `.` or `!` (TYPES.md 2.2,
 doc/design/SYMBOLIC-FORTH.md):
 every name a symbol until `.` applies it, a type given by applying its
-word, `i64 .`, and converting `!`, a convenience for `convert .`, the word
-`convert` applied, which takes a type or a type's symbol: `2 i64 !`. March8 reads the
+word, `i64 .`, and converting `!`, a meta-op, which takes a type or a
+type's symbol: `2 i64 !`. A number is a symbol there too, given its kind,
+`10 int# !`, `1.5 dec# !`, `1:2 ratio# !`, which march8 folds into the
+literal as it reads (2026-10-19). March8 reads the
 intermediate form and lowers it by spelling alone: `fib` is `fib .`,
 `Snake'` and `+'` are symbols, and `2 i64!` is `2 i64 . !`. `march8 lower`
 writes any March in Symbolic Forth, and `--symbolic` reads it; the litmus
@@ -67,7 +69,7 @@ reads them back to the same tokens, and runs them to the same results.
 | `name'` | the symbol `name`, for a word passed rather than applied, `+' reduce`, or any symbol, `Snake'` |
 | `\name` | a symbol table entry, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
 | `.` | applies the value on top, a word or a quotation; each dot at the end of a word applies once more: `[ 2 + ].` |
-| `!` | converts the value below by the type on top, `convert` applied: `2 i64!`, `x y < i64 f64 > !` (Thomas, 2026-10-13) |
+| `!` | converts the value below by the type on top, a meta-op, as `;` is, read as the primitive `!` applied: `2 i64!`, `x y < i64 f64 > !` (Thomas, 2026-10-13; no word `convert` since 2026-10-19) |
 | `a.b` | one word: a dot inside a word is part of it, a number's point, `2.5`, or in a name a path in a namespace, `io.file.read` (TYPES.md 3.12), kept for namespaces and defining no word yet. Dots between names once chained them, `a.b.` for `a. b.` (2026-10-09), which left no spelling for a path (Thomas, 2026-10-10) |
 | `[ … ]` | a quotation: its words, unevaluated |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
@@ -153,9 +155,9 @@ divides a path, and `;` defines at one, `math.sq: [ dup * ] ;`. A word's
 names are looked up in its namespace, then among the namespace's import,
 then in the core, from where the code was written, so a quotation of
 `math`'s that `map` runs still finds `math.sq`; a word of the program's
-root is reached from a namespace by importing it. `import#: <| math.*
-io.file.read |> ;` makes names local, each by its last part, or all that a
-namespace exports; `math.export#: <| pi |> ;` says what may be reached from
+root is reached from a namespace by importing it. `import#: [| math.*
+io.file.read |] ;` makes names local, each by its last part, or all that a
+namespace exports; `math.export#: [| pi |] ;` says what may be reached from
 outside, and reaching anything else warns as severe, though it compiles,
 and a namespace's children see all of it. A namespace has one import,
 which holds for all of it: a source's imports run first. A name found in

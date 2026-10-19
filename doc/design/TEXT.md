@@ -1,7 +1,9 @@
 # Text
 
 Status: design note, 2026-10-04. Nothing here is built. It records what
-strings are in March, decided with Thomas before any code. It also records
+strings are in March, decided with Thomas before any code. Revised
+2026-10-19: text as a literal kind, with `ascii` a refinement of `string`
+and a string's structure a representation (section 1). It also records
 a longer road toward glyphs that anyone can define, use and share, which
 Unicode does not offer.
 
@@ -19,7 +21,24 @@ Unicode does not offer.
 - **No separate ASCII type.** Every ASCII string is valid UTF-8, byte for
   byte. ASCII text gets a fast path instead: a string records whether every
   byte is below 128. If so, the n-th character is the n-th byte, and
-  character-indexing words use that.
+  character-indexing words use that. Revised 2026-10-19: no separate
+  representation, but a type, `ascii`, a refinement of `string` (below).
+- **Text is a literal kind, `str#`,** undecided until something takes it,
+  as a number is (Thomas, 2026-10-19). Strings differ along two axes,
+  encoding and structure, which differ in kind (agreed 2026-10-19,
+  SYMBOLIC-FORTH.md 6.15):
+  - **Encoding changes which texts a type holds,** so it is a type.
+    `ascii` holds the strings whose every byte is below 128, with the same
+    bytes as `string`, as `bool` is among the i64s (TYPES.md 2.16). The
+    fast-path flag above becomes the type, and an `ascii` clause is chosen
+    before a `string` one. Other encodings are conversions at input and
+    output; UTF-8 stays the only encoding inside.
+  - **Structure changes only what an operation costs,** so it is a
+    representation the compiler chooses by use: a flat array when small
+    or local, a tree when large or stored (layer 1). A word does not say
+    which.
+  - **`str#` settles to `string`** where nothing asks for more, as `int#`
+    settles to i64.
 - **Custom glyphs are a later layer,** and they ride on UTF-8 rather than
   replacing it (section 5). Nothing built for UTF-8 is thrown away when they
   come.

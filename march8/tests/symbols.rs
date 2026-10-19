@@ -132,7 +132,7 @@ fn a_capital_marks_nothing() {
     // they resolve as words do, by namespace and import.
     assert_eq!(plain("Human: Human' ; Human"), "<1> Human'");
     assert_eq!(
-        plain("bio.Human: Human' ; import#: <| bio.* |> ; Human"),
+        plain("bio.Human: Human' ; import#: [| bio.* |] ; Human"),
         "<1> Human'"
     );
     // In a signature the word is applied, so it leaves the symbol to match.

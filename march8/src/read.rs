@@ -8,16 +8,19 @@ use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tok {
-    /// An integer literal.
+    /// An integer literal, `10`, which is `10 int# !` in Symbolic Forth.
     Int(i128),
-    /// A decimal literal: its digits, and how many follow the point.
+    /// A decimal literal: its digits, and how many follow the point. `1.5`
+    /// is `1.5 dec# !` in Symbolic Forth.
     Dec(i128, u32),
     /// A ratio literal, `1:2`: its terms as written, the sign on the first.
+    /// `1:2` is `1:2 ratio# !` in Symbolic Forth.
     Ratio(Rc<[i128]>),
     Str(Rc<str>),
     Name(Rc<str>),
     /// `.`, which applies the value on top; the reader puts one after each
-    /// name that applies, and `!` is `convert` applied.
+    /// name that applies, and `!` and `;` are the words `!` and `;`
+    /// applied.
     Apply,
     /// `?`, which applies the value on top as a test, leaving one bool,
     /// or in a signature holds it as a guard (doc/design/SYMBOLIC-FORTH.md
@@ -63,7 +66,19 @@ fn closer(open: u8) -> u8 {
         b'[' => b']',
         b'(' => b')',
         b'{' => b'}',
+        b'|' => b'|',
         _ => b'>',
+    }
+}
+
+/// How a bracket opened is written: `|` stands for `[|`.
+fn opening(open: u8) -> &'static str {
+    match open {
+        b'[' => "[",
+        b'(' => "(",
+        b'{' => "{",
+        b'|' => "[|",
+        _ => "<",
     }
 }
 
@@ -75,7 +90,9 @@ pub fn read(src: &str, symbols: &Symbols) -> Result<Vec<Token>> {
 
 /// Reads Symbolic Forth, the lowest form (doc/design/TYPES.md 2.2; Thomas,
 /// 2026-10-13): every name is a symbol, applied only by `.`, and `!`
-/// converts, `2 i64 !`. Labels, primes and capitals mark nothing there.
+/// converts, `2 i64 !`. Labels, primes and capitals mark nothing there, and
+/// digits nothing either: `10` is a symbol, and `10 int# !` the number
+/// (doc/design/SYMBOLIC-FORTH.md 6.7).
 pub fn read_symbolic(src: &str, symbols: &Symbols) -> Result<Vec<Token>> {
     read_form(src, symbols, true)
 }
@@ -97,9 +114,8 @@ fn read_form(src: &str, symbols: &Symbols, symbolic: bool) -> Result<Vec<Token>>
 fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<Token>> {
     let mut out = Vec::new();
     let mut open: Vec<(u8, Pos)> = Vec::new();
-    // Each `<| … |>` open: how deep the brackets were, and how words were
-    // read outside it.
-    let mut lowest: Vec<(usize, bool)> = Vec::new();
+    // Each `[| … |]` open: how words were read outside it.
+    let mut lowest: Vec<bool> = Vec::new();
     loop {
         r.skip_space();
         let Some(c) = r.peek() else {
@@ -148,26 +164,34 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             });
             continue;
         }
-        // `<| … |>` is the lowest form's quotation written inline
+        // `[| … |]` is the lowest form's quotation written inline
         // (doc/design/SYMBOLIC-FORTH.md 3): its words are read as Symbolic
-        // Forth, so nothing applies without a dot, and it is `[ … ]`.
-        if word == "<|" {
-            open.push((b'[', pos));
+        // Forth, so nothing applies without a dot, and it is `[ … ]`. Only
+        // `|]` closes it.
+        if word == "[|" {
+            open.push((b'|', pos));
             out.push(Token {
                 tok: Tok::Open(b'['),
                 pos,
                 word: None,
             });
-            lowest.push((open.len(), r.symbolic));
+            lowest.push(r.symbolic);
             r.symbolic = true;
             continue;
         }
-        if word == "|>" {
-            if lowest.last().map(|l| l.0) != Some(open.len()) {
-                return Err(Error::new(Kind::Syntax, Some(pos), "`|>` closes no `<|`"));
+        if word == "|]" {
+            match open.pop() {
+                Some((b'|', _)) => {}
+                Some((o, p)) => {
+                    return Err(Error::new(
+                        Kind::Syntax,
+                        Some(pos),
+                        format!("`|]` closes the `{}` at {p}", opening(o)),
+                    ));
+                }
+                None => return Err(Error::new(Kind::Syntax, Some(pos), "`|]` closes nothing")),
             }
-            open.pop();
-            r.symbolic = lowest.pop().expect("open").1;
+            r.symbolic = lowest.pop().expect("open");
             out.push(Token {
                 tok: Tok::Close(b']'),
                 pos,
@@ -244,19 +268,29 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         };
         let start = out.len();
         piece(
-            stem, applies, &scripts, marks, pos, at, symbols, &mut open, &mut out,
+            stem,
+            applies,
+            &scripts,
+            marks,
+            pos,
+            at,
+            !r.symbolic,
+            symbols,
+            &mut open,
+            &mut out,
         )?;
         if let Some(applies) = readable {
             let marked: usize = marks.chars().map(|m| if m == '!' { 2 } else { 1 }).sum();
             let len = (out.len() - start - marked) as u8;
             out[start].word = Some(Word { len, applies });
         }
+        fold(&mut out)?;
     }
     if let Some((o, p)) = open.pop() {
         return Err(Error::new(
             Kind::Unfinished,
             Some(p),
-            format!("`{}` is never closed", o as char),
+            format!("`{}` is never closed", opening(o)),
         ));
     }
     Ok(out)
@@ -357,9 +391,44 @@ pub fn is_variable(w: &str) -> bool {
     w.len() == 1 && w.as_bytes()[0].is_ascii_lowercase()
 }
 
-/// One word: its token, its width and power spelled out, its own
-/// application if it is a name that applies, and for each mark after it,
-/// the first at `at`, an application, `.`, or `convert` applied, `!`.
+/// Folds a literal just read, `10 int# !`, `1.5 dec# !` or `1:2 ratio# !`,
+/// into the token the intermediate form reads `10` as
+/// (doc/design/SYMBOLIC-FORTH.md 6.7). It is `!` done early: the stage would
+/// make the same literal while compiling, and made here it is one wherever a
+/// literal is looked for, as a count or a value to match. A symbol not of its
+/// kind, `1.5 int# !`, is left for `!`, which says why.
+fn fold(out: &mut Vec<Token>) -> Result<()> {
+    let [.., sym, kind, bang, apply] = &out[..] else {
+        return Ok(());
+    };
+    let (Tok::Name(s), Tok::Name(k), Tok::Name(b), Tok::Apply) =
+        (&sym.tok, &kind.tok, &bang.tok, &apply.tok)
+    else {
+        return Ok(());
+    };
+    if &**b != "!" || !matches!(&**k, "int#" | "dec#" | "ratio#") {
+        return Ok(());
+    }
+    let lit = match (number(s, sym.pos)?, &**k) {
+        (Some(t @ Tok::Int(_)), "int#")
+        | (Some(t @ Tok::Dec(..)), "dec#")
+        | (Some(t @ Tok::Ratio(_)), "ratio#") => t,
+        _ => return Ok(()),
+    };
+    let pos = sym.pos;
+    out.truncate(out.len() - 4);
+    out.push(Token {
+        tok: lit,
+        pos,
+        word: None,
+    });
+    Ok(())
+}
+
+/// One word: its token, a number only if `numbers`, its width and power
+/// spelled out, its own application if it is a name that applies, and for
+/// each mark after it, the first at `at`, an application, `.`, or `!`
+/// applied.
 #[allow(clippy::too_many_arguments)]
 fn piece(
     stem: &str,
@@ -368,6 +437,7 @@ fn piece(
     marks: &str,
     pos: Pos,
     at: Pos,
+    numbers: bool,
     symbols: &Symbols,
     open: &mut Vec<(u8, Pos)>,
     out: &mut Vec<Token>,
@@ -395,7 +465,7 @@ fn piece(
                         return Err(Error::new(
                             Kind::Syntax,
                             Some(pos),
-                            format!("`{stem}` closes the `{}` at {p}", o as char),
+                            format!("`{stem}` closes the `{}` at {p}", opening(o)),
                         ));
                     }
                     None => {
@@ -407,9 +477,11 @@ fn piece(
                     }
                 }
             }
-            w => Some(number(w, pos)?.unwrap_or_else(|| {
-                Tok::Name(crate::symbols::unscripted(&symbolize(w, symbols)).into())
-            })),
+            w => Some(
+                if numbers { number(w, pos)? } else { None }.unwrap_or_else(|| {
+                    Tok::Name(crate::symbols::unscripted(&symbolize(w, symbols)).into())
+                }),
+            ),
         };
         if let Some(tok) = tok {
             out.push(Token {
@@ -449,7 +521,7 @@ fn piece(
             };
             if m == '!' {
                 out.push(Token {
-                    tok: Tok::Name("convert".into()),
+                    tok: Tok::Name("!".into()),
                     pos,
                     word: None,
                 });
@@ -749,7 +821,8 @@ impl<'a> Reader<'a> {
 }
 
 /// Code in Symbolic Forth, the lowest form (doc/design/TYPES.md 2.2): every
-/// name a symbol, each application a `.`, and `convert` applied `!`. It
+/// name a symbol, each application a `.`, and a number a symbol given its
+/// kind, `10 int# !`. It
 /// reads back, by `read_symbolic`, to the same tokens: the litmus test of
 /// the intermediate form (Thomas, 2026-10-13). Lines are kept, so the text
 /// reads as the source did.
@@ -767,10 +840,10 @@ pub fn lower(toks: &[Token]) -> String {
         }
         match &t.tok {
             Tok::Name(n)
-                if (&**n == "convert" || &**n == ";")
+                if (&**n == "!" || &**n == ";")
                     && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
             {
-                out.push(if &**n == ";" { ';' } else { '!' });
+                out.push_str(n);
                 i += 1;
             }
             tok => out.push_str(&lowered(tok)),
@@ -801,9 +874,9 @@ pub fn quote(n: &str, out: &mut String) {
 fn lowered(tok: &Tok) -> String {
     let text = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"");
     match tok {
-        Tok::Int(n) => n.to_string(),
-        Tok::Dec(d, s) => crate::prims::show_dec(*d, *s),
-        Tok::Ratio(t) => crate::prims::show_ratio(t),
+        Tok::Int(n) => format!("{n} int# !"),
+        Tok::Dec(d, s) => format!("{} dec# !", crate::prims::show_dec(*d, *s)),
+        Tok::Ratio(t) => format!("{} ratio# !", crate::prims::show_ratio(t)),
         Tok::Str(s) => format!("\"{}\"", text(s)),
         Tok::Name(n) => {
             let mut s = String::new();
@@ -969,7 +1042,7 @@ mod tests {
                 r(&[12, 30]),
                 r(&[2026, 10, 13]),
                 r(&[1, 2]),
-                Tok::Name("convert".into()),
+                Tok::Name("!".into()),
                 Tok::Apply,
             ]
         );
@@ -1060,16 +1133,63 @@ mod tests {
                 Tok::Int(2),
                 n("i64"),
                 Tok::Apply,
-                n("convert"),
+                n("!"),
                 Tok::Apply,
                 Tok::Open(b'<'),
                 n("i64"),
                 Tok::Apply,
                 Tok::Close(b'>'),
-                n("convert"),
+                n("!"),
                 Tok::Apply,
             ]
         );
+    }
+
+    #[test]
+    fn numbers_are_symbols_in_symbolic_forth() {
+        // Digits mark nothing there (doc/design/SYMBOLIC-FORTH.md 6.7): a
+        // number is a symbol given its kind, which reads as the literal the
+        // intermediate form reads, in a hole too.
+        let s = Symbols::standard();
+        let read = |src| -> Vec<Tok> {
+            read_symbolic(src, &s)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.tok)
+                .collect()
+        };
+        let n = |s: &str| Tok::Name(s.into());
+        assert_eq!(
+            read("10 -2 1.5 1:2"),
+            [n("10"), n("-2"), n("1.5"), n("1:2")]
+        );
+        assert_eq!(
+            read("10 int# ! -2 int#! 1.10 dec# ! 1:2 ratio# !"),
+            toks("10 -2 1.10 1:2")
+        );
+        assert_eq!(
+            read(r#""\[ 1 int# ! ]""#),
+            [Tok::Template(
+                [Piece::Hole(
+                    [Token {
+                        tok: Tok::Int(1),
+                        pos: Pos { line: 1, col: 5 },
+                        word: None
+                    }]
+                    .into()
+                )]
+                .into()
+            )]
+        );
+        // A symbol not of its kind is left for `!`, which says why; one that
+        // is too large is an error here.
+        assert_eq!(
+            read("1.5 int# !"),
+            [n("1.5"), n("int#"), n("!"), Tok::Apply]
+        );
+        assert_eq!(read("x int# !"), [n("x"), n("int#"), n("!"), Tok::Apply]);
+        let e = read_symbolic("99999999999999999999999999999999999999999 int# !", &s);
+        assert_eq!(e.unwrap_err().kind, Kind::Literal);
     }
 
     #[test]

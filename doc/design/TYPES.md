@@ -62,13 +62,14 @@ the type: every type is given by a word, so types need no spelling of
 their own (one that bottoms out might show as `i64'`, were it ever shown).
 A type is data, and is not applied: converting is the meta-op `!`,
 `i64 . !` or `i64 !` (`!` takes a type, or a type's symbol). It was
-`convert .` at first, a word applied, and march8 still reads it so. A
+`convert .` at first, a word applied, and march8 read it so until
+2026-10-19; it now reads `!` as the primitive `!` applied, as `;` is. A
 bracket is a quotation, made data the same way, `[ … ] seq# !`, and so is
 a number, which is
 only a symbol there: `10 i64 !`, or `10 int# !` for a literal whose type
 what takes it decides (2.10). A signature there is two sets, inputs then
 outputs, `[ i64 . ] seq# ! [ i64 . ] seq# !`, so `--` is only a comment,
-and a type variable is given by a word, `n var .`: no rule of spelling is
+and a type variable is given by a word, `n var# .`: no rule of spelling is
 left there. (First the form was `1 i64
 . 1 i64 . + .`, when applying a type's name converted.) March8 reads an
 intermediate form over it, in which this is `1 i64! 1 i64! +` (the last
@@ -273,6 +274,27 @@ an error.
   clauses, scoped by namespaces and modules.
 - **The most specific clause wins; a tie is an error** for now. ("The
   clause defined last" was considered and left open.)
+- **How a clause is chosen** (Thomas, 2026-10-17; not built). The
+  shortest first (3.13); then, among clauses of one length, by the top
+  slot, keeping those whose pattern there is most specific, then by the
+  next slot down, and so on; clauses tied in every slot are an error. A
+  pattern is more specific than one that includes it: a value, `< 1 >` or
+  `< Open' >`, before a concrete type, `i64` or `sym`, before a union or
+  a class, `num` or `atom`, before a variable (Thomas: "literals are most
+  specific, 1 is 1 after all … then concrete types, like i64 … and then
+  sum types … which are clearly less specific"); a bool is among the
+  i64s and a symbol among the strings, so each comes before the type it
+  is in. Patterns that both match and neither includes the other tie at
+  their slot. An undecided literal given, `1`, which `i64` and `f64` both
+  hold, takes its own kind, then its default type, so `1 2 +` is i64's.
+  This replaces march8's scores, summed over the slots, by which one slot
+  made up for another, `< i64 atom >` beating `< a i64 >`. It is CLOS's
+  way, which orders methods argument by argument, the top here being the
+  first, rather than Julia's, which calls such clauses ambiguous: deciding
+  from the top reaches as little of the stack as it can, as the shortest
+  does. Definition order was weighed and left: families are open, so the
+  module loaded first would choose; an override, if wanted, is a mark on
+  a clause.
 - **Every clause has the same stack effect,** as SURFACE.md decided, but
   clauses chosen by type may differ in their result types: `+` gives an
   integer for integers and a float for floats. To be relaxed (3.13).
@@ -291,7 +313,7 @@ Literals take their type from context, with no implicit promotion
 (SURFACE.md). A symbol taken as a string, a value known only at run time
 too, is no promotion: it is text until a type structures it
 (SYMBOLIC-FORTH.md 6.28). At a compile stage a literal is undecided: its type is a
-**literal type** (`lit#` is a placeholder name). Thomas: it is "just another
+**literal type**, `int#`, `dec#`, `ratio#`, `str#`, `seq#` or `map#` (3.4). Thomas: it is "just another
 type signature `< f64 lit# >`", so literal handling is clauses, open like
 any family.
 
@@ -484,7 +506,14 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
    and the display reach them.
 3. **Records** in detail, and the surface syntax for tuples, records, value
    patterns and guards.
-4. **Literal type names** (`lit#`, and the integer and decimal types).
+4. **Literal type names.** Settled (Thomas, 2026-10-19): `int#`, `dec#`,
+   `ratio#`, `seq#` and `map#`, as written, and `str#` for text, which
+   strings' encodings make undecided too (SYMBOLIC-FORTH.md 6.15): `str#`
+   settles to `string`, UTF-8, as `int#` settles to i64, and `ascii` is a
+   refinement of `string`, as `bool` is of i64 (2.16). A string's structure,
+   flat or a tree, is a representation chosen by use, not a type (TEXT.md
+   1). The placeholder `lit#` goes;
+   should a word need to match any literal, that is a class, as `num` is.
 5. **Precise numbers** for money: a decimal type, or rationals.
 6. **Unions, set-theoretic** (proposed 2026-10-09, after Elixir's type
    system: Castagna, Duboc and Valim, "The Design Principles of the Elixir

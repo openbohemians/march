@@ -133,7 +133,7 @@ fn unapplied(n: &str) -> bool {
 }
 
 /// Tokens as they are written, for a message: a name and its application
-/// are the name, `convert` applied is `!`, and a symbol or a variable is
+/// are the name, `!` and `;` among them, and a symbol or a variable is
 /// spelled as one.
 fn source_text(toks: &[Token]) -> String {
     let mut out = String::new();
@@ -148,9 +148,7 @@ fn source_text(toks: &[Token]) -> String {
             }
             Tok::Name(s) if toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) => {
                 i += 1;
-                if &**s == "convert" {
-                    "!".into()
-                } else if unapplied(s) {
+                if unapplied(s) {
                     format!("{s}.")
                 } else {
                     s.to_string()
@@ -1338,7 +1336,7 @@ impl Stage {
                 _ => {
                     return Err(self.err(
                         Kind::Syntax,
-                        format!("`{key}` takes the names it lists, `<| math.* io.file.read |>`"),
+                        format!("`{key}` takes the names it lists, `[| math.* io.file.read |]`"),
                     ));
                 }
             }
@@ -1567,7 +1565,7 @@ impl Stage {
                 Val::Quote(q) if sigs.is_empty() => self.set_names(&space, key, q),
                 _ => Err(self.err(
                     Kind::Syntax,
-                    format!("`{key}` takes the names it lists, `<| math.* io.file.read |>`"),
+                    format!("`{key}` takes the names it lists, `[| math.* io.file.read |]`"),
                 )),
             };
         }
@@ -3593,7 +3591,7 @@ impl Stage {
                         }
                         // `!` types as many values as the type on top has
                         // slots, and takes the type too.
-                        Item::Name(s) if &*s == "convert" => match items.last() {
+                        Item::Name(s) if &*s == "!" => match items.last() {
                             Some(Item::Bracket(from, to)) => {
                                 let n = self.bracket_size(&toks[*from..*to]);
                                 (n + 1, n)

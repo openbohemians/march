@@ -4,7 +4,7 @@
 //! is a symbol, a word passed. A type is built by words, so a type's name
 //! gives the type; a type is data, and `!` converts by it (Thomas,
 //! 2026-10-13). This is an intermediate form over Symbolic Forth, where
-//! everything is a number, a symbol, `.` or `!`. A definition names first,
+//! everything is a symbol, `.` or `!`. A definition names first,
 //! then what it names. A bracket is a value, a type or a signature, except
 //! first in a definition's quotation, where it is the clause's context.
 use march8::{Kind, Session};
@@ -55,12 +55,13 @@ fn a_type_is_built_by_words() {
         typed(&["\"42\"", "i64! string i64 map empty"]),
         "<2> 42 < i64 nil or > { } < string i64 map >"
     );
-    // `!` converts by a type, built or named; it is `convert` applied.
+    // `!` converts by a type, built or named. It is a meta-op, as `;` is
+    // (doc/design/SYMBOLIC-FORTH.md 6.5), and no word `convert` remains.
     assert_eq!(
         typed(&["2 i64! 2 f64! ( 1 2 ) i64 ary !"]),
         "<3> 2 < i64 > 2.0 < f64 > ( 1 2 ) < i64 ary >"
     );
-    assert_eq!(show(&["2 f64 convert"]), "<1> 2.0");
+    assert_eq!(session(&["2 f64 convert"]).err(), Some(Kind::NoWord));
     // A type is data, and is not called.
     let e = error("2 i64.");
     assert!(

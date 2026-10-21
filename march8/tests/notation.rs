@@ -70,7 +70,7 @@ fn a_type_is_built_by_words() {
     );
     assert!(error("1 2 < i64 i64 > .").contains("a signature is not called"));
     // A bracket reads as code does, so the same text means the same there.
-    let n = "size: < string i64 map -- i64 > [ length ] ;";
+    let n = "size: < string i64 map >< i64 > [ length ] ;";
     assert_eq!(show(&[n, "string i64 map empty size"]), "<1> 0");
     // A type is defined as any value is, bracketed or not.
     let real = "real: i64 f64 or ; half: < real > [ 2 div ] ;";
@@ -98,7 +98,7 @@ fn a_question_mark_tests() {
     assert!(e.contains("and it leaves 4 (int#)"), "{e}");
     assert_eq!(show(&["two: [ dup ] ; 3 two"]), "<2> 3 3");
     // No word's name ends in `?`, which tests.
-    let e = error("big?: < i64 -- i64 > [ 100 + ] ;");
+    let e = error("big?: < i64 >< i64 > [ 100 + ] ;");
     assert!(e.contains("`big?` is `big` tested"), "{e}");
 }
 

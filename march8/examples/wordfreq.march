@@ -9,7 +9,7 @@
 tally: < i64 > [ 1 + ] ;
 tally: < nil > [ drop 1 ] ;
 bump: < k i64 map k > [ over over get tally put ] ;
-frequencies: < string ary -- string i64 map > [ string i64 map empty [ bump ] fold ] ;
+frequencies: < string ary >< string i64 map > [ string i64 map empty [ bump ] fold ] ;
 
 -- Each word and its count, a line each, in the words' order.
 report: < string i64 map > [ dup keys sort [ over over at "\_ \_\n;" write ] each drop ] ;

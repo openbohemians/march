@@ -1,9 +1,10 @@
 //! Symbolic Forth, the lowest form (doc/design/TYPES.md 2.2; Thomas,
 //! 2026-10-13): symbols, `.` and `!`. Every name is a symbol until `.`
 //! applies it, a type is given by applying its word, `i64 .`, `!` converts,
-//! and a number is a symbol given its kind, `10 int# !`. The form march8 reads is an intermediate one over it, and this
-//! is its litmus test: all of it lowers to Symbolic Forth and reads back the
-//! same, and the lowered programs run.
+//! and a number is a symbol given its kind, `10 int# !`. The form march8
+//! parses is an intermediate one over it, and this is its litmus test: all
+//! of it lowers to Symbolic Forth and parses back the same, and the lowered
+//! programs run.
 use march8::read::{Piece, Tok, Token, lower, read, read_symbolic};
 use march8::symbols::Symbols;
 use march8::{CORE, Pos, Session};
@@ -30,7 +31,6 @@ fn placeless(t: Token) -> Tok {
                             .map(|t| Token {
                                 tok: placeless(t.clone()),
                                 pos: Pos { line: 0, col: 0 },
-                                word: None,
                             })
                             .collect(),
                     ),
@@ -71,10 +71,12 @@ fn every_application_is_a_dot() {
         "Closed Open door . ( 1 int# ! 2 int# ! ) + reduce . 2 int# ! i64 . ! \
          x y < i64 . f64 . > !"
     );
+    // A name keeps its subscript and its power, for a rule to rewrite where
+    // the name is applied, and a quotation's power is `power#` (6.21, 6.22).
     assert_eq!(
-        lowered("-2 1.10 1:2 12:30:15 '10' dup_2 [ dup + ]^3"),
+        lowered("-2 1.10 1:2 12:30:15 '10' dup_2 +⁴ [ dup + ]^3"),
         "-2 int# ! 1.10 dec# ! 1:2 ratio# ! 12:30:15 ratio# ! 10 \
-         dup 2 int# ! width# . . [ dup . + . ] 3 int# ! power# ."
+         dup_2 . +^4 . [ dup . + . ] 3 int# ! power# ."
     );
     // Strings keep their escapes, and a hole its code, lowered too.
     assert_eq!(
@@ -110,10 +112,11 @@ fn the_examples_lower_and_run_the_same() {
         lowered(src);
     }
     // Run lowered, a program does what it did: core is read as it is, and
-    // the program as Symbolic Forth. Not yet one with a pattern word, the
-    // syllogism's: `lower` writes a word a pattern reads as the core reads
-    // it (doc/design/SYMBOLIC-FORTH.md 25, open).
-    for src in &EXAMPLES[..2] {
+    // the program as Symbolic Forth. The syllogism's rule rewrites its
+    // capitalized names where `.` applies them, as it does where they are
+    // written (doc/design/SYMBOLIC-FORTH.md 25). The summary reads its
+    // input, and runs in tests/programs.rs.
+    for src in &EXAMPLES[..3] {
         let mut a = Session::new();
         a.eval(src).unwrap();
         let mut b = Session::new();
@@ -131,6 +134,12 @@ fn symbolic_forth_runs() {
     s.eval("sq [ dup . * . ] ; 3 int# ! sq . 2.5 dec# ! sq . 2 int# ! f64 ! \"42\" i64 !")
         .unwrap();
     assert_eq!(s.show(), "<4> 9 6.25 2.0 42");
+    // A subscript and a power are the core's rules, which rewrite a name
+    // where `.` applies it, as in High Stack.
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval("1 int# ! 2 int# ! dup_2 . +^4 .").unwrap();
+    assert_eq!(s.show(), "<1> 6");
     // `!` is a meta-op, as `;` is (doc/design/SYMBOLIC-FORTH.md 6.5): it
     // structures the value below by the type on top, given or named, and no
     // word `convert` remains.

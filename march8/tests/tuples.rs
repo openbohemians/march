@@ -135,7 +135,7 @@ fn tuple_types_in_brackets() {
         "<3> 1 2 2"
     );
     assert_eq!(
-        show(&["mk: < -- ( i64 string ) > [ ( 1 \"a\" ) ] ; mk 2 at"]),
+        show(&["mk: < >< ( i64 string ) > [ ( 1 \"a\" ) ] ; mk 2 at"]),
         "<1> \"a\""
     );
     assert_eq!(show(&["( 1 \"a\" ) < ( i64 string ) > ! length"]), "<1> 2");

@@ -267,7 +267,7 @@ pub fn scripted(word: &str) -> String {
     out
 }
 
-/// A name's width and power (doc/design/SYMBOLIC-FORTH.md 21, 22): what
+/// A name's subscript and power (doc/design/SYMBOLIC-FORTH.md 21, 22): what
 /// comes before them, and the digits of each, or none. `dup_2^3` is `dup`,
 /// "2" and "3", and `dup` is itself and two empty strings.
 pub fn scripts(name: &str) -> (&str, &str, &str) {

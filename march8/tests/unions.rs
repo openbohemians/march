@@ -142,8 +142,8 @@ fn a_union_made_at_run_time_is_noted() {
     assert!(s.take_warnings().is_empty());
     assert_eq!(s.show(), "<2> \"yes\" 1");
     let named = "positive: [ 0 gt? ] ;
-        gg: < i64 positive? -- i64 string or > [ drop \"yes\" ] ;
-        gg: < i64 -- i64 string or > [ drop 1 i64! ] ;";
+        gg: < i64 positive? >< i64 string or > [ drop \"yes\" ] ;
+        gg: < i64 >< i64 string or > [ drop 1 i64! ] ;";
     let mut s = Session::new();
     s.eval(named).unwrap();
     s.eval("3").unwrap();

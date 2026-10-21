@@ -21,7 +21,21 @@ which march8 is to reach it (section 7); text as a literal kind, `str#`,
 its encoding a type and its structure a representation (section 15);
 `[| … |]` for `<| … |>` (section 3); what `#` means (section 17);
 numbers as symbols, built (section 7); and the core's width and power as
-pattern words found in lookup (section 25).
+pattern words found in lookup (section 25). Revised 2026-10-20: a
+subscript is an index, which a word's family gives a meaning, and the core
+gives one only to a word that moves values or is handed code, a width
+(section 22); code means what it means where it was written, each name it
+applies expanded to its path there, a symbol is global text, and the core
+is a namespace, `core`, which every namespace finds last (section 16); a
+quotation is a sequence, and a word's clauses and its effect are data
+(6.6); and a recognizer is a rewrite rule, matched where `.` applies a
+name, the core's power and width being rules of the core's, so the
+syllogism runs lowered (section 25); a signature's two brackets touch,
+`< i64 >< i64 >`, so `--` is a comment everywhere (6.8, 6.9); a clause as
+data is what `;` takes, inputs, outputs and body (6.6); and a guard in a
+bracket is always tested, `[ … ] ?` (section 2). All built. Designed, not
+built: failing, `fail`, and handling a trap by a clause of the same word
+(6.29).
 
 ## 1. What it is
 
@@ -104,7 +118,7 @@ and in a body names an input by its place (section 14).
 Types are words because a type is a construction (Thomas, 2026-10-18).
 Were types symbols, only the simplest would be one, `string` or `i64`;
 the rest are built, and built by no word they would be elaborate symbols,
-`(string*)` or `{sym:str}`, which a pattern word (6.25) would read
+`(string*)` or `{sym:str}`, which a rule (6.25) would rewrite
 anyway: a word again. So a base type is a primitive word, as a primitive
 operation is, and every other type is made by words from those. A type's
 written form is its construction, `string . i64 . map .`, as code is
@@ -171,11 +185,11 @@ which become spellings above it (decided 2026-10-14, not built):
   1), undecided, and taking from below, in the same way (Thomas,
   2026-10-14).
 - **`< … >`** is code run while compiling, whose values are a type or a
-  signature, `< string i64 map k >`. `--` divides inputs from outputs,
-  and first in a definition's quotation it is the clause's context. It
-  needs no kind of its own: code run where it stands whose values are
-  gathered is a sequence, so `< … >` is `[ … ] seq# !`, a sequence of
-  types.
+  signature, `< string i64 map k >`. A clause's signature is two of
+  them, inputs then outputs, written touching, `< a a gt? >< a >`
+  (6.8), before its body. It needs no kind of its own: code run where it
+  stands whose values are gathered is a sequence, so `< … >` is
+  `[ … ] seq# !`, a sequence of types.
 - **`"…"`** is a string, with holes of code: `"\_ apples"`. In the lowest
   form text is a quoted symbol, `'…'`, which a type structures, and a
   string with holes is a quotation of its pieces made text,
@@ -196,7 +210,7 @@ which become spellings above it (decided 2026-10-14, not built):
   march8 (2026-10-15), as `[| … |]` on 2026-10-19, closed by `|]` alone.
 
 A signature in the lowest form is two sequences, inputs then outputs, and
-needs no divider: `< a* -- b* >` is `[ a* ] [ b* ]` (Thomas, 2026-10-14),
+needs no divider (Thomas, 2026-10-14): `< a* >< b* >` is `[ a* ] [ b* ]`,
 each a sequence of types, `[ a* ] seq# ! [ b* ] seq# !`. One sequence
 gives the inputs alone, and the stage finds the outputs; `[ n var# . ]
 seq# ! [ ] seq# !` declares that there are none. `;` takes a clause's
@@ -211,8 +225,17 @@ sq [ i64 . ] seq# ! [ i64 . ] seq# !
 
 `;` tells these apart by type, since a name is a symbol and a
 sequence is not. And with no divider, `--` begins a comment everywhere,
-inside a quotation as well; High Stack keeps it as the divider in a
-signature's bracket (6.9).
+inside a quotation and a bracket as well; High Stack writes the two
+brackets touching, `< i64 >< i64 >` (6.8, 6.9).
+
+The whole signature stays before the body (Thomas, 2026-10-20: "I like
+the full signature up front"). Written in the body, `foo: [ < i64 i64 >
+… < i64 > ] ;`, a clause would be one quotation and `;` would take only a
+name and a value, but a bracket would be read by where it stands, and in
+Low Stack, where a bracket is three elements, `[ … ] seq# !`, `;` would
+have to find that shape at both ends of the body. `foo: < i64 i64 > [ … ]
+< i64 > ;` reads no bracket by place, `;` telling the outputs from the
+inputs by order and type, but splits the signature around the body.
 
 A signature has two kinds of hole. Values its code takes from below must
 be known while compiling, since a type depends on no value known only at
@@ -242,13 +265,13 @@ rules live here, not below:
 | `2 i64!` | `2 i64 . !` | `!` structures by a type |
 | `positive?` | `positive ?` | `?` tests |
 | `10`, `1.5`, `1:2` | `10 int# !`, `1.5 dec# !`, `1:2 ratio# !` | a number's spelling gives its kind |
-| `< i64 -- i64 >` | `[ i64 . ] seq# ! [ i64 . ] seq# !` | a signature is two sequences |
+| `< i64 >< i64 >` | `[ i64 . ] seq# ! [ i64 . ] seq# !` | a signature is two sequences |
 | `[\| sq math.pi \|]` | `[ sq math.pi ]` | the lowest form inline |
 | `( 1 2 )` | `[ 1 int# ! 2 int# ! ] seq# !` | a sequence literal |
 | `5 ( _ 1 )` | `5 [ a var# . 1 int# ! ] seq# !` | `_`, an argument, is a letter |
 | `"\_ apples"` | `[ a var# . ' apples' ] str# !` | a string with an argument |
-| `dup_2`, `dup₂` | `dup_2 .`, `dup 2 int# ! width# . .` in lookup | a width, by the word, a pattern word of the core (6.25) |
-| `+^4`, `+⁴` | `+^4 .`, `+ 4 int# ! power# . .` in lookup | a power, by the word's kind, likewise |
+| `dup_2`, `dup₂` | `dup_2 .` | a name, its subscript an index; for `dup`, the core's width, by a rule (6.22, 6.25) |
+| `+^4`, `+⁴` | `+^4 .` | a power, by the word's kind, a rule of the core's (6.21, 6.25) |
 | `[ dup + ]^3` | `[ dup . + . ] 3 int# ! power# .` | a quotation's power, a quotation |
 
 A capital marks nothing (6.27): `Snake` is a name and applies, so
@@ -317,6 +340,53 @@ Settled (Thomas, 2026-10-14), not built:
    runs (section 1). The quotation is the more fundamental: a sequence is
    a quotation run and gathered, and once run its code is gone. Joy has
    one thing too, a list, which `i` applies.
+
+   **A quotation is taken apart as a sequence** (2026-10-20), so March
+   can read code, as it must to do in March what march8 did in Rust: the
+   identity search, `width#`'s and `quote-power`'s (21, 22; Thomas: build
+   in March, not Rust). Its elements are what Low Stack holds, each a
+   symbol or a quotation: `[ swap + ]` is `[| swap . + . |]`, four; `10`
+   is three, `10 int# !`; a quotation inside is one, whole. Running one
+   splices them in where it is applied, Thomas: "isn't running `[ swap +
+   ] .` the same as removing the `[` and `]` and executing as if `swap .
+   + .` were on the symbolic stack?" It is: each symbol lands on the
+   stack, and each meta-op acts on what is there. Taken apart, nothing
+   runs, so a meta-op is held, as the symbol of its name, `'.'` (Thomas:
+   "I suppose that's fine"), and put back, it acts again. It is the core's
+   families that take a quotation, `length`, `at`, `slice`, `concat` and
+   `insert`, and so `first`, `last`, `rest` and `most`, rather than Joy's
+   `uncons` and `cons`. Its names were expanded where it was written
+   (16), so a name taken out is its path, `math.dbl'`, and quotations put
+   together mean what each meant. Only while compiling, as a quotation has no value at run
+   time; and a family applied again to one unfolds there, its guards
+   decided by the values, so a word walks a quotation by recursion.
+   Built in march8 (2026-10-20). Not yet: `(`, `{`, `<` and strings,
+   which Low Stack has after steps 3 and 4 (section 7); a quotation
+   holding the symbol `'.'` pushed, which would be one with the meta-op
+   taken out; a walk past about sixty elements, depth's bound, which a
+   `fold` over a quotation would lift.
+
+   **A word's clauses are data too** (2026-10-20; Thomas: "that seems
+   reasonable"), and its effect, so March reads a word as it reads a
+   quotation. `w ins clauses#` gives the clauses of the word w that
+   dispatch would choose for inputs of the types ins gives, a type or
+   code that leaves them, `< i64 i64 >` or `[ i64 i64 ]`, in the order it
+   would try them: those with guards first, as defined, then the best
+   without. Dispatch is the stage's, so March asks it rather than writing
+   it twice. Each clause is a quotation of what `;` takes after the name,
+   each bracket as the code written in it: its inputs, its outputs if it
+   gives them, and its body (Thomas, 2026-10-20). So `max' < i64 i64 >
+   clauses#` gives two, the first `[ [ a a gt ? ] [ a ] [ drop ] ]`; a
+   type given alone is written by its name, `[ i64 . ]`; a clause with no
+   signature is its body alone, `[ [ + ] ]`; and a primitive has no
+   clauses, its code being the machine's. Once brackets lower to
+   sequences (section 7, step 3), a clause can hold them as `[ … ] seq#
+   !`, and run, leave just what `;` takes. `w effect#` gives how many
+   values a word or a quotation takes and leaves, `max' effect#` being 2
+   and 1, as the stage knows them. Both run while compiling. Built in
+   march8 (2026-10-20); a clause of two, its signature with `--` and its
+   body, until `><` (8). Next: the identity search in March (21), with
+   `fail` (29), then `width#`'s test and `quote-power`'s cases (22).
 7. **Numbers are symbols.** No rule of spelling reads them in the lowest
    form: `10 i64 !` gives the type, and `10 int# !`, `1.5 dec# !` and
    `1:2 ratio# !` the literal kind, undecided until something takes it,
@@ -330,14 +400,20 @@ Settled (Thomas, 2026-10-14), not built:
    a literal is looked for, a count or a value to match. A symbol not of
    the kind, `1.5 int# !`, is left for `!`, which says why. Inside `[| …
    |]` a number is a symbol too (3).
-8. **Signatures are two sequences**, inputs then outputs, `[ a* -- b* ]`
-   being `[ a* ] [ b* ]`, each a sequence of types, `seq# !`; one gives
-   the inputs alone. `;` takes them before the body (section 3).
-9. **Comments** run from `--` to the line's end, everywhere in the
-   lowest form, since no divider is needed in a signature. High Stack
-   keeps `--` as the divider in a signature's bracket, `< i64 -- i64 >`,
-   FORTH's stack comment, and a comment elsewhere (Thomas, 2026-10-15:
-   minor, to reconsider later). A line of three or more `-` and nothing
+8. **Signatures are two sequences**, inputs then outputs, `[ a* ] [ b*
+   ]`, each a sequence of types, `seq# !`; one gives the inputs alone.
+   `;` takes them before the body (section 3). High Stack writes them as
+   two brackets touching, `< a a gt? >< a >`, so `><` is `>` then `<`
+   and needs no meaning of its own (Thomas, 2026-10-20, from the bowtie
+   `⋈`, which it looks like; the glyph stays out of source). An empty
+   bracket gives no inputs, `< >< i64 >`. Built in march8 (2026-10-20),
+   the core and every test moved to it.
+9. **Comments** run from `--` to the line's end, everywhere, since no
+   divider is needed in a signature: in High Stack too, inside a bracket
+   as well (2026-10-20). Until then High Stack kept `--` as the divider
+   in a signature's bracket, `< i64 -- i64 >`, FORTH's stack comment
+   (Thomas, 2026-10-15: minor, to reconsider later); march8 says so when a
+   bracket a `--` begins a comment in is never closed. A line of three or more `-` and nothing
    else opens a block comment, and a line of them ending in a period,
    `---.`, closes it (Thomas), so a block reads as a ruled box:
 
@@ -389,6 +465,9 @@ Settled (Thomas, 2026-10-14), not built:
     Nothing is captured: a quotation holds no value from where it was
     made, so March has no closures. A value from outside reaches a
     quotation on the stack, as in Joy, or is written in when it is known.
+    No closures means no values from outside, not no names: a name in a
+    quotation means what it means where the quotation was written (16),
+    settled while compiling (Thomas, 2026-10-20).
     The stage moves the arguments while compiling, a value known only at
     run time through the scratch stack, as `dip`'s is. In the lowest form a
     `_` is a letter (Thomas, 2026-10-19): lowering counts a bracket's `_`s
@@ -459,7 +538,7 @@ Settled (Thomas, 2026-10-14), not built:
     would be a sequence written into the string. Letters belong to the innermost bracket they are written in, as
     `_`s do, so a bracket means the same wherever it is pasted, and
     nothing is captured. In a signature a letter is still a type variable,
-    filled by matching (section 2), so in `at: < a ary i64 -- a > [ … ]`
+    filled by matching (section 2), so in `at: < a ary i64 >< a > [ … ]`
     the signature's `a` and the body's are two variables. In Low Stack a
     body's letter is `b var# .` (section 7). Not built yet.
 
@@ -524,10 +603,86 @@ Settled (Thomas, 2026-10-14), not built:
     variable is an entry. Built in march8 (2026-10-15), but for a
     namespace as a value: `;` defines at a path, and a word's names are
     looked up in its namespace where they are written, so a quotation of
-    `math`'s that `map` runs still finds `math.sq`; a bare name defined by
-    a namespace's code is that namespace's. There a namespace is the words
+    `math`'s that `map` runs still finds `math.sq`. There a namespace is the words
     whose paths it begins, not yet a map, so `math .` and `at` on it are
     still to come.
+
+    **A name means what it means where it was written** (Thomas,
+    2026-10-20). Thomas: "if I write `[ 1 2 + ]` in a program, I almost
+    certainly want `+` to mean what it means where I wrote it. It would be
+    hard to reason about if I passed that quote to another word which was
+    defined in another namespace where `+` means something else." So code
+    is **expanded** where it is written: once a source is read, each name
+    it applies, `+ .`, becomes its path there, `math.+` if `math` defines
+    one, else its import's or the core's, and a name found nowhere is the
+    namespace's own, defined later or never. Code then means the same
+    wherever it runs, a quotation handed to a word of another namespace
+    among it. It is no closure: no value is captured, only which word a
+    name means (14). Clojure's syntax-quote does the same, writing `map` as
+    `clojure.core/map`, and Unison keeps code resolved and shows it by short
+    names. Expanding is a walk over code that rewrites names, so March can
+    do it itself, once a quotation can be taken apart (6).
+
+    **A symbol is global** (Thomas, 2026-10-20): "symbols are global, not
+    namespaced, hence one of the reasons one might do `Human: Human' ;` if
+    they want/need to 'spec' acceptable symbols a module recognizes." Only
+    a name applied where it is written is expanded, which the code shows by
+    its `.`, so no lookup decides it (Thomas: "`dbl'` means `dbl'`, `dbl'
+    .` means `math.dbl`"). `dbl'` is `dbl'` everywhere, compared as text,
+    and applied from the stack it is a path from the root: `dbl' map`
+    inside `math` applies the root's `dbl`, and `[ dbl ] map`, or `math.dbl'
+    map`, applies `math.dbl`. That reverses what was first built the same
+    morning, a symbol carrying its namespace while compiling: march8 kept
+    it on each symbol, and on each quotation by its place in memory, state
+    March would have nowhere to keep (Thomas: "how does it track that? A
+    symbol is a symbol after all"). A rule's capture is a symbol too, which
+    the rule reads as a name where it was applied by `name#` (25).
+
+    **The meta-ops are no names** (Thomas: "the meta-ops might be the one
+    thing you don't ever have to namespace -- they are universals. They
+    can't be overriden or changed."). The reader knows them and nothing
+    looks them up, so expanding leaves them as they are, and defining one,
+    `!: … ;` or `';' … ;`, is an error.
+
+    So that a namespace's own word counts wherever its source defines it,
+    as its import does (17), a source's definitions are known before it
+    is expanded, and its `import#` and `export#` set. A definition's
+    signature and body are expanded in the namespace of the name it
+    defines, and a bare name defined is the root's, as a symbol is. A name
+    a rule matches is expanded to a path where it was written,
+    `math.dbl^2`, so the path says where the rule was applied (25). Each
+    source is expanded once, so a word a later source defines in a
+    namespace leaves code already expanded as it was. Built in march8
+    (2026-10-20).
+
+    **The core is a namespace, `core`** (Thomas, 2026-10-20: "ultimately
+    certain core words won't be directly available. To get them the coder
+    would have to import them, making that potentially 'unsafe' decision
+    where they can muck about in the deeper internals"). Every namespace
+    finds the core last, as though it imported `core.*`, which makes local
+    what the core exports; what it does not export, its internals, a
+    namespace reaches by importing it by its path, a decision written
+    where it is made, as Go's `unsafe` is a package imported by name. So
+    `+` is `core.+`, a path like any other, and a program's word of a
+    core name is its own: `dup: [ 7 ] ;` at the root is the program's
+    `dup`, the core's own words still meaning the core's, `over` among
+    them, and `core.dup` reaching the core's. A program adds a clause to a
+    family of the core's by its path, then, `core.unit: < int#-' > … ;`,
+    as to any namespace's. A source applies its own word wherever it is
+    written, its own definition included, so `i64: < i64 f64 or > ;` is
+    an error that names `core.i64`. Expanded code keeps its paths, and
+    what shows a name shows the shortest one the root finds the word by,
+    `dup` for `core.dup`: a message, a name taken out of a quotation,
+    `[ swap + ] first` being `swap'`, and a capture `name#` reads (25),
+    so `-+^0` still meets `< -+' 0 >`. Built in march8 (2026-10-20), the
+    core exporting all of its words. Not yet: which words the core
+    exports and how importing the rest is marked, which Thomas does not
+    know yet. The typed primitives, `i64+`, `ary-at`, `quote-at`,
+    `string-concat`, are the natural internals; the words lowered code
+    applies, `int#`, `power#`, `name#`, stay exported, since lowered code
+    names no import. Nor yet showing expanded code by its shortest names,
+    which nothing shows yet, `lower` and `fmt` writing source as it was
+    typed.
 
 17. **Import and export** (Thomas): a namespace's map has two keys of
     March's own, `import#` and `export#`, named so as not to take words a
@@ -543,7 +698,8 @@ Settled (Thomas, 2026-10-14), not built:
     `import#` makes names local, each by its last part or by the name
     paired with it, and `math.*` makes local all that `math` exports. A
     bare name is looked up locally, then among the imports, then in the
-    core. A path is absolute, so it means the same anywhere. An import
+    core, the namespace `core`, as though each namespace imported
+    `core.*` last (16). A path is absolute, so it means the same anywhere. An import
     that meets a local name or another import is an error, settled by
     naming it. A namespace has one import, which holds for all of it
     wherever it is written, as if first, and is written first by
@@ -574,10 +730,13 @@ Settled (Thomas, 2026-10-14), not built:
     part of the name, as any character is, and a habit of naming, not a
     rule: a name ending in `#` is March's own, so a program keeps the
     plain word, `csv.export` beside `export#`. March's own are of three
-    kinds: the literal kinds, `int#`, `dec#`, `ratio#`, `str#`, `seq#` and
-    `map#` (TYPES.md 2.10); the words that say what a spelling said,
-    `var#`, `power#`, `width#` and `pattern#` (section 7); and a
-    namespace's keys, `import#` and `export#`. A vocabulary stays plain,
+    kinds: the literal kinds, `int#`, `dec#`, `ratio#`, `str#`, `seq#`,
+    `map#` and `unit#` (TYPES.md 2.10, 6.21); the words that say what a
+    spelling said, `var#`, `power#`, `width#` and `pattern#` (section 7),
+    `identity#`, which finds an identity (6.21), and `name#`, which reads
+    a symbol as a name where a rule's name was applied (25), and
+    `clauses#` and `effect#`, which read a word (6); and a namespace's
+    keys, `import#` and `export#`. A vocabulary stays plain,
     the core's types and verbs among it, `i64`, `string`, `map`, `dup`:
     those are words a program uses, not machinery it lowers to. Nothing
     holds a program to the habit, as nothing holds it to a case (27).
@@ -590,14 +749,15 @@ Settled (Thomas, 2026-10-14), not built:
     that name, as `def` did. So a second `;` on a constant's name adds a
     clause rather than replacing the value: replacing an entry is the
     global store's write, for the store's design. Built in march8
-    (2026-10-15), with the signature before the body, in one bracket or
-    in two, inputs then outputs; a body that begins with a signature is
-    refused, saying where it goes.
+    (2026-10-15), with the signature before the body, its inputs, then its
+    outputs if it gives them, each a bracket (8; one bracket divided by
+    `--` until 2026-10-20); a body that begins with a signature is
+    refused, saying where it goes (section 3).
 
 19. **Symbols applied at run time** (Thomas). `.` applies a symbol known
     while compiling, or one its type bounds: a union of symbols, compiled
     as a switch among known words, or a named signature, `adjustment:
-    < price -- price >` (Thomas, 2026-09-26), whose words are compiled at
+    < price >< price >` (Thomas, 2026-09-26), whose words are compiled at
     that shape into a table, FORTH's `execute` with the check done first.
     Any other symbol is data, and runs by immediate mode, through a word
     of the system, as ANS FORTH's `EVALUATE` runs text. In immediate mode
@@ -644,7 +804,7 @@ Settled (Thomas, 2026-10-15):
     | kind | effect | `w^n` | so |
     |---|---|---|---|
     | value | `-- a` | n copies, multiplied | `pi^2` is π², `pi pi ⋅` |
-    | function | `a -- a` | n applications, composed | `sqrt^2` is `sqrt sqrt`, a fourth root |
+    | function | `< a >< a >` | n applications, composed | `sqrt^2` is `sqrt sqrt`, a fourth root |
     | operation | k values, one left | n operands, joined by it | `+^4` is `+ + +` |
 
     An operation is counted by its operands, as x³ is three x's and two
@@ -656,8 +816,52 @@ Settled (Thomas, 2026-10-15):
     an operation its one operand left as it is; `^0` is x⁰, the identity:
     nothing, for a function, and for an operation the value its fold
     starts from, `+^0` being 0 and `⋅^0` 1, its type from context, as a
-    literal's is. A type's power is its product, so in a signature
-    `i64^3` is three i64s, as ℝ³ is. n is written, a number in the source.
+    literal's is. The identity depends on the operation, not on the type
+    alone (Thomas, 2026-10-20): `+` and `⋅` share a type and not an
+    identity. A value's power is its copies multiplied, so its `^0` is
+    `⋅^0`, `three^0` being 1. A type's power is its product, so in a
+    signature `i64^3` is three i64s, as ℝ³ is. n is written, a number in
+    the source.
+
+    **An identity is a literal, `unit#`** (Thomas, 2026-10-20). `+^0`
+    has no inputs, but `+` does, and its identity's type is the one `+` is
+    used at: so it is decided where the value is used, as a literal's is,
+    and as Haskell's `mempty` is. `+^0` is `+' unit# !`, the identity of
+    `+`, its type to come, and a value's `three^0` is `*' unit# !`; where
+    nothing says, it is i64, as `0` is. So `5 max^0 max` asks for `max`'s
+    identity at whatever 5 is, and `concat^0` alone is no error.
+
+    **The identities come from the primitives** (Thomas: "since
+    everything is ultimately built of primitives, can't we analyze the
+    primitives to determine the ^0? a sort of ^0 algebra"). The facts are
+    March's, in march8's core.march: `unit` gives each primitive
+    operation's, `i64+' unit` being 0, the products' 1 and
+    `string-concat`'s the empty string; and `least` and `greatest` give an
+    order's ends, `i64' least` the smallest i64, `f64' greatest` ∞ and
+    `bool' greatest` true. A type converts a `unit#` to itself as it does a
+    literal, `i64: < unit# >< i64 > [ i64 identity# ] ;`, and `identity#`
+    finds which fact holds: it follows the operation at that type to the
+    primitive it applies there, through a word that applies one operation,
+    `add: [ + ] ;`, or flips it, `[ swap + ]`, and a family's clause for
+    that type; or to a choice of the greater of two, by `gt` or `lt`, whose
+    identity is the type's least value, the lesser's its greatest. So `max`
+    at i64 has the smallest i64, `min` at f64 ∞, and `and`, `min` at bool,
+    true, with no fact of its own. Any other word has none, `-+` and `avg`
+    among them, since an e with f(e, x) = x for every x is an equation,
+    which for most words has no solution: avg(e, x) = x makes e be x. APL
+    does the same: `+/⍬` is 0, `×/⍬` 1, and a function of one's own
+    reduced over nothing is a DOMAIN ERROR. An unbounded type has no ends,
+    so `max`'s identity at int#, a literal not yet typed, is an error. A
+    clause of the core's `unit`, `core.unit: < int#-' > … ;`, adds a fact,
+    and one of the core's `power#` still gives a word a 0th power of its
+    own (24).
+
+    Built 2026-10-20. The facts are March, and `identity#`'s search is
+    Rust, in the stage, until a word's clauses are data March can read
+    (16): then it is March too (Thomas: "we have to ultimately implement
+    this in March itself"). A first build that day had the facts and the
+    search both in Rust, and decided an identity's type where `^0` was
+    written, so `max^0` and `concat^0` were errors.
 
     A power is a quotation, which the word `power#` makes from a word or
     a quotation and the count, so a quotation's power is the quotation of
@@ -678,26 +882,47 @@ Settled (Thomas, 2026-10-15):
     `pi dup^2`, since `dup` is how one gets a copy. `*` stays only in a
     signature, with no count, `t*` any number of t and `a*` the rest of
     the stack: the regular expression's star, which mathematics writes as
-    Σ*. Built in march8 (2026-10-15).
-22. **A subscript is a width,** a spelling as the power is (Thomas). `w_n`,
-    written `wₙ`, is w with each value it works on a group of n, and
-    lowers as `^n` does, `=_2` being `= 2 int# ! width# . .`, so no word
-    needs defining at each width: `=_2` and `dup_2` are FORTH's 2DUP, `~_2`
-    its 2SWAP, `over_2` 2OVER and `rot_2` 2ROT, and `dip_2`, `keep_2` and
-    `bi_2` are Factor's 2dip, 2keep and 2bi. The stage widens a word as it
-    powers one: inside `w_n`, w's own words act on groups, and a quotation
-    handed to w is not widened but runs once, as written, on the group's
-    values. So `keep_2` is 2keep, though `keep`'s own `over [ . ] dip` moves
-    a pair past a quotation. An operation acts lane by lane, the first of
-    each group with the first, as vectors add, so `1 2 10 20 +_2` is `11
-    22`; the stack words agree, 2DUP being dup in each lane. `width#` leaves
-    a quotation, as `power#` does, and the width comes before the power,
-    `dup_2^3` being `dup_2` cubed, which is `dup` cubed two wide; so it
-    lowers with the power first, `dup 3 power# . 2 width# .`, the power
-    taken by the kind of the word itself, as `+_2^3` sums three pairs,
-    though `+_2` takes four values. So `==` and `~~` go. Built in march8
-    (2026-10-15), where a group's values at run time move by `pick`, by
-    rolls, or through the scratch stack, `dup_2` being `over over`.
+    Σ*. Built in march8 (2026-10-15). A word's power is a rule of the
+    core's (25), which rewrites `dbl^2` where it is applied as `dbl 2 int#
+    ! power# .`, so `dbl` is the one found there, and `power#` makes its
+    power. Built 2026-10-20.
+22. **A subscript is an index** (Thomas, 2026-10-20). In mathematics a
+    subscript picks a member of a family, log_b, x_i, a_n, and the family
+    says what its index means. So in March `w_n`, written `wₙ`, is a name,
+    and what it means is its family's. A superscript is unlike it: fⁿ is f
+    iterated, whatever f is, so a power has one rule for every word (21),
+    and a subscript has none. A program gives `log_2` a meaning by a
+    rule, its base (25), or `x_1` one by defining it, as any name.
+
+    Where no family gives a subscript a meaning, the core gives one, by a
+    rule of its own (25), to any word that moves values or is handed code:
+    a width, each value it moves a group of n, the group moved as one
+    value. So `1 2 dup_2` is `1 2 1 2`, FORTH's 2DUP, the pair
+    copied, not `1 1 2 2`, each value copied. `swap_2` is 2SWAP, `over_2`
+    2OVER, `rot_2` 2ROT and `drop_2` 2DROP, and `=_2` and `~_2` likewise;
+    `dip_2`, `keep_2` and `bi_2` are Factor's 2dip, 2keep and 2bi. Inside
+    `w_n`, w's own words move groups, but a quotation handed to w is not
+    widened: it runs once, as written, on the group's values. So `keep_2`
+    is 2keep, though `keep`'s own `over [ . ] dip` moves a pair past a
+    quotation. At run time a group's values move by `pick`, by rolls, or
+    through the scratch stack, `dup_2` being `over over`. The width comes
+    before the power, `dup_2^3` being `dup_2` cubed. So `==` and `~~` go.
+    A program's word made of them has one too, by what it does, not by a
+    list: `tuck: [ swap over ] ;` gives `tuck_2` (Thomas, 2026-10-20: "if
+    it is general then maybe we make it general after all").
+
+    A word that computes has no width: `+_2` and `cube_2` are no words,
+    unless a program defines them. A first rule (2026-10-15) gave every
+    word one, an operation acting lane by lane, `1 2 10 20 +_2` being
+    `11 22`, as vectors add. But a
+    vector does that better; it is not what one guesses, Thomas first
+    reading `+_3` as three operands, which is `+^3`; and it made a
+    subscript a width everywhere, where mathematics makes it an index
+    (Thomas: "is this truly generalizable?"). Moving a group as one value
+    is what stack words do, and FORTH and Factor give only those a width.
+    Built in march8 (2026-10-15, as a rule of every word; as an index,
+    2026-10-20, first for a list of the core's words, then for any word
+    that moves values or is handed code).
 23. **`fmt` writes them as mathematics does,** by LaTeX's marks, `^` up
     and `_` down: a name's trailing `^` and digits as superscript digits,
     `+^4` as `+⁴`, and its trailing `_` and digits as subscript digits,
@@ -705,164 +930,169 @@ Settled (Thomas, 2026-10-15):
     `file_read` stays as it is. The reader reads them back, `₂` as `_2`
     and `⁴` as `^4`, as it is to read `⟨ ⟩` as `< >`
     (march8/docs/MACHINE.md), and the ASCII spelling is the one kept, the
-    one typed, the width first, `dup_2^3` as `dup₂³`. March8's escape `\_2`
+    one typed, the subscript first, `dup_2^3` as `dup₂³`. March8's escape `\_2`
     writes `₂`, and is the same spelling. Built in march8 (2026-10-15).
-24. **No name ends in a power or a width** (Thomas). The reader takes
-    `^n` and `_n` off, as the core's pattern words are to in lookup (25),
-    so a word named `dup_2` could never be reached, and
-    defining one is an error that says what the spelling means. FORTH
-    lets a word redefine a number, searching its dictionary first; here
-    what a spelling lowers to would then hang on what happens to be
-    defined, and one definition would change every use unseen. A
-    specific meaning is a clause instead, of `power#` or `width#`, for
+24. **No name ends in a power** (Thomas). The core's rule rewrites `^n`
+    (25), and comes last, so a word named `sq^2` would come before it, as
+    FORTH lets a word redefine a number, searching its dictionary first.
+    Here what a spelling means would then hang on what happens to be
+    defined, and one definition would change every use unseen, so defining
+    one is an error that says what the spelling means. A specific meaning
+    is a clause instead, of the core's `power#`, by its path (16), for
     that word and that count: a family chooses its most specific clause,
     so the clause wins over the general rule, as FORTH's dictionary wins
-    over its numbers, while the reader still lowers by spelling alone.
-    The identities need it, since the stage cannot know that `+`'s is 0:
+    over its numbers. An identity the primitives do not give is one (21):
 
     ```
-    power#: < +' 0 > [ drop drop [ 0 ] ] ;          -- +^0 is 0
-    power#: < *' 0 > [ drop drop [ 1 ] ] ;          -- ⋅^0 is 1
-    width#: < dup' 2 > [ drop drop [ over over ] ] ;
+    core.power#: < -+' 0 > [ drop drop [ 0 ] ] ;    -- -+^0 is 0
     ```
 
-    The first two are in march8's core.march, which matches a quoted word
-    as a value, as it does a number or a symbol.
+    `power#` matches a quoted word as a value, as it does a number or a
+    symbol. The core's own identities were such clauses until they came
+    from the primitives (21, 2026-10-20). A subscript is part of a name,
+    an index (22, 2026-10-20), so `x_1` and `log_2` may be defined, and a
+    program's `dup_2` comes before the core's, as a program's `dup` would
+    (17).
 25. **Recognizers: March defines its spelling rules** (Thomas). The rules
-    that read High Stack (26), `^n` and `_n` among them, can be March code,
-    recognizers, as FORTH names them, each taking a word's text and giving
-    what it lowers to, and a program may add its own: `log_2` can be a
-    spelling of its own, base 2's log, more specific than the width, where
-    24 refuses it as a name. A definition still cannot change how text
-    reads, only a spelling rule, which says that it is one, so reading hangs
-    on spelling rules alone and the litmus test holds: `march8 lower` still
-    writes any program in Low Stack. In FORTH a recognizer is a word that
-    takes a token's text and says how to interpret or compile it, by which
-    Gforth reads its numbers; Lisp's kin is the reader macro, Factor's the
-    parsing word. With them March reads itself by its own words, a step up
-    in kind. Very powerful, and an easy way to win an obscure-code contest:
+    that read High Stack (26) can be March code, recognizers, as FORTH
+    names them, and a program may add its own: `log_b` can be a family of
+    its own, base b's log, `log_2` among them. A definition still cannot
+    change how text reads, only a spelling rule, which says that it is
+    one, so the litmus test holds: `march8 lower` still writes any program
+    in Low Stack. In FORTH a recognizer is a word that takes a token's
+    text and says how to interpret or compile it, by which Gforth reads
+    its numbers; Lisp's kin is the reader macro, Factor's the parsing
+    word. With them March reads itself by its own words, a step up in
+    kind. Very powerful, and an easy way to win an obscure-code contest:
     not to be used lightly (Thomas).
 
-    A recognizer is a word whose name is a pattern (Thomas, 2026-10-16):
-    a regular expression between slashes, which matches a whole word, then
-    a signature and a body, as any word has. A name is a pattern that
-    matches only itself; a pattern names a set of words, an indexed family,
-    as math writes log_b. What the pattern's groups capture goes on the
-    stack, each a symbol, in the order written, after the word's inputs, as
-    if written where the word stands: the word is an ordinary word with
-    inputs its name supplies, which `int# !` or `i64 !` makes numbers (7).
+    **A recognizer is a rewrite rule** (Thomas, 2026-10-20: "recognizers
+    should be implemented as defining rewrite rules"). Its name is a
+    pattern, a regular expression between slashes that matches a whole
+    name, and its value is code. Where a name the pattern matches is
+    applied, the rule puts in its place what the pattern's groups capture,
+    each a symbol, in the order written, then the rule's code:
 
     ```
-    logs./log_([0-9]+)/: < f64 sym -- f64 > [ i64 ! log-base ] ;
+    logs./log_([0-9]+)/: [ i64 ! log-base ] ;
     import#: [| logs.* |] ;
     1024 log_2                       -- 1024 '2' i64 ! log-base
     ```
 
-    The signature states what the body sees, the captures last; to its
-    user `log_2` is `< f64 -- f64 >`, one input fewer for each group.
-    Without a signature the effect is found, as any word's is, for each
-    word the pattern matches. Clauses of one pattern are a family. The
-    captures are on the stack, not marks, `$1`, since a mark would want a
-    spelling in Low Stack, and `dup` serves a capture used twice; after the
-    inputs, not beneath them, since that is where the word stands,
-    `x log_2` reading as `x 2 log-base`, as the core's own `log₂'` reads as
-    `log 2 width#`, and beneath them the stage would reach under its user's
-    values. A group that may not match must still leave something, so the
-    effect is fixed: `nil` perhaps, of `sym nil or`, or such groups refused.
+    A rule is a spelling, not a word, so it has no signature and one
+    meaning: a second definition of a pattern is an error, and so is a
+    signature. Its effect is the rewrite's, found where the name is
+    applied, so to its user `log_2` is `< f64 >< f64 >`. More meanings
+    are a family's, which the rule's code applies:
 
-    A pattern word is an entry of its namespace, as any word is, and
-    reaches where that namespace is imported (17; Thomas, 2026-10-15), and
-    in its own namespace, as a word is used where it is defined. It holds
-    for the whole namespace, wherever it is written, as an import does
-    (17), so no text reads one way before it and another after; its
-    slashes say it is a pattern, so it is found before the rest is read. It
-    reads a word as typed, without its marks, `log_2` for `log₂'`, and
-    before the core's own spelling rules, so a program's `log_2` is not the
-    core's width, as a bare name is looked up among the imports before the
-    core (17). It reads a word the core reads as a name, `12kg` among them,
-    but not a number, `;` or `_`. A word that two patterns match, of one
-    namespace or of two, is an error (Thomas), so their order never counts;
-    so is a word a pattern matches that is also a local name or an import,
-    settled by naming it (17). A pattern word comes with `logs.*`, as any
-    exported word does.
+    ```
+    times: < i64 sym >< i64 > [ int# ! * ] ;
+    times: < f64 sym >< f64 > [ f64 ! * ] ;
+    /times([0-9]+)/: [ times ] ;     -- 5 times3 is 15, 2.5 times2 5.0
+    ```
 
-    In FORTH a recognizer runs anything while reading. Here only the
-    pattern reads, choosing the word and its captures; the body runs where
-    the word stands, as any word's does, or with `'` the word is passed,
-    `log_2'`, as a name is. As a pattern word, the core's width would be
-    `/(.+)_([0-9]+)/: [ int# ! width# . . ] ;`, the word widened, then
-    applied, with no signature, since its effect is the widened word's.
+    Each part means what it means where it was written (16). A capture is
+    a symbol, global text, and `name#` reads one as a name where the name
+    was applied, its path: a name a rule matches is expanded to a path
+    there, `math.dbl^2`, so the path says where. The core's power and width
+    rules read their word so, `[ [ name# ] dip int# ! power# . ]`, and
+    `dbl^2` in `math` squares `math.dbl`; a rule whose capture is a count,
+    `times3`, has no need of it. Clojure's macros read a symbol so, with
+    `resolve`, while they expand. The rule's own
+    names are found where the rule was defined, as a word's are, so `sq7`,
+    in a namespace that imports `ops./sq([0-9]+)/: [ int# ! sq ] ;`,
+    squares by `ops.sq`: hygiene, as Scheme's macros keep it. The captures
+    go on the stack, not into marks, `$1`, since a mark would want a
+    spelling in Low Stack, and `dup` serves a capture used twice; and they
+    go where the name stands, after the values before it, so `x log_2` is
+    `x '2' i64 ! log-base`. Each group must capture in every match, so the
+    effect is fixed: an optional group is refused, for now.
 
-    The slashes are a spelling of High Stack. In Low Stack `;` takes a
-    pattern where it takes a name, the symbol made a pattern by `pattern#
-    !`, as `int# !` makes a number (section 7); so `;`'s first slot
-    widens from one name to a set of names, and no slot changes what it
-    means. A pattern matches a word, which has no spaces, so it needs none;
-    a `/` in it is written `\/`.
+    A rule holds in its own namespace and where that namespace is imported
+    by `*` (17), for the whole namespace, wherever it is written, as an
+    import does, so no name means one thing before it and another after;
+    before its code is defined, a name it matches is an error. An export
+    names it by its pattern, `export#: [| /log_([0-9]+)/ |]`. A name two
+    rules match, of one namespace or of two, is an error (Thomas), so
+    their order never counts; so is a name a rule matches that is also
+    defined there or imported, settled by naming it (17). The core has
+    rules too, which come last, as the core's names are found last:
 
-    This replaces a first form (2026-10-15), a namespace's clauses of
-    `recognize#`, the pattern in the signature's slot and a template whose
-    holes, `_`, took the captures,
-    `logs.recognize#: < 'log_([0-9]+)' > [ _ int# ! log-base ] ;`. It copied `import#` and `export#`, but those are
-    settings of a namespace, what it sees and what it shows, while a
-    recognizer is vocabulary; and under its key `< >` held a pattern, not a
-    signature. A key may give meaning to its value, as `import#` does to its
-    list, but should not change what a slot means, each such exception a
-    cost, though one may be made on purpose where it keeps a program from
-    harm (Thomas, 2026-10-16). A map from pattern to template, one
-    `recognize#` to a namespace, as the import pairs will be, mended the
-    slot but kept the key, and is dropped with it.
+    ```
+    /(.+)\^([0-9]+)/: [ int# ! power# . ] ;
+    /(.+)_([0-9]+)/: [ int# ! width# ] ;
+    ```
 
-    Built in march8 (2026-10-16), by Rust's `regex` crate, which matches
+    So `.` applying a name looks first for a rule of its namespace or of
+    the namespaces it imports, then for the name, locally, among the
+    imports and in the core, and last for a rule of the core. `dbl^2` is
+    `dbl 2 int# ! power# .`, `power#` leaving a quotation, which `.`
+    applies (21); `dup_2` is `dup 2 int# ! width#`, `width#` applying the
+    word its symbol names at that width, if it moves values or is handed
+    code, and otherwise saying there is no such word (22). A program's `dup_2`, or a
+    rule of its own that matches it, comes before the core's.
+
+    A rule is matched where the name is applied, by `.`, against the name
+    without its marks, `log_2` for `log₂`; with `'` the name is passed,
+    `log_2'`, and rewritten where `.` applies it later. So High Stack and
+    Low Stack match alike, and nothing runs while reading: in FORTH a
+    recognizer runs anything then, and here a pattern only matches. A
+    number is no name, nor `;` or `_`; `12kg` is a name, which applies, so
+    a rule may give it a meaning. In Low Stack `;` takes a pattern where
+    it takes a name, the symbol made a pattern by `pattern# !`, as `int#
+    !` makes a number (section 7); so `;`'s first slot widens from one
+    name to a set of names, and no slot changes what it means. A pattern
+    matches a name, which has no spaces, so it needs none; a `/` in it is
+    written `\/`.
+
+    Built in march8 (2026-10-20), by Rust's `regex` crate, which matches
     in linear time (Thomas: March wants regular expressions anyway, if only
     as a module). March may come to have a pattern syntax of its own, a
     regex then an optional module, which March itself never needs (Thomas,
-    2026-10-16). A source's patterns are known before it runs, and the
-    core's text is read by the core's rules alone. A pattern word's code is
-    its captures, then its word, the pattern's path, applied, so its
-    signature, family and effect are a word's; a symbol becomes a number
-    only where it is known, so a clause typed `sym` is checked where it is
-    applied, not where defined. Each group must capture in every match: an
-    optional group is refused, for now. Only `*` imports a pattern word;
-    an export names it by its pattern, `export#: [| /log_([0-9]+)/ |]`.
-    March8 learns a body's namespace only at `;`, so the stage, not the
-    reader, reads a word by a pattern, when it reaches the word in its
-    code's namespace, as it looks up a name. So `march8 lower` still
-    writes the core's reading, and writes the pattern's name as a symbol,
-    which `;` reads back. Lowering a program that uses pattern words writes
-    each word a pattern claims as a word (section 7), which march8 can do
-    once the core's width and power are found in lookup (below). A captured name, `(.+)`, is a
-    symbol applied in the body's namespace, not where the word was
-    written, as a passed `sq'` is (16); that is to be settled when
-    namespaces become values. The cost, measured for the first form,
-    whose matching this keeps: about 25 ns a word where patterns are
-    known, and none elsewhere.
+    2026-10-16). The syllogism runs lowered, its capitals rewritten where
+    `.` applies them (27). The cost, measured for the first form, whose
+    matching this keeps: about 25 ns a name where a namespace has rules,
+    and none elsewhere; the core's rules are tried only where nothing else
+    is found.
 
-    **The core's width and power are found in lookup** (Thomas,
-    2026-10-19; not built). They move from the reader into the core as
-    pattern words, the width `/(.+)_([0-9]+)/: [ int# ! width# . . ] ;`
-    and the power likewise. Then no word needs its namespace to be
-    lowered: `dup_2` lowers as `dup_2 .` and `log_2` as `log_2 .`, as
-    `dup` lowers as `dup .`, and which word each is, is found where any
-    name's is, in lookup, in the namespace its code is written in. A
-    program's `log_2` wins over the core's width by the order every name is
-    found in, local, then imports, then the core (17), with no rule of its
-    own. While the reader kept them, it had to choose between the width and
-    a program's pattern before lookup, and only the namespace could say:
-    the seam was the core's spelling rules in the reader, not pattern
-    words (Thomas: "isn't that true of any word?"). It costs two things.
-    Lowered code shows less, `dup_2 .` where it showed `dup 2 int# !
-    width# . .`, which the core's pattern makes of it in lookup and which
-    can still be written. And lookup does more, though it tries the core's
-    patterns only where nothing else is found, so a word that is found pays
-    nothing. A quotation's power, `[ dup + ]^3`, stays a spelling of the
-    reader: it is on a bracket, which no pattern reads. Subscript and
-    superscript digits still read as `_2` and `^2` (23), as `\times`
-    reads as `×`. And 24 holds: no name ends in a width or a power, so
-    only a pattern, which says it is one, claims `log_2`. March8 matches a
-    pattern against the word as written in High Stack, which Symbolic
-    Forth does not keep, and so the syllogism does not yet run lowered;
-    matching the symbol `.` applies ends that.
+    **How it came to this.** A first form (2026-10-15) was a namespace's
+    clauses of `recognize#`, the pattern in the signature's slot and a
+    template whose holes, `_`, took the captures. It copied `import#` and
+    `export#`, but those are settings of a namespace, what it sees and
+    what it shows, while a recognizer is vocabulary; and under its key
+    `< >` held a pattern, not a signature. A key may give meaning to its
+    value, as `import#` does to its list, but should not change what a
+    slot means, each such exception a cost, though one may be made on
+    purpose where it keeps a program from harm (Thomas, 2026-10-16).
+
+    A second (2026-10-16) made a recognizer a word whose name is a
+    pattern, with a signature and clauses as any word has, its captures on
+    the stack after its inputs. March8 matched it while compiling, against
+    the word as typed in High Stack, which Low Stack does not keep, so the
+    syllogism could not run lowered; and a captured name was looked up
+    where the word's body applied it, not where it was written. Thomas:
+    "the issue is how you are trying to implement them -- as quotes. Why
+    not implement it as a rewrite rule [in] the low stack?" A rewrite puts
+    the code where the name is, which is what a spelling rule says. It
+    loses a pattern's clauses, which a family gives back.
+
+    The core's power and width went the same way. A plan (2026-10-19) made
+    them rules of the core, but a captured name, `dbl` of `dbl^2`, was then
+    looked up inside the core's code, where `dbl` is not; march8 had that
+    fault already, `width#` and `power#` being core words with bodies. So
+    for a day (2026-10-20) lookup read a power itself, in Rust, and the
+    core's widths were names. Once a name means what it means where it was
+    written (16), a capture does too, and the plan works: the rules above
+    replace that Rust. A subscript stays an index (22): the core's width
+    is for a word that moves values or is handed code, and `+_2` is no
+    word. Thomas: "If I write `1 2 +`, how does it handle `+`? So why
+    would `+_2` be any different?" A name keeps its subscript and its power
+    when lowered, `dup_2 .` where it was `dup 2 int# ! width# . .`, so
+    lowering needs no namespace (Thomas: "isn't that true of any word?").
+    A quotation's power, `[ dup + ]^3`, stays a spelling, `[ dup + ] 3
+    int# ! power# .`: it is on a bracket, which lookup never sees.
+    Subscript and superscript digits still read as `_2` and `^2` (23), as
+    `\times` reads as `×`.
 26. **High Stack and Low Stack** (Thomas, to try). The surface March is
     written in, today the intermediate form of section 4, is High Stack;
     Symbolic Forth, the lowest form, is Low Stack.
@@ -872,8 +1102,8 @@ Settled (Thomas, 2026-10-15):
     is used, `Snake'` or `'Snake'`, or given by a word that leaves it,
     `Snake: Snake' ;`, as a Lisp keyword evaluates to itself. A namespace
     of symbols, a state machine or facts and rules, imports the old rule
-    as a pattern word (25) whose capture is the word itself,
-    `/([A-Z][A-Za-z0-9]*)/: < sym -- sym > [ ] ;`, and there
+    as a rule (25) whose capture is the name itself and whose code is
+    none, `/([A-Z][A-Za-z0-9]*)/: [ ] ;`, and there
     `Socrates Is Human fact` reads without marks as before; a capitalized
     word defined in it clashes with the pattern, as among facts it should.
     In a signature a bare `Open` is applied and means what it leaves, its
@@ -884,9 +1114,8 @@ Settled (Thomas, 2026-10-15):
     defines none, reading and case styles being words of namespaces,
     `io.file.read` and `case.snake` (TYPES.md 3.12);
     examples/door.march defines its states and events, and
-    examples/syllogism.march reads its capitals by the pattern word.
-    `lower` does not yet write what a pattern word reads (25, open), so
-    the syllogism is not run lowered.
+    examples/syllogism.march reads its capitals by the rule, lowered too,
+    where `.` applies them (25, 2026-10-20).
 28. **A symbol taken as text is a string** (Thomas, 2026-10-17). A symbol
     is text until a type structures it (section 1), so a word that takes a
     string takes a symbol and makes it one: `'hello' length` and
@@ -912,7 +1141,66 @@ Settled (Thomas, 2026-10-15):
     Text that chooses no clause can stay a string, already a cell as a
     map's key, strings being interned.
 
-Open: for pattern words (25), what a group that may not match leaves,
+29. **Failing, and traps** (Thomas, 2026-10-20: "it is just an ERROR
+    context with the same word definitions as the word you want to catch
+    that error in"; "yes, that is what I had in mind"). A word fails by
+    `fail`, which takes one value, a kind alone or a tuple of a message
+    and a kind, so that what lies below is never taken for a message:
+
+    ```
+    no-file' fail
+    ( "can't read it" no-file' ) fail
+    ```
+
+    `fail` never returns, so nothing after it is reached and a body that
+    ends in it leaves what its signature says. Code run while compiling
+    that fails, a bracket's, a rule's, the identity search's (21), is an
+    error where that code was applied. At run time failing is a trap.
+
+    A handler is a clause of the same word, for its inputs and a trap on
+    top. When anything inside the word fails, its inputs come back as
+    they were when it was applied, the trap goes on top, and the word is
+    applied again, so ordinary dispatch chooses the handler, which leaves
+    what the word leaves: the word's effect is the same either way, and
+    checked while compiling.
+
+    ```
+    size: < string >< i64 > [ io.file.read length ] ;
+    size: < string trap >< i64 > [ drop drop 0 ] ;
+    size: < string trap [ kind no-file' eq ] ? >< i64 > [ drop drop 0 ] ;
+    ```
+
+    A guard chooses among kinds, and a trap no handler's guard takes goes
+    on outward, as though the word had none. `kind` gives a trap's kind
+    and `why` its message, or with none, its kind's name; where it failed
+    is kept for the report. `fail` takes a trap too, and passes it on as
+    it is. The nearest word applied with a handler catches; with none,
+    the session reports it, as now. The machine's failures are traps
+    too, overflow, division by zero, a file not read, no clause's guard
+    holding, each of its kind; the fuel limit is the session's, never
+    caught. This is Factor's `recover`, which restores the data stack and
+    calls a quotation with the error, and ANS FORTH's `CATCH`, which
+    restores its depth: with types, March restores the inputs themselves.
+    The word is the try, as a Ruby method is with its own `rescue`.
+
+    The error context is on the stack, as every context is, so it is no
+    global state, and each task fails and handles on its own (Thomas:
+    "Is error a system global state? maybe not, b/c of multi-tasking").
+    It is a type only failing makes, `trap`, so a word that takes an
+    error as data, a program's own type, is never a handler (Thomas: "just
+    b/c a word accepts an error argument doesn't make the a trap"). One
+    rule keeps it so: a clause that takes a trap may not leave one, and no
+    store may hold one, so a trap lives only while a failure is handled.
+    Only a word with a handler pays, keeping its inputs as it is entered,
+    which, March's values being persistent, is keeping their cells; what
+    was done before the failure stands.
+
+    Not built. First, for the identity search, `fail` while compiling;
+    `( "…" kind' )` needs a sequence literal a clause takes as a tuple
+    (TYPES.md 2.10), where march8 now settles one holding a string and a
+    symbol as two strings.
+
+Open: for rules (25), what a group that may not match leaves,
 refused for now, and how an import names one alone; and the symbol for
 the verb `map` (section 2). To revisit: a map form, `{| … |}` perhaps, as
 `[| … |]` is the quotation's (section 3), which `[| … |] map#!` says
@@ -950,9 +1238,12 @@ says with words of the core, which lowering writes (section 4): `int#`,
 make data of a quotation (6.10), a signature being two sequences (6.8);
 `str#` makes text of one (6.15); `var#` makes a variable of a name, in
 a signature a type filled by matching, in a body an input by its place
-(6.11, 6.14); `power#` and `width#` make a power and a
-width (6.21, 6.22); `pattern#` makes a pattern of a symbol (below); and
-`import#` and `export#` are a namespace's keys (6.17). Each ends in `#`,
+(6.11, 6.14); `power#` makes a power (6.21), `unit#` an identity and
+`identity#` finds it at a type (6.21); `width#` applies a word at a width
+(6.22); `pattern#` makes a pattern of a symbol (below), and `name#`
+reads a rule's capture as a name where the rule was applied (6.16, 6.25);
+`clauses#` and `effect#` read a word, its clauses as data and its effect
+(6.6); and `import#` and `export#` are a namespace's keys (6.17). Each ends in `#`,
 which marks March's own by habit and means nothing to the reader (6.17).
 Types are words (section 2).
 
@@ -971,20 +1262,18 @@ Types are words (section 2).
   by `int# !`, and `;` takes it where it takes a name (6.25):
 
   ```
-  /log_([0-9]+)/: < f64 sym -- f64 > [ i64 ! log-base ] ;
-  log_([0-9]+) pattern# ! [ f64 . sym . ] seq# ! [ f64 . ] seq# !
-     [ i64 . ! log-base . ] ;
+  /log_([0-9]+)/: [ i64 ! log-base ] ;
+  log_([0-9]+) pattern# ! [ i64 . ! log-base . ] ;
   ```
 
-  A word the pattern claims is written as any word is, `log_2 .`: it is a
-  symbol until `.` looks it up, and the pattern matches it there, in
-  lookup, as a path is walked there, so the reader still has no rule. The
-  core's width and power are pattern words too (6.25), so `dup_2` is
-  `dup_2 .`, and no word's lowering needs its namespace. So
-  a program that uses pattern words lowers word for word, the syllogism
-  among them: `Socrates Is Human fact` is `Socrates . Is . Human . fact
-  .`, its capitals read by the pattern word of 6.27 where they are looked
-  up.
+  A name the rule matches is written as any name is, `log_2 .`: it is a
+  symbol until `.` looks it up, and the rule matches it there, in lookup,
+  as a path is walked there, so the reader still has no rule. A power and
+  a subscript are the core's rules (6.25), so `dup_2` is `dup_2 .`, and no
+  name's lowering needs its namespace. So a program that uses rules lowers
+  word for word, the syllogism among them: `Socrates Is Human fact` is
+  `Socrates . Is . Human . fact .`, its capitals rewritten by the rule of
+  6.27 where `.` applies them. Built 2026-10-20.
 
 **The order march8 is to reach it in**, each step keeping the litmus test
 (section 5) passing:
@@ -1001,9 +1290,11 @@ Types are words (section 2).
 4. **Strings**, as `[ … ] str# !` of `'…'` pieces and code (6.15).
 5. **Letters as places**, built in High Stack (6.14), lowering to
    `b var# .`, with each `_` lowered to its letter.
-6. **Pattern words**, as above, matched in lookup against the symbol `.`
-   applies, not the word as written, and the core's width and power moved
-   there from the reader as pattern words of the core, so lowering needs
-   no namespace (6.25); then the syllogism runs lowered.
+6. **Rules**, as above, matched in lookup against the symbol `.`
+   applies, not the word as typed (6.25); then the syllogism runs
+   lowered. Built 2026-10-20: a recognizer is a rewrite rule, the core's
+   power and width are rules of the core's, and a name keeps its
+   subscript and its power when lowered, so lowering needs no namespace
+   (6.21, 6.22).
 7. **The litmus test with no exceptions:** the core and every example
    lower, read back to the same tokens, and run the same.

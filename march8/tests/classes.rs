@@ -72,11 +72,11 @@ fn a_class_checks_and_keeps_the_type() {
     // Applied, or as an output, a class checks the value, which keeps its
     // own type.
     assert_eq!(show(&["3 < num > ! 4 + 7 num!"]), "<2> 7 7");
-    let inc = "inc: < num -- num > [ 1 + ] ;";
+    let inc = "inc: < num >< num > [ 1 + ] ;";
     assert_eq!(show(&[inc, "3 inc 2.5 inc"]), "<2> 4 3.5");
     assert_eq!(session(&["\"x\" num!"]).err(), Some(Kind::Mismatch));
     assert_eq!(
-        session(&["bad: < num -- num > [ drop \"no\" ] ; 3 bad"]).err(),
+        session(&["bad: < num >< num > [ drop \"no\" ] ; 3 bad"]).err(),
         Some(Kind::Mismatch)
     );
     // Messages name the class.
@@ -99,8 +99,18 @@ fn def_names_a_type() {
     // A name that is a type already; and `or` on what is not a type is
     // logical, so 2, not a bool, is no truth.
     assert_eq!(
-        session(&["i64: < i64 f64 or > ;"]).err(),
+        session(&["core.i64: < i64 f64 or > ;"]).err(),
         Some(Kind::Mismatch)
+    );
+    // The root's `i64` is the program's own, which its source applies
+    // wherever it is written, its own bracket too.
+    assert_eq!(
+        session(&["i64: < i64 f64 or > ;"]).err(),
+        Some(Kind::NoWord)
+    );
+    assert_eq!(
+        show(&["i64: < core.i64 f64 or > ; one: < i64 > [ drop 1 ] ; 2.0 f64! one"]),
+        "<1> 1"
     );
     assert_eq!(show(&["0 1 or"]), "<1> true");
     assert_eq!(session(&["1 2 or"]).err(), Some(Kind::Literal));
@@ -118,7 +128,7 @@ fn a_word_that_builds_types_is_chosen_by_what_it_takes() {
     assert_eq!(session(&["i64 true or"]).err(), Some(Kind::NoWord));
     assert_eq!(session(&["true i64 or"]).err(), Some(Kind::NoWord));
     // `nil` stands for its type where a type is wanted, in any family.
-    let kv = "kv: < type type -- type > [ drop ] ;";
+    let kv = "kv: < type type >< type > [ drop ] ;";
     assert_eq!(show(&[kv, "\"ab\" string nil kv !"]), "<1> \"ab\"");
 }
 

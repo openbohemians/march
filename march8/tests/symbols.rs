@@ -6,7 +6,7 @@
 //! does.
 use march8::{Kind, Session};
 
-const CAPS: &str = "/([A-Z][A-Za-z0-9]*)/: < sym -- sym > [ ] ;";
+const CAPS: &str = "/([A-Z][A-Za-z0-9]*)/: [ ] ;";
 
 fn show(src: &str) -> String {
     let mut s = Session::new();

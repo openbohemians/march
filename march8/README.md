@@ -8,7 +8,7 @@ frozen. March will compile itself again once it is mature.
 It builds on merkle-champ 0.2, from crates.io.
 
 ```sh
-cargo run -- --eval 'fee: < money -- money > [ 1.10 + ] ; 19.99 fee'
+cargo run -- --eval 'fee: < money >< money > [ 1.10 + ] ; 19.99 fee'
 # <1> 21.09
 cargo run -- --eval 'sq: [ dup * ] ; 2.5 sq 3 sq'
 # <2> 6.25 9

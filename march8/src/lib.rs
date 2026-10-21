@@ -85,18 +85,11 @@ impl Session {
     }
 
     fn compile_word(&mut self, src: &str) -> error::Result<(Vec<Op>, Vec<Type>)> {
-        let mut toks = if self.symbolic {
+        let toks = if self.symbolic {
             read::read_symbolic(src, &self.symbols)?
         } else {
             read::read(src, &self.symbols)?
         };
-        // The core is read by its own rules alone, though its words are the
-        // root's (doc/design/SYMBOLIC-FORTH.md 25).
-        if self.stage.core {
-            for t in &mut toks {
-                t.word = None;
-            }
-        }
         self.stage.begin(&self.types);
         self.stage.run_source(&toks)?;
         let types = self.stage.finish()?;

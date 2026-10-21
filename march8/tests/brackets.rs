@@ -26,8 +26,8 @@ fn a_symbol_chooses_a_clause() {
     // the symbol `Snake`, which the word `Snake` leaves (SYMBOLIC-FORTH.md
     // 27).
     let style = "Snake: Snake' ; Kebab: Kebab' ; \
-                 style: < string Snake -- string > [ drop case.snake ] ; \
-                 style: < string Kebab -- string > [ drop case.kebab ] ;";
+                 style: < string Snake >< string > [ drop case.snake ] ; \
+                 style: < string Kebab >< string > [ drop case.kebab ] ;";
     assert_eq!(
         show(&[
             style,
@@ -68,11 +68,11 @@ fn a_type_applied_converts() {
         "<3> 2 < i64 > 2.5 < f64 > ( 1 2 ) < i64 ary >"
     );
     assert_eq!(
-        show(&["nn: < a ary -- i64 > [ length ] ; ( 1 2 3 ) nn"]),
+        show(&["nn: < a ary >< i64 > [ length ] ; ( 1 2 3 ) nn"]),
         "<1> 3"
     );
     assert_eq!(
-        show(&["look: < k v map k -- v > [ at ] ; { \"a\" 1 } \"a\" look"]),
+        show(&["look: < k v map k >< v > [ at ] ; { \"a\" 1 } \"a\" look"]),
         "<1> 1"
     );
     // A bracket in a body still types the values on top.
@@ -86,14 +86,24 @@ fn one_letter_is_a_variable_and_a_question_a_guard() {
     // One letter is a variable, a type variable in a bracket, and names no
     // word.
     assert_eq!(
-        show(&["first-of: < a a -- a > [ drop ] ; 5 6 first-of"]),
+        show(&["first-of: < a a >< a > [ drop ] ; 5 6 first-of"]),
         "<1> 5"
     );
     assert_eq!(session(&["a: [ 1 ] ;"]).err(), Some(Kind::Syntax));
-    // A word tested, `positive?`, is a guard in a bracket, and so is any
-    // quotation leaving a bool.
-    let even = "even: < i64 [ 2 mod zero? ] > [ drop 1 ] ; even: < i64 > [ drop 0 ] ;";
+    // A word tested, `positive?`, is a guard in a bracket, and so is a
+    // quotation tested, leaving a bool; each role has its mark
+    // (doc/design/SYMBOLIC-FORTH.md 2), so one left bare is refused.
+    let even = "even: < i64 [ 2 mod zero ] ? > [ drop 1 ] ; even: < i64 > [ drop 0 ] ;";
     assert_eq!(show(&[even, "4 even 3 even", "7", "even"]), "<3> 1 0 0");
+    let e = Session::new()
+        .eval("even: < i64 [ 2 mod zero ] > [ drop 1 ] ;")
+        .unwrap_err();
+    assert_eq!(e.kind, Kind::Syntax);
+    assert!(
+        e.to_string()
+            .contains("`[ 2 mod zero ]` is left bare, and a guard is a test: `[ 2 mod zero ] ?`"),
+        "{e}"
+    );
     let sign = "sign: < i64 positive? > [ drop 1 ] ; sign: < i64 > [ drop 0 ] ;";
     assert_eq!(show(&[sign, "5 sign -5 sign"]), "<2> 1 0");
     // Its code runs while compiling: it can leave no value of run time.
@@ -106,7 +116,7 @@ fn brackets_inside_brackets() {
     // converts to a number. The bracket in the guard is one value, applied
     // to the input, so the guard looks at one input.
     let num = "number: < nil > [ drop false ] ; number: < f64 > [ drop true ] ;
-        hh: < string [ < f64 > ! number? ] > [ drop 1 ] ;
+        hh: < string [ < f64 > ! number ] ? > [ drop 1 ] ;
         hh: < string > [ drop 0 ] ;";
     assert_eq!(
         show(&[num, "\"2.5\" hh \"x\" hh", "\"7\"", "hh"]),
@@ -114,21 +124,47 @@ fn brackets_inside_brackets() {
     );
     // A guard's message shows its brackets as written.
     let e = Session::new()
-        .eval("ff: < [ < f64 > ! number? ] > [ ] ;")
+        .eval("ff: < [ < f64 > ! number ] ? > [ ] ;")
         .unwrap_err();
-    assert!(e.to_string().contains("`[ < f64 > ! number? ]`"), "{e}");
+    assert!(e.to_string().contains("`[ < f64 > ! number ] ?`"), "{e}");
     // A one-slot bracket in a bracket is its type.
     assert_eq!(
-        show(&["ff: < < i64 > -- < i64 > > [ 1 + ] ; 1 ff"]),
+        show(&["ff: < < i64 > >< < i64 > > [ 1 + ] ; 1 ff"]),
         "<1> 2"
     );
-    // Any other would be a quotation's type, `map`'s `< a -- b >`: not yet.
+    // Any other would be a quotation's type, as `map`'s code is: not yet.
     for src in [
-        "gg: < a ary < a -- b > -- b ary > [ map ] ;",
-        "gg: < i64 -- < i64 i64 > > [ ] ;",
+        "gg: < a ary < a b > >< b ary > [ map ] ;",
+        "gg: < i64 >< < i64 i64 > > [ ] ;",
     ] {
         let e = Session::new().eval(src).unwrap_err();
         assert_eq!(e.kind, Kind::Limit, "{src}");
         assert!(e.to_string().contains("would type a quotation"), "{e}");
     }
+}
+
+#[test]
+fn a_signature_is_two_brackets_touching() {
+    // Its inputs, then its outputs (doc/design/SYMBOLIC-FORTH.md 6.8):
+    // `><` is `>` then `<`, and `--` is a comment, in a bracket too.
+    assert_eq!(show(&["sq: < i64 >< i64 > [ dup * ] ; 3 sq"]), "<1> 9");
+    assert_eq!(show(&["sq: < i64 > < i64 > [ dup * ] ; 3 sq"]), "<1> 9");
+    assert_eq!(
+        show(&["sq: < i64 -- its side\n >< i64 > [ dup * ] ; 3 sq"]),
+        "<1> 9"
+    );
+    assert_eq!(show(&["one: < >< i64 > [ 1 ] ; one"]), "<1> 1");
+    // The divider it was is a comment now, which says so.
+    let e = Session::new()
+        .eval("sq: < i64 -- i64 > [ dup * ] ;")
+        .unwrap_err();
+    assert_eq!(e.kind, Kind::Syntax);
+    assert!(
+        e.to_string()
+            .contains("a signature's outputs are a bracket of their own"),
+        "{e}"
+    );
+    // It closes a `<` and nothing else.
+    let e = Session::new().eval("[ >< ]").unwrap_err();
+    assert!(e.to_string().contains("`>` closes the `[`"), "{e}");
 }

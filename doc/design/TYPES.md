@@ -138,12 +138,16 @@ bullet below).
   FORTH does. Symbols need no declaring and are one namespace: a symbol has
   no definition, only clauses that match it, which belong to families. A
   bracket's code runs while compiling, so it leaves only known values. A
-  bracket first in a definition's quotation is the clause's context;
-  anywhere else it is a value (2026-10-12), so `[ < f64 > . ] map`
-  converts each element: a type, or, of more than one type, a signature,
-  by which `!` gives the values below their types, `x y < i64 f64 > !`.
-  `--` divides inputs from outputs, which leaves no comment inside a
-  bracket (open).
+  bracket before a definition's body is the clause's context, and from
+  2026-10-14 is never read inside it (SYMBOLIC-FORTH.md 3); anywhere else
+  it is a value (2026-10-12), so `[ < f64 > ! ] map` converts each
+  element: a type, or, of more than one type, a signature, by which `!`
+  gives the values below their types, `x y < i64 f64 > !`. A quotation is
+  a guard only tested, `< i64 [ 2 mod zero ] ? >`, each role having its
+  mark (SYMBOLIC-FORTH.md 2; a bare one was a guard until 2026-10-20).
+  Inputs and outputs are two brackets, touching, `< i64 >< i64 >`, so `--`
+  is a comment inside a bracket too (SYMBOLIC-FORTH.md 6.8, 2026-10-20;
+  `--` divided them until then).
 - **Compile stages evaluate the type part and erase it.** When the type
   stage meets `+ .` with two i64s, it picks integer addition and leaves a
   plain call behind. After lowering, `.` is an ordinary call instruction
@@ -256,9 +260,9 @@ an error.
 - **Clauses are signature patterns:**
 
   ```
-  < i64 i64 -- i64 >    integer add
-  < f64 f64 -- f64 >    float add
-  < a ary a -- a ary >    lift: add to each element ("a" is a type variable)
+  < i64 i64 >< i64 >    integer add
+  < f64 f64 >< f64 >    float add
+  < a ary a >< a ary >    lift: add to each element ("a" is a type variable)
   ```
 
   Lifting stops being a special case of the checker and becomes a clause.
@@ -313,7 +317,8 @@ Literals take their type from context, with no implicit promotion
 (SURFACE.md). A symbol taken as a string, a value known only at run time
 too, is no promotion: it is text until a type structures it
 (SYMBOLIC-FORTH.md 6.28). At a compile stage a literal is undecided: its type is a
-**literal type**, `int#`, `dec#`, `ratio#`, `str#`, `seq#` or `map#` (3.4). Thomas: it is "just another
+**literal type**, `int#`, `dec#`, `ratio#`, `str#`, `seq#`, `map#` or `unit#`, an operation's identity,
+`+^0` (3.4; SYMBOLIC-FORTH.md 6.21). Thomas: it is "just another
 type signature `< f64 lit# >`", so literal handling is clauses, open like
 any family.
 
@@ -393,8 +398,8 @@ needs a bracket, as SURFACE.md assigns `< >` to signatures and patterns:
   word, `< f64 money >`, is then the annotation of its inputs, not a
   construct of its own. (Since 2026-10-12 a type's name gives the type
   everywhere, so a type is built in code as in a bracket, `x 100 i64 vec
-  .`, and a bracket is a value except first in a definition's quotation,
-  `!` annotating by it: `x y < i64 f64 > !` (2.2).)
+  .`, and a bracket is a value except before a definition's body, `!`
+  annotating by it: `x y < i64 f64 > !` (2.2).)
 
 Rejected: marking each type name, as in `100 <i64> <vec>`. It leaves unclear
 where a type expression starts (is the 100 part of it?), and makes a second
@@ -429,7 +434,7 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   where it starts, is refused: a word that takes a symbol could take the
   name below it. Until then the name came last, `[ 1 + . ] inc def .`.
 - **A heading sets a mode** for the definitions after it, as a stack
-  machine's state: `## < i64 -- i64 >` makes them clauses for those types,
+  machine's state: `## < i64 >< i64 >` makes them clauses for those types,
   until the next heading. A heading always starts a section, even an empty
   one, so consecutive headings do not combine; how to write OR between
   patterns is deferred.
@@ -587,7 +592,7 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
    - **`fbool`,** the numbers from 0 to 1, as f64 or UNORM, with `not`,
      `and` and `or` as for `bool` (2.16), which embeds in it. Fuzzy truths
      come mostly from membership functions, words that say how far a
-     measurement belongs to a fuzzy set: `[ < f64 -- fbool. > 160.0 -. 30.0
+     measurement belongs to a fuzzy set: `[ < f64 >< fbool. > 160.0 -. 30.0
      ÷. 0.0 1.0 clamp. ] tall def.`, 175 cm being 0.5 tall.
    - **Hedges,** Zadeh's modifiers: "very" is x², "somewhat" √x.
    - **`decide`** (Thomas's word) makes a bool from a fuzzy truth, for a

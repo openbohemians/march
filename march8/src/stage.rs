@@ -14,7 +14,7 @@ use crate::prims::{self, Effects, PRIMS, Prim};
 use crate::read::{self, Piece, Tok, Token};
 use crate::types::*;
 use regex::{Regex, RegexSet};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// What is known of a value at compile time.
@@ -33,8 +33,10 @@ pub enum Val {
     Str(Rc<str>),
     /// A type, as a value.
     Type(Type),
-    /// A name not yet applied, and where it was written, where errors in
-    /// applying it are reported.
+    /// A name not yet applied, a symbol, and where it was written, where
+    /// errors in applying it are reported. A symbol is global text
+    /// (doc/design/SYMBOLIC-FORTH.md 16): code means what it means where it
+    /// was written because its names are expanded to their paths there.
     Name(Rc<str>, Pos),
     /// A quotation.
     Quote(Rc<[Token]>),
@@ -118,7 +120,7 @@ impl PartialEq for Test {
             }
             // A symbol by its name, not where it was written.
             (Test::Equals(a), Test::Equals(b)) => match (&a.val, &b.val) {
-                (Val::Name(x, _), Val::Name(y, _)) => a.ty == b.ty && x == y,
+                (Val::Name(x, ..), Val::Name(y, ..)) => a.ty == b.ty && x == y,
                 _ => a == b,
             },
             _ => false,
@@ -165,7 +167,6 @@ fn source_text(toks: &[Token]) -> String {
             Tok::Ratio(t) => prims::show_ratio(t),
             Tok::Str(s) => format!("{s:?}"),
             Tok::Open(b) | Tok::Close(b) => (*b as char).to_string(),
-            Tok::Dashes => "--".into(),
             Tok::Template(_) => "\"…\"".into(),
         };
         if !out.is_empty() {
@@ -181,7 +182,7 @@ impl Guard {
     /// The guard as a message names it.
     fn name(&self) -> String {
         match &self.test {
-            Test::Quote(q) => format!("the guard `[ {} ]`", source_text(q)),
+            Test::Quote(q) => format!("the guard `{}`", source_text(q)),
             Test::Equals(j) => format!("the value pattern {}", value_text(j)),
         }
     }
@@ -199,7 +200,7 @@ fn value_text(j: &Jdg) -> String {
         Val::Ratio(t) => prims::show_ratio(t),
         Val::Float(x) => format!("{x:?}"),
         Val::Str(s) => format!("{s:?}"),
-        Val::Name(s, _) => {
+        Val::Name(s, ..) => {
             let mut out = String::new();
             crate::show::symbol(s, &mut out);
             out
@@ -459,8 +460,8 @@ fn is_path(name: &str) -> bool {
     path.split('.').all(|p| !p.is_empty())
 }
 
-/// Where a pattern word's pattern starts in its name: `/…/`, after the path
-/// of its namespace if it has one (doc/design/SYMBOLIC-FORTH.md 25).
+/// Where a rule's pattern starts in its name: `/…/`, after the path of its
+/// namespace if it has one (doc/design/SYMBOLIC-FORTH.md 25).
 fn pattern_at(name: &str) -> Option<usize> {
     let p = name.find('/')?;
     (name.len() - p > 2 && name.ends_with('/') && (p == 0 || name[..p].ends_with('.'))).then_some(p)
@@ -499,7 +500,7 @@ fn is_code(j: &Jdg) -> bool {
 fn same_code(a: &Val, b: &Val) -> bool {
     match (a, b) {
         (Val::Quote(x), Val::Quote(y)) => Rc::ptr_eq(x, y),
-        (Val::Name(x, _), Val::Name(y, _)) => Rc::ptr_eq(x, y),
+        (Val::Name(x, ..), Val::Name(y, ..)) => Rc::ptr_eq(x, y),
         _ => false,
     }
 }
@@ -508,8 +509,10 @@ fn same_code(a: &Val, b: &Val) -> bool {
 /// 21), if it has one.
 fn power_effect((k, m): (usize, usize), n: usize) -> Option<(usize, usize)> {
     match (k, m) {
-        (0, 1) => (n > 0).then_some((0, 1)),
-        (2.., 1) => (n > 0 && (n - 1).is_multiple_of(k - 1)).then_some((n, 1)),
+        // The 0th power of a value or an operation is an identity, a value.
+        (0, 1) | (2.., 1) if n == 0 => Some((0, 1)),
+        (0, 1) => Some((0, 1)),
+        (2.., 1) => (n - 1).is_multiple_of(k - 1).then_some((n, 1)),
         _ => Some((0..n).fold((0, 0), |(a, b), _| {
             if k <= b {
                 (a, b - k + m)
@@ -545,11 +548,24 @@ fn take(items: &mut Vec<Item>, ins: &mut usize, k: usize) {
 #[derive(Debug)]
 pub struct Clause {
     pub sig: Option<Sig>,
+    /// Its signature as written, each value a type or a bracket: none, one,
+    /// or two, the inputs then the outputs.
+    pub written: Rc<[Jdg]>,
     pub body: Rc<[Token]>,
     pub at: Pos,
     /// Defined by the core vocabulary: its errors are reported where it is
     /// applied, since its own source is not the program's.
     pub core: bool,
+}
+
+/// Where an operation's identity at a type is found (doc/design/SYMBOLIC-FORTH.md
+/// 21): a fact of the primitive it applies there, `unit`'s, or the least or
+/// greatest value of the type, `least`'s or `greatest`'s, for a choice of
+/// the greater or the lesser.
+enum Leaf {
+    Prim(Rc<str>),
+    Least,
+    Greatest,
 }
 
 /// What a name means. A name may be a type and have clauses too: the
@@ -566,6 +582,7 @@ struct Word {
 
 /// Words applied inside words, at most this deep.
 const DEPTH: u32 = 64;
+
 /// Tokens evaluated in one compilation, at most.
 const STEPS: u64 = 10_000_000;
 
@@ -614,29 +631,35 @@ pub struct Stage {
     machine: Option<Machine>,
     /// Set while a word is applied wide (doc/design/SYMBOLIC-FORTH.md 22).
     wide: Option<Wide>,
-    /// The namespace of the code being compiled, empty for the root, which
-    /// is where the code was written (doc/design/SYMBOLIC-FORTH.md 16, 17).
-    ns: Rc<str>,
-    /// Code written in a namespace: from where its tokens start, where they
-    /// end, the tokens, kept so the place is not reused, and the namespace.
-    scopes: BTreeMap<usize, Scope>,
+    /// Where the name a rule rewrites was applied, a namespace, empty for
+    /// the root, which `name#` reads (doc/design/SYMBOLIC-FORTH.md 25).
+    applied_in: Rc<str>,
+    /// The names a source defines, known while it is expanded, so that a
+    /// namespace's own later words count wherever they are written (16).
+    pending: HashSet<Rc<str>>,
+    /// The namespaces that hold words, by their paths.
+    spaces: HashSet<Rc<str>>,
+    /// Set while a typed clause is checked as it is defined.
+    checking: u32,
     /// Each namespace's import and export: the paths they name.
     imports: HashMap<Rc<str>, Rc<[Rc<str>]>>,
     exports: HashMap<Rc<str>, Rc<[Rc<str>]>>,
-    /// Each namespace's patterns, the names of its pattern words.
+    /// Each namespace's rules, by their patterns, and the core's under
+    /// `CORE_RULES`.
     patterns: HashMap<Rc<str>, Patterns>,
-    /// Words a pattern has read, by its namespace and the word's text: its
-    /// captures and its word, kept so that a word read again is the same
-    /// code.
-    recognized: HashMap<(Rc<str>, Rc<str>), Code>,
 }
 
-/// Code, as tokens.
-type Code = Rc<[Token]>;
+/// Where the core's rules are kept among the namespaces' (doc/design/
+/// SYMBOLIC-FORTH.md 25): a key no namespace has, since a namespace's
+/// parts are names.
+const CORE_RULES: &str = ".";
 
-/// A word a pattern reads: the pattern's namespace, its place there, and
-/// the word's text.
-type Reading = (Rc<str>, usize, Rc<str>);
+/// The core's namespace.
+const CORE: &str = "core";
+
+/// A rule that rewrites a name: where its patterns are kept, a namespace or
+/// `CORE_RULES`, and its place among them.
+type Rule = (Rc<str>, usize);
 
 /// A namespace's patterns (doc/design/SYMBOLIC-FORTH.md 25): as one set, to
 /// match a word against all at once, and each one.
@@ -652,10 +675,6 @@ struct Pattern {
     re: Regex,
     word: Rc<str>,
 }
-
-/// Code written in a namespace: where its tokens end, the tokens, and the
-/// namespace.
-type Scope = (usize, Rc<[Token]>, Rc<str>);
 
 /// A width being applied: how many values make a group, and the code
 /// handed to the word widened, which runs as written.
@@ -675,8 +694,8 @@ fn signature(q: &[Token]) -> bool {
     q.first().is_some_and(|t| t.tok == Tok::Open(b'<')) && matching(q, 0) + 1 == q.len()
 }
 
-/// A bracket in a bracket, `< a ary < a -- b > -- b ary >`, would be the
-/// type of a quotation, an input or output that is code.
+/// A bracket in a bracket that is no one type, `< a ary < a b > >`, would
+/// be the type of a quotation, an input or output that is code.
 fn quotation_type(q: &[Token], pos: Pos) -> Error {
     Error::new(
         Kind::Limit,
@@ -689,6 +708,55 @@ fn quotation_type(q: &[Token], pos: Pos) -> Error {
 }
 
 /// The index of the bracket that closes the one opened at `i`.
+/// Where a definition that starts at `i` ends, at its `;`: a name, then
+/// its signature and body, brackets, or one value, then `;`.
+fn definition(toks: &[Token], i: usize) -> Option<usize> {
+    let Tok::Name(_) = toks[i].tok else {
+        return None;
+    };
+    let mut j = i + 1;
+    while toks.get(j).is_some_and(|t| matches!(t.tok, Tok::Open(_))) {
+        j = matching(toks, j) + 1;
+    }
+    let value = |t: &Token| {
+        matches!(
+            t.tok,
+            Tok::Name(_) | Tok::Int(_) | Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_)
+        )
+    };
+    if j == i + 1 && toks.get(j).is_some_and(value) {
+        j += 1;
+    }
+    let semicolon = j > i + 1
+        && toks.get(j).is_some_and(|t| t.tok == Tok::Name(";".into()))
+        && toks.get(j + 1).is_some_and(|t| t.tok == Tok::Apply);
+    semicolon.then_some(j)
+}
+
+/// The words a source defines, by their names.
+fn definitions(toks: &[Token]) -> impl Iterator<Item = Rc<str>> + '_ {
+    (0..toks.len()).filter_map(move |i| {
+        let Tok::Name(n) = &toks[i].tok else {
+            return None;
+        };
+        let applied = toks
+            .get(i + 1)
+            .is_some_and(|t| matches!(t.tok, Tok::Apply | Tok::Test));
+        if applied || !names(n) {
+            return None;
+        }
+        definition(toks, i)?;
+        let key = split_path(n).1;
+        (pattern_at(key) != Some(0) && !matches!(key, "import#" | "export#")).then(|| n.clone())
+    })
+}
+
+/// Whether a name applied names a word: not a meta-op, `!` or `;`, nor an
+/// argument, `_`, nor a variable.
+fn names(n: &str) -> bool {
+    !matches!(n, "!" | ";" | "_") && !read::is_variable(n)
+}
+
 fn matching(toks: &[Token], i: usize) -> usize {
     let Tok::Open(o) = toks[i].tok else {
         unreachable!("an opening bracket")
@@ -725,6 +793,16 @@ fn values(n: usize) -> String {
     }
 }
 
+/// A core word's path, `core.dup`.
+fn core_path(name: &str) -> Rc<str> {
+    format!("{CORE}.{name}").into()
+}
+
+/// Whether a word found is the core's of that name.
+fn is_core_word(found: &str, name: &str) -> bool {
+    found.strip_prefix(CORE).and_then(|p| p.strip_prefix('.')) == Some(name)
+}
+
 fn float_bits(x: f64) -> u64 {
     if x.is_nan() {
         f64::NAN.to_bits()
@@ -759,15 +837,18 @@ impl Stage {
             in_bracket: 0,
             machine: None,
             wide: None,
-            ns: "".into(),
-            scopes: BTreeMap::new(),
+            applied_in: "".into(),
+            pending: HashSet::new(),
+            spaces: HashSet::new(),
+            checking: 0,
             imports: HashMap::new(),
             exports: HashMap::new(),
             patterns: HashMap::new(),
-            recognized: HashMap::new(),
         };
+        // The core is the namespace `core`, which every namespace finds
+        // last, as though imported (doc/design/SYMBOLIC-FORTH.md 16).
         for (i, (_, name)) in Base::ALL.iter().enumerate() {
-            let name: Rc<str> = (*name).into();
+            let name = core_path(name);
             s.word(&name).ty = Some(i as Type);
             s.type_names.insert(i as Type, name);
         }
@@ -777,24 +858,39 @@ impl Stage {
             (Con::Map, "map"),
             (Con::Or, "or"),
         ] {
-            s.word(&name.into()).con = Some(con);
+            s.word(&core_path(name)).con = Some(con);
         }
         let atom = s.types.intern(Term::Atom);
-        s.word(&"atom".into()).ty = Some(atom);
+        s.word(&core_path("atom")).ty = Some(atom);
         let tuple = s.types.intern(Term::AnyTuple);
-        s.word(&"tuple".into()).ty = Some(tuple);
+        s.word(&core_path("tuple")).ty = Some(tuple);
         let none = crate::symbols::Symbols::parse("").expect("an empty table");
         for p in PRIMS {
             let toks = crate::read::read(p.sig, &none).expect("a primitive's signature reads");
-            let sig = s
-                .bracket(&toks[1..toks.len() - 1])
+            // Its inputs, and its outputs in a second bracket.
+            let end = matching(&toks, 0);
+            let mut sig = s
+                .bracket(&toks[1..end])
                 .expect("a primitive's signature is well formed");
-            s.word(&p.name.into()).prim = Some((p.prim, Rc::new(sig)));
+            if end + 1 < toks.len() {
+                sig.outs = Some(
+                    s.outputs(&toks[end + 2..toks.len() - 1])
+                        .expect("a primitive's outputs are types"),
+                );
+            }
+            s.word(&core_path(p.name)).prim = Some((p.prim, Rc::new(sig)));
         }
         s
     }
 
     fn word(&mut self, name: &Rc<str>) -> &mut Word {
+        if !self.words.contains_key(name) {
+            let mut space = split_path(name).0;
+            while !space.is_empty() {
+                self.spaces.insert(space.into());
+                space = space.rfind('.').map_or("", |i| &space[..i]);
+            }
+        }
         self.words.entry(name.clone()).or_default()
     }
 
@@ -820,7 +916,7 @@ impl Stage {
         self.effects = 0;
         self.steps = 0;
         self.depth = 0;
-        self.ns = "".into();
+        self.applied_in = "".into();
     }
 
     /// Ends a compilation: every value left is made a value at run time, and
@@ -878,19 +974,8 @@ impl Stage {
         Ok(self.stack.pop().expect("checked"))
     }
 
-    /// Evaluates code, in the namespace it was written in.
+    /// Evaluates code, its names expanded where it was written.
     pub fn run(&mut self, toks: &[Token]) -> Result<()> {
-        let ns = self.scope_of(toks).unwrap_or_else(|| "".into());
-        if ns == self.ns {
-            return self.run_here(toks);
-        }
-        let saved = std::mem::replace(&mut self.ns, ns);
-        let r = self.run_here(toks);
-        self.ns = saved;
-        r
-    }
-
-    fn run_here(&mut self, toks: &[Token]) -> Result<()> {
         let mut i = 0;
         while i < toks.len() {
             let t = &toks[i];
@@ -898,24 +983,6 @@ impl Stage {
             self.steps += 1;
             if self.steps > STEPS {
                 return Err(self.err(Kind::Limit, "compiling took too many steps"));
-            }
-            // A pattern the namespace knows reads a word in place of the core
-            // (doc/design/SYMBOLIC-FORTH.md 25): its code, its captures and
-            // its word, runs here, or with `'` is passed.
-            if let Some(w) = t.word
-                && !self.patterns.is_empty()
-                && let Some(q) = self.recognize(&toks[i..i + w.len as usize])?
-            {
-                if w.applies {
-                    self.enter()?;
-                    let r = self.run(&q);
-                    self.depth -= 1;
-                    r?;
-                } else {
-                    self.push(QUOTE, Val::Quote(q));
-                }
-                i += w.len as usize;
-                continue;
             }
             match &t.tok {
                 Tok::Int(n) => self.push(INT_LIT, Val::Int(*n)),
@@ -940,7 +1007,7 @@ impl Stage {
                 Tok::Test => self.apply_test()?,
                 Tok::Open(b'[') => {
                     let j = matching(toks, i);
-                    let q = self.written(toks[i + 1..j].into());
+                    let q: Rc<[Token]> = toks[i + 1..j].into();
                     self.push(QUOTE, Val::Quote(q));
                     i = j;
                 }
@@ -982,7 +1049,6 @@ impl Stage {
                     self.floor = self.stack.len();
                 }
                 Tok::Close(b) => self.close_literal(*b)?,
-                Tok::Dashes => unreachable!("only inside brackets"),
             }
             i += 1;
         }
@@ -998,8 +1064,7 @@ impl Stage {
         match f.val {
             Val::Name(n, at) => {
                 self.pos = at;
-                let n = self.lookup(&n)?;
-                self.apply_word(&n)
+                self.apply_name(&n, at)
             }
             // A type is data, and is not called (Thomas, 2026-10-13): `!`
             // converts by it.
@@ -1037,7 +1102,10 @@ impl Stage {
     fn convert_by(&mut self) -> Result<()> {
         let f = self.pop()?;
         let named = match &f.val {
-            Val::Name(n, _) => self.words.get(n).and_then(|w| w.ty),
+            Val::Name(n, _) => self
+                .words
+                .get(&self.resolve_quiet("", n))
+                .and_then(|w| w.ty),
             _ => None,
         };
         let t = match f.val {
@@ -1093,12 +1161,43 @@ impl Stage {
 
     fn apply_word(&mut self, name: &Rc<str>) -> Result<()> {
         let Some(w) = self.words.get(name) else {
+            // The source's own word, which it applies wherever it is
+            // written, before it is defined too (doc/design/SYMBOLIC-FORTH.md
+            // 16).
+            if self.pending.contains(name) {
+                let core = match self.words.contains_key(&core_path(name)) {
+                    true => format!("; the core's is `{CORE}.{name}`"),
+                    false => String::new(),
+                };
+                // A clause checked as it is defined waits for it, as for a
+                // value known only later.
+                let kind = match self.checking {
+                    0 => Kind::NoWord,
+                    _ => Kind::Unknown,
+                };
+                return Err(self.err(
+                    kind,
+                    format!(
+                        "no word `{name}` yet: the source defines its own `{name}`, and \
+                         applies it here, before it is defined{core}"
+                    ),
+                ));
+            }
             if let Some((space, last)) = name.rsplit_once('.')
                 && is_path(name)
             {
                 let prefix = format!("{space}.");
                 let msg = if self.words.keys().any(|k| k.starts_with(&prefix)) {
-                    format!("no word `{last}` in `{space}`")
+                    // A name written there, found nowhere, was taken as the
+                    // namespace's own: the program's root is not the core.
+                    let root = match self.words.get(last) {
+                        Some(w) if w.user => format!(
+                            ", its import, or the core: the root's `{last}` is the program's, \
+                             which a namespace imports to use"
+                        ),
+                        _ => String::new(),
+                    };
+                    format!("no word `{last}` in `{space}`{root}")
                 } else {
                     format!(
                         "no word `{name}`: there is no namespace `{space}`, and `{}` applies \
@@ -1108,7 +1207,8 @@ impl Stage {
                 };
                 return Err(self.err(Kind::NoWord, msg));
             }
-            return Err(self.err(Kind::NoWord, format!("no word `{name}`{}", self.typo(name))));
+            let why = self.typo(name);
+            return Err(self.err(Kind::NoWord, format!("no word `{name}`{why}")));
         };
         // A word that builds types and does something else too, `map` and
         // `or`, is a family: its constructor is the clause that takes types,
@@ -1142,45 +1242,25 @@ impl Stage {
 
     // ---- Namespaces (doc/design/SYMBOLIC-FORTH.md 16, 17) ----
 
-    /// The namespace code was written in, if not the root.
-    fn scope_of(&self, toks: &[Token]) -> Option<Rc<str>> {
-        let at = toks.as_ptr() as usize;
-        let (_, (end, _, ns)) = self.scopes.range(..=at).next_back()?;
-        (!toks.is_empty() && at < *end).then(|| ns.clone())
-    }
-
-    /// Code written here, in the namespace being compiled, which its names
-    /// are looked up in wherever it runs.
-    fn written(&mut self, toks: Rc<[Token]>) -> Rc<[Token]> {
-        let ns = self.ns.clone();
-        self.scope(&toks, ns);
-        toks
-    }
-
-    fn scope(&mut self, toks: &Rc<[Token]>, ns: Rc<str>) {
-        if ns.is_empty() || toks.is_empty() {
-            return;
-        }
-        let at = toks.as_ptr() as usize;
-        let end = at + std::mem::size_of_val(&**toks);
-        self.scopes.insert(at, (end, toks.clone(), ns));
-    }
-
-    /// The word a name applies, from the namespace being compiled: a path
-    /// is itself, and reached from outside its namespace, must be exported;
-    /// a bare name is looked up in the namespace, then among its import,
-    /// then in the core, and found in two of the first is an error.
+    /// The word a name applies from the root: a path is itself; a bare
+    /// name is the root's own, its import's, or the core's.
     fn lookup(&mut self, name: &Rc<str>) -> Result<Rc<str>> {
+        self.find("", name)
+    }
+
+    /// The word a name applies, written in a namespace: a path is itself; a
+    /// bare name is looked up in the namespace, then among its import, then
+    /// in the core, and found in two of the first is an error.
+    fn find(&self, ns: &str, name: &Rc<str>) -> Result<Rc<str>> {
         if is_path(name) {
-            self.reach(name);
             return Ok(name.clone());
         }
-        let ns = self.ns.clone();
-        let local = self.local(&ns, name);
-        let imported = self.imported(&ns, name);
+        let local = self.local(ns, name);
+        let imported = self.imported(ns, name);
         match (local, &imported[..]) {
             (Some(l), []) => Ok(l),
             (None, [i]) => Ok(i.clone()),
+            (None, []) if self.in_core(name).is_some() => Ok(core_path(name)),
             (None, []) if ns.is_empty() || !self.words.get(name).is_some_and(|w| w.user) => {
                 Ok(name.clone())
             }
@@ -1215,21 +1295,102 @@ impl Stage {
         match (self.local(ns, name), &imported[..]) {
             (Some(l), []) => l,
             (None, [i]) => i.clone(),
+            (None, []) => self.in_core(name).unwrap_or_else(|| name.clone()),
             _ => name.clone(),
         }
+    }
+
+    /// The shortest name that applies a word from the root: its last part,
+    /// if the root finds the word by it, as it finds the core's, else its
+    /// path. A symbol is global text, so a name taken out of code, which
+    /// applied from the stack is found from the root, keeps what it meant.
+    fn short(&self, path: &Rc<str>) -> Rc<str> {
+        if !is_path(path) {
+            return path.clone();
+        }
+        let last: Rc<str> = split_path(path).1.into();
+        if self.resolve_quiet("", &last) == *path {
+            last
+        } else {
+            path.clone()
+        }
+    }
+
+    /// A message with the core's words named as the root finds them, `dup`
+    /// for `core.dup`, but not a name a definition says, `core.unit:`.
+    fn shorten(&self, msg: &str) -> String {
+        let prefix = format!("{CORE}.");
+        let mut out = String::with_capacity(msg.len());
+        let mut at = 0;
+        while let Some(k) = msg[at..].find(&prefix) {
+            let i = at + k;
+            let end = msg[i..]
+                .find(|c: char| c.is_whitespace() || c == '`')
+                .map_or(msg.len(), |e| i + e);
+            let starts = msg[..i]
+                .chars()
+                .next_back()
+                .is_none_or(|c| c.is_whitespace() || "`'\"([<,".contains(c));
+            out.push_str(&msg[at..i]);
+            let chunk = &msg[i..end];
+            let mut name = chunk;
+            loop {
+                if !starts || chunk.ends_with(':') {
+                    out.push_str(chunk);
+                    break;
+                }
+                if self.words.contains_key(name) {
+                    out.push_str(&self.short(&name.into()));
+                    out.push_str(&chunk[name.len()..]);
+                    break;
+                }
+                // A name, less what follows it in a message.
+                match name.char_indices().next_back() {
+                    Some((j, c)) if "',.);".contains(c) => name = &name[..j],
+                    _ => {
+                        out.push_str(chunk);
+                        break;
+                    }
+                }
+            }
+            at = end;
+        }
+        out.push_str(&msg[at..]);
+        out
+    }
+
+    /// An error with the core's words named as the root finds them.
+    fn shorten_error(&self, mut e: Error) -> Error {
+        e.msg = self.shorten(&e.msg);
+        for t in &mut e.trace {
+            *t = self.shorten(t);
+        }
+        e
     }
 
     /// Runs a source: its imports first, wherever they are written, since an
     /// import holds for all of its namespace (doc/design/SYMBOLIC-FORTH.md
     /// 17); and its patterns known first, as they hold for all of theirs, so
-    /// no word reads one way before its pattern and another after (25).
+    /// no word reads one way before its pattern and another after (25). Then
+    /// it is expanded, each name it applies made its path where it was
+    /// written, its own later words counting (16), and run.
     pub fn run_source(&mut self, toks: &[Token]) -> Result<()> {
+        self.pending = definitions(toks).map(|n| self.defined(&n)).collect();
+        // Its messages name the core's words as the root finds them, its
+        // own words counting.
+        let r = self.run_expanded(toks).map_err(|e| self.shorten_error(e));
+        self.pending.clear();
+        r
+    }
+
+    fn run_expanded(&mut self, toks: &[Token]) -> Result<()> {
         let mut imports = Vec::new();
         let mut i = 0;
         while i < toks.len() {
             match &toks[i].tok {
                 Tok::Name(n)
-                    if split_path(n).1 == "import#" || pattern_at(split_path(n).1) == Some(0) =>
+                    if matches!(split_path(n).1, "import#" | "export#")
+                        || pattern_at(split_path(n).1) == Some(0) =>
                 {
                     let mut j = i + 1;
                     while toks.get(j).is_some_and(|t| matches!(t.tok, Tok::Open(_))) {
@@ -1240,17 +1401,14 @@ impl Stage {
                         && toks.get(j + 1).is_some_and(|t| t.tok == Tok::Apply);
                     if !defined {
                         i += 1;
-                    } else if split_path(n).1 == "import#" {
+                    } else if matches!(split_path(n).1, "import#" | "export#") {
                         imports.push(i..j + 2);
                         i = j + 2;
                     } else {
                         self.pos = toks[i].pos;
-                        let (space, key) = split_path(n);
-                        let space: Rc<str> = if space.is_empty() {
-                            self.ns.clone()
-                        } else {
-                            space.into()
-                        };
+                        let n = self.defined(n);
+                        let (space, key) = split_path(&n);
+                        let space: Rc<str> = space.into();
                         self.pattern(&space, key)?;
                         i = j + 2;
                     }
@@ -1262,6 +1420,8 @@ impl Stage {
         for r in &imports {
             self.run(&toks[r.clone()])?;
         }
+        // Expanding renames names, so the tokens keep their places.
+        let toks = self.expand(toks, self.home())?;
         let mut at = 0;
         for r in imports {
             self.run(&toks[at..r.start])?;
@@ -1270,15 +1430,126 @@ impl Stage {
         self.run(&toks[at..])
     }
 
+    // ---- Expansion (doc/design/SYMBOLIC-FORTH.md 16) ----
+
+    /// Code as it means where it was written, in `ns`: each name it applies
+    /// made its path, so that it means the same wherever it runs. A symbol
+    /// is global text, and is left as it is; so is a meta-op, which is no
+    /// name. A definition's signature and body are written in the namespace
+    /// of the word it defines.
+    fn expand(&mut self, toks: &[Token], ns: &str) -> Result<Vec<Token>> {
+        let mut out = Vec::with_capacity(toks.len());
+        let mut i = 0;
+        while i < toks.len() {
+            let t = &toks[i];
+            let applied = matches!(
+                toks.get(i + 1),
+                Some(Token {
+                    tok: Tok::Apply | Tok::Test,
+                    ..
+                })
+            );
+            if let (Tok::Name(n), false, Some(end)) = (&t.tok, applied, definition(toks, i)) {
+                out.push(t.clone());
+                let n = self.defined(n);
+                out.extend(self.expand(&toks[i + 1..end], split_path(&n).0)?);
+                i = end;
+                continue;
+            }
+            match &t.tok {
+                Tok::Name(n) if applied && names(n) => {
+                    self.pos = t.pos;
+                    out.push(Token {
+                        tok: Tok::Name(self.path_of(ns, n)?),
+                        pos: t.pos,
+                    });
+                }
+                Tok::Template(pieces) => {
+                    let mut each = Vec::with_capacity(pieces.len());
+                    for p in pieces.iter() {
+                        each.push(match p {
+                            Piece::Hole(code) => Piece::Hole(self.expand(code, ns)?.into()),
+                            text => text.clone(),
+                        });
+                    }
+                    out.push(Token {
+                        tok: Tok::Template(each.into()),
+                        pos: t.pos,
+                    });
+                }
+                _ => out.push(t.clone()),
+            }
+            i += 1;
+        }
+        Ok(out)
+    }
+
+    /// The path of a name applied where it is written, in `ns`: a rule of
+    /// the namespace's that matches it applies there, so its path is in
+    /// `ns`; a path is itself; a bare name is the namespace's own, its
+    /// import's, or the core's; and one found nowhere is the namespace's
+    /// own, defined later or never.
+    fn path_of(&mut self, ns: &str, name: &Rc<str>) -> Result<Rc<str>> {
+        let here = || -> Rc<str> {
+            match ns {
+                "" => name.clone(),
+                _ => format!("{ns}.{name}").into(),
+            }
+        };
+        if self.rule_match(ns, name)?.is_some() {
+            return Ok(here());
+        }
+        if is_path(name) {
+            self.reach(ns, name);
+            return Ok(name.clone());
+        }
+        let local = self.local(ns, name);
+        let imported = self.imported(ns, name);
+        match (local, &imported[..]) {
+            (Some(l), []) => Ok(l),
+            (None, [i]) => Ok(i.clone()),
+            (None, []) if self.in_core(name).is_some() => Ok(core_path(name)),
+            (None, []) if ns.is_empty() => Ok(name.clone()),
+            (None, []) => Ok(here()),
+            _ => self.find(ns, name),
+        }
+    }
+
+    /// The core's word of a name, which every namespace finds last, as
+    /// though it imported `core.*` (doc/design/SYMBOLIC-FORTH.md 16).
+    fn in_core(&self, name: &str) -> Option<Rc<str>> {
+        let path = core_path(name);
+        (self.words.contains_key(&path) || self.pending.contains(&path)).then_some(path)
+    }
+
+    /// Where a definition's bare name is defined: the root, or, while the
+    /// core is read, the core.
+    fn home(&self) -> &'static str {
+        if self.core { CORE } else { "" }
+    }
+
+    /// The word a definition's name defines: a path is itself, and a bare
+    /// name is the home's.
+    fn defined(&self, name: &Rc<str>) -> Rc<str> {
+        match self.home() {
+            "" => name.clone(),
+            _ if is_path(name) => name.clone(),
+            home => format!("{home}.{name}").into(),
+        }
+    }
+
     /// A namespace's own word of that name: in the root, one the program
     /// defined, as a core word is no import's rival.
     fn local(&self, ns: &str, name: &str) -> Option<Rc<str>> {
         if ns.is_empty() {
+            if let Some(n) = self.pending.get(name) {
+                return Some(n.clone());
+            }
             let w = self.words.get_key_value(name)?;
             return w.1.user.then(|| w.0.clone());
         }
         let path: Rc<str> = format!("{ns}.{name}").into();
-        self.words.contains_key(&path).then_some(path)
+        (self.words.contains_key(&path) || self.pending.contains(&path)).then_some(path)
     }
 
     /// What a namespace's import makes of a bare name: a path whose last
@@ -1295,7 +1566,8 @@ impl Stage {
                 None if p.rsplit('.').next() == Some(name) => p.clone(),
                 None => continue,
             };
-            if self.words.contains_key(&path) && !found.contains(&path) {
+            let known = self.words.contains_key(&path) || self.pending.contains(&path);
+            if known && !found.contains(&path) {
                 found.push(path);
             }
         }
@@ -1312,12 +1584,12 @@ impl Stage {
     /// Warns of a path reached from outside its namespace that it does not
     /// export: it compiles, a word being private but not locked out, and a
     /// namespace's children see its unexported words.
-    fn reach(&mut self, path: &str) {
+    fn reach(&mut self, from: &str, path: &str) {
         let (space, name) = split_path(path);
         if space.is_empty() {
             return;
         }
-        let inside = *self.ns == *space || self.ns.starts_with(&format!("{space}."));
+        let inside = from == space || from.starts_with(&format!("{space}."));
         if !inside && !self.exported(space, name) {
             self.warn(
                 Level::Severe,
@@ -1361,18 +1633,24 @@ impl Stage {
         Ok(())
     }
 
-    /// A pattern word's pattern, known to its namespace
+    /// A rule's pattern, known to its namespace, or the core's rules
     /// (doc/design/SYMBOLIC-FORTH.md 25): a regular expression between
-    /// slashes, `/log_([0-9]+)/`, which matches a whole word, and each of
-    /// whose groups captures in every match, so the word's effect is fixed.
-    /// How many groups it has.
+    /// slashes, `/log_([0-9]+)/`, which matches a whole name, and each of
+    /// whose groups captures in every match, so the rewrite's effect is
+    /// fixed. How many groups it has.
     fn pattern(&mut self, space: &Rc<str>, key: &str) -> Result<usize> {
         let word: Rc<str> = if space.is_empty() {
             key.into()
         } else {
             format!("{space}.{key}").into()
         };
-        if let Some(r) = self.patterns.get(space)
+        // The core's rules are tried after everything else (25).
+        let rules: Rc<str> = if &**space == CORE {
+            CORE_RULES.into()
+        } else {
+            space.clone()
+        };
+        if let Some(r) = self.patterns.get(&rules)
             && let Some(p) = r.each.iter().find(|p| p.word == word)
         {
             return Ok(p.re.captures_len() - 1);
@@ -1397,32 +1675,28 @@ impl Stage {
                 Kind::Syntax,
                 format!(
                     "`{key}` has a group that may not match: each group captures in every \
-                     match, so the word's effect is fixed"
+                     match, so the rewrite's effect is fixed"
                 ),
             ));
         }
         let groups = re.captures_len() - 1;
-        let r = self
-            .patterns
-            .entry(space.clone())
-            .or_insert_with(|| Patterns {
-                set: RegexSet::empty(),
-                each: Vec::new(),
-            });
+        let r = self.patterns.entry(rules).or_insert_with(|| Patterns {
+            set: RegexSet::empty(),
+            each: Vec::new(),
+        });
         r.each.push(Pattern {
             key: key.into(),
             re,
             word,
         });
         r.set = RegexSet::new(r.each.iter().map(|p| p.re.as_str())).expect("each compiles");
-        self.recognized.clear();
         Ok(groups)
     }
 
-    /// The namespaces whose patterns read the code of `ns`, and whether each
-    /// is `ns` itself: its own, as a word is used where it is defined, and
-    /// those its import names by `*`.
-    fn recognizing<'a>(&'a self, ns: &'a str) -> impl Iterator<Item = (&'a Rc<str>, bool)> + 'a {
+    /// The namespaces whose rules hold in `ns`, and whether each is `ns`
+    /// itself: its own, as a word is applied in its own namespace, and those
+    /// its import names by `*`.
+    fn ruling<'a>(&'a self, ns: &'a str) -> impl Iterator<Item = (&'a Rc<str>, bool)> + 'a {
         let own = self.patterns.get_key_value(ns).map(|(k, _)| (k, true));
         let paths = self.imports.get(ns).map_or(&[][..], |p| &p[..]);
         own.into_iter().chain(paths.iter().filter_map(move |p| {
@@ -1432,57 +1706,66 @@ impl Stage {
         }))
     }
 
-    /// Which pattern reads a word in a namespace, given the tokens the core
-    /// read it as: one at most, its namespace and its place there, and the
-    /// word's text, since a word matching two, in one namespace or in two,
-    /// is an error. An imported namespace's pattern reads if it is exported.
-    fn reader(&self, ns: &str, toks: &[Token]) -> Result<Option<Reading>> {
-        let mut spaces = self.recognizing(ns).peekable();
-        if spaces.peek().is_none() {
+    /// The rule that rewrites a name applied in a namespace
+    /// (doc/design/SYMBOLIC-FORTH.md 25): one of the namespace's own, or of
+    /// one its import names by `*` and that exports it, at most one, since a
+    /// name two match, in one namespace or in two, is an error. So is a name
+    /// that is also defined here or imported, as two imports are.
+    fn rule(&self, ns: &str, name: &str) -> Result<Option<Rule>> {
+        let Some((space, k)) = self.rule_match(ns, name)? else {
             return Ok(None);
+        };
+        let word = &self.patterns[&space].each[k].word;
+        if self.words.get(word).is_none_or(|w| w.clauses.is_empty()) {
+            let pattern = whose(&space, &self.patterns[&space].each[k].key);
+            return Err(self.err(
+                Kind::NoWord,
+                format!(
+                    "`{name}` matches {pattern}, whose code is not defined yet: a rule \
+                     holds for all of its namespace, once its code is defined"
+                ),
+            ));
         }
-        let text = read::text(toks);
-        let mut found: Vec<(Rc<str>, usize)> = Vec::new();
-        for (space, own) in spaces {
+        Ok(Some((space, k)))
+    }
+
+    /// The rule that matches a name written in a namespace, as `rule` finds
+    /// it, whether or not its code is defined yet.
+    fn rule_match(&self, ns: &str, name: &str) -> Result<Option<Rule>> {
+        let mut found: Vec<Rule> = Vec::new();
+        for (space, own) in self.ruling(ns) {
             let r = &self.patterns[space];
-            if !r.set.is_match(&text) || found.iter().any(|(s, _)| s == space) {
+            if !r.set.is_match(name) || found.iter().any(|(s, _)| s == space) {
                 continue;
             }
             found.extend(
                 r.set
-                    .matches(&text)
+                    .matches(name)
                     .into_iter()
                     .filter(|&k| own || self.exported(space, &r.each[k].key))
                     .map(|k| (space.clone(), k)),
             );
         }
-        if let [_, _, ..] = &found[..] {
-            let all: Vec<String> = found
+        let whose_each = |found: &[Rule]| -> Vec<String> {
+            found
                 .iter()
                 .map(|(space, k)| whose(space, &self.patterns[space].each[*k].key))
-                .collect();
+                .collect()
+        };
+        if let [_, _, ..] = &found[..] {
             return Err(self.err(
                 Kind::Syntax,
                 format!(
-                    "`{text}` matches both {}: a word is read one way",
-                    all.join(", and ")
+                    "`{name}` matches both {}: a name has one meaning",
+                    whose_each(&found).join(", and ")
                 ),
             ));
         }
-        Ok(found.pop().map(|(space, k)| (space, k, text.into())))
-    }
-
-    /// The code a pattern reads a word as, if one the namespace knows
-    /// matches it: its captures, then its word applied. A word that is also
-    /// a name here, defined or imported, is an error, as two imports are.
-    fn recognize(&mut self, toks: &[Token]) -> Result<Option<Code>> {
-        let ns = self.ns.clone();
-        let Some((space, k, text)) = self.reader(&ns, toks)? else {
+        let Some((space, k)) = found.pop() else {
             return Ok(None);
         };
-        let p = &self.patterns[&space].each[k];
-        let (pattern, word) = (whose(&space, &p.key), p.word.clone());
-        let named = match (self.local(&ns, &text), self.imported(&ns, &text).pop()) {
+        let pattern = whose_each(&[(space.clone(), k)]).remove(0);
+        let named = match (self.local(ns, name), self.imported(ns, name).pop()) {
             (Some(_), _) => Some("defined here".to_string()),
             (None, Some(path)) => Some(format!("imported, `{path}`")),
             (None, None) => None,
@@ -1490,50 +1773,167 @@ impl Stage {
         if let Some(named) = named {
             return Err(self.err(
                 Kind::Syntax,
-                format!("`{text}` is {named}, and matches {pattern}: a word is read one way"),
+                format!("`{name}` is {named}, and matches {pattern}: a name has one meaning"),
             ));
         }
-        if self.words.get(&word).is_none_or(|w| w.clauses.is_empty()) {
-            return Err(self.err(
-                Kind::NoWord,
-                format!(
-                    "`{text}` matches {pattern}, whose word is not defined yet: a pattern \
-                     holds for all of its namespace, its word once defined"
-                ),
-            ));
-        }
-        let key = (space.clone(), text.clone());
-        if let Some(q) = self.recognized.get(&key) {
-            return Ok(Some(q.clone()));
-        }
-        let q: Code = self.reading(&space, k, &text, toks[0].pos).into();
-        self.scope(&q, space);
-        self.recognized.insert(key, q.clone());
-        Ok(Some(q))
+        Ok(Some((space, k)))
     }
 
-    /// The code a pattern reads a word as: what its groups capture, in
-    /// order, each a symbol, `'2'` of `log_2`, then its word applied.
-    fn reading(&self, space: &str, k: usize, text: &str, pos: Pos) -> Vec<Token> {
-        let p = &self.patterns[space].each[k];
-        let caps = p.re.captures(text).expect("it matched");
-        let token = |tok| Token {
-            tok,
-            pos,
-            word: None,
-        };
+    /// The core's rule that rewrites a name, if one does: tried where nothing
+    /// else is found, as the core's names are found last (25).
+    fn core_rule(&self, name: &str) -> Option<Rule> {
+        let r = self.patterns.get(CORE_RULES)?;
+        let k = r.set.matches(name).into_iter().next()?;
+        Some((CORE_RULES.into(), k))
+    }
+
+    /// What a rule's groups capture of a name, in order.
+    fn captures(&self, (rules, k): &Rule, name: &str) -> Vec<Rc<str>> {
+        let p = &self.patterns[rules].each[*k];
+        let caps = p.re.captures(name).expect("it matched");
         caps.iter()
             .skip(1)
-            .map(|c| token(Tok::Name(c.expect("each group captures").as_str().into())))
-            .chain([token(Tok::Name(p.word.clone())), token(Tok::Apply)])
+            .map(|c| c.expect("each group captures").as_str().into())
             .collect()
+    }
+
+    /// A name rewritten by a rule (25): what its groups capture, each a
+    /// symbol, then the rule's code, whose names mean what they mean where
+    /// the rule is defined. `log_2` is `'2'` and the code. A capture is
+    /// global text, as any symbol is; the code reads it as a name where the
+    /// name was applied, `site`, by `name#`.
+    fn rewrite(&mut self, rule: &Rule, name: &str, at: Pos, site: Rc<str>) -> Result<()> {
+        for c in self.captures(rule, name) {
+            self.push(SYMBOL, Val::Name(c, at));
+        }
+        let word = self.patterns[&rule.0].each[rule.1].word.clone();
+        self.enter()?;
+        let saved = std::mem::replace(&mut self.applied_in, site);
+        let r = self.apply_word(&word);
+        self.applied_in = saved;
+        self.depth -= 1;
+        r
+    }
+
+    /// `name#`: a symbol as a name written where the name a rule rewrites
+    /// was applied, its path (doc/design/SYMBOLIC-FORTH.md 16, 25), so a
+    /// rule may apply what it captured as a word there: `dbl^2` in `math`
+    /// squares `math.dbl`.
+    fn name_of(&mut self) -> Result<()> {
+        let j = self.stack.pop().expect("matched");
+        let Val::Name(n, at) = j.val else {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "`name#` takes a symbol, and {} is not one",
+                    self.describe(&j)
+                ),
+            ));
+        };
+        let site = self.applied_in.clone();
+        let path = self.path_of(&site, &n)?;
+        self.push(SYMBOL, Val::Name(self.short(&path), at));
+        Ok(())
+    }
+
+    /// Where a name was applied, by its path: the longest part before a dot
+    /// that is a namespace, and the rest, which a rule there may match; the
+    /// root for a bare name.
+    fn site_of(&self, name: &Rc<str>) -> (Rc<str>, Rc<str>) {
+        let mut end = name.len();
+        while let Some(i) = name[..end].rfind('.') {
+            let space = &name[..i];
+            if self.is_space(space) {
+                return (space.into(), name[i + 1..].into());
+            }
+            end = i;
+        }
+        ("".into(), name.clone())
+    }
+
+    fn is_space(&self, s: &str) -> bool {
+        self.spaces.contains(s)
+            || self.patterns.contains_key(s)
+            || self.imports.contains_key(s)
+            || self.exports.contains_key(s)
+    }
+
+    /// The effect of a name applied in a namespace: a rule's rewrite, else
+    /// the word it names, else the core's rule's rewrite.
+    fn name_effect(
+        &self,
+        ns: &str,
+        name: &Rc<str>,
+        visiting: &mut Vec<Rc<str>>,
+    ) -> Option<(usize, usize)> {
+        let (site, key) = match ns {
+            "" => self.site_of(name),
+            _ => (ns.into(), name.clone()),
+        };
+        if let Some(rule) = self.rule(&site, &key).ok()? {
+            return self.rewrite_effect(&site, &rule, &key, visiting);
+        }
+        let found = self.resolve_quiet(ns, name);
+        if self.words.contains_key(&found) {
+            return self.word_effect(&found, visiting);
+        }
+        let rule = self.core_rule(&key)?;
+        self.rewrite_effect(&site, &rule, &key, visiting)
+    }
+
+    /// The effect of a rule's rewrite of a name: its captures, each found as
+    /// a name of `ns` would be, then its code, in the rule's namespace.
+    fn rewrite_effect(
+        &self,
+        ns: &str,
+        rule: &Rule,
+        name: &str,
+        visiting: &mut Vec<Rc<str>>,
+    ) -> Option<(usize, usize)> {
+        let word = &self.patterns[&rule.0].each[rule.1].word;
+        if visiting.contains(word) {
+            return None;
+        }
+        let body = self.words.get(word)?.clauses.first()?.body.clone();
+        let mut toks: Vec<Token> = self
+            .captures(rule, name)
+            .into_iter()
+            .map(|c| Token {
+                tok: Tok::Name(self.resolve_quiet(ns, &c)),
+                pos: Pos::default(),
+            })
+            .collect();
+        toks.extend(body.iter().cloned());
+        visiting.push(word.clone());
+        let r = self.effect_in(&toks, "", visiting);
+        visiting.pop();
+        r
+    }
+
+    /// Applies a name, a path or the root's: a rule of the namespace where
+    /// it was applied that matches it, else the word lookup finds, else a
+    /// rule of the core's (doc/design/SYMBOLIC-FORTH.md 25). A name a rule
+    /// matches is expanded to a path in the namespace it was written in, so
+    /// the path says where.
+    fn apply_name(&mut self, name: &Rc<str>, at: Pos) -> Result<()> {
+        let (site, key) = self.site_of(name);
+        if let Some(rule) = self.rule(&site, &key)? {
+            return self.rewrite(&rule, &key, at, site);
+        }
+        if !self.words.contains_key(&self.resolve_quiet("", name))
+            && let Some(rule) = self.core_rule(&key)
+        {
+            return self.rewrite(&rule, &key, at, site);
+        }
+        let word = self.lookup(name)?;
+        self.apply_word(&word)
     }
 
     /// `;` (doc/design/SYMBOLIC-FORTH.md 18): binds the name below to the
     /// value on top, a clause's body or a type, with the clause's signature
-    /// between them if it has one, its inputs and outputs in one bracket or
-    /// in two (section 3): `sq: [ dup * ] ;`, `fib: < n > [ … ] ;`,
-    /// `sq: < i64 > < i64 > [ dup * ] ;` and `num: < i64 f64 or > ;`.
+    /// between them if it has one, its inputs, then its outputs if it gives
+    /// them, each a bracket (section 3): `sq: [ dup * ] ;`, `fib: < n > [ …
+    /// ] ;`, `sq: < i64 >< i64 > [ dup * ] ;` and `num: < i64 f64 or > ;`.
     fn semicolon(&mut self) -> Result<()> {
         let usage =
             "`;` takes a name, its signature if it has one, then a quotation, a type or a symbol";
@@ -1551,13 +1951,19 @@ impl Stage {
             }
         };
         sigs.reverse();
-        // A path is where it says; a bare name is in the namespace whose
-        // code defines it.
-        let name: Rc<str> = if is_path(&name) || self.ns.is_empty() {
-            name
-        } else {
-            format!("{}.{name}", self.ns).into()
-        };
+        // The meta-ops are not names: the reader knows them, nothing looks
+        // them up, and so nothing defines them (doc/design/SYMBOLIC-FORTH.md
+        // 16).
+        if matches!(&*name, "." | "?" | "!" | ";" | "[" | "]") {
+            return Err(self.err(
+                Kind::Syntax,
+                format!("`{name}` is a meta-op, which is no name, and is not defined"),
+            ));
+        }
+        // A symbol is global, so a name is defined where it says: a path in
+        // its namespace, a bare name in the root, or while the core is read,
+        // in the core.
+        let name = self.defined(&name);
         let (space, key) = split_path(&name);
         let space: Rc<str> = space.into();
         if matches!(key, "import#" | "export#") {
@@ -1569,28 +1975,52 @@ impl Stage {
                 )),
             };
         }
-        // A pattern names the words it matches (doc/design/SYMBOLIC-FORTH.md
-        // 25), their clauses one family, each taking the captures last.
-        let groups = if pattern_at(key) == Some(0) {
-            Some(self.pattern(&space, key)?)
+        // A pattern defines a rule (doc/design/SYMBOLIC-FORTH.md 25): code
+        // put where a name it matches is applied, after the captures. A rule
+        // is a spelling, not a word, so it has no signature and one meaning.
+        let rule = pattern_at(key) == Some(0);
+        if rule {
+            self.pattern(&space, key)?;
+            if !sigs.is_empty() {
+                return Err(self.err(
+                    Kind::Syntax,
+                    format!(
+                        "`{key}` is a rule, code put where a name it matches stands, and has \
+                         no signature: `{key}: [ … ] ;`"
+                    ),
+                ));
+            }
+            if self.words.get(&name).is_some_and(|w| !w.clauses.is_empty()) {
+                return Err(self.err(
+                    Kind::Syntax,
+                    format!("`{key}` has its code already: a rule has one meaning"),
+                ));
+            }
+            if !matches!(&value.val, Val::Quote(q) if !signature(q)) {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!("`{key}` is a rule, and takes its code, a quotation"),
+                ));
+            }
         } else {
             self.definable(&name)?;
-            None
-        };
+        }
         if !self.core {
             self.word(&name).user = true;
         }
         let q = match value.val {
             Val::Quote(q) if !signature(&q) => q,
-            Val::Type(t) if sigs.is_empty() && groups.is_none() => {
+            Val::Type(t) if sigs.is_empty() => {
                 return self.name_type(&name, t);
             }
-            Val::Name(n, _)
+            Val::Name(n, ..)
                 if sigs.is_empty()
-                    && groups.is_none()
-                    && self.words.get(&n).is_some_and(|w| w.ty.is_some()) =>
+                    && self
+                        .words
+                        .get(&self.resolve_quiet("", &n))
+                        .is_some_and(|w| w.ty.is_some()) =>
             {
-                let t = self.words[&n].ty.expect("a type");
+                let t = self.words[&self.resolve_quiet("", &n)].ty.expect("a type");
                 return self.name_type(&name, t);
             }
             // A symbol is data, which `;` binds as it does code: the word
@@ -1599,12 +2029,9 @@ impl Stage {
             Val::Name(n, pos) if value.ty == SYMBOL => Rc::from([Token {
                 tok: Tok::Name(n),
                 pos,
-                word: None,
             }]),
             _ => return Err(self.err(Kind::Mismatch, usage)),
         };
-        // Its names are looked up in its namespace, wherever it was written.
-        self.scope(&q, space);
         if let Some(Tok::Open(b'<')) = q.first().map(|t| &t.tok) {
             return Err(self.err(
                 Kind::Syntax,
@@ -1616,15 +2043,14 @@ impl Stage {
             [] => None,
             [s] => Some(self.sig_of(s)?),
             [ins, outs] => {
-                let (ins, outs) = (self.sig_of(ins)?, self.sig_of(outs)?);
-                if ins.outs.is_some() || outs.outs.is_some() || !outs.guards.is_empty() {
-                    return Err(self.err(
-                        Kind::Syntax,
-                        "two signatures are the inputs, then the outputs, with no `--` in either",
-                    ));
-                }
+                let ins = self.sig_of(ins)?;
+                let outs = match &outs.val {
+                    Val::Type(t) => vec![*t],
+                    Val::Quote(q) => self.outputs(&q.clone()[1..q.len() - 1])?,
+                    _ => unreachable!("a signature"),
+                };
                 Some(Sig {
-                    outs: Some(outs.ins),
+                    outs: Some(outs),
                     ..ins
                 })
             }
@@ -1635,23 +2061,12 @@ impl Stage {
                 ));
             }
         };
-        if let (Some(groups), Some(sig)) = (groups, &sig)
-            && sig.ins.len() < groups
-        {
-            return Err(self.err(
-                Kind::Syntax,
-                format!(
-                    "`{key}` captures {groups}, and its signature takes {}: the captures are \
-                     its last inputs",
-                    sig.ins.len()
-                ),
-            ));
-        }
         let core = self.core;
         self.define(
             &name,
             Clause {
                 sig,
+                written: sigs.into(),
                 body: q,
                 at,
                 core,
@@ -1695,18 +2110,19 @@ impl Stage {
                 ),
             ));
         }
-        let (base, sub, sup) = crate::symbols::scripts(n);
-        if !base.is_empty() && (!sub.is_empty() || !sup.is_empty()) {
-            let what = match (sub, sup) {
-                (w, "") => format!("{w} wide"),
-                ("", p) => format!("to the power {p}"),
-                (w, p) => format!("{w} wide, to the power {p}"),
-            };
+        // A subscript is part of a name, an index (22), but a power is
+        // read in lookup, and no name ends in one (24).
+        let (_, _, sup) = crate::symbols::scripts(n);
+        if let Some(base) = n
+            .strip_suffix(sup)
+            .and_then(|b| b.strip_suffix('^'))
+            .filter(|b| !sup.is_empty() && !b.is_empty())
+        {
             return Err(self.err(
                 Kind::Syntax,
                 format!(
-                    "`{n}` is a spelling, `{base}` {what}, and names no word; \
-                     a meaning of its own is a clause of `power#` or `width#`"
+                    "`{n}` is a spelling, `{base}` to the power {sup}, and names no word; \
+                     a meaning of its own is a clause of `power#`"
                 ),
             ));
         }
@@ -1730,16 +2146,11 @@ impl Stage {
         }
         if self.in_bracket > 0 {
             let at = self.pos;
-            let tok = |tok| Token {
-                tok,
-                pos: at,
-                word: None,
-            };
+            let tok = |tok| Token { tok, pos: at };
             let mut q = match &f.val {
                 Val::Name(n, p) => vec![Token {
                     tok: Tok::Name(n.clone()),
                     pos: *p,
-                    word: None,
                 }],
                 Val::Quote(c) => {
                     let mut v = vec![tok(Tok::Open(b'['))];
@@ -1750,11 +2161,12 @@ impl Stage {
                 _ => unreachable!("code"),
             };
             q.push(tok(Tok::Test));
-            self.push(QUOTE, Val::Quote(q.into()));
+            // Held, the test it is: a bool to come, of the inputs.
+            self.push(BOOL, Val::Quote(q.into()));
             return Ok(());
         }
         let shown = match &f.val {
-            Val::Name(n, _) => format!("`{n}?`"),
+            Val::Name(n, ..) => format!("`{n}?`"),
             _ => "a quotation tested".into(),
         };
         let outs = self.code_effect(&f).map(|(_, o)| o);
@@ -1787,7 +2199,7 @@ impl Stage {
             Val::Float(x) => format!("{x:?} (f64)"),
             Val::Str(s) => format!("{s:?}"),
             Val::Type(t) => format!("the type `{}`", self.types.name(*t)),
-            Val::Name(n, _) => format!("the symbol `{n}`"),
+            Val::Name(n, ..) => format!("the symbol `{n}`"),
             Val::Quote(_) => "a quotation".into(),
             Val::Many => format!("a run of {}", self.types.name(j.ty)),
             Val::Pinned(v) => self.describe(&Jdg {
@@ -1807,7 +2219,7 @@ impl Stage {
         let top = &self.stack[self.stack.len() - n..];
         top.iter()
             .map(|j| match &j.val {
-                Val::Name(s, _) if j.ty == SYMBOL => {
+                Val::Name(s, ..) if j.ty == SYMBOL => {
                     let mut out = String::new();
                     crate::show::symbol(s, &mut out);
                     out
@@ -1826,7 +2238,10 @@ impl Stage {
             return String::new();
         };
         let word: String = c.to_lowercase().chain(cs).collect();
-        if self.words.contains_key(word.as_str()) {
+        if self
+            .words
+            .contains_key(&self.resolve_quiet("", &word.as_str().into()))
+        {
             format!("; the word is `{word}`")
         } else {
             String::new()
@@ -1851,7 +2266,11 @@ impl Stage {
 
     /// The type a literal takes when nothing says (TYPES.md 2.10).
     fn default_of(lit: Type) -> Type {
-        if lit == INT_LIT { I64 } else { F64 }
+        if matches!(lit, INT_LIT | UNIT_LIT) {
+            I64
+        } else {
+            F64
+        }
     }
 
     /// Gives the judgment at `i` the type `t`: it has it already; or it is a
@@ -1884,7 +2303,7 @@ impl Stage {
             // A symbol is its name, interned, at run time as a string is, so
             // only a known one changes.
             if t == STRING
-                && let Val::Name(n, _) = &self.stack[i].val
+                && let Val::Name(n, ..) = &self.stack[i].val
             {
                 self.stack[i].val = Val::Str(n.clone());
             }
@@ -2200,10 +2619,18 @@ impl Stage {
             .iter()
             .map(|j| j.ty)
             .collect();
+        // A value that is only known while compiling, as a quotation, has no
+        // cell for an instance to take, so a family applied to one again is
+        // unfolded, its guards decided by the values, until one finishes, as
+        // March walks a quotation: depth bounds it.
+        let unfolds = types
+            .iter()
+            .any(|&t| self.types.compile_time_only(t) && !self.types.is_literal(t));
         if let Some(i) = self
             .frames
             .iter()
             .rposition(|f| f.name == *name && f.ins == types)
+            .filter(|_| !unfolds)
         {
             if i + 1 == self.frames.len() {
                 return self.recur(arity);
@@ -2217,7 +2644,9 @@ impl Stage {
             ));
         }
         let key = (name.clone(), types);
-        if let Some(i) = self.active.iter().position(|k| *k == key) {
+        if let Some(i) = self.active.iter().position(|k| *k == key)
+            && !unfolds
+        {
             return Err(self.err(Kind::Again(i), name.to_string()));
         }
         let at = self.pos;
@@ -2481,10 +2910,10 @@ impl Stage {
             } else {
                 // The trap leaves its message beneath its code, for the
                 // session to report.
-                let msg = format!(
+                let msg = self.shorten(&format!(
                     "no word `{name}` for {}: no clause's guard holds",
                     self.top_types(arity)
-                );
+                ));
                 alts.push(Some(Alt {
                     code: vec![
                         Ins::Str(msg.into()),
@@ -3259,7 +3688,7 @@ impl Stage {
         let w = Warning {
             level,
             pos: Some(self.site.unwrap_or(self.pos)),
-            msg,
+            msg: self.shorten(&msg),
         };
         if !self.warnings.contains(&w) {
             self.warnings.push(w);
@@ -3289,7 +3718,7 @@ impl Stage {
                 // A value pattern is the input `eq` the value.
                 Test::Equals(v) => {
                     self.stack.push(v.clone());
-                    self.apply_word(&"eq".into())
+                    self.apply_word(&core_path("eq"))
                 }
             };
             let found = std::mem::replace(&mut self.effects, outer);
@@ -3442,8 +3871,16 @@ impl Stage {
                 Prim::Swap => (2, 2),
                 // Its effect is its quotation's and one more, which `effect`
                 // reads where the quotation is written.
-                Prim::Dip | Prim::Widen => return None,
-                Prim::QuotePower | Prim::QuoteWidth => (2, 1),
+                Prim::Dip => return None,
+                Prim::QuotePower => (2, 1),
+                Prim::Width => return None,
+                Prim::Identity => (2, 1),
+                Prim::QuoteLength => (1, 1),
+                Prim::QuoteAt | Prim::QuoteConcat => (2, 1),
+                Prim::QuoteSlice | Prim::QuoteInsert => (3, 1),
+                Prim::NameOf => (1, 1),
+                Prim::Clauses => (2, 1),
+                Prim::Effect => (1, 2),
                 Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
                 Prim::Each | Prim::EachRight => (2, 0),
                 Prim::Within => (2, 1),
@@ -3509,8 +3946,7 @@ impl Stage {
 
     /// The effect of tokens of the explicit form.
     fn effect(&self, toks: &[Token], visiting: &mut Vec<Rc<str>>) -> Option<(usize, usize)> {
-        let ns = self.scope_of(toks).unwrap_or_else(|| "".into());
-        self.effect_in(toks, &ns, visiting)
+        self.effect_in(toks, "", visiting)
     }
 
     /// The effect of code written in a namespace.
@@ -3522,30 +3958,30 @@ impl Stage {
     ) -> Option<(usize, usize)> {
         let mut ins = 0;
         let mut items: Vec<Item> = Vec::new();
-        let mut i = 0;
-        while i < toks.len() {
-            // A word a pattern reads does what its code does.
-            if let Some(w) = toks[i].word
-                && !self.patterns.is_empty()
-                && let Some((space, k, text)) =
-                    self.reader(ns, &toks[i..i + w.len as usize]).ok()?
-            {
-                let q = self.reading(&space, k, &text, toks[i].pos);
-                let (a, b) = self.effect_in(&q, &space, visiting)?;
-                if w.applies {
-                    take(&mut items, &mut ins, a);
-                    items.extend((0..b).map(|_| Item::Other));
-                } else {
-                    items.push(Item::Code(a, b));
-                }
-                i += w.len as usize;
-                continue;
-            }
+        self.effect_on(toks, 0..toks.len(), ns, visiting, &mut items, &mut ins)?;
+        // Its arguments are taken first, so they are inputs beneath those its
+        // code reaches.
+        Some((ins + args_in(toks).len(), items.len()))
+    }
+
+    /// What code in `toks[span]` does to the items it finds, counting in
+    /// `ins` those it takes from beneath them.
+    fn effect_on(
+        &self,
+        toks: &[Token],
+        span: std::ops::Range<usize>,
+        ns: &str,
+        visiting: &mut Vec<Rc<str>>,
+        items: &mut Vec<Item>,
+        ins: &mut usize,
+    ) -> Option<()> {
+        let mut i = span.start;
+        while i < span.end {
             match &toks[i].tok {
                 Tok::Int(n) => items.push(Item::Int(*n)),
                 Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_) => items.push(Item::Other),
                 Tok::Template(pieces) => {
-                    take(&mut items, &mut ins, template_args(pieces).len());
+                    take(items, ins, template_args(pieces).len());
                     items.push(Item::Other);
                 }
                 // An argument, taken before the code ran.
@@ -3574,7 +4010,7 @@ impl Stage {
                     if self.effect_in(&toks[i + 1..j], ns, visiting)?.0 != k {
                         return None;
                     }
-                    take(&mut items, &mut ins, k);
+                    take(items, ins, k);
                     items.push(Item::Other);
                     i = j;
                 }
@@ -3589,18 +4025,29 @@ impl Stage {
                             i += 1;
                             continue;
                         }
+                        // A symbol of digits given a type, as a rule's
+                        // capture is, `2 int# !`, is a count.
+                        Item::Name(s)
+                            if is_core_word(&s, "!") && self.count_of(items).is_some() =>
+                        {
+                            let n = self.count_of(items).expect("checked");
+                            items.truncate(items.len() - 2);
+                            items.push(Item::Int(n));
+                            i += 1;
+                            continue;
+                        }
                         // `!` types as many values as the type on top has
                         // slots, and takes the type too.
-                        Item::Name(s) if &*s == "!" => match items.last() {
+                        Item::Name(s) if is_core_word(&s, "!") => match items.last() {
                             Some(Item::Bracket(from, to)) => {
                                 let n = self.bracket_size(&toks[*from..*to]);
                                 (n + 1, n)
                             }
                             _ => (2, 1),
                         },
-                        // A power or a width of the code and the count before
-                        // it, as the reader spells `dup_2^3`.
-                        Item::Name(s) if matches!(&*s, "power#" | "width#") => {
+                        // A quotation's power, of the code and the count
+                        // before it, as `[ dup + ]^3` is spelled.
+                        Item::Name(s) if is_core_word(&s, "power#") => {
                             let (Some(Item::Int(n)), Some(code)) = (items.pop(), items.pop())
                             else {
                                 return None;
@@ -3609,65 +4056,116 @@ impl Stage {
                                 Item::Quote(from, to) => {
                                     self.effect_in(&toks[from..to], ns, visiting)?
                                 }
-                                Item::Name(q) => self.word_effect(&q, visiting)?,
+                                Item::Name(q) => self.name_effect(ns, &q, visiting)?,
                                 Item::Code(a, b) => (a, b),
                                 _ => return None,
                             };
-                            let n = usize::try_from(n).ok()?;
-                            items.push(if &*s == "power#" {
-                                let (a, b) = power_effect(e, n)?;
-                                Item::Code(a, b)
-                            } else {
-                                Item::Code(e.0 * n, e.1 * n)
-                            });
+                            let (a, b) = power_effect(e, usize::try_from(n).ok()?)?;
+                            items.push(Item::Code(a, b));
                             i += 1;
                             continue;
                         }
-                        // `w n widen`, w applied n wide, n times what w does.
-                        Item::Name(s) if &*s == "widen" => {
-                            let (Some(Item::Int(n)), Some(code)) = (items.pop(), items.pop())
+                        // A word's width, of the word and the count before
+                        // it, as the core's rule spells `dup_2`: n times what
+                        // the word does, and `dip`'s sets aside n values.
+                        Item::Name(s) if is_core_word(&s, "width#") => {
+                            let (Some(Item::Int(n)), Some(Item::Name(w))) =
+                                (items.pop(), items.pop())
                             else {
                                 return None;
                             };
-                            let (a, b) = match code {
-                                Item::Quote(from, to) => {
-                                    self.effect_in(&toks[from..to], ns, visiting)?
-                                }
-                                Item::Name(q) => self.word_effect(&q, visiting)?,
-                                Item::Code(a, b) => (a, b),
-                                _ => return None,
-                            };
                             let n = usize::try_from(n).ok()?;
-                            (a * n, b * n)
+                            if self.is_dip(&w) {
+                                let (a, b) =
+                                    self.handed_effect(items.pop()?, toks, ns, visiting)?;
+                                (a + n, b + n)
+                            } else {
+                                let (a, b) = self.name_effect(ns, &w, visiting)?;
+                                (a * n, b * n)
+                            }
+                        }
+                        // A symbol read as a name is still that name, as
+                        // far as its effect goes: a rule's capture, which
+                        // is found where the name was applied.
+                        Item::Name(s)
+                            if is_core_word(&s, "name#")
+                                && matches!(items.last(), Some(Item::Name(_))) =>
+                        {
+                            i += 1;
+                            continue;
+                        }
+                        // `x q dip` runs q's code on what is beneath x, and
+                        // puts x back.
+                        Item::Name(s)
+                            if self.is_dip(&s) && matches!(items.last(), Some(Item::Quote(..))) =>
+                        {
+                            let Some(Item::Quote(from, to)) = items.pop() else {
+                                unreachable!("checked")
+                            };
+                            let x = items.pop().unwrap_or_else(|| {
+                                *ins += 1;
+                                Item::Other
+                            });
+                            self.effect_on(toks, from..to, ns, visiting, items, ins)?;
+                            items.push(x);
+                            i += 1;
+                            continue;
                         }
                         // `x q dip` takes and leaves one more than q.
                         Item::Name(s) if self.is_dip(&s) => {
-                            let (a, b) = match items.pop()? {
-                                Item::Quote(from, to) => {
-                                    self.effect_in(&toks[from..to], ns, visiting)?
-                                }
-                                Item::Name(q) => self.word_effect(&q, visiting)?,
-                                Item::Code(a, b) => (a, b),
-                                _ => return None,
-                            };
+                            let (a, b) = self.handed_effect(items.pop()?, toks, ns, visiting)?;
                             (a + 1, b + 1)
                         }
-                        Item::Name(s) => self.word_effect(&s, visiting)?,
+                        Item::Name(s) => self.name_effect(ns, &s, visiting)?,
                         Item::Type => return None,
                         Item::Quote(from, to) => self.effect_in(&toks[from..to], ns, visiting)?,
                         Item::Code(a, b) => (a, b),
                         Item::Bracket(..) | Item::Int(_) | Item::Other => return None,
                     };
-                    take(&mut items, &mut ins, a);
+                    take(items, ins, a);
                     items.extend((0..b).map(|_| Item::Other));
                 }
                 _ => return None,
             }
             i += 1;
         }
-        // Its arguments are taken first, so they are inputs beneath those its
-        // code reaches.
-        Some((ins + args_in(toks).len(), items.len()))
+        Some(())
+    }
+
+    /// The effect of code handed to a word, as `dip` is handed it.
+    fn handed_effect(
+        &self,
+        code: Item,
+        toks: &[Token],
+        ns: &str,
+        visiting: &mut Vec<Rc<str>>,
+    ) -> Option<(usize, usize)> {
+        match code {
+            Item::Quote(from, to) => self.effect_in(&toks[from..to], ns, visiting),
+            Item::Name(q) => self.name_effect(ns, &q, visiting),
+            Item::Code(a, b) => Some((a, b)),
+            _ => None,
+        }
+    }
+
+    /// The count a symbol of digits makes, given a type on top: a rule's
+    /// capture, `2 int# !`.
+    fn count_of(&self, items: &[Item]) -> Option<i128> {
+        let (Item::Name(d), top) = (items.get(items.len().checked_sub(2)?)?, items.last()?) else {
+            return None;
+        };
+        let typed = match top {
+            Item::Type => true,
+            Item::Name(t) => self
+                .words
+                .get(&self.resolve_quiet("", t))
+                .is_some_and(|w| w.ty.is_some()),
+            _ => false,
+        };
+        match read::number(d, Pos::default()) {
+            Ok(Some(Tok::Int(n))) if typed => Some(n),
+            _ => None,
+        }
     }
 
     /// How many values a bracket in a body types when `!` converts by it:
@@ -3691,7 +4189,6 @@ impl Stage {
                     i = matching(toks, i);
                     n += 1;
                 }
-                Tok::Dashes => break,
                 _ => {}
             }
             i += 1;
@@ -3759,7 +4256,7 @@ impl Stage {
         let ins = clause.sig.as_ref().map(|s| s.ins.clone());
         let c = Rc::new(clause);
         let context = c.sig.as_ref().map(Sig::context);
-        let w = self.words.entry(name.clone()).or_default();
+        let w = self.word(name);
         let before = w.clauses.clone();
         match w
             .clauses
@@ -3875,7 +4372,9 @@ impl Stage {
             r = self.test(sig, skip);
             self.stack.truncate(ins.len());
         }
+        self.checking += 1;
         let mut r = r.and_then(|_| self.clause(c, Env::default()));
+        self.checking -= 1;
         for i in 0..self.stack.len() {
             if r.is_ok() {
                 r = self.materialize(i);
@@ -3901,30 +4400,18 @@ impl Stage {
     /// A bracket, `< … >`, is code, a comprehension of types (Thomas,
     /// 2026-10-09), read as all code is: a type's name gives the type, and a
     /// constructor builds one, `a ary` (2026-10-12). A variable, one letter,
-    /// is a type variable, and a word tested, `positive?`, is a guard. What
-    /// the code leaves is the signature, by what each value is: a type,
-    /// inputs of that type; a value, a literal, a symbol, `true`, inputs
-    /// equal to it; a quotation, a guard, which tests the inputs before it.
-    /// `--` divides the inputs from the outputs, which are types.
+    /// is a type variable, and a word or a quotation tested, `positive?` or
+    /// `[ 2 mod zero ] ?`, is a guard. What the code leaves is the
+    /// signature, by what each value is: a type, inputs of that type; a
+    /// value, a literal, a symbol, `true`, inputs equal to it; a test, a
+    /// guard, which tests the inputs before it.
+    /// A clause's outputs are a second bracket, `< i64 >< i64 >` (section
+    /// 3), which `outputs` reads.
     pub fn bracket(&mut self, toks: &[Token]) -> Result<Sig> {
-        // The `--` of this bracket, not of one inside it.
-        let mut depth = 0;
-        let dashes = toks.iter().position(|t| {
-            match t.tok {
-                Tok::Open(_) => depth += 1,
-                Tok::Close(_) => depth -= 1,
-                _ => {}
-            }
-            depth == 0 && t.tok == Tok::Dashes
-        });
-        let (inputs, outputs) = match dashes {
-            Some(d) => (&toks[..d], Some(&toks[d + 1..])),
-            None => (toks, None),
-        };
         let mut ins = Vec::new();
         let mut equals = Vec::new();
         let mut guards = Vec::new();
-        for (j, pos) in self.comprehend(inputs)? {
+        for (j, pos) in self.comprehend(toks)? {
             match j.val {
                 Val::Type(t) => ins.push(t),
                 // A name left is a symbol, `< string Camel >`: a type's name
@@ -3943,8 +4430,20 @@ impl Stage {
                 }
                 // `nil`, the one value of its type, is that type.
                 _ if j.ty == NIL => ins.push(NIL),
+                Val::Quote(q) if j.ty == BOOL => {
+                    guards.push(self.quote_guard(q, ins.len(), pos)?)
+                }
                 Val::Quote(q) if signature(&q) => return Err(quotation_type(&q, pos)),
-                Val::Quote(q) => guards.push(self.quote_guard(q, ins.len(), pos)?),
+                // Each role has its mark (doc/design/SYMBOLIC-FORTH.md 2): a
+                // test is tested.
+                Val::Quote(q) => {
+                    let text = source_text(&q);
+                    return Err(self.at_pos(
+                        pos,
+                        Kind::Syntax,
+                        format!("`[ {text} ]` is left bare, and a guard is a test: `[ {text} ] ?`"),
+                    ));
+                }
                 _ => {
                     equals.push(Guard {
                         test: Test::Equals(j.clone()),
@@ -3956,36 +4455,32 @@ impl Stage {
                 }
             }
         }
-        let outs = match outputs {
-            None => None,
-            Some(o) => {
-                let mut outs = Vec::new();
-                for (j, pos) in self.comprehend(o)? {
-                    match j.val {
-                        Val::Type(t) => outs.push(t),
-                        _ if j.ty == NIL => outs.push(NIL),
-                        Val::Quote(q) if signature(&q) => return Err(quotation_type(&q, pos)),
-                        _ => {
-                            self.pos = pos;
-                            return Err(self.err(
-                                Kind::Mismatch,
-                                format!(
-                                    "an output is a type, and {} is not one",
-                                    self.describe(&j)
-                                ),
-                            ));
-                        }
-                    }
-                }
-                Some(outs)
-            }
-        };
         equals.extend(guards);
         Ok(Sig {
             ins,
             guards: equals,
-            outs,
+            outs: None,
         })
+    }
+
+    /// A clause's outputs, the code of its second bracket: types.
+    fn outputs(&mut self, toks: &[Token]) -> Result<Vec<Type>> {
+        let mut outs = Vec::new();
+        for (j, pos) in self.comprehend(toks)? {
+            match j.val {
+                Val::Type(t) => outs.push(t),
+                _ if j.ty == NIL => outs.push(NIL),
+                Val::Quote(q) if signature(&q) => return Err(quotation_type(&q, pos)),
+                _ => {
+                    self.pos = pos;
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!("an output is a type, and {} is not one", self.describe(&j)),
+                    ));
+                }
+            }
+        }
+        Ok(outs)
     }
 
     /// Runs a bracket's code, on a stack of its own, and gives what it
@@ -4036,7 +4531,7 @@ impl Stage {
             .collect())
     }
 
-    /// A quotation left in a bracket: a guard, testing the inputs before it,
+    /// A test held in a bracket: a guard, testing the inputs before it,
     /// as many as it takes, and leaving one flag.
     fn quote_guard(&self, q: Rc<[Token]>, before: usize, pos: Pos) -> Result<Guard> {
         let text = source_text(&q);
@@ -4044,7 +4539,7 @@ impl Stage {
             return Err(Error::new(
                 Kind::Mismatch,
                 Some(pos),
-                format!("`[ {text} ]` cannot be a guard: how many values it takes is not known"),
+                format!("`{text}` cannot be a guard: how many values it takes is not known"),
             ));
         };
         if outs != 1 {
@@ -4052,7 +4547,7 @@ impl Stage {
                 Kind::Mismatch,
                 Some(pos),
                 format!(
-                    "`[ {text} ]` leaves {}, and a guard leaves one flag",
+                    "`{text}` leaves {}, and a guard leaves one flag",
                     values(outs)
                 ),
             ));
@@ -4062,7 +4557,7 @@ impl Stage {
                 Kind::Mismatch,
                 Some(pos),
                 format!(
-                    "the guard `[ {text} ]` looks at {}, and {} before it",
+                    "the guard `{text}` looks at {}, and {} before it",
                     values(ins),
                     values(before)
                 ),
@@ -4078,7 +4573,7 @@ impl Stage {
 
     /// Applies a constructor: `100 i64 vec` is a type.
     /// Whether the values on top are what a constructor takes, as its
-    /// signature says: `< type type -- type >` for `map` and `or`, `nil`
+    /// signature says: `< type type >< type >` for `map` and `or`, `nil`
     /// standing for its type.
     fn constructs(&mut self, c: Con) -> bool {
         let ins = match c {
@@ -4151,7 +4646,8 @@ impl Stage {
             return Err(self.err(Kind::Mismatch, format!("`{name}` names a type already")));
         }
         w.ty = Some(t);
-        self.types.name_class(t, name);
+        let shown = name.strip_prefix(&format!("{CORE}.")).unwrap_or(name);
+        self.types.name_class(t, shown);
         self.instances.clear();
         Ok(())
     }
@@ -4187,7 +4683,7 @@ impl Stage {
             Val::Float(x) => Ins::Op(Op::Float(float_bits(*x))),
             // A symbol is its name, an interned string, so symbols compare
             // by identity.
-            Val::Str(s) | Val::Name(s, _) => Ins::Str(s.clone()),
+            Val::Str(s) | Val::Name(s, ..) => Ins::Str(s.clone()),
             _ => {
                 return Err(self.err(
                     Kind::Mismatch,
@@ -4307,8 +4803,16 @@ impl Stage {
             }
             Prim::Dip => self.dip(name)?,
             Prim::QuotePower => self.quote_power()?,
-            Prim::QuoteWidth => self.quote_width()?,
-            Prim::Widen => self.widen()?,
+            Prim::Width => self.width()?,
+            Prim::Identity => self.identity_at()?,
+            Prim::QuoteLength
+            | Prim::QuoteAt
+            | Prim::QuoteSlice
+            | Prim::QuoteConcat
+            | Prim::QuoteInsert => self.quote_data(p, base)?,
+            Prim::NameOf => self.name_of()?,
+            Prim::Clauses => self.clauses_of()?,
+            Prim::Effect => self.effect_counts()?,
             Prim::VecLength => {
                 let k = len(self, 13);
                 if !self.stack[base].known() {
@@ -4583,7 +5087,7 @@ impl Stage {
             let cell = match &j.val {
                 Val::Int(n) => *n as i64 as u64,
                 Val::Float(x) => float_bits(*x),
-                Val::Str(s) | Val::Name(s, _) => m.text_cell(s)?,
+                Val::Str(s) | Val::Name(s, ..) => m.text_cell(s)?,
                 _ => unreachable!("a known value with a cell"),
             };
             m.stack.push(cell);
@@ -4933,7 +5437,7 @@ impl Stage {
 
     // ---- Powers and widths (doc/design/SYMBOLIC-FORTH.md 21, 22) ----
 
-    /// The count a power or a width takes, written in the source.
+    /// The count a power takes, written in the source.
     fn count(&mut self, word: &str, least: i128) -> Result<usize> {
         let j = self.stack.pop().expect("matched");
         match j.val {
@@ -4954,15 +5458,624 @@ impl Stage {
     /// How a word or a quotation reads in a message.
     fn shown(j: &Jdg) -> String {
         match &j.val {
-            Val::Name(n, _) => format!("`{n}`"),
+            Val::Name(n, ..) => format!("`{n}`"),
             _ => "the quotation".into(),
         }
+    }
+
+    /// `u t identity#`: the identity `u`, `w' unit# !`, given the type `t`
+    /// where it is used (doc/design/SYMBOLIC-FORTH.md 21). The facts are
+    /// March's, core.march's `unit` for each primitive operation, and
+    /// `least` and `greatest` for each type's order. This finds which holds,
+    /// following w at t to the primitive it applies there, through a word
+    /// that applies one operation or flips it, or to a choice of the greater
+    /// or the lesser. That search is to be March's own once a word's clauses
+    /// are data.
+    fn identity_at(&mut self) -> Result<()> {
+        let t = match self.stack.pop().expect("matched").val {
+            Val::Type(t) => t,
+            _ => {
+                return Err(self.err(Kind::Mismatch, "`identity#` takes a type"));
+            }
+        };
+        let u = self.stack.pop().expect("matched");
+        let shown = Self::shown(&u);
+        let leaf = match &u.val {
+            Val::Name(n, _) => {
+                let w = self.resolve_quiet("", n);
+                self.leaf(&w, t, &mut Vec::new())
+            }
+            Val::Quote(q) => self.body_leaf(q, t, &mut Vec::new()),
+            _ => None,
+        };
+        let tn: Rc<str> = self.types.name(t).into();
+        let Some(leaf) = leaf else {
+            return Err(self.err(
+                Kind::NoWord,
+                format!(
+                    "{shown} has no identity at {tn} that its primitives give: at {tn} it \
+                     applies no one operation whose primitive `unit` knows, and chooses no \
+                     greater or lesser"
+                ),
+            ));
+        };
+        let (sym, fact) = match leaf {
+            Leaf::Prim(p) => (self.short(&p), "unit"),
+            Leaf::Least => (tn.clone(), "least"),
+            Leaf::Greatest => (tn.clone(), "greatest"),
+        };
+        self.push(SYMBOL, Val::Name(sym.clone(), self.pos));
+        self.apply_word(&core_path(fact)).map_err(|e| {
+            if e.kind != Kind::NoWord {
+                return e;
+            }
+            let why = match fact {
+                "unit" => format!("applies `{sym}`, for which `unit` gives no identity"),
+                _ => format!(
+                    "keeps the {} of two, and `{fact}` gives {tn} none",
+                    if fact == "least" { "greater" } else { "lesser" }
+                ),
+            };
+            self.err(
+                Kind::NoWord,
+                format!(
+                    "{shown} at {tn} {why}: a clause of `{fact}` would, \
+                     `{CORE}.{fact}: < {sym}' > [ drop … ] ;`"
+                ),
+            )
+        })
+    }
+
+    /// Where the identity of the word `name` at `t` is found: a primitive is
+    /// its own; a family's clause for two values of `t` is followed, and two
+    /// that choose the greater or the lesser are a choice.
+    fn leaf(&mut self, name: &Rc<str>, t: Type, visiting: &mut Vec<Rc<str>>) -> Option<Leaf> {
+        let name = self.alias_of(name);
+        let w = self.words.get(&name)?;
+        if w.prim.is_some() {
+            return Some(Leaf::Prim(name));
+        }
+        if visiting.contains(&name) {
+            return None;
+        }
+        let clauses = w.clauses.clone();
+        let mut best: Vec<Rc<Clause>> = Vec::new();
+        let mut top = i32::MIN;
+        for c in clauses {
+            let score = match &c.sig {
+                None => Some(0),
+                Some(s) if s.ins.len() == 2 => {
+                    let mut env = Env::default();
+                    let a = self.match_slot(s.ins[0], t, &mut env);
+                    let b = self.match_slot(s.ins[1], t, &mut env);
+                    a.zip(b).map(|(a, b)| a + b)
+                }
+                Some(_) => None,
+            };
+            match score {
+                Some(k) if k > top => (top, best) = (k, vec![c]),
+                Some(k) if k == top => best.push(c),
+                _ => {}
+            }
+        }
+        visiting.push(name.clone());
+        let found = match &best[..] {
+            [c] => self.body_leaf(&c.body, t, visiting),
+            [a, b] => self.choice(a, b),
+            _ => None,
+        };
+        visiting.pop();
+        found
+    }
+
+    /// Where the identity of code that applies one operation is found,
+    /// `[ + ]`, or the same flipped, `[ swap + ]`, which has the same.
+    fn body_leaf(&mut self, body: &[Token], t: Type, visiting: &mut Vec<Rc<str>>) -> Option<Leaf> {
+        let found = |s: &Self, n: &Rc<str>| s.alias_of(&s.resolve_quiet("", n));
+        let op = match body {
+            [
+                Token {
+                    tok: Tok::Name(op), ..
+                },
+                Token {
+                    tok: Tok::Apply, ..
+                },
+            ] => op,
+            [
+                Token {
+                    tok: Tok::Name(s), ..
+                },
+                Token {
+                    tok: Tok::Apply, ..
+                },
+                Token {
+                    tok: Tok::Name(op), ..
+                },
+                Token {
+                    tok: Tok::Apply, ..
+                },
+            ] if matches!(self.words.get(&found(self, s))?.prim, Some((Prim::Swap, _))) => op,
+            _ => return None,
+        };
+        let op = found(self, op);
+        self.leaf(&op, t, visiting)
+    }
+
+    /// Two clauses that keep one of two values by an order test, as `max`
+    /// and `min` do: the identity is the least value of the type if they
+    /// keep the greater, the greatest if the lesser.
+    fn choice(&self, a: &Clause, b: &Clause) -> Option<Leaf> {
+        let (tested, other) = match (&a.sig.as_ref()?.guards[..], &b.sig.as_ref()?.guards[..]) {
+            ([g], []) => ((a, g), b),
+            ([], [g]) => ((b, g), a),
+            _ => return None,
+        };
+        let ((c, g), ins) = (tested, &tested.0.sig.as_ref()?.ins);
+        if ins.len() != 2 || ins[0] != ins[1] || other.sig.as_ref()?.ins != *ins {
+            return None;
+        }
+        let Test::Quote(q) = &g.test else {
+            return None;
+        };
+        let greater = match &q[..] {
+            [
+                Token {
+                    tok: Tok::Name(n), ..
+                },
+                Token {
+                    tok: Tok::Test | Tok::Apply,
+                    ..
+                },
+            ] => match &*self.resolve_quiet("", n) {
+                w if is_core_word(w, "gt") => true,
+                w if is_core_word(w, "lt") => false,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let (kept, otherwise) = (self.kept(c)?, self.kept(other)?);
+        if kept == otherwise {
+            return None;
+        }
+        // The test asks whether the first is the greater, or the lesser.
+        Some(if greater == (kept == 0) {
+            Leaf::Least
+        } else {
+            Leaf::Greatest
+        })
+    }
+
+    /// Which of its two inputs a clause leaves, if its body only moves them
+    /// and leaves one: `drop` the first, `swap drop` the second.
+    fn kept(&self, c: &Clause) -> Option<usize> {
+        let mut st = vec![0, 1];
+        for pair in c.body.chunks(2) {
+            let [
+                Token {
+                    tok: Tok::Name(n), ..
+                },
+                Token {
+                    tok: Tok::Apply, ..
+                },
+            ] = pair
+            else {
+                return None;
+            };
+            let w = self.alias_of(&self.resolve_quiet("", n));
+            match self.words.get(&w)?.prim.as_ref()?.0 {
+                Prim::Dup => st.push(*st.last()?),
+                Prim::Drop => drop(st.pop()?),
+                Prim::Swap if st.len() >= 2 => {
+                    let k = st.len();
+                    st.swap(k - 1, k - 2);
+                }
+                _ => return None,
+            }
+        }
+        match st[..] {
+            [k] => Some(k),
+            _ => None,
+        }
+    }
+
+    // ---- A quotation as data (doc/design/SYMBOLIC-FORTH.md 6) ----
+
+    /// `length`, `at`, `slice`, `concat` and `insert` on a quotation, while
+    /// compiling: its elements are what Low Stack holds, each a symbol or a
+    /// quotation. Running one splices its elements in, where each symbol
+    /// lands on the stack and each meta-op acts; taken apart, nothing runs,
+    /// so a meta-op is held as the symbol of its name, `'.'`, and put back,
+    /// it acts again.
+    fn quote_data(&mut self, p: Prim, base: usize) -> Result<()> {
+        let Val::Quote(q) = self.stack[base].val.clone() else {
+            return Err(self.err(Kind::Unknown, "a quotation is taken apart while compiling"));
+        };
+        let elems = self.elements(&q)?;
+        let n = elems.len() as i128;
+        let int = |s: &Self, k: usize| match s.stack[base + k].val {
+            Val::Int(i) => Ok(i),
+            _ => Err(s.err(
+                Kind::Unknown,
+                "a position in a quotation must be known while compiling",
+            )),
+        };
+        let out = match p {
+            Prim::QuoteLength => Jdg {
+                ty: I64,
+                val: Val::Int(n),
+            },
+            Prim::QuoteAt => {
+                let k = int(self, 1)?;
+                let Some(i) = prims::element(k, n) else {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!("there is no element {k} in a quotation of {n}"),
+                    ));
+                };
+                self.element_value(&elems[i])
+            }
+            Prim::QuoteSlice => {
+                let (i, j) = (int(self, 1)?, int(self, 2)?);
+                if i == 0 {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        "there is no element 0: elements count from 1",
+                    ));
+                }
+                // The gap before element i, and the gap after element j.
+                let a = if i > 0 { i - 1 } else { n + i };
+                let (a, b) = match (usize::try_from(a), prims::end(j, n)) {
+                    (Ok(a), Some(b)) if a <= b => (a, b),
+                    _ => {
+                        return Err(self.err(
+                            Kind::Mismatch,
+                            format!("{i} to {j} is outside a quotation of {n}"),
+                        ));
+                    }
+                };
+                self.joined(&elems[a..b])?
+            }
+            Prim::QuoteConcat => {
+                let Val::Quote(r) = self.stack[base + 1].val.clone() else {
+                    unreachable!("matched a quotation")
+                };
+                let mut all = elems;
+                all.extend(self.elements(&r)?);
+                self.joined(&all)?
+            }
+            Prim::QuoteInsert => {
+                let k = int(self, 2)?;
+                let Some(g) = prims::end(k, n) else {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!("there is no gap {k} in a quotation of {n}"),
+                    ));
+                };
+                let v = self.stack[base + 1].clone();
+                let mut all = elems;
+                all.insert(g, self.element_of(&v)?);
+                self.joined(&all)?
+            }
+            _ => unreachable!("{p:?} takes no quotation apart"),
+        };
+        self.stack.truncate(base);
+        self.stack.push(out);
+        Ok(())
+    }
+
+    /// A quotation's elements, as Low Stack holds them, each a run of its
+    /// tokens: a name is a symbol, a number three, `10 int# !`, a meta-op
+    /// one, `.`, `?`, `!` or `;`, and a quotation inside one, whole. Low
+    /// Stack has no other bracket and no string yet (section 7, steps 3 and
+    /// 4), so a quotation holding one is not taken apart.
+    fn elements(&self, q: &[Token]) -> Result<Vec<Vec<Token>>> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < q.len() {
+            let t = &q[i];
+            let applied = q.get(i + 1).is_some_and(|t| t.tok == Tok::Apply);
+            let sym = |s: String| Token {
+                tok: Tok::Name(s.into()),
+                pos: t.pos,
+            };
+            let lit = |n: String, kind: &str| {
+                let bang = [
+                    sym("!".into()),
+                    Token {
+                        tok: Tok::Apply,
+                        pos: t.pos,
+                    },
+                ];
+                vec![vec![sym(n)], vec![sym(kind.into())], bang.to_vec()]
+            };
+            match &t.tok {
+                Tok::Name(m) if matches!(&**m, "!" | ";") && applied => {
+                    out.push(q[i..i + 2].to_vec());
+                    i += 1;
+                }
+                Tok::Name(m) if matches!(&**m, "." | "?" | "!" | ";") => {
+                    return Err(self.at_pos(
+                        t.pos,
+                        Kind::Mismatch,
+                        format!(
+                            "a quotation holding the symbol `{m}` is not taken apart: \
+                             a meta-op taken out is the symbol of its name, so the two would \
+                             be one"
+                        ),
+                    ));
+                }
+                Tok::Name(_) | Tok::Apply | Tok::Test => out.push(vec![t.clone()]),
+                Tok::Int(k) => out.extend(lit(k.to_string(), "int#")),
+                Tok::Dec(d, s) => out.extend(lit(prims::show_dec(*d, *s), "dec#")),
+                Tok::Ratio(r) => out.extend(lit(prims::show_ratio(r), "ratio#")),
+                Tok::Open(b'[') => {
+                    let mut depth = 0;
+                    let end = (i..q.len())
+                        .find(|&j| {
+                            match q[j].tok {
+                                Tok::Open(_) => depth += 1,
+                                Tok::Close(_) => depth -= 1,
+                                _ => {}
+                            }
+                            depth == 0
+                        })
+                        .expect("a quotation's brackets close");
+                    out.push(q[i..=end].to_vec());
+                    i = end;
+                }
+                tok => {
+                    let what = match tok {
+                        Tok::Str(_) | Tok::Template(_) => "strings".into(),
+                        tok => format!(
+                            "`{}`",
+                            read::lower(&[Token {
+                                tok: tok.clone(),
+                                pos: t.pos
+                            }])
+                        ),
+                    };
+                    return Err(self.at_pos(
+                        t.pos,
+                        Kind::Mismatch,
+                        format!(
+                            "a quotation is taken apart as Low Stack holds it, and Low Stack \
+                             has no {what} yet (doc/design/SYMBOLIC-FORTH.md 7)"
+                        ),
+                    ));
+                }
+            }
+            i += 1;
+        }
+        Ok(out)
+    }
+
+    fn at_pos(&self, pos: Pos, kind: Kind, msg: String) -> Error {
+        Error::new(kind, Some(pos), msg)
+    }
+
+    /// An element as a value: a symbol, global text, or a quotation. A name
+    /// expanded where it was written is its path, and taken out, the
+    /// shortest name the root finds it by, `swap'` for `core.swap`.
+    fn element_value(&self, e: &[Token]) -> Jdg {
+        let at = e[0].pos;
+        let sym = |s: &Rc<str>| Jdg {
+            ty: SYMBOL,
+            val: Val::Name(self.short(s), at),
+        };
+        match e {
+            [
+                Token {
+                    tok: Tok::Apply, ..
+                },
+            ] => sym(&".".into()),
+            [Token { tok: Tok::Test, .. }] => sym(&"?".into()),
+            [
+                Token {
+                    tok: Tok::Name(m), ..
+                },
+                ..,
+            ] => sym(m),
+            [_, inner @ .., _] => Jdg {
+                ty: QUOTE,
+                val: Val::Quote(inner.into()),
+            },
+            _ => unreachable!("an element is a symbol or a quotation"),
+        }
+    }
+
+    /// A value as an element.
+    fn element_of(&self, j: &Jdg) -> Result<Vec<Token>> {
+        // Put in by the core's code, it is where the program applied that.
+        let pos = self.site.unwrap_or(self.pos);
+        let tok = |tok| Token { tok, pos };
+        Ok(match &j.val {
+            Val::Name(s, _) => match &**s {
+                "." => vec![tok(Tok::Apply)],
+                "?" => vec![tok(Tok::Test)],
+                "!" | ";" => vec![tok(Tok::Name(s.clone())), tok(Tok::Apply)],
+                _ => vec![tok(Tok::Name(s.clone()))],
+            },
+            Val::Quote(q) => {
+                let mut e = vec![tok(Tok::Open(b'['))];
+                e.extend(q.iter().cloned());
+                e.push(tok(Tok::Close(b']')));
+                e
+            }
+            _ => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "a quotation holds symbols and quotations, and {} is neither",
+                        self.describe(j)
+                    ),
+                ));
+            }
+        })
+    }
+
+    /// A quotation of elements, its numbers read back, `10 int# !` as `10`.
+    /// Its names were expanded where they were written, so it means what
+    /// its pieces meant, wherever they came from (16).
+    fn joined(&mut self, elems: &[Vec<Token>]) -> Result<Jdg> {
+        let mut toks = Vec::new();
+        for t in elems.iter().flatten() {
+            toks.push(t.clone());
+            read::fold(&mut toks)?;
+        }
+        Ok(Jdg {
+            ty: QUOTE,
+            val: Val::Quote(toks.into()),
+        })
+    }
+
+    // ---- A word's clauses as data (doc/design/SYMBOLIC-FORTH.md 6) ----
+
+    /// `w ins clauses#`: the clauses of the word w that dispatch would
+    /// choose for inputs of the types ins gives, a type, or code that leaves
+    /// them, `< i64 i64 >` or `[ i64 i64 ]`, in the order it would try them:
+    /// those with guards first, as they were defined, then the best without.
+    /// Each is a quotation of what `;` takes after the name, each bracket as
+    /// the code written in it: the inputs, the outputs if it gives them, and
+    /// the body, `[ [ a a gt ? ] [ a ] [ drop ] ]`. A primitive has none, its
+    /// code being the machine's. Dispatch is the stage's, so it is not
+    /// written twice.
+    fn clauses_of(&mut self) -> Result<()> {
+        let ins = self.stack.pop().expect("matched");
+        let w = self.stack.pop().expect("matched");
+        let types = match &ins.val {
+            Val::Type(t) => vec![*t],
+            Val::Quote(q) => {
+                let inner = if signature(q) { &q[1..q.len() - 1] } else { q };
+                let sig = self.bracket(inner)?;
+                if sig.outs.is_some() || !sig.guards.is_empty() {
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        "`clauses#` takes its inputs' types alone, `< i64 i64 >`, \
+                         with no guard, value or outputs",
+                    ));
+                }
+                sig.ins
+            }
+            _ => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "`clauses#` takes its inputs' types, a type or code that leaves them, \
+                         `< i64 i64 >`, and {} is neither",
+                        self.describe(&ins)
+                    ),
+                ));
+            }
+        };
+        let Val::Name(n, _) = &w.val else {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "`clauses#` takes a word's symbol, and {} is not one",
+                    self.describe(&w)
+                ),
+            ));
+        };
+        let name = self.resolve_quiet("", n);
+        let Some(word) = self.words.get(&name) else {
+            return Err(self.err(Kind::NoWord, format!("no word `{n}`")));
+        };
+        let clauses = word.clauses.clone();
+        // Dispatch's choice, for values of those types alone.
+        let base = self.stack.len();
+        let floor = std::mem::replace(&mut self.floor, base);
+        for &ty in &types {
+            self.stack.push(Jdg { ty, val: Val::Run });
+        }
+        let cands = self.candidates(&clauses);
+        let plain: Vec<Candidate> = cands.iter().filter(|c| !c.1.guarded()).cloned().collect();
+        let best = self.best(n, &plain, types.len());
+        self.stack.truncate(base);
+        self.floor = floor;
+        let mut chosen: Vec<Rc<Clause>> = cands
+            .iter()
+            .filter(|c| c.1.guarded())
+            .map(|c| c.1.clone())
+            .collect();
+        chosen.extend(best?.map(|(c, _)| c));
+        let at = self.site.unwrap_or(self.pos);
+        let tok = |tok| Token { tok, pos: at };
+        let mut out = Vec::new();
+        for c in chosen {
+            let start = out.len();
+            out.push(tok(Tok::Open(b'[')));
+            for j in c.written.iter() {
+                out.push(tok(Tok::Open(b'[')));
+                out.extend(self.written(j)?);
+                out.push(tok(Tok::Close(b']')));
+            }
+            out.push(tok(Tok::Open(b'[')));
+            out.extend(c.body.iter().cloned());
+            out.extend([tok(Tok::Close(b']')), tok(Tok::Close(b']'))]);
+            // The core's own source is not the program's, so its code is
+            // where it was taken.
+            if c.core {
+                for t in &mut out[start..] {
+                    t.pos = at;
+                }
+            }
+        }
+        self.push(QUOTE, Val::Quote(out.into()));
+        Ok(())
+    }
+
+    /// A bracket of a clause's signature as written, its code. A type given
+    /// alone is written by its name, `i64`.
+    fn written(&mut self, j: &Jdg) -> Result<Vec<Token>> {
+        Ok(match &j.val {
+            Val::Quote(q) => q[1..q.len() - 1].to_vec(),
+            Val::Type(t) => {
+                let none = crate::symbols::Symbols::parse("").expect("an empty table");
+                let toks = read::read(&self.types.name(*t), &none)?;
+                self.expand(&toks, "")?
+            }
+            _ => unreachable!("a signature is a type or a bracket"),
+        })
+    }
+
+    /// `w effect#`: how many values a word or a quotation takes and leaves,
+    /// `max' effect#` being 2 and 1, as the stage knows while compiling.
+    fn effect_counts(&mut self) -> Result<()> {
+        let w = self.stack.pop().expect("matched");
+        if !is_code(&w) {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "`effect#` takes a word's symbol or a quotation, and {} is neither",
+                    self.describe(&w)
+                ),
+            ));
+        }
+        if let Val::Name(n, _) = &w.val
+            && !self.words.contains_key(&self.resolve_quiet("", n))
+            && self.core_rule(n).is_none()
+        {
+            return Err(self.err(Kind::NoWord, format!("no word `{n}`")));
+        }
+        let Some((ins, outs)) = self.code_effect(&w) else {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "{} has no stack effect known while compiling",
+                    Self::shown(&w)
+                ),
+            ));
+        };
+        for k in [ins, outs] {
+            self.push(I64, Val::Int(k as i128));
+        }
+        Ok(())
     }
 
     /// The effect of a word or a quotation, if it is known.
     fn code_effect(&self, j: &Jdg) -> Option<(usize, usize)> {
         match &j.val {
-            Val::Name(n, _) => self.effect_of(n),
+            Val::Name(n, _) => self.name_effect("", n, &mut Vec::new()),
             Val::Quote(q) => self.effect(q, &mut Vec::new()),
             _ => None,
         }
@@ -4984,12 +6097,16 @@ impl Stage {
             ));
         };
         let (times, products) = match (k, m) {
-            (0, 1) | (2.., 1) if n == 0 => {
+            // x⁰ is the identity of x's operation, a value whose type comes
+            // where it is used, as a literal's does: `w' unit# !`. A value's
+            // power is its copies multiplied, so its operation is `⋅`.
+            (0, 1) | (2, 1) if n == 0 => (0, 0),
+            (3.., 1) if n == 0 => {
                 return Err(self.err(
                     Kind::NoWord,
                     format!(
-                        "the power 0 of {shown} is the identity of its operation, \
-                         a clause of `power#`, as `+^0` is 0"
+                        "the power 0 of {shown} is the identity of its operation, and an \
+                         identity is an operation's of two values; {shown} takes {k}"
                     ),
                 ));
             }
@@ -5014,71 +6131,57 @@ impl Stage {
         }
         for _ in 0..products {
             q.push(Token {
-                tok: Tok::Name("*".into()),
+                tok: Tok::Name(core_path("*")),
                 pos: at,
-                word: None,
             });
             q.push(Token {
                 tok: Tok::Apply,
                 pos: at,
-                word: None,
             });
         }
+        if n == 0 && m == 1 && (k == 0 || k == 2) {
+            let op: Vec<Tok> = match &w.val {
+                _ if k == 0 => vec![Tok::Name(core_path("*"))],
+                Val::Name(name, ..) => vec![Tok::Name(name.clone())],
+                _ => std::iter::once(Tok::Open(b'['))
+                    .chain(code.iter().map(|t| t.tok.clone()))
+                    .chain([Tok::Close(b']')])
+                    .collect(),
+            };
+            let unit = [
+                Tok::Name(core_path("unit#")),
+                Tok::Name("!".into()),
+                Tok::Apply,
+            ];
+            q.extend(op.into_iter().chain(unit).map(|tok| Token { tok, pos: at }));
+        }
         self.push(QUOTE, Val::Quote(q.into()));
         Ok(())
     }
 
-    /// `w n quote-width`: w n wide, a quotation, which `widen` applies.
-    fn quote_width(&mut self) -> Result<()> {
+    /// `w n width#`: w applied n wide, as the core's rule spells `dup_2`
+    /// (doc/design/SYMBOLIC-FORTH.md 22). Each value w moves is a group of n,
+    /// but the code handed to it, on the stack now, runs once, as written, on
+    /// a group's values. A word has a width if it moves values only, or is
+    /// handed code; any other `w_n` is an index no family has defined.
+    fn width(&mut self) -> Result<()> {
         let n = self.count("width#", 1)?;
         let w = self.stack.pop().expect("matched");
-        let at = self.pos;
-        let tok = |tok| Token {
-            tok,
-            pos: at,
-            word: None,
+        let Val::Name(name, at) = &w.val else {
+            return Err(self.err(
+                Kind::NoWord,
+                format!(
+                    "no word `width#` for {}: it takes a word",
+                    self.describe(&w)
+                ),
+            ));
         };
-        let mut q = match &w.val {
-            Val::Name(name, at) => vec![Token {
-                tok: Tok::Name(name.clone()),
-                pos: *at,
-                word: None,
-            }],
-            Val::Quote(c) => {
-                let mut v = vec![tok(Tok::Open(b'['))];
-                v.extend(c.iter().cloned());
-                v.push(tok(Tok::Close(b']')));
-                v
-            }
-            _ => {
-                return Err(self.err(
-                    Kind::NoWord,
-                    format!(
-                        "no word `width#` for {}: it takes a quotation or a word",
-                        self.describe(&w)
-                    ),
-                ));
-            }
+        self.pos = *at;
+        let found = match self.lookup(name) {
+            Ok(found) => Some(found),
+            Err(e) if e.kind == Kind::NoWord => None,
+            Err(e) => return Err(e),
         };
-        q.extend([
-            tok(Tok::Int(n as i128)),
-            tok(Tok::Name("widen".into())),
-            tok(Tok::Apply),
-        ]);
-        self.push(QUOTE, Val::Quote(q.into()));
-        Ok(())
-    }
-
-    /// `w n widen`: w applied n wide. Each value w works on is a group of
-    /// n, but the code handed to it, on the stack now, which runs once, as
-    /// written, on a group's values.
-    fn widen(&mut self) -> Result<()> {
-        let n = self.count("widen", 1)?;
-        let w = self.stack.pop().expect("matched");
-        let code = self.code_tokens(&w, "widen")?;
-        if n == 1 {
-            return self.run_code(&code);
-        }
         let outside = self
             .stack
             .iter()
@@ -5086,15 +6189,44 @@ impl Stage {
             .map(|j| j.val.clone())
             .collect();
         let saved = self.wide.replace(Wide { n, outside });
-        let r = match &w.val {
-            Val::Name(name, at) => {
-                self.pos = *at;
-                self.wide_word(name)
-            }
-            _ => self.wide_quote(&code, true),
-        };
+        let r = match &found {
+            Some(found) => self.widens(found),
+            None => Ok(false),
+        }
+        .and_then(|widens| match &found {
+            Some(found) if widens && n == 1 => self.unwide(|s| s.apply_word(found)),
+            Some(found) if widens => self.wide_word(found),
+            _ => Err(self.err(
+                Kind::NoWord,
+                format!(
+                    "no word `{name}_{n}`: a subscript is an index, which a word's family \
+                     gives a meaning, and the core gives one only to a word that moves values \
+                     or is handed code, a width, as `dup_2`"
+                ),
+            )),
+        });
         self.wide = saved;
         r
+    }
+
+    /// Whether a word has a width, while widening: it moves values only, as
+    /// the stack words do and words made of them, or it is handed code, as
+    /// the combinators are.
+    fn widens(&self, name: &Rc<str>) -> Result<bool> {
+        let name = self.alias_of(name);
+        if self.moves_only(&name, &mut Vec::new()) {
+            return Ok(true);
+        }
+        let Some(w) = self.words.get(&name) else {
+            return Ok(false);
+        };
+        if w.ty.is_some() || w.con.is_some() || !self.stack[self.floor..].iter().any(is_code) {
+            return Ok(false);
+        }
+        match self.effect_of(&name) {
+            Some((k, _)) => self.code_among(k),
+            None => Ok(true),
+        }
     }
 
     fn unwide(&mut self, f: impl FnOnce(&mut Self) -> Result<()>) -> Result<()> {
@@ -5121,14 +6253,13 @@ impl Stage {
                 let name = self.lookup(name)?;
                 self.wide_word(&name)
             }
-            _ => self.wide_quote(&code, false),
+            _ => self.run_code(&code),
         }
     }
 
     /// A word widened. `dup`, `drop`, `swap` and `dip` move groups as they
     /// move values, and so does a word made only of them, or one handed
-    /// code: its body is widened in turn. Any other word, as an operation,
-    /// acts lane by lane.
+    /// code: its body is widened in turn.
     fn wide_word(&mut self, name: &Rc<str>) -> Result<()> {
         let name = self.alias_of(name);
         let Some(w) = self.words.get(&name) else {
@@ -5145,13 +6276,7 @@ impl Stage {
             return self.unwide(|s| s.apply_word(&name));
         }
         let (prim, clauses) = (w.prim.is_some(), w.clauses.clone());
-        let effect = self.effect_of(&name);
-        let moves = self.moves_only(&name, &mut Vec::new());
-        let handed = match effect {
-            Some((k, _)) => self.code_among(k)?,
-            None => true,
-        };
-        if moves || handed {
+        if self.widens(&name)? {
             // The clause chosen as a family chooses one, its body widened.
             let chosen = if prim {
                 None
@@ -5166,34 +6291,10 @@ impl Stage {
             };
             return self.run_code(&clause.body);
         }
-        let (k, m) = effect.expect("known");
-        let code = [
-            Token {
-                tok: Tok::Name(name),
-                pos: self.pos,
-                word: None,
-            },
-            Token {
-                tok: Tok::Apply,
-                pos: self.pos,
-                word: None,
-            },
-        ];
-        self.lanes(&code, k, m)
-    }
-
-    /// A quotation widened. One written in the word widened moves groups,
-    /// as the word's own code; the quotation widened itself is chosen as a
-    /// word is.
-    fn wide_quote(&mut self, q: &[Token], widened: bool) -> Result<()> {
-        if widened
-            && !self.moves_only_tokens(q, &mut Vec::new())
-            && let Some((k, m)) = self.effect(q, &mut Vec::new())
-            && !self.code_among(k)?
-        {
-            return self.lanes(q, k, m);
-        }
-        self.run_code(q)
+        Err(self.err(
+            Kind::NoWord,
+            format!("`{name}` has no width: it neither moves values nor is handed code"),
+        ))
     }
 
     /// The sizes of the top `k` values while widening, from the top: code
@@ -5293,49 +6394,6 @@ impl Stage {
         }
         let s = self.items(1)?[0];
         self.aside(s, |st| st.wide_apply(f))
-    }
-
-    /// Applies code that takes k values and leaves m to each lane of k
-    /// groups of n, the first values of the groups, then the second, and so
-    /// on, as written, and gathers what each leaves into m groups of n, as
-    /// vectors add.
-    fn lanes(&mut self, code: &[Token], k: usize, m: usize) -> Result<()> {
-        let n = self.wide.as_ref().expect("widening").n;
-        self.need(k * n)?;
-        let base = self.stack.len() - k * n;
-        let order: Vec<usize> = (0..n)
-            .flat_map(|i| (0..k).map(move |g| g * n + i))
-            .collect();
-        self.permute(base, &order);
-        self.unwide(|s| s.lane(code, k, m, n - 1))?;
-        if self.stack.len() != base + m * n {
-            return Err(self.err(
-                Kind::Mismatch,
-                "a word widened must leave what its effect says, in each lane",
-            ));
-        }
-        let order: Vec<usize> = (0..m)
-            .flat_map(|g| (0..n).map(move |i| i * m + g))
-            .collect();
-        self.permute(base, &order);
-        Ok(())
-    }
-
-    /// The lane on top, then, with what it leaves set aside, the lanes
-    /// below it.
-    fn lane(&mut self, code: &[Token], k: usize, m: usize, i: usize) -> Result<()> {
-        let want = self.stack.len() - k + m;
-        self.run_code(code)?;
-        if self.stack.len() != want {
-            return Err(self.err(
-                Kind::Mismatch,
-                format!("a word widened takes {k} values in each lane and leaves {m}"),
-            ));
-        }
-        if i > 0 {
-            self.aside(m, |s| s.lane(code, k, m, i - 1))?;
-        }
-        Ok(())
     }
 
     /// Whether a word only moves values: `dup`, `drop`, `swap` and `dip`,
@@ -5456,6 +6514,13 @@ impl Stage {
     /// clauses say how to make one; otherwise it must have the type already,
     /// or forget into it.
     fn convert(&mut self, i: usize, t: Type) -> Result<()> {
+        // An operation, by its symbol or a quotation, is made its identity,
+        // `+' unit# !`, whose type comes where it is used
+        // (doc/design/SYMBOLIC-FORTH.md 21).
+        if t == UNIT_LIT && matches!(self.stack[i].val, Val::Name(..) | Val::Quote(_)) {
+            self.stack[i].ty = UNIT_LIT;
+            return Ok(());
+        }
         // A symbol that writes a number, as a pattern's capture `2` does,
         // is that number given a type (doc/design/SYMBOLIC-FORTH.md 7).
         if let Val::Name(n, at) = &self.stack[i].val
@@ -5473,7 +6538,7 @@ impl Stage {
         }
         let have = self.stack[i].ty;
         // One known only at run time is a number only once known, as a
-        // capture is where its pattern word is applied.
+        // capture is where the name its rule rewrites is applied.
         if have == SYMBOL && !matches!(t, SYMBOL | STRING) && !self.stack[i].known() {
             return Err(self.err(
                 Kind::Unknown,
@@ -6156,19 +7221,18 @@ impl Stage {
     }
 
     /// The code a quotation or a word is, as `words_of` takes it.
-    fn code_tokens(&self, j: &Jdg, name: &str) -> Result<Rc<[Token]>> {
+    fn code_tokens(&mut self, j: &Jdg, name: &str) -> Result<Rc<[Token]>> {
         match &j.val {
             Val::Quote(q) => Ok(q.clone()),
+            // A symbol's code applies it, as global text.
             Val::Name(n, at) => Ok(vec![
                 Token {
                     tok: Tok::Name(n.clone()),
                     pos: *at,
-                    word: None,
                 },
                 Token {
                     tok: Tok::Apply,
                     pos: *at,
-                    word: None,
                 },
             ]
             .into()),
@@ -6464,7 +7528,7 @@ impl Stage {
                             ),
                         ));
                     }
-                    self.apply_word(&">string".into())?;
+                    self.apply_word(&core_path(">string"))?;
                 }
             }
         }
@@ -6515,7 +7579,7 @@ impl Stage {
                 self.stack.push(j);
                 if ty != STRING {
                     let floor = std::mem::replace(&mut self.floor, self.stack.len() - 1);
-                    let r = self.apply_word(&">string".into());
+                    let r = self.apply_word(&core_path(">string"));
                     self.floor = floor;
                     r?;
                 }

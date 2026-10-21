@@ -257,18 +257,18 @@ fn a_vec_knows_its_length_at_compile_time() {
     assert_eq!(fails("bb: < 3 i64 vec > [ 5 at ] ;"), Kind::Mismatch);
     // A value left in a bracket is a value pattern, so it cannot be an
     // output (tests/choice.rs).
-    assert_eq!(fails("bb: < -- 2 > [ ] ;"), Kind::Mismatch);
+    assert_eq!(fails("bb: < >< 2 > [ ] ;"), Kind::Mismatch);
 }
 
 #[test]
 fn signatures_promise_outputs() {
     // After `--`, the outputs, which are checked.
-    let fee = "fee: < money -- money > [ 1.10 + ] ;";
+    let fee = "fee: < money >< money > [ 1.10 + ] ;";
     assert_eq!(run(&format!("{fee} 19.99 fee")).unwrap(), [2109]);
-    assert_eq!(fails("bb: < i64 -- f64 > [ 1 + ] ;"), Kind::Mismatch);
-    assert_eq!(fails("bb: < i64 -- i64 i64 > [ 1 + ] ;"), Kind::Mismatch);
+    assert_eq!(fails("bb: < i64 >< f64 > [ 1 + ] ;"), Kind::Mismatch);
+    assert_eq!(fails("bb: < i64 >< i64 i64 > [ 1 + ] ;"), Kind::Mismatch);
     // A literal result takes the type promised.
-    assert_eq!(show("two: < -- f64 > [ 2 ] ; two"), "<1> 2.0");
+    assert_eq!(show("two: < >< f64 > [ 2 ] ; two"), "<1> 2.0");
 }
 
 #[test]

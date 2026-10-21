@@ -104,7 +104,7 @@ fn recursion_needs_a_case_that_finishes() {
     assert_eq!(cells(&["loop: < i64 > [ loop ] ;"]), Err(Kind::Mismatch));
     // Unless its signature promises them: then it is a loop, which runs
     // until the step budget is spent, in constant space.
-    let mut s = session(&["loop: < i64 -- i64 > [ 1 + loop ] ;"]).unwrap();
+    let mut s = session(&["loop: < i64 >< i64 > [ 1 + loop ] ;"]).unwrap();
     s.fuel = 100_000;
     assert_eq!(
         s.eval("1 loop").unwrap_err().kind,

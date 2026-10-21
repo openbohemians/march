@@ -239,5 +239,5 @@ fn value_patterns_choose_by_equality() {
     );
     // Patterns belong in signatures, and a value is not an output.
     assert_eq!(cells(&["1 < 1 > !"]), Err(Kind::Syntax));
-    assert_eq!(cells(&["bb: < i64 -- 0 > [ ] ;"]), Err(Kind::Mismatch));
+    assert_eq!(cells(&["bb: < i64 >< 0 > [ ] ;"]), Err(Kind::Mismatch));
 }

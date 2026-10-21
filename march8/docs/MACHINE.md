@@ -12,7 +12,7 @@ time, `map`, and arithmetic lifted over arrays; slice 3 adds recursion,
 instances and tail calls.
 
 ```
-fee: < money -- money > [ 1.10 + ] ;
+fee: < money >< money > [ 1.10 + ] ;
 19.99 fee                          → 21.09, exactly: 2109 cents
 sq: [ dup * ] ;
 3 sq                               → 9, compiled as the literal 9
@@ -92,8 +92,8 @@ code applies words far more often than it passes symbols. Now a capital
 marks nothing (Thomas): words are case-sensitive, so a module defines the
 symbols it needs as words that leave them, and they resolve as words do,
 by namespace and import. A program made of symbols, a logic program's
-atoms, reads its capitals as symbols by a pattern word whose capture is the
-name, `/([A-Z][A-Za-z0-9]*)/: < sym -- sym > [ ] ;`, as
+atoms, reads its capitals as symbols by a rule whose capture is the name
+and whose code is none, `/([A-Z][A-Za-z0-9]*)/: [ ] ;`, as
 examples/syllogism.march does.
 
 A symbol is text until a type structures it, so a word that takes a string
@@ -105,7 +105,7 @@ symbol only by `sym!`.
 
 `map` and `or` are families (Thomas, 2026-10-16): each builds a type
 from types, its constructor the clause whose signature is
-`< type type -- type >`, chosen as any clause is, by what it takes, and
+`< type type >< type >`, chosen as any clause is, by what it takes, and
 otherwise maps over an array or joins truths. No value is both a type and
 an array or a truth, so `i64 true or` is no word. `nil` stands for its type
 where a type is wanted, in any family: it matches `type`, so `i64 nil or`
@@ -131,9 +131,9 @@ leaves is the signature, by what each value is:
 
 ```
 case: < string Camel > [ … ] ;        a string, and the symbol Camel
-at: < a ary i64 -- a > [ … ] ;        one letter is a type variable
+at: < a ary i64 >< a > [ … ] ;        one letter is a type variable
 sign: < i64 positive? > [ … ] ;       a word tested, by ?: a guard
-even: < i64 [ 2 mod zero? ] > [ … ] ;     any quotation left is one too
+even: < i64 [ 2 mod zero ] ? > [ … ] ;    a quotation tested is one too
 fib: < 0 > [ … ] ;    < 0 i64! >    < true >    a value left: equal to it
 pair: < ( i64 string ) > [ … ] ;      an array of types: a tuple type
 ```
@@ -151,11 +151,29 @@ context. Anywhere else it is a value, so `[ < f64 > ! ] map` converts each
 element, as `[ f64! ] map` does.
 
 **Namespaces** (doc/design/SYMBOLIC-FORTH.md 16, 17): a dot inside a name
-divides a path, and `;` defines at one, `math.sq: [ dup * ] ;`. A word's
-names are looked up in its namespace, then among the namespace's import,
-then in the core, from where the code was written, so a quotation of
-`math`'s that `map` runs still finds `math.sq`; a word of the program's
-root is reached from a namespace by importing it. `import#: [| math.*
+divides a path, and `;` defines at one, `math.sq: [ dup * ] ;`. Each
+source is **expanded** once it is read (2026-10-20): each name it applies
+becomes its path where it was written, looked up in its namespace, then
+among the namespace's import, then in the core, and a name found nowhere
+is the namespace's own, so a quotation of `math`'s that `map` runs still
+finds `math.sq`. The source's definitions are gathered first, and its
+`import#` and `export#` set, so a namespace's own later word counts; a
+definition's signature and body are expanded in its name's namespace.
+Lookup is then of a path, or of a bare name in the root. A symbol is
+global text and is never expanded: `sq' map` in `math` applies the root's
+`sq`, and `math.sq' map` or `[ sq ] map` applies `math.sq`; `Open'` equals
+`Open'` wherever written. The meta-ops are no names, and defining one is
+an error. A word of the program's root is reached from a namespace by
+importing it. **The core is the namespace `core`**, found last, as though
+every namespace imported `core.*`: `+` is `core.+`, and a program's word
+of a core name is its own, `dup: [ 7 ] ;` leaving the core's words, `over`
+among them, the core's `dup`. So a clause added to a core family is
+written by its path, `core.unit: < int#-' > [ drop 0 ] ;`. While
+core.march is read, a bare name defined is the core's. Expanded code
+keeps its paths; a message, a name taken out of a quotation, and
+`name#`'s symbol show the shortest name the root finds the word by, `dup`
+for `core.dup`. The core exports all of its words for now; which it keeps
+as internals, reached by importing them by path, is to come. `import#: [| math.*
 io.file.read |] ;` makes names local, each by its last part, or all that a
 namespace exports; `math.export#: [| pi |] ;` says what may be reached from
 outside, and reaching anything else warns as severe, though it compiles,
@@ -163,26 +181,36 @@ and a namespace's children see all of it. A namespace has one import,
 which holds for all of it: a source's imports run first. A name found in
 two places is an error that a path settles.
 
-**Recognizers** (doc/design/SYMBOLIC-FORTH.md 25): words whose names are
-patterns, regular expressions between slashes that match a whole word,
-`units./([0-9]+)kg/: < sym > [ int# ! 1000 * ] ;`. A word a pattern matches
-is its captures, each a symbol, in order, then the pattern's word applied:
-`12kg` is `'12'` and the word, so `12 1000 *`. The signature takes the
-captures last, and to the word's user `log_2` of
-`/log_([0-9]+)/: < f64 sym -- f64 > [ i64 ! log-base ] ;` is
-`< f64 -- f64 >`. Clauses of one pattern are a family. A pattern reads its own namespace,
-and where that namespace is imported by `*` and exports it, by its pattern,
-before the core's width and power. Each group must capture in every match,
-so the effect is fixed. A word that two patterns match, or that is also a
-name defined or imported, is an error. A source's patterns are known before
-it runs, so a word they match is never read another way; the stage reads a
-word by one when it reaches it, in the namespace of its code. A symbol
-becomes a number where it is known, so a clause typed `sym` is checked
-where it is applied.
+**Recognizers** (doc/design/SYMBOLIC-FORTH.md 25) are rewrite rules: a
+pattern, a regular expression between slashes that matches a whole name,
+and code, `units./([0-9]+)kg/: [ int# ! 1000 * ] ;`. Where a name the
+pattern matches is applied, the rule puts in its place its captures, each
+a symbol, in order, then its code: `12kg` is `'12' int# ! 1000 *`. A rule
+has no signature and one definition; its effect is the rewrite's, so to
+its user `log_2` of `/log_([0-9]+)/: [ i64 ! log-base ] ;` is
+`< f64 >< f64 >`, and more meanings are a family's, which its code
+applies. A capture is a symbol, global text, which the rule's code reads
+as a name where the name was applied with `name#`; the rule's own names
+mean what they mean where the rule was defined. A name a rule matches is
+expanded to a path where it was written, `math.dbl^2`, so the path says
+where: its namespace is the longest part before a dot that is one. When
+`.` applies a name, the stage looks for a rule of that namespace, or of
+one it imports by `*` that exports the rule by its pattern, then for the
+name, then for a rule of the core: the power,
+`/(.+)\^([0-9]+)/: [ [ name# ] dip int# ! power# . ] ;`, and the width,
+`/(.+)_([0-9]+)/: [ [ name# ] dip int# ! width# ] ;`, which `width#` gives a word that
+moves values or is handed code, `tuck_2` of a program's `tuck` too. A rule holds for
+all of its namespace, and a name it matches before its code is defined is
+an error. Each group must capture in every match, so the effect is fixed.
+A name that two rules match, or that a rule matches and is also defined
+or imported, is an error. A rule is matched against the symbol `.`
+applies, so Symbolic Forth matches as March does, and the syllogism runs
+lowered. A symbol becomes a number where it is known, so a family's
+clause typed `sym` is checked where it is applied.
 
 **A definition is data:** a name, what it names, and `;` (Thomas,
 2026-10-12; doc/design/SYMBOLIC-FORTH.md 18), FORTH's `: inc 1 + ;` turned
-postfix: `inc: < i64 -- i64 > [ 1 + ] ;`. The name comes first, and
+postfix: `inc: < i64 >< i64 > [ 1 + ] ;`. The name comes first, and
 the bracket after it says what kind of thing it names:
 
 ```
@@ -191,10 +219,15 @@ num: < i64 f64 or money or int# or dec# or ratio# or > ;    a type
 ```
 
 A bracket before the body is the clause's signature, its context (TYPES.md
-2.15): the types of its inputs, then after `--` the outputs it promises, or
-the two in two brackets, inputs then outputs, `sq: < i64 > < i64 > [ dup * ]
-;`. Clauses of one name are a family. No name ends in `?`, which tests, or
-in a power or a width, which are spellings. A type is named, `config: <
+2.15): the types of its inputs, then, in a second bracket, the outputs it
+promises, the two written touching, `sq: < i64 >< i64 > [ dup * ] ;`, as
+`><` is `>` then `<` (doc/design/SYMBOLIC-FORTH.md 6.8). `--` begins a
+comment everywhere, inside a bracket too; one that leaves a bracket never
+closed is taken for the divider it was until 2026-10-20, and the error
+says where the outputs go. Clauses of one name are a family. No name ends in `?`, which tests, or
+in a power, `^` and digits, which the core's rule rewrites where the name
+is applied; a subscript, `_` and digits, is part of a name, an index, as
+in x₁. A type is named, `config: <
 string i64 map > ;`, the bracket only saying that it is one, and a named
 class is called by its name in messages. `;` takes nothing else: a value
 computed where it stands, with no bracket to mark where it starts, could
@@ -295,8 +328,8 @@ A family applied chooses its clause by the values on top (TYPES.md 2.8):
 - **A clause whose signature types all its inputs** is also compiled where
   it is defined, on values at run time of those types, so its errors show
   there. If it fails, it is not defined; unless it fails only for needing
-  a value known while compiling, as `embed`'s file, when it is checked
-  where it is applied instead.
+  a value known while compiling, as `embed`'s file, or a word its source
+  defines later, when it is checked where it is applied instead.
 - **A clause with the same context as one before replaces it,** as a FORTH
   redefinition does; otherwise the two would always tie.
 
@@ -345,8 +378,9 @@ read`; reading is by namespace now, `io.stdin.read` and `io.file.read`.)
 ### Guards: the choice at run time
 
 A word tested in a signature is a **guard**, `< i64 positive? >`, and so
-is any quotation left there, `< i64 [ 2 mod zero? ] >` (TYPES.md 2.2,
-2.15; doc/design/SYMBOLIC-FORTH.md 20). It looks at the
+is a quotation tested there, `< i64 [ 2 mod zero ] ? >` (TYPES.md 2.2,
+2.15; doc/design/SYMBOLIC-FORTH.md 20). A quotation left bare is refused,
+saying to test it, since each role has its mark (SYMBOLIC-FORTH.md 2). It looks at the
 inputs before it, as many as it takes, without taking them, and leaves a
 `bool` (TYPES.md 2.16). How many it takes comes from its definition, by a
 pass over its words: `positive?`, `[ 0 gt? ]`, takes one, and `lt?` takes
@@ -455,7 +489,7 @@ Lifting is clauses in `core.march`, an array and a number in either
 order for `+`, `-+`, `*` and `/*` ("Arrays as tensors"):
 
 ```
-+: < a ary a -- a ary > [ swap [ over + ] map swap drop ] ;
++: < a ary a >< a ary > [ swap [ over + ] map swap drop ] ;
 ```
 
 So `( 1 2 3 ) 1 +` is `( 2 3 4 )`, a literal taking the elements' type, and
@@ -466,15 +500,15 @@ the prototype's original bug, `{ "k" ( 1 2 ) } "k" at 1 +`, lifts.
 A clause defined under a type's name says how a literal becomes that type:
 
 ```
-i64: < int# -- i64 > [ int#>i64 ] ;
-money: < dec# -- money > [ dec#>money ] ;
+i64: < int# >< i64 > [ int#>i64 ] ;
+money: < dec# >< money > [ dec#>money ] ;
 ```
 
 Converting a literal by the type, `2 i64!`, runs this clause, and so does
 a clause that wants the type and is given the literal. Applying the name
 gives the type itself; its clauses are only its conversions. So literal handling is
 an open family, as Thomas framed it ("just another type signature"). Two
-literals fold by clauses on the literal types, `< int# int# -- int# >`,
+literals fold by clauses on the literal types, `< int# int# >< int# >`,
 exactly, and stay literals, so `1 2 + 3.5 +` is the decimal 6.5. A
 literal takes its default type, i64 or f64, only when it must be a value at
 run time. Until then it prefers to become another literal kind, which keeps
@@ -753,6 +787,11 @@ and makes it a call to an **instance**:
   word testing symbols as it runs. Known inputs do not unfold through
   recursion, numbers or symbols: `10 fact` calls the instance (TYPES.md
   3.16).
+- A value known only while compiling, as a quotation, has no cell for an
+  instance to take, so a family applied to one again **unfolds**, its
+  guards decided by the values, until a clause finishes: so March walks
+  a quotation (SYMBOLIC-FORTH.md 6.6). Depth bounds it, sixty-four words
+  inside words.
 
 **The ghost.** A recursive call's results have the types of the
 alternatives that finish without recursing (TYPES.md 2.7). An alternative
@@ -796,10 +835,21 @@ has one meaning, and an inverse is a word); `^`, power; `mod`, the comparisons, 
 of clauses over primitives, in March. Also there: `=` and `~` as `dup` and
 `swap`; `<>` as `dip`, and over it `over`, `rot`, `keep`, which applies a
 quotation to a value and keeps the value, and `bi`, which applies two to
-one, `3 [ dup * ] [ 1 + ] bi` leaving 9 4; `power#` and `width#`, which
-powers and widths are spelled as, each a quotation, with the identities
-`+^0` and `⋅^0` as clauses of their own (doc/design/SYMBOLIC-FORTH.md 21,
-22, 24); the guards `zero?`, `positive?` and `negative?`, and `abs`, `min` and
+one, `3 [ dup * ] [ 1 + ] bi` leaving 9 4, each of them also n wide,
+`dup_2` and `keep_2` being FORTH's 2DUP and Factor's 2keep, the only
+meaning the core gives a subscript, and given as well to a program's word
+that only moves values or is handed code; `power#`, which makes a power, a
+quotation, `+^0` and any operation's 0th power being its identity,
+`+' unit# !`, a literal whose type comes where it is used, and a value's
+`^0` being `⋅^0`; the conversions of `unit#` to each type, and the facts
+they read, `unit` for each primitive operation (`i64+' unit` is 0,
+`string-concat' unit` the empty string), and `least` and `greatest` for
+each order's ends (`i64' least`, `f64' greatest` ∞, `bool' greatest`
+true);
+and the two rules that rewrite a power and a width, `dbl^2` as `dbl 2
+int# ! power# .` and `dup_2` as `dup 2 int# ! width#`, each word read by
+`name#` where the name was applied
+(doc/design/SYMBOLIC-FORTH.md 21, 22, 24, 25); the guards `zero?`, `positive?` and `negative?`, and `abs`, `min` and
 `max` as clauses chosen by them, with no `if`; `sqrt`; `pow`, x to the y,
 exact for two literals and checked for integers; and `divmod`, the quotient
 and remainder, floored (`-7 3 divmod` is `-3 2`), with `div` and `mod` each
@@ -845,7 +895,7 @@ case.snake` is "hello_world", with `case.kebab`, `case.camel` and
 `case.pascal`; imported, all of them or one alone, they are `lower`,
 `snake` and the rest, and anyone may add one.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
-operations, such as `i64+ < i64 i64 -- i64 >`, which is checked addition.
+operations, such as `i64+ < i64 i64 >< i64 >`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`, `ratio#/`) exist only at
 compile time.
 A primitive applied to values all known folds, unless it has an effect
@@ -862,10 +912,28 @@ A few are handled by the stage itself, because their types are not a
 signature's: the stack words, which move judgments, the values at run time
 among them moving, only if their order changes, by rolls or the scratch
 stack, whichever is shorter; `quote-power`, a word's or a quotation's
-power by its kind, from its effect; `widen`, which applies a word with
-each value a group, `dup`, `drop`, `swap` and `dip` moving groups, a
-word made only of them or handed code widened in its body, and any other
-word lane by lane; `dip`,
+power by its kind, from its effect, its 0th being `w' unit# !`, the
+identity of w's operation, a literal typed where it is used; `identity#`,
+which finds that identity at a type, following the operation to the
+primitive it applies there, whose identity core.march's `unit` states, or
+to a choice of the greater or the lesser, whose is the type's `least` or
+`greatest`, until a word's clauses are data March can read; `quote-length`,
+`quote-at`, `quote-slice`, `quote-concat` and `quote-insert`, a quotation
+as a sequence while compiling, its elements Low Stack's, a symbol or a
+quotation, a meta-op the symbol of its name, `'.'`, which the core's
+`length`, `at`, `slice`, `concat`, `insert`, `first` and `rest` take
+(SYMBOLIC-FORTH.md 6.6); `clauses#`, `w ins clauses#`, the clauses of w
+that dispatch would choose for inputs of the types ins gives, a type or
+code that leaves them, `< i64 i64 >`, in the order it would try them, each
+a quotation of what `;` takes after the name, each bracket as its code,
+`[ [ a a gt ? ] [ a ] [ drop ] ]`, a primitive having none, and `effect#`, how many values a word or a
+quotation takes and leaves, so March reads a word as it reads a quotation
+(SYMBOLIC-FORTH.md 6.6); `name#`, a symbol as a name where a rule's
+name was applied, the word expanding finds there, by the shortest name the
+root finds it by (SYMBOLIC-FORTH.md 16, 25); `width#`, which applies a
+stack word or a combinator with each value a group, `dup`, `drop`, `swap`
+and `dip` moving groups, and a word made only of them or handed code
+widened in its body; `dip`,
 which compiles its quotation with the value under it out of reach, on the
 scratch stack if it is a value at run time and the quotation has code;
 `vec-length`, a
@@ -1022,6 +1090,17 @@ different lengths both may match (above).
 
 ## Not yet
 
+- **Failing and traps** (doc/design/SYMBOLIC-FORTH.md 29, 2026-10-20).
+  `fail` takes a kind, or a tuple of a message and a kind, and never
+  returns. While compiling it is an error where the failing code was
+  applied; at run time it is a trap, which a clause of the same word for
+  its inputs and a `trap` on top handles, the inputs restored as they were
+  when the word was applied, so the handler leaves what the word leaves. A
+  trap may be neither left by a clause that takes one nor stored. The
+  machine's failures become traps of their kinds, all but the fuel limit.
+  First, `fail` while compiling, for the identity search; the tuple needs
+  a sequence literal that a clause takes as a tuple (TYPES.md 2.10), where
+  march8 settles `( "can't read it" no-file' )` as two strings.
 - **Loops in March, the kernel shrink** (2026-10-14). `map`, `zip`,
   `table` and `within` are about 470 lines of Rust, which could be words in
   `core.march` over `each`, the one loop the stage types. What was found:
@@ -1115,9 +1194,6 @@ different lengths both may match (above).
   `< … >` as the mathematical angle brackets `⟨ … ⟩` (U+27E8, U+27E9,
   LaTeX's `\langle` and `\rangle`). The reader then reads `⟨ ⟩` as `< >`,
   so either form reads back, and the way back is the same rewrite.
-- **Comments in brackets.** `--` divides a bracket's inputs from its
-  outputs, so it cannot begin a comment there (Thomas, 2026-10-09), and
-  stays so in High Stack (2026-10-15, to reconsider if it chafes).
 - **More of files.** Writing a file, which cannot be another
   `write` clause, since `write` takes one string and a family's clauses
   take as many; `string error or` from `file-read` once there is an error type;

@@ -35,10 +35,13 @@ pub enum Base {
     /// A ratio literal, `1:2`: its terms as written until its type is
     /// decided, exact while it is a literal.
     RatioLit,
+    /// An operation's identity, `+' unit# !`, `+^0`: its type is decided
+    /// where it is used, as a literal's is (doc/design/SYMBOLIC-FORTH.md 21).
+    UnitLit,
 }
 
 impl Base {
-    pub const ALL: [(Base, &'static str); 12] = [
+    pub const ALL: [(Base, &'static str); 13] = [
         (Base::I64, "i64"),
         (Base::F64, "f64"),
         (Base::Money, "money"),
@@ -51,6 +54,7 @@ impl Base {
         (Base::Nil, "nil"),
         (Base::Bool, "bool"),
         (Base::RatioLit, "ratio#"),
+        (Base::UnitLit, "unit#"),
     ];
 }
 
@@ -67,6 +71,7 @@ pub const QUOTE: Type = 8;
 pub const NIL: Type = 9;
 pub const BOOL: Type = 10;
 pub const RATIO_LIT: Type = 11;
+pub const UNIT_LIT: Type = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Term {
@@ -150,11 +155,11 @@ impl Types {
         self.terms[t as usize]
     }
     pub fn is_literal(&self, t: Type) -> bool {
-        matches!(t, INT_LIT | DEC_LIT | RATIO_LIT)
+        matches!(t, INT_LIT | DEC_LIT | RATIO_LIT | UNIT_LIT)
     }
     /// Whether a value of this type exists only at compile time.
     pub fn compile_time_only(&self, t: Type) -> bool {
-        matches!(t, INT_LIT | DEC_LIT | RATIO_LIT | TYPE | QUOTE)
+        matches!(t, INT_LIT | DEC_LIT | RATIO_LIT | UNIT_LIT | TYPE | QUOTE)
     }
     /// Whether `t` is a pattern rather than one type: it has a variable or a
     /// class, `atom` or a union.

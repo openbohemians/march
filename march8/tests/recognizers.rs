@@ -1,8 +1,10 @@
-//! Recognizers (doc/design/SYMBOLIC-FORTH.md 25): words whose names are
-//! patterns, `/log_([0-9]+)/`, each matching a whole word. What a pattern
-//! captures goes on the stack, each a symbol, after the word's inputs, and
-//! its clauses are a family. A pattern reads a word in its own namespace and
-//! where that namespace is imported, before the core does.
+//! Recognizers (doc/design/SYMBOLIC-FORTH.md 25): rewrite rules, whose
+//! patterns, `/log_([0-9]+)/`, each match a whole name. Where a name a rule
+//! matches is applied, what the pattern captures goes on the stack, each a
+//! symbol, and the rule's code follows, its names meaning what they mean
+//! where the rule was defined. A rule holds in its own namespace and where
+//! that namespace is imported, before the core's words; the core's own
+//! rules, a power and its stack words' subscripts, come last.
 use march8::{Kind, Session};
 
 fn show(src: &str) -> String {
@@ -18,16 +20,16 @@ fn error(src: &str) -> (Kind, String) {
     (e.kind, e.msg.clone())
 }
 
-const OPS: &str = "ops./times([0-9]+)/: < i64 sym -- i64 > [ int# ! * ] ;";
+const OPS: &str = "ops./times([0-9]+)/: [ int# ! * ] ;";
 
 #[test]
-fn a_pattern_word_reads_a_word_where_imported() {
+fn a_rule_holds_where_imported() {
     assert_eq!(
         show(&format!("{OPS} import#: [| ops.* |] ; 5 times3")),
         "<1> 15"
     );
-    // A word the core reads as a symbol, as it does a number's kin.
-    let units = "units./([0-9]+)kg/: < sym > [ int# ! 1000 * ] ;";
+    // A name the core would not know, as a number's kin.
+    let units = "units./([0-9]+)kg/: [ int# ! 1000 * ] ;";
     assert_eq!(
         show(&format!("{units} import#: [| units.* |] ; 12kg 2kg +")),
         "<1> 14000"
@@ -39,8 +41,7 @@ fn a_pattern_word_reads_a_word_where_imported() {
         )),
         "<1> 15"
     );
-    // In a quotation, which is code like any, its effect without the
-    // captures.
+    // In a quotation, which is code like any, its effect the rewrite's.
     assert_eq!(
         show(&format!(
             "{OPS} import#: [| ops.* |] ; ( 1 2 3 ) [ times3 ] map 5 [ times2 ]^3 ."
@@ -50,69 +51,98 @@ fn a_pattern_word_reads_a_word_where_imported() {
 }
 
 #[test]
-fn a_pattern_word_reads_its_own_namespace() {
+fn a_rule_holds_in_its_own_namespace() {
     assert_eq!(
         show(&format!("{OPS} ops.ff: [ 5 times3 ] ; ops.ff")),
         "<1> 15"
     );
-    let root = "/times([0-9]+)/: < i64 sym -- i64 > [ i64 ! * ] ;";
+    let root = "/times([0-9]+)/: [ i64 ! * ] ;";
     assert_eq!(show(&format!("{root} 5 times3")), "<1> 15");
 }
 
 #[test]
 fn captures_go_on_the_stack_in_order() {
-    let src = "/([0-9]+)x([0-9]+)/: < sym sym > [ swap int# ! 10 * swap int# ! + ] ; 7x2";
+    let src = "/([0-9]+)x([0-9]+)/: [ swap int# ! 10 * swap int# ! + ] ; 7x2";
     assert_eq!(show(src), "<1> 72");
 }
 
 #[test]
-fn clauses_of_one_pattern_are_a_family() {
-    let src = "/times([0-9]+)/: < i64 sym -- i64 > [ int# ! * ] ; \
-               /times([0-9]+)/: < f64 sym -- f64 > [ f64 ! * ] ; 5 times3 2.5 times2";
+fn a_rule_has_one_meaning_and_no_signature() {
+    let (kind, msg) = error(&format!("{OPS} ops./times([0-9]+)/: [ f64 ! * ] ;"));
+    assert_eq!(kind, Kind::Syntax);
+    assert!(
+        msg.contains("has its code already: a rule has one meaning"),
+        "{msg}"
+    );
+    let (kind, msg) = error("/times([0-9]+)/: < i64 sym >< i64 > [ int# ! * ] ;");
+    assert_eq!(kind, Kind::Syntax);
+    assert!(msg.contains("is a rule"), "{msg}");
+    assert!(msg.contains("has no signature"), "{msg}");
+    // More meanings are a family's, which the rule's code applies.
+    let src = "times: < i64 sym >< i64 > [ int# ! * ] ; \
+               times: < f64 sym >< f64 > [ f64 ! * ] ; \
+               /times([0-9]+)/: [ times ] ; 5 times3 2.5 times2";
     assert_eq!(show(src), "<2> 15 5.0");
 }
 
 #[test]
-fn an_imported_pattern_comes_before_the_core() {
-    // `add_2` would be `add` two wide.
-    let ops = "ops./add_([0-9]+)/: < i64 sym -- i64 > [ int# ! + ] ;";
+fn an_imported_rule_comes_before_the_core() {
+    // A subscript is an index, which the rule gives a meaning; the core
+    // gives `add_2` none.
+    let ops = "ops./add_([0-9]+)/: [ int# ! + ] ;";
     assert_eq!(
         show(&format!("{ops} import#: [| ops.* |] ; 5 add_2 add₃")),
         "<1> 10"
     );
     let (kind, _) = error("5 add_2");
     assert_eq!(kind, Kind::NoWord);
+    // Before the core's own rules, as it comes before any core word.
+    let ops = "ops./dup_([0-9]+)/: [ int# ! ] ;";
+    assert_eq!(
+        show(&format!("{ops} import#: [| ops.* |] ; dup_7")),
+        "<1> 7"
+    );
 }
 
 #[test]
-fn a_body_names_words_of_its_namespace() {
-    let ops = "ops.sq: [ dup * ] ; ops./sq([0-9]+)/: < sym > [ int# ! sq ] ;";
+fn a_rule_names_words_where_it_was_defined() {
+    let ops = "ops.sq: [ dup * ] ; ops./sq([0-9]+)/: [ int# ! sq ] ;";
     assert_eq!(show(&format!("{ops} import#: [| ops.* |] ; sq7")), "<1> 49");
+    // A capture is a symbol, global text; `name#` reads it as a name where
+    // the name was applied.
+    let ops = "ops./twice-(.+)/: [ name# 2 power# . ] ;";
+    assert_eq!(
+        show(&format!(
+            "{ops} app.import#: [| ops.* |] ; app.dbl: [ dup + ] ; \
+             app.main: [ 3 twice-dbl ] ; app.main"
+        )),
+        "<1> 12"
+    );
 }
 
 #[test]
-fn a_recognized_word_takes_marks_as_a_name_does() {
+fn a_matched_name_takes_marks_as_any_name_does() {
     let src = format!("{OPS} import#: [| ops.* |] ; 5 times3' .");
     assert_eq!(show(&src), "<1> 15");
 }
 
 #[test]
-fn a_pattern_holds_for_all_of_its_namespace() {
-    // A word applied later reads by it wherever it is written.
+fn a_rule_holds_for_all_of_its_namespace() {
+    // A word applied later is rewritten by it wherever it is written.
     assert_eq!(
         show(&format!(
             "import#: [| ops.* |] ; main: [ 5 times3 ] ; {OPS} main"
         )),
         "<1> 15"
     );
-    // Before its word is defined, a word it matches is not read another way.
+    // Before its code is defined, a name it matches has no other meaning.
     let (kind, msg) = error(&format!("import#: [| ops.* |] ; 5 times3 {OPS}"));
     assert_eq!(kind, Kind::NoWord);
-    assert!(msg.contains("whose word is not defined yet"), "{msg}");
+    assert!(msg.contains("whose code is not defined yet"), "{msg}");
 }
 
 #[test]
-fn an_export_holds_for_patterns() {
+fn an_export_holds_for_rules() {
     let ops = format!("{OPS} ops.ee: [ 1 ] ;");
     let (kind, _) = error(&format!(
         "{ops} ops.export#: [| ee |] ; import#: [| ops.* |] ; 5 times3"
@@ -128,9 +158,9 @@ fn an_export_holds_for_patterns() {
 }
 
 #[test]
-fn a_word_is_read_one_way() {
+fn a_name_has_one_meaning() {
     let (kind, msg) = error(&format!(
-        "{OPS} ops./t(.*)/: < sym > [ drop ] ; import#: [| ops.* |] ; 5 times3"
+        "{OPS} ops./t(.*)/: [ drop ] ; import#: [| ops.* |] ; 5 times3"
     ));
     assert_eq!(kind, Kind::Syntax);
     assert!(
@@ -138,7 +168,7 @@ fn a_word_is_read_one_way() {
         "{msg}"
     );
     let (_, msg) = error(&format!(
-        "{OPS} more./(.+)3/: < sym > [ drop ] ; import#: [| ops.* more.* |] ; 5 times3"
+        "{OPS} more./(.+)3/: [ drop ] ; import#: [| ops.* more.* |] ; 5 times3"
     ));
     assert!(
         msg.contains("`times3` matches both `ops`'s `/times([0-9]+)/`, and `more`'s `/(.+)3/`"),
@@ -157,24 +187,22 @@ fn a_word_is_read_one_way() {
 
 #[test]
 fn a_pattern_is_checked_when_defined() {
-    let (kind, msg) = error("/times([0-9]+)?/: < i64 sym > [ drop ] ;");
+    let (kind, msg) = error("/times([0-9]+)?/: [ drop ] ;");
     assert_eq!(kind, Kind::Syntax);
     assert!(msg.contains("has a group that may not match"), "{msg}");
-    let (_, msg) = error("/(a)|(b)/: < sym sym > [ drop drop ] ;");
+    let (_, msg) = error("/(a)|(b)/: [ drop drop ] ;");
     assert!(msg.contains("has a group that may not match"), "{msg}");
-    let (_, msg) = error("/times([0-9]+/: < sym > [ drop ] ;");
+    let (_, msg) = error("/times([0-9]+/: [ drop ] ;");
     assert!(msg.contains("is no pattern: unclosed group"), "{msg}");
-    let (_, msg) = error("/times([0-9]+)/: < > [ 1 ] ;");
-    assert!(
-        msg.contains("captures 1, and its signature takes 0"),
-        "{msg}"
-    );
+    let (kind, msg) = error("/times([0-9]+)/: 1 ;");
+    assert_eq!(kind, Kind::Mismatch);
+    assert!(msg.contains("takes its code, a quotation"), "{msg}");
 }
 
 #[test]
 fn a_pattern_keeps_its_dots_and_slashes() {
-    let dots = "ops./(.+)\\.kg/: < sym > [ drop 1 ] ; import#: [| ops.* |] ; a.kg";
+    let dots = "ops./(.+)\\.kg/: [ drop 1 ] ; import#: [| ops.* |] ; a.kg";
     assert_eq!(show(dots), "<1> 1");
-    let slash = "ops./km\\/(.+)/: < sym > [ int# ! ] ; import#: [| ops.* |] ; km/5";
+    let slash = "ops./km\\/(.+)/: [ int# ! ] ; import#: [| ops.* |] ; km/5";
     assert_eq!(show(slash), "<1> 5");
 }

@@ -40,6 +40,11 @@ pub enum Val {
     Name(Rc<str>, Pos),
     /// A quotation.
     Quote(Rc<[Token]>),
+    /// An array literal whose elements are all known: built when a value
+    /// at run time is needed, so it can be read while compiling, `(
+    /// "can't read it" no-file' ) fail`, and a clause that wants its
+    /// elements as another type takes them so (TYPES.md 2.10).
+    Seq(Rc<[Jdg]>),
     /// A value known at compile time whose cell is on the machine's stack:
     /// an input a value pattern matched, inside its clause. Copied, it is the
     /// known value; folded, its cell is dropped; else it stays as it is.
@@ -205,16 +210,21 @@ fn value_text(j: &Jdg) -> String {
             crate::show::symbol(s, &mut out);
             out
         }
+        Val::Seq(es) => {
+            let es: Vec<String> = es.iter().map(value_text).collect();
+            format!("( {} )", es.join(" "))
+        }
         _ => "a value".into(),
     }
 }
 
 /// An open array, map or string literal: its bracket, where its elements
-/// start, and the floor outside it.
+/// start, the floor outside it, and where in the code its mark is.
 struct Literal {
     bracket: u8,
     start: usize,
     floor: usize,
+    mark: usize,
 }
 
 /// The arguments of a bracket being applied (doc/design/SYMBOLIC-FORTH.md
@@ -558,16 +568,6 @@ pub struct Clause {
     pub core: bool,
 }
 
-/// Where an operation's identity at a type is found (doc/design/SYMBOLIC-FORTH.md
-/// 21): a fact of the primitive it applies there, `unit`'s, or the least or
-/// greatest value of the type, `least`'s or `greatest`'s, for a choice of
-/// the greater or the lesser.
-enum Leaf {
-    Prim(Rc<str>),
-    Least,
-    Greatest,
-}
-
 /// What a name means. A name may be a type and have clauses too: the
 /// clauses of a type's name are how literals become it.
 #[derive(Default)]
@@ -627,6 +627,9 @@ pub struct Stage {
     /// Set while a bracket's code runs, where a word of one letter is a type
     /// variable.
     in_bracket: u32,
+    /// Set while compiling code that may not run, a choice's alternative
+    /// or a loop's body: there `fail` fails only when the program runs.
+    unsure: u32,
     /// The machine primitives are folded on, made when first needed.
     machine: Option<Machine>,
     /// Set while a word is applied wide (doc/design/SYMBOLIC-FORTH.md 22).
@@ -835,6 +838,7 @@ impl Stage {
             warnings: Vec::new(),
             site: None,
             in_bracket: 0,
+            unsure: 0,
             machine: None,
             wide: None,
             applied_in: "".into(),
@@ -1033,6 +1037,7 @@ impl Stage {
                         bracket: b'(',
                         start: self.stack.len(),
                         floor: self.floor,
+                        mark: self.code.len(),
                     });
                     self.floor = self.stack.len();
                 }
@@ -1040,11 +1045,13 @@ impl Stage {
                 // taken here (doc/design/SYMBOLIC-FORTH.md 14).
                 Tok::Open(b) => {
                     self.take_args(args_in(&toks[i + 1..matching(toks, i)]))?;
+                    let mark = self.code.len();
                     self.emit(Op::Prim(P::Mark));
                     self.literals.push(Literal {
                         bracket: *b,
                         start: self.stack.len(),
                         floor: self.floor,
+                        mark,
                     });
                     self.floor = self.stack.len();
                 }
@@ -2201,6 +2208,7 @@ impl Stage {
             Val::Type(t) => format!("the type `{}`", self.types.name(*t)),
             Val::Name(n, ..) => format!("the symbol `{n}`"),
             Val::Quote(_) => "a quotation".into(),
+            Val::Seq(_) => format!("{} ({})", value_text(j), self.types.name(j.ty)),
             Val::Many => format!("a run of {}", self.types.name(j.ty)),
             Val::Pinned(v) => self.describe(&Jdg {
                 ty: j.ty,
@@ -2290,6 +2298,9 @@ impl Stage {
         if have == t || (self.types.is_class(t) && fits(self)) {
             return Ok(());
         }
+        if self.annotate_seq(i, t)? {
+            return Ok(());
+        }
         // A union is a type of values too, so a tuple forgets its positions
         // into an array of one before patterns are let through.
         if self.forget_tuple(i, t)? {
@@ -2372,12 +2383,6 @@ impl Stage {
             return Err(self.err(
                 Kind::Syntax,
                 "guards and value patterns belong in a signature, first in a quotation",
-            ));
-        }
-        if sig.outs.is_some() {
-            return Err(self.err(
-                Kind::Syntax,
-                "`--` belongs in a signature, first in a quotation",
             ));
         }
         self.need(sig.ins.len())?;
@@ -2564,10 +2569,19 @@ impl Stage {
             }
             (Term::AnyTuple, Term::Tuple(_)) => Some(4),
             // A tuple where an array is wanted forgets its positions, at a
-            // cost: an array of the union of its types (TYPES.md 2.5).
+            // cost: an array of the union of its types (TYPES.md 2.5), or of
+            // a type each element is, `( "a" b' )` strings.
             (Term::Ary(e), Term::Tuple(_)) => {
                 let u = self.tuple_union(have);
-                Some(1 + self.unify(e, u, env)?)
+                if let Some(s) = self.unify(e, u, env) {
+                    return Some(1 + s);
+                }
+                let es = self.types.elements(have).expect("a tuple").to_vec();
+                let mut worst = i32::MAX;
+                for x in es {
+                    worst = worst.min(self.unify(e, x, env)?);
+                }
+                Some(1 + worst)
             }
             // A bool is an i64, 0 or 1: matched a little less well than one.
             (Term::Base(Base::I64), Term::Base(Base::Bool)) => Some(6),
@@ -2866,7 +2880,8 @@ impl Stage {
         let mut waiting = Vec::new();
         let mut certain = false;
         for cand in cands.iter().filter(|c| c.1.guarded()) {
-            match self.alternative(name, cand, true, &snapshot, at, top)? {
+            let first = order.is_empty();
+            match self.alternative(name, cand, true, first, &snapshot, at, top)? {
                 Outcome::Dropped => continue,
                 Outcome::Taken(alt, sure) => {
                     alts.push(Some(alt));
@@ -2888,7 +2903,8 @@ impl Stage {
             self.stack = snapshot.clone();
             if let Some((c, env)) = self.best(name, &plain, arity)? {
                 let cand = (0, c, env);
-                match self.alternative(name, &cand, false, &snapshot, at, top)? {
+                let first = order.is_empty();
+                match self.alternative(name, &cand, false, first, &snapshot, at, top)? {
                     Outcome::Taken(alt, _) => alts.push(Some(alt)),
                     Outcome::Waits(_) => {
                         waiting.push(alts.len());
@@ -2938,7 +2954,7 @@ impl Stage {
             self.frames.last_mut().expect("an instance").ghost = Some(ghost);
             for i in waiting {
                 let (cand, guarded) = order[i].clone();
-                match self.alternative(name, &cand, guarded, &snapshot, at, top)? {
+                match self.alternative(name, &cand, guarded, i == 0, &snapshot, at, top)? {
                     Outcome::Taken(alt, _) => alts[i] = Some(alt),
                     _ => return Err(Error::new(Kind::Ghost, Some(at), name.to_string())),
                 }
@@ -2988,11 +3004,14 @@ impl Stage {
 
     /// One alternative of a choice, compiled from the saved judgments into
     /// code of its own: its guards' test, if it has guards, and its body.
+    /// Its body surely runs if it is the first and its guards hold now.
+    #[allow(clippy::too_many_arguments)]
     fn alternative(
         &mut self,
         name: &Rc<str>,
         cand: &Candidate,
         guarded: bool,
+        first: bool,
         snapshot: &[Jdg],
         at: Pos,
         top: bool,
@@ -3019,7 +3038,10 @@ impl Stage {
         if guarded && test.is_none() {
             self.pin(c.sig.as_ref().expect("guarded"));
         }
+        let unsure = !(first && test == Some(true));
+        self.unsure += unsure as u32;
         let r = self.apply_clause(name, c, env.clone(), at);
+        self.unsure -= unsure as u32;
         let code = std::mem::replace(&mut self.code, outer);
         let sure = guarded && test == Some(true);
         match r {
@@ -3350,7 +3372,7 @@ impl Stage {
                                 Some(at),
                                 format!(
                                     "the results of `{name}` on {names} do not settle: \
-                                     give its signature outputs after `--`"
+                                     give its signature its outputs, a second bracket, `< i64 >< i64 >`"
                                 ),
                             ));
                         }
@@ -3368,7 +3390,7 @@ impl Stage {
                         format!(
                             "`{name}` applies itself on {names}, and none of its clauses for \
                              them finishes without doing so, so its results have no types: \
-                             give its signature outputs after `--`"
+                             give its signature its outputs, a second bracket, `< i64 >< i64 >`"
                         ),
                     ));
                 }
@@ -3516,7 +3538,10 @@ impl Stage {
             self.stack = snapshot.clone();
             let outer = std::mem::take(&mut self.code);
             let skip = (k + 1 < members.len()).then(|| self.label());
+            // Each arm runs for its own type alone.
+            self.unsure += 1;
             let r = self.split_arm(name, i, m, skip);
+            self.unsure -= 1;
             self.pos = at;
             let code = std::mem::replace(&mut self.code, outer);
             r.map_err(|mut e| {
@@ -3599,6 +3624,50 @@ impl Stage {
         Ok(())
     }
 
+    /// A known array at `i` taken as an array or a tuple of other types:
+    /// each element converted as it would be alone, so it stays known, `(
+    /// "a" b' )` two strings where a `string ary` is wanted (TYPES.md
+    /// 2.10). Whether it was; not where an element would need code, or a
+    /// tag, as a union's does, or does not convert, which is said of the
+    /// whole.
+    fn annotate_seq(&mut self, i: usize, t: Type) -> Result<bool> {
+        let Val::Seq(es) = &self.stack[i].val else {
+            return Ok(false);
+        };
+        let es = es.clone();
+        let want: Vec<Type> = match self.types.term(t) {
+            Term::Ary(e) => vec![e; es.len()],
+            Term::Vec(n, e) if self.types.term(n) == Term::Nat(es.len() as u64) => {
+                vec![e; es.len()]
+            }
+            Term::Tuple(_) => match self.types.elements(t) {
+                Some(ps) if ps.len() == es.len() => ps.to_vec(),
+                _ => return Ok(false),
+            },
+            _ => return Ok(false),
+        };
+        if want.iter().any(|&w| self.is_union(w)) {
+            return Ok(false);
+        }
+        let code = self.code.len();
+        let mut out = Vec::with_capacity(es.len());
+        for (e, &w) in es.iter().zip(&want) {
+            self.stack.push(e.clone());
+            let r = self.annotate(self.stack.len() - 1, w);
+            let j = self.stack.pop().expect("pushed");
+            if r.is_err() || !j.known() || self.code.len() != code {
+                self.code.truncate(code);
+                return Ok(false);
+            }
+            out.push(j);
+        }
+        self.stack[i] = Jdg {
+            ty: t,
+            val: Val::Seq(out.into()),
+        };
+        Ok(true)
+    }
+
     /// The union of a tuple's types.
     fn tuple_union(&mut self, t: Type) -> Type {
         let es = self.types.elements(t).expect("a tuple").to_vec();
@@ -3616,6 +3685,12 @@ impl Stage {
             return Ok(false);
         };
         let es = es.to_vec();
+        // Each element of the type wanted, a symbol among strings, the
+        // cells are the array's already.
+        if !self.is_union(e) && es.iter().all(|&x| x == e || self.forgets(e, x)) {
+            self.stack[i].ty = t;
+            return Ok(true);
+        }
         let u = self.tuple_union(have);
         let fits = e == u
             || (self.is_union(e)
@@ -3874,7 +3949,8 @@ impl Stage {
                 Prim::Dip => return None,
                 Prim::QuotePower => (2, 1),
                 Prim::Width => return None,
-                Prim::Identity => (2, 1),
+                // It never returns, so it leaves whatever is wanted.
+                Prim::Fail => return None,
                 Prim::QuoteLength => (1, 1),
                 Prim::QuoteAt | Prim::QuoteConcat => (2, 1),
                 Prim::QuoteSlice | Prim::QuoteInsert => (3, 1),
@@ -4375,8 +4451,14 @@ impl Stage {
         self.checking += 1;
         let mut r = r.and_then(|_| self.clause(c, Env::default()));
         self.checking -= 1;
+        // Failing, it leaves nothing to check (doc/design/SYMBOLIC-FORTH.md
+        // 29).
+        let fails = matches!(&r, Err(e) if e.kind == Kind::Fails);
+        if fails {
+            r = Ok(());
+        }
         for i in 0..self.stack.len() {
-            if r.is_ok() {
+            if r.is_ok() && !fails {
                 r = self.materialize(i);
             }
         }
@@ -4678,22 +4760,8 @@ impl Stage {
         if self.types.is_literal(t) {
             self.annotate(i, Self::default_of(t))?;
         }
-        let ins = match &self.stack[i].val {
-            Val::Int(n) => Ins::Op(Op::Lit(*n as i64 as u64)),
-            Val::Float(x) => Ins::Op(Op::Float(float_bits(*x))),
-            // A symbol is its name, an interned string, so symbols compare
-            // by identity.
-            Val::Str(s) | Val::Name(s, ..) => Ins::Str(s.clone()),
-            _ => {
-                return Err(self.err(
-                    Kind::Mismatch,
-                    format!(
-                        "{} is left unapplied: it has no value at run time",
-                        self.describe(&self.stack[i])
-                    ),
-                ));
-            }
-        };
+        let j = self.stack[i].clone();
+        let ins = self.code_of(&j)?;
         if self.stack[i + 1..].iter().any(|j| j.val == Val::Many) {
             return Err(self.err(
                 Kind::Mismatch,
@@ -4702,13 +4770,13 @@ impl Stage {
         }
         let above = self.stack[i + 1..].iter().filter(|j| !j.known()).count();
         match above {
-            0 => self.code.push(ins),
+            0 => self.code.extend(ins),
             1 => {
-                self.code.push(ins);
+                self.code.extend(ins);
                 self.emit(Op::Prim(P::Swap));
             }
             2 => {
-                self.code.push(ins);
+                self.code.extend(ins);
                 self.emit(Op::Prim(P::Rot));
                 self.emit(Op::Prim(P::Rot));
             }
@@ -4716,7 +4784,7 @@ impl Stage {
                 for _ in 0..n {
                     self.emit(Op::Prim(P::ScratchPush));
                 }
-                self.code.push(ins);
+                self.code.extend(ins);
                 for _ in 0..n {
                     self.emit(Op::Prim(P::ScratchPop));
                 }
@@ -4724,6 +4792,35 @@ impl Stage {
         }
         self.stack[i].val = Val::Run;
         Ok(())
+    }
+
+    /// The code that leaves a known value: a known array's, its elements
+    /// gathered.
+    fn code_of(&self, j: &Jdg) -> Result<Vec<Ins>> {
+        Ok(match &j.val {
+            Val::Int(n) => vec![Ins::Op(Op::Lit(*n as i64 as u64))],
+            Val::Float(x) => vec![Ins::Op(Op::Float(float_bits(*x)))],
+            // A symbol is its name, an interned string, so symbols compare
+            // by identity.
+            Val::Str(s) | Val::Name(s, ..) => vec![Ins::Str(s.clone())],
+            Val::Seq(es) => {
+                let mut ins = vec![Ins::Op(Op::Prim(P::Mark))];
+                for e in es.iter() {
+                    ins.extend(self.code_of(e)?);
+                }
+                ins.push(Ins::Op(Op::Prim(P::Gather)));
+                ins
+            }
+            _ => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "{} is left unapplied: it has no value at run time",
+                        self.describe(j)
+                    ),
+                ));
+            }
+        })
     }
 
     fn materialize_top(&mut self, n: usize) -> Result<()> {
@@ -4804,7 +4901,7 @@ impl Stage {
             Prim::Dip => self.dip(name)?,
             Prim::QuotePower => self.quote_power()?,
             Prim::Width => self.width()?,
-            Prim::Identity => self.identity_at()?,
+            Prim::Fail => return Err(self.fail()),
             Prim::QuoteLength
             | Prim::QuoteAt
             | Prim::QuoteSlice
@@ -5083,14 +5180,25 @@ impl Stage {
     ) -> std::result::Result<Vec<Val>, machine::Error> {
         let m = self.machine.get_or_insert_with(Machine::empty);
         m.stack.clear();
-        for j in args {
-            let cell = match &j.val {
+        // A known array is gathered there, as its code would.
+        fn cell(m: &mut Machine, j: &Jdg) -> std::result::Result<u64, machine::Error> {
+            Ok(match &j.val {
                 Val::Int(n) => *n as i64 as u64,
                 Val::Float(x) => float_bits(*x),
                 Val::Str(s) | Val::Name(s, ..) => m.text_cell(s)?,
+                Val::Seq(es) => {
+                    let cells = es
+                        .iter()
+                        .map(|e| cell(m, e))
+                        .collect::<std::result::Result<_, _>>()?;
+                    m.vector_cell(cells)?
+                }
                 _ => unreachable!("a known value with a cell"),
-            };
-            m.stack.push(cell);
+            })
+        }
+        for j in args {
+            let c = cell(m, j)?;
+            m.stack.push(c);
         }
         m.apply(ops)?;
         let cells = std::mem::take(&mut m.stack);
@@ -5158,7 +5266,10 @@ impl Stage {
         let below = self.stack.clone();
         self.push(e, Val::Run);
         self.enter()?;
+        // A loop's body runs only if the array has elements.
+        self.unsure += 1;
         let r = self.run_quote(&q);
+        self.unsure -= 1;
         self.depth -= 1;
         r?;
         let kept = self.stack.len() == below.len() + 1
@@ -5264,7 +5375,10 @@ impl Stage {
         let below = self.stack.clone();
         self.push(e, Val::Run);
         self.enter()?;
+        // A loop's body runs only if the array has elements.
+        self.unsure += 1;
         let r = self.run_quote(&q);
+        self.unsure -= 1;
         self.depth -= 1;
         r?;
         if let Some(t) = collect {
@@ -5463,219 +5577,80 @@ impl Stage {
         }
     }
 
-    /// `u t identity#`: the identity `u`, `w' unit# !`, given the type `t`
-    /// where it is used (doc/design/SYMBOLIC-FORTH.md 21). The facts are
-    /// March's, core.march's `unit` for each primitive operation, and
-    /// `least` and `greatest` for each type's order. This finds which holds,
-    /// following w at t to the primitive it applies there, through a word
-    /// that applies one operation or flips it, or to a choice of the greater
-    /// or the lesser. That search is to be March's own once a word's clauses
-    /// are data.
-    fn identity_at(&mut self) -> Result<()> {
-        let t = match self.stack.pop().expect("matched").val {
-            Val::Type(t) => t,
-            _ => {
-                return Err(self.err(Kind::Mismatch, "`identity#` takes a type"));
-            }
-        };
-        let u = self.stack.pop().expect("matched");
-        let shown = Self::shown(&u);
-        let leaf = match &u.val {
-            Val::Name(n, _) => {
-                let w = self.resolve_quiet("", n);
-                self.leaf(&w, t, &mut Vec::new())
-            }
-            Val::Quote(q) => self.body_leaf(q, t, &mut Vec::new()),
-            _ => None,
-        };
-        let tn: Rc<str> = self.types.name(t).into();
-        let Some(leaf) = leaf else {
-            return Err(self.err(
-                Kind::NoWord,
-                format!(
-                    "{shown} has no identity at {tn} that its primitives give: at {tn} it \
-                     applies no one operation whose primitive `unit` knows, and chooses no \
-                     greater or lesser"
-                ),
-            ));
-        };
-        let (sym, fact) = match leaf {
-            Leaf::Prim(p) => (self.short(&p), "unit"),
-            Leaf::Least => (tn.clone(), "least"),
-            Leaf::Greatest => (tn.clone(), "greatest"),
-        };
-        self.push(SYMBOL, Val::Name(sym.clone(), self.pos));
-        self.apply_word(&core_path(fact)).map_err(|e| {
-            if e.kind != Kind::NoWord {
-                return e;
-            }
-            let why = match fact {
-                "unit" => format!("applies `{sym}`, for which `unit` gives no identity"),
-                _ => format!(
-                    "keeps the {} of two, and `{fact}` gives {tn} none",
-                    if fact == "least" { "greater" } else { "lesser" }
-                ),
-            };
-            self.err(
-                Kind::NoWord,
-                format!(
-                    "{shown} at {tn} {why}: a clause of `{fact}` would, \
-                     `{CORE}.{fact}: < {sym}' > [ drop … ] ;`"
-                ),
-            )
-        })
-    }
-
-    /// Where the identity of the word `name` at `t` is found: a primitive is
-    /// its own; a family's clause for two values of `t` is followed, and two
-    /// that choose the greater or the lesser are a choice.
-    fn leaf(&mut self, name: &Rc<str>, t: Type, visiting: &mut Vec<Rc<str>>) -> Option<Leaf> {
-        let name = self.alias_of(name);
-        let w = self.words.get(&name)?;
-        if w.prim.is_some() {
-            return Some(Leaf::Prim(name));
-        }
-        if visiting.contains(&name) {
-            return None;
-        }
-        let clauses = w.clauses.clone();
-        let mut best: Vec<Rc<Clause>> = Vec::new();
-        let mut top = i32::MIN;
-        for c in clauses {
-            let score = match &c.sig {
-                None => Some(0),
-                Some(s) if s.ins.len() == 2 => {
-                    let mut env = Env::default();
-                    let a = self.match_slot(s.ins[0], t, &mut env);
-                    let b = self.match_slot(s.ins[1], t, &mut env);
-                    a.zip(b).map(|(a, b)| a + b)
-                }
-                Some(_) => None,
-            };
-            match score {
-                Some(k) if k > top => (top, best) = (k, vec![c]),
-                Some(k) if k == top => best.push(c),
-                _ => {}
-            }
-        }
-        visiting.push(name.clone());
-        let found = match &best[..] {
-            [c] => self.body_leaf(&c.body, t, visiting),
-            [a, b] => self.choice(a, b),
-            _ => None,
-        };
-        visiting.pop();
-        found
-    }
-
-    /// Where the identity of code that applies one operation is found,
-    /// `[ + ]`, or the same flipped, `[ swap + ]`, which has the same.
-    fn body_leaf(&mut self, body: &[Token], t: Type, visiting: &mut Vec<Rc<str>>) -> Option<Leaf> {
-        let found = |s: &Self, n: &Rc<str>| s.alias_of(&s.resolve_quiet("", n));
-        let op = match body {
-            [
-                Token {
-                    tok: Tok::Name(op), ..
-                },
-                Token {
-                    tok: Tok::Apply, ..
-                },
-            ] => op,
-            [
-                Token {
-                    tok: Tok::Name(s), ..
-                },
-                Token {
-                    tok: Tok::Apply, ..
-                },
-                Token {
-                    tok: Tok::Name(op), ..
-                },
-                Token {
-                    tok: Tok::Apply, ..
-                },
-            ] if matches!(self.words.get(&found(self, s))?.prim, Some((Prim::Swap, _))) => op,
-            _ => return None,
-        };
-        let op = found(self, op);
-        self.leaf(&op, t, visiting)
-    }
-
-    /// Two clauses that keep one of two values by an order test, as `max`
-    /// and `min` do: the identity is the least value of the type if they
-    /// keep the greater, the greatest if the lesser.
-    fn choice(&self, a: &Clause, b: &Clause) -> Option<Leaf> {
-        let (tested, other) = match (&a.sig.as_ref()?.guards[..], &b.sig.as_ref()?.guards[..]) {
-            ([g], []) => ((a, g), b),
-            ([], [g]) => ((b, g), a),
-            _ => return None,
-        };
-        let ((c, g), ins) = (tested, &tested.0.sig.as_ref()?.ins);
-        if ins.len() != 2 || ins[0] != ins[1] || other.sig.as_ref()?.ins != *ins {
-            return None;
-        }
-        let Test::Quote(q) = &g.test else {
-            return None;
-        };
-        let greater = match &q[..] {
-            [
-                Token {
-                    tok: Tok::Name(n), ..
-                },
-                Token {
-                    tok: Tok::Test | Tok::Apply,
-                    ..
-                },
-            ] => match &*self.resolve_quiet("", n) {
-                w if is_core_word(w, "gt") => true,
-                w if is_core_word(w, "lt") => false,
-                _ => return None,
+    /// `x fail`: fails, by a kind, `no-file' fail`, or a message and a kind,
+    /// `( "can't read it" no-file' ) fail` (doc/design/SYMBOLIC-FORTH.md 29).
+    /// It never returns: while compiling, it is an error where the failing
+    /// code was applied, of the kind it names, the machine's own kinds by
+    /// their names, `no-word'`; the program's, its own. Where the code may
+    /// not run, in a choice made at run time or a loop's body, it would
+    /// fail only if it ran, a trap, which is not built yet.
+    fn fail(&mut self) -> Error {
+        let x = self.stack.pop().expect("matched");
+        let taken = match &x.val {
+            Val::Name(k, _) => Some((None, k.clone())),
+            Val::Seq(es) => match &es[..] {
+                [
+                    Jdg {
+                        val: Val::Str(m), ..
+                    },
+                    Jdg {
+                        val: Val::Name(k, _),
+                        ..
+                    },
+                ] => Some((Some(m.clone()), k.clone())),
+                _ => None,
             },
-            _ => return None,
-        };
-        let (kept, otherwise) = (self.kept(c)?, self.kept(other)?);
-        if kept == otherwise {
-            return None;
-        }
-        // The test asks whether the first is the greater, or the lesser.
-        Some(if greater == (kept == 0) {
-            Leaf::Least
-        } else {
-            Leaf::Greatest
-        })
-    }
-
-    /// Which of its two inputs a clause leaves, if its body only moves them
-    /// and leaves one: `drop` the first, `swap drop` the second.
-    fn kept(&self, c: &Clause) -> Option<usize> {
-        let mut st = vec![0, 1];
-        for pair in c.body.chunks(2) {
-            let [
-                Token {
-                    tok: Tok::Name(n), ..
-                },
-                Token {
-                    tok: Tok::Apply, ..
-                },
-            ] = pair
-            else {
-                return None;
-            };
-            let w = self.alias_of(&self.resolve_quiet("", n));
-            match self.words.get(&w)?.prim.as_ref()?.0 {
-                Prim::Dup => st.push(*st.last()?),
-                Prim::Drop => drop(st.pop()?),
-                Prim::Swap if st.len() >= 2 => {
-                    let k = st.len();
-                    st.swap(k - 1, k - 2);
-                }
-                _ => return None,
-            }
-        }
-        match st[..] {
-            [k] => Some(k),
             _ => None,
+        };
+        if taken.is_none() && x.known() {
+            return self.err(
+                Kind::Mismatch,
+                format!(
+                    "`fail` takes a kind, `no-file'`, or a message and a kind, \
+                     `( \"can't read it\" no-file' )`, and {} is neither",
+                    self.describe(&x)
+                ),
+            );
         }
+        // Where the clause is checked, it leaves whatever it must from here.
+        if self.checking > 0 {
+            return self.err(Kind::Fails, "fails");
+        }
+        let Some((msg, kind)) = taken else {
+            return self.err(
+                Kind::Limit,
+                format!(
+                    "`fail` takes a kind known while compiling, and {} is known only as the \
+                     program runs: failing then, a trap, is not built yet \
+                     (doc/design/SYMBOLIC-FORTH.md 29)",
+                    self.describe(&x)
+                ),
+            );
+        };
+        if self.unsure > 0 {
+            return self.err(
+                Kind::Limit,
+                format!(
+                    "`{kind}` would fail here only if this code ran, as the program runs: \
+                     failing then, a trap, is not built yet (doc/design/SYMBOLIC-FORTH.md 29)"
+                ),
+            );
+        }
+        let msg = msg.map_or_else(|| format!("fails: `{kind}`"), |m| m.to_string());
+        let kind = match &*kind {
+            "syntax" => Kind::Syntax,
+            "unfinished" => Kind::Unfinished,
+            "no-word" => Kind::NoWord,
+            "mismatch" => Kind::Mismatch,
+            "literal" => Kind::Literal,
+            "unknown" => Kind::Unknown,
+            "arithmetic" => Kind::Arithmetic,
+            "limit" => Kind::Limit,
+            "effect" => Kind::Effect,
+            "io" => Kind::Io,
+            _ => Kind::Fail(kind.to_string()),
+        };
+        self.err(kind, msg)
     }
 
     // ---- A quotation as data (doc/design/SYMBOLIC-FORTH.md 6) ----
@@ -5932,8 +5907,10 @@ impl Stage {
 
     /// `w ins clauses#`: the clauses of the word w that dispatch would
     /// choose for inputs of the types ins gives, a type, or code that leaves
-    /// them, `< i64 i64 >` or `[ i64 i64 ]`, in the order it would try them:
-    /// those with guards first, as they were defined, then the best without.
+    /// them, `< i64 i64 >` or `[ i64 i64 ]`, or for values, `[ i64+' ]`, in
+    /// the order it would try them: those with guards first, as they were
+    /// defined, then the best without. A value pattern another value is
+    /// given for is not chosen.
     /// Each is a quotation of what `;` takes after the name, each bracket as
     /// the code written in it: the inputs, the outputs if it gives them, and
     /// the body, `[ [ a a gt ? ] [ a ] [ drop ] ]`. A primitive has none, its
@@ -5942,19 +5919,20 @@ impl Stage {
     fn clauses_of(&mut self) -> Result<()> {
         let ins = self.stack.pop().expect("matched");
         let w = self.stack.pop().expect("matched");
-        let types = match &ins.val {
-            Val::Type(t) => vec![*t],
+        let (types, values) = match &ins.val {
+            Val::Type(t) => (vec![*t], Vec::new()),
             Val::Quote(q) => {
                 let inner = if signature(q) { &q[1..q.len() - 1] } else { q };
                 let sig = self.bracket(inner)?;
-                if sig.outs.is_some() || !sig.guards.is_empty() {
+                let values = sig.guards.iter().all(|g| matches!(g.test, Test::Equals(_)));
+                if sig.outs.is_some() || !values {
                     return Err(self.err(
                         Kind::Mismatch,
-                        "`clauses#` takes its inputs' types alone, `< i64 i64 >`, \
-                         with no guard, value or outputs",
+                        "`clauses#` takes its inputs alone, their types or values, \
+                         `< i64 i64 >`, with no guard or outputs",
                     ));
                 }
-                sig.ins
+                (sig.ins, sig.guards)
             }
             _ => {
                 return Err(self.err(
@@ -5992,9 +5970,20 @@ impl Stage {
         let best = self.best(n, &plain, types.len());
         self.stack.truncate(base);
         self.floor = floor;
+        let given = |c: &Clause| {
+            let sig = c.sig.as_ref().expect("guarded");
+            let shift = types.len() as isize - sig.ins.len() as isize;
+            sig.guards.iter().all(|g| {
+                let at = g.slot as isize + shift;
+                values
+                    .iter()
+                    .find(|v| v.slot as isize == at)
+                    .is_none_or(|v| !matches!(g.test, Test::Equals(_)) || v.test == g.test)
+            })
+        };
         let mut chosen: Vec<Rc<Clause>> = cands
             .iter()
-            .filter(|c| c.1.guarded())
+            .filter(|c| c.1.guarded() && given(&c.1))
             .map(|c| c.1.clone())
             .collect();
         chosen.extend(best?.map(|(c, _)| c));
@@ -6521,6 +6510,18 @@ impl Stage {
             self.stack[i].ty = UNIT_LIT;
             return Ok(());
         }
+        // Not yet typed, it is its operation, which `quote !` gives as
+        // code, a word's symbol being the code that applies it, `[ + ]`, so
+        // March can find which identity it is.
+        if t == QUOTE && self.stack[i].ty == UNIT_LIT {
+            if let Val::Name(n, at) = &self.stack[i].val {
+                let tok = |tok| Token { tok, pos: *at };
+                let q = vec![tok(Tok::Name(n.clone())), tok(Tok::Apply)];
+                self.stack[i].val = Val::Quote(q.into());
+            }
+            self.stack[i].ty = QUOTE;
+            return Ok(());
+        }
         // A symbol that writes a number, as a pattern's capture `2` does,
         // is that number given a type (doc/design/SYMBOLIC-FORTH.md 7).
         if let Val::Name(n, at) = &self.stack[i].val
@@ -6610,6 +6611,9 @@ impl Stage {
             let i = self
                 .known_element(base, k, Some(es.len() as u64))?
                 .expect("the length is known");
+            if self.known_at(base, i) {
+                return Ok(());
+            }
             self.stack[base + 1].val = Val::Int(i as i128);
             return self.emit_ops(2, &[P::VecAt], &[es[i]]);
         }
@@ -6745,6 +6749,7 @@ impl Stage {
             Val::Int(k) => {
                 let i = self.known_element(base, k, len)?;
                 match i {
+                    Some(i) if self.known_at(base, i) => return Ok(()),
                     Some(i) => {
                         self.stack[base + 1].val = Val::Int(i as i128);
                         if self.fold(p, base, &[out])? {
@@ -6772,6 +6777,18 @@ impl Stage {
         self.stack.truncate(base);
         self.push(out, Val::Run);
         Ok(())
+    }
+
+    /// The element at i, from 0, of a known array at `base`, the index on
+    /// it, in their place: whether the array was known.
+    fn known_at(&mut self, base: usize, i: usize) -> bool {
+        let Val::Seq(es) = &self.stack[base].val else {
+            return false;
+        };
+        let e = es[i].clone();
+        self.stack.truncate(base);
+        self.stack.push(e);
+        true
     }
 
     /// A known element index, from 0, if it can be known now: always for
@@ -6909,7 +6926,9 @@ impl Stage {
         self.push(a, Val::Run);
         self.push(b, Val::Run);
         self.enter()?;
+        self.unsure += 1;
         let r = self.run_quote(q);
+        self.unsure -= 1;
         self.depth -= 1;
         r?;
         let kept = self.stack.len() == below.len() + 1
@@ -7275,11 +7294,13 @@ impl Stage {
             );
             self.stack.truncate(base);
             self.push(e, Val::Run);
+            self.unsure += 1;
             let r = self.enter().and_then(|()| {
                 let r = self.run_quote(q);
                 self.depth -= 1;
                 r
             });
+            self.unsure -= 1;
             let after = std::mem::replace(&mut self.stack, saved.1);
             self.code = saved.0;
             self.effects = saved.2;
@@ -7401,17 +7422,27 @@ impl Stage {
         let step = if b == b')' { 1 } else { 2 };
         let mut parts = Vec::new();
         // An array's elements of different types, at fixed positions, are a
-        // tuple (TYPES.md 2.5); each literal among them takes its default.
+        // tuple (TYPES.md 2.5); each literal among them takes its default. A
+        // symbol beside a string is one of them: it is text where a string
+        // is taken (doc/design/SYMBOLIC-FORTH.md 28), and nothing takes it
+        // here, so `( "can't read it" no-file' )` is a string and a symbol.
         if b == b')' && !runs {
             let tys: Vec<Type> = self.stack[start..].iter().map(|j| j.ty).collect();
+            let text = tys.contains(&SYMBOL) && tys.iter().any(|&x| x != SYMBOL);
             let shared = self.join(&tys).filter(|&t| {
-                tys.iter().all(|&x| {
-                    x == t || self.forgets(t, x) || (self.types.is_literal(x) && self.accepts(t, x))
-                })
+                !text
+                    && tys.iter().all(|&x| {
+                        x == t
+                            || self.forgets(t, x)
+                            || (self.types.is_literal(x) && self.accepts(t, x))
+                    })
             });
             if shared.is_none() {
                 for i in start..self.stack.len() {
-                    self.materialize(i)?;
+                    let t = self.stack[i].ty;
+                    if self.types.is_literal(t) {
+                        self.annotate(i, Self::default_of(t))?;
+                    }
                 }
                 let elems = self.stack[start..].iter().map(|j| j.ty).collect();
                 parts.push(self.types.tuple(elems));
@@ -7446,6 +7477,16 @@ impl Stage {
             let n = self.types.intern(Term::Nat(n as u64));
             self.types.intern(Term::Vec(n, parts[0]))
         };
+        self.floor = lit.floor;
+        self.args.pop();
+        // Its elements all known, and no code since its mark, it is known.
+        let known = self.stack[start..].iter().all(Jdg::known);
+        if b == b')' && !runs && known && self.code.len() == lit.mark + 1 {
+            self.code.pop();
+            let es: Rc<[Jdg]> = self.stack.drain(start..).collect();
+            self.push(ty, Val::Seq(es));
+            return Ok(());
+        }
         let op = if b == b')' { P::Gather } else { P::MapGather };
         for i in start..self.stack.len() {
             self.materialize(i)?;
@@ -7455,8 +7496,6 @@ impl Stage {
         }
         self.emit(Op::Prim(op));
         self.push(ty, Val::Run);
-        self.floor = lit.floor;
-        self.args.pop();
         Ok(())
     }
 
@@ -7500,6 +7539,7 @@ impl Stage {
             bracket: b'"',
             start,
             floor: self.floor,
+            mark: self.code.len(),
         });
         let r = self.pieces(pieces, pos);
         let lit = self.literals.pop().expect("pushed");
@@ -7548,6 +7588,7 @@ impl Stage {
             bracket: b'"',
             start,
             floor: self.floor,
+            mark: self.code.len(),
         });
         self.floor = start;
         let r = self.enter().and_then(|()| {

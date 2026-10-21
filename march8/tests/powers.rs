@@ -96,6 +96,34 @@ fn an_identity_takes_its_type_where_it_is_used() {
 }
 
 #[test]
+fn the_search_for_an_identity_is_march() {
+    // core.march's `identity#` reads the words as data: an identity is its
+    // operation as code, which `quote !` gives.
+    assert_eq!(show(&["+' unit# ! quote ! first"]), "<1> +'");
+    // A program's choice of the greater, by either test, has the least
+    // value; swapping first, however often, changes nothing.
+    let mx = "mx: < i64 i64 gt? > [ drop ] ; mx: < i64 i64 > [ swap drop ] ;";
+    assert_eq!(show(&[&format!("{mx} 3 mx^0 mx")]), "<1> 3");
+    let mx = "mx: < a a lt? > [ swap drop ] ; mx: < a a > [ drop ] ;";
+    assert_eq!(show(&[&format!("{mx} mx^0")]), "<1> -9223372036854775808");
+    assert_eq!(show(&["ss: [ swap swap + ] ; 7 ss^0 ss"]), "<1> 7");
+    // Its words end in `#`, so a program's own plain words are its own.
+    assert_eq!(
+        show(&["choice: [ 42 ] ; end: [ 7 ] ; choice end max^0"]),
+        "<3> 42 7 -9223372036854775808"
+    );
+    // Where it finds none, it says what it looked at.
+    let (kind, msg) = fails("[ + 2 * ]^0 . i64!");
+    assert_eq!(kind, Kind::NoWord);
+    assert!(
+        msg.starts_with("the quotation has no identity at i64"),
+        "{msg}"
+    );
+    let (_, msg) = fails("int#-^0");
+    assert!(msg.starts_with("`int#-` at i64 applies `int#-`"), "{msg}");
+}
+
+#[test]
 fn a_quotations_power_is_a_quotation() {
     // `[ q ]^n` is `[ q^n ]`, still a value, which `.` applies.
     assert_eq!(show(&["( 1 [ dup + ]^3 . )"]), "<1> ( 8 )");

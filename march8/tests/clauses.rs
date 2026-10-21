@@ -1,9 +1,9 @@
 //! A word's clauses as data, and its effect (doc/design/SYMBOLIC-FORTH.md
 //! 6), while compiling: `w ins clauses#` gives the clauses dispatch would
-//! choose for inputs of the types `ins` gives, each a quotation of what `;`
-//! takes after the name, its inputs, its outputs if it gives them, and its
-//! body; `w effect#` how many values w takes and leaves. So March can read a
-//! word, as it reads a quotation.
+//! choose for inputs of the types or values `ins` gives, each a quotation
+//! of what `;` takes after the name, its inputs, its outputs if it gives
+//! them, and its body; `w effect#` how many values w takes and leaves. So
+//! March can read a word, as it reads a quotation.
 use march8::{Kind, Session};
 
 fn show(src: &str) -> String {
@@ -75,6 +75,14 @@ fn they_are_the_clauses_dispatch_would_choose() {
         "<2> 3 3"
     );
     assert_eq!(show(&format!("{fib} fib' string clauses# length")), "<1> 0");
+    // Given a value, a value pattern for another is not chosen.
+    assert_eq!(show(&format!("{fib} fib' [ 1 ] clauses# length")), "<1> 2");
+    assert_eq!(
+        show(&format!("{fib} fib' [ 1 ] clauses# first last .")),
+        "<1> 1"
+    );
+    assert_eq!(show("unit' [ i64+' ] clauses# length"), "<1> 1");
+    assert_eq!(show("unit' [ i64-' ] clauses# length"), "<1> 0");
     // None for types no clause takes, nor fewer values than they take; and
     // a primitive has none, its code being the machine's.
     assert_eq!(show("max' i64 clauses# length"), "<1> 0");
@@ -108,7 +116,10 @@ fn what_they_take_is_checked() {
     assert_eq!(kind, Kind::NoWord);
     assert_eq!(msg, "no word `foo`");
     let (_, msg) = error("max' [ i64 positive? ] clauses#");
-    assert!(msg.contains("its inputs' types alone"), "{msg}");
+    assert!(
+        msg.contains("its inputs alone, their types or values"),
+        "{msg}"
+    );
     let (_, msg) = error("max' 3 clauses#");
     assert!(msg.contains("and 3 (int#) is neither"), "{msg}");
     let (_, msg) = error("3 effect#");

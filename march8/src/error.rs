@@ -47,8 +47,15 @@ pub enum Kind {
     /// inside its own application, unwinding to that application, the
     /// `n`th, to make it an instance.
     Again(usize),
+    /// Inside the compiler only: `fail` reached while a clause is checked
+    /// where it is defined. The clause never returns from there, so it
+    /// leaves whatever it must, and what follows is never reached.
+    Fails,
     /// A file that could not be read while compiling, for `embed`.
     Io,
+    /// A program's own failure, by its kind, `no-file' fail`
+    /// (doc/design/SYMBOLIC-FORTH.md 29).
+    Fail(String),
     /// An error while running.
     Run(crate::machine::Error),
 }

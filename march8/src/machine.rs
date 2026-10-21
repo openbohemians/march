@@ -329,6 +329,11 @@ impl Machine {
         self.allocate_text(merkle_champ::Sequence::text(s))
     }
 
+    /// The handle of an array of these cells, as `Gather` makes one.
+    pub fn vector_cell(&mut self, cells: Vec<u64>) -> Result<u64, Error> {
+        self.allocate_vector(cells.into_iter().collect())
+    }
+
     /// Runs primitives on the stack, outside any word: what the stage does
     /// to fold a primitive on known values, so that it has one meaning,
     /// compiled or folded. Only primitives on values: no control, scratch

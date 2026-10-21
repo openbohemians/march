@@ -338,12 +338,19 @@ any family.
   and whoever takes it handles each; a literal is undecided, and whoever
   takes it decides. Two literals divide exactly, `1 3 /*` is 1:3: a literal
   prefers another literal kind to its default, since it keeps it exact.
-- **A sequence literal, `seq#`** (Thomas, 2026-10-14; not built): what
+- **A sequence literal, `seq#`** (Thomas, 2026-10-14; in part): what
   `( … )` collects, `[ … ] seq# !` in the lowest form. Ordered, repeats
   allowed, and undecided like a number: a clause that wants a tuple, a vec
   or an `i64 ary` makes it one, and with nothing to take it, it settles by
   its contents, a vec when its elements are alike, a tuple when not.
   `{ … }` is `[ … ] map# !`, a map literal, undecided the same way.
+  Built in march8 (2026-10-21): an array literal of known elements is
+  held as them while compiling, settled by its contents, and a clause
+  that wants another type takes its elements as it would each alone, so
+  `( "a" b' )`, a string and a symbol, is two strings where a `string
+  ary` is wanted. A symbol and a string are not alike: the symbol is text
+  only once taken as a string. Not yet: its numbers stay undecided, so
+  `( 1 2 )` is still i64s where an `f64 ary` is wanted.
 - **`1 1 +`** matches a clause on two literals and folds to the literal 2 at
   compile time. A literal defaults to i64 only when a concrete
   representation is needed: stored, printed, or never given a type.

@@ -249,6 +249,7 @@ The machine runs code on a stack of **judgments** (TYPES.md
 | a name, a quotation | a word not yet applied, a quotation |
 | nothing | a value at run time, on the machine's stack |
 | pinned | a value at run time known to equal a value: a value pattern's input, in its clause |
+| a known array | an array literal whose elements are all known, held as its elements (2026-10-21) |
 
 **A known value has no code until a value at run time needs it.** When an
 operation that runs takes it, or the word ends, the value is
@@ -261,7 +262,15 @@ above it if there are any (by `swap`, `rot rot`, or the scratch stack). So:
 - **stack words move judgments,** and emit code only for the values at run
   time among them: `dup` of a known value copies the judgment, and `swap`
   of a known value and a value at run time emits nothing;
-- **the code holds only what must happen at run time.**
+- **the code holds only what must happen at run time;**
+- **an array literal of known elements is known too:** `( 1 2 3 ) 2 at` is
+  the literal 2, and `( ( 1 2 ) ( 3 4 ) ) 2 at 1 at` the literal 3. Its
+  elements are gathered only where a value at run time is needed, each
+  copy on its own, so `( 1 2 ) dup` builds two. A clause that wants it as
+  another type takes its elements so, each as it would alone: `( "a" b'
+  )`, a string and a symbol, is two strings where a `string ary` is
+  wanted (TYPES.md 2.10). It is what lets March read data while
+  compiling, as `fail` reads its message (below, "Errors").
 
 The prototype emitted a placeholder for each literal where it appeared and
 patched it once its type was known, keeping code order equal to judgment
@@ -295,7 +304,9 @@ equal types are equal numbers.
 | `tuple` | in patterns, any tuple: a class, as `atom` is |
 
 **An array literal is a vec:** `( 7 8 9 )` is a `3 i64 vec`, so its length
-is a constant. A vec is accepted where an array of the same elements is
+is a constant. A symbol beside a string makes a tuple, `( "a" b' )` being a
+`( string sym )`: a symbol is text only where a string is taken
+(doc/design/SYMBOLIC-FORTH.md 28), and a literal takes nothing. A vec is accepted where an array of the same elements is
 wanted, forgetting its length, at any depth: a `string 2 i64 vec map` is a
 `string i64 ary map`. It costs nothing, since both are the same at run time.
 
@@ -810,7 +821,7 @@ so `fact` on an f64 multiplies floats; if the instance then leaves other
 types than the ghost said, it is compiled again with the types it found. A
 family that applies itself with no clause finishing without doing so has no
 types for its results, an error where it is defined, unless its signature
-promises outputs after `--`: then it is a loop.
+promises outputs, a second bracket, `< i64 >< i64 >`: then it is a loop.
 
 **Tail calls.** A call followed only by a return, perhaps after branches,
 is a tail call, and a call to itself one in its own frame, so recursion that
@@ -845,7 +856,12 @@ quotation, `+^0` and any operation's 0th power being its identity,
 they read, `unit` for each primitive operation (`i64+' unit` is 0,
 `string-concat' unit` the empty string), and `least` and `greatest` for
 each order's ends (`i64' least`, `f64' greatest` ∞, `bool' greatest`
-true);
+true), and `identity#`, which finds which fact holds by reading the words
+as data, `clauses#` and `effect#` (2026-10-21): it follows the operation
+at the type to the primitive it applies there, through a word that applies
+one operation or swaps first, or to two clauses keeping the greater or
+the lesser of two values, by `gt` or `lt`, which only move them, and says
+where it finds none;
 and the two rules that rewrite a power and a width, `dbl^2` as `dbl 2
 int# ! power# .` and `dup_2` as `dup 2 int# ! width#`, each word read by
 `name#` where the name was applied
@@ -913,18 +929,17 @@ signature's: the stack words, which move judgments, the values at run time
 among them moving, only if their order changes, by rolls or the scratch
 stack, whichever is shorter; `quote-power`, a word's or a quotation's
 power by its kind, from its effect, its 0th being `w' unit# !`, the
-identity of w's operation, a literal typed where it is used; `identity#`,
-which finds that identity at a type, following the operation to the
-primitive it applies there, whose identity core.march's `unit` states, or
-to a choice of the greater or the lesser, whose is the type's `least` or
-`greatest`, until a word's clauses are data March can read; `quote-length`,
+identity of w's operation, a literal typed where it is used, which `quote
+!` makes code again, `[ w ]`, for core.march to find which it is;
+`quote-length`,
 `quote-at`, `quote-slice`, `quote-concat` and `quote-insert`, a quotation
 as a sequence while compiling, its elements Low Stack's, a symbol or a
 quotation, a meta-op the symbol of its name, `'.'`, which the core's
 `length`, `at`, `slice`, `concat`, `insert`, `first` and `rest` take
 (SYMBOLIC-FORTH.md 6.6); `clauses#`, `w ins clauses#`, the clauses of w
 that dispatch would choose for inputs of the types ins gives, a type or
-code that leaves them, `< i64 i64 >`, in the order it would try them, each
+code that leaves them, `< i64 i64 >`, or values, `[ i64+' ]`, a value
+pattern for another value not chosen, in the order it would try them, each
 a quotation of what `;` takes after the name, each bracket as its code,
 `[ [ a a gt ? ] [ a ] [ drop ] ]`, a primitive having none, and `effect#`, how many values a word or a
 quotation takes and leaves, so March reads a word as it reads a quotation
@@ -1020,6 +1035,19 @@ running are the machine's, but for a family none of whose clauses holds at
 run time, which says which, as compiling does: ``no word `door` for sym
 sym: no clause's guard holds``.
 
+**A program fails by `fail`** (doc/design/SYMBOLIC-FORTH.md 29), which takes
+a kind, `no-file' fail`, or a message and a kind, `( "can't read it"
+no-file' ) fail`, and never returns. While compiling it is an error of that
+kind, the machine's own kinds by their names, `syntax'`, `no-word'`,
+`mismatch'`, `literal'`, `unknown'`, `arithmetic'`, `limit'`, `effect'`
+and `io'`, and any other the program's own, `Kind::Fail`. Its message is
+the one given, or ``fails: `no-file` ``, said where `fail` is with the
+words applied around it. A clause that fails is defined as any other, and
+leaves whatever it must, since nothing after `fail` is reached; it is
+checked where defined only as far as `fail`. Where the code may not run,
+in a choice made at run time or a loop's body, it would fail only as the
+program runs: a trap, not built yet, so that is a limit for now.
+
 Warnings have three levels: informative, minor and severe (Thomas,
 2026-10-09). The session collects them, and `march8` writes them to
 standard error, `1:1: informative: …`. Two are built so far, both
@@ -1090,17 +1118,23 @@ different lengths both may match (above).
 
 ## Not yet
 
-- **Failing and traps** (doc/design/SYMBOLIC-FORTH.md 29, 2026-10-20).
-  `fail` takes a kind, or a tuple of a message and a kind, and never
-  returns. While compiling it is an error where the failing code was
-  applied; at run time it is a trap, which a clause of the same word for
-  its inputs and a `trap` on top handles, the inputs restored as they were
-  when the word was applied, so the handler leaves what the word leaves. A
-  trap may be neither left by a clause that takes one nor stored. The
-  machine's failures become traps of their kinds, all but the fuel limit.
-  First, `fail` while compiling, for the identity search; the tuple needs
-  a sequence literal that a clause takes as a tuple (TYPES.md 2.10), where
-  march8 settles `( "can't read it" no-file' )` as two strings.
+Bugs, what is next, and what is still to think on are in TODO.md, at the
+repo's root.
+
+- **Traps** (doc/design/SYMBOLIC-FORTH.md 29, 2026-10-20). `fail` while
+  compiling is built (above, "Errors"); at run time it is a trap, which a
+  clause of the same word for its inputs and a `trap` on top handles, the
+  inputs restored as they were when the word was applied, so the handler
+  leaves what the word leaves. A trap may be neither left by a clause that
+  takes one nor stored. The machine's failures become traps of their
+  kinds, all but the fuel limit.
+- **Recursion on known numbers and symbols while compiling.** A family
+  applied to itself on values that have cells becomes an instance on
+  values at run time (above, "Recursion and instances"), even when they
+  are known, so `5 fact` is a call, and a recursion over symbols alone has
+  no types. With a value known only while compiling among its inputs, a
+  type or a quotation, it unfolds instead, its guards decided by the
+  values, which is what March's own work while compiling uses.
 - **Loops in March, the kernel shrink** (2026-10-14). `map`, `zip`,
   `table` and `within` are about 470 lines of Rust, which could be words in
   `core.march` over `each`, the one loop the stage types. What was found:
@@ -1128,7 +1162,7 @@ different lengths both may match (above).
     stays in a register. Arrows were the other candidates, `->` and `<-`
     moving and `=>` and `<=` copying (Thomas), but `->` and `<-` are wanted
     for list edits and `<=` reads as ≤. `<>` is a name to march8's reader,
-    which takes only a lone `<` as a bracket; the list edits below wanted
+    which takes only a lone `<` as a bracket; the list edits (TODO.md) wanted
     it for pairing, which will need another spelling. Thomas first named
     `dip` `_`, which now marks a bracket's arguments.
   - **Moving the loops waits on the machine code** (Thomas). The stage
@@ -1198,17 +1232,13 @@ different lengths both may match (above).
   `write` clause, since `write` takes one string and a family's clauses
   take as many; `string error or` from `file-read` once there is an error type;
   paths from the source's own place, not where march8 runs.
-- **Known arrays.** An array is always made at run time, so words that make
-  one, `words`, `split`, `lines`, `range`, do not fold on known values, and
-  `file-embed`'s text folds only through words that make scalars: a YAML file
-  read into data while compiling needs arrays and maps the stage knows.
-- **TODO: list edits by arrows,** from SYMBOL (Thomas, 2026-10-09: to think
-  on). Its ASCII pairs point the way the elements move: `+>` and `<+` add an
-  element at the front and the end, `->` and `<-` remove a suffix and a
-  prefix if there, `<->` both, `~>` and `<~` interleave, `><` concatenates
-  and `<>` pairs, though `<>` is now `dip` (2026-10-15). A typeable system, but it must be checked against `<` and
-  `>` as brackets (a word that only contains them is no bracket), and
-  against what March's words already say (`insert`, `remove`, `concat`).
+- **More of known arrays.** An array literal of known elements is known
+  (2026-10-21), but words that make an array, `words`, `split`, `lines`,
+  `range`, still make it at run time, so they do not fold on known values,
+  and `file-embed`'s text folds only through words that make scalars: a
+  YAML file read into data while compiling needs arrays and maps the stage
+  knows. A known array is built once for each copy, so `( 1 2 ) dup` builds
+  two.
 - **More of tuples, and records.** `rest`, `most`, `slice` and `concat` on
   tuples forget their positions, where they could make tuples; `eq?` has no
   clause for them. A literal with a run among mixed elements is still an

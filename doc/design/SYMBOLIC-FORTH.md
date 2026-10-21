@@ -385,8 +385,11 @@ Settled (Thomas, 2026-10-14), not built:
    values a word or a quotation takes and leaves, `max' effect#` being 2
    and 1, as the stage knows them. Both run while compiling. Built in
    march8 (2026-10-20); a clause of two, its signature with `--` and its
-   body, until `><` (8). Next: the identity search in March (21), with
-   `fail` (29), then `width#`'s test and `quote-power`'s cases (22).
+   body, until `><` (8). Given values as well as types, `unit' [ i64+' ]
+   clauses#`, a value pattern for another value is not chosen
+   (2026-10-21), so March asks whether a fact is stated. The identity
+   search is March over them (21, built 2026-10-21), with `fail` (29).
+   Next: `width#`'s test and `quote-power`'s cases (22).
 7. **Numbers are symbols.** No rule of spelling reads them in the lowest
    form: `10 i64 !` gives the type, and `10 int# !`, `1.5 dec# !` and
    `1:2 ratio# !` the literal kind, undecided until something takes it,
@@ -407,14 +410,21 @@ Settled (Thomas, 2026-10-14), not built:
    and needs no meaning of its own (Thomas, 2026-10-20, from the bowtie
    `⋈`, which it looks like; the glyph stays out of source). An empty
    bracket gives no inputs, `< >< i64 >`. Built in march8 (2026-10-20),
-   the core and every test moved to it.
+   the core and every test moved to it. A bracket still stands apart,
+   `< string >`, not `<string>`: a word is what is between spaces
+   (Thomas, 2026-10-20: "let's just stick with spacing", to revisit).
+   Brackets that touch words were weighed and set aside: lined-up cases
+   read as columns either way, and patterns, `/([0-9]+)kg/`, and names,
+   `<#`, `>string`, would need rules of their own. If nested data comes
+   to need it, a narrower step is open: a word of brackets alone is those
+   brackets, `]]` as `] ]`, of which `><` would be one case.
 9. **Comments** run from `--` to the line's end, everywhere, since no
    divider is needed in a signature: in High Stack too, inside a bracket
    as well (2026-10-20). Until then High Stack kept `--` as the divider
    in a signature's bracket, `< i64 -- i64 >`, FORTH's stack comment
    (Thomas, 2026-10-15: minor, to reconsider later); march8 says so when a
-   bracket a `--` begins a comment in is never closed. A line of three or more `-` and nothing
-   else opens a block comment, and a line of them ending in a period,
+   bracket a `--` begins a comment in is never closed. A line of three or
+   more `-` and nothing else opens a block comment, and a line of them ending in a period,
    `---.`, closes it (Thomas), so a block reads as a ruled box:
 
    ```
@@ -838,9 +848,9 @@ Settled (Thomas, 2026-10-15):
     operation's, `i64+' unit` being 0, the products' 1 and
     `string-concat`'s the empty string; and `least` and `greatest` give an
     order's ends, `i64' least` the smallest i64, `f64' greatest` ∞ and
-    `bool' greatest` true. A type converts a `unit#` to itself as it does a
-    literal, `i64: < unit# >< i64 > [ i64 identity# ] ;`, and `identity#`
-    finds which fact holds: it follows the operation at that type to the
+    `bool' greatest` true. A type converts a `unit#` to itself as it does
+    a literal, `i64: < unit# >< i64 > [ [ i64 i64 ] identity# ] ;`, and
+    `identity#` finds which fact holds: it follows the operation at that type to the
     primitive it applies there, through a word that applies one operation,
     `add: [ + ] ;`, or flips it, `[ swap + ]`, and a family's clause for
     that type; or to a choice of the greater of two, by `gt` or `lt`, whose
@@ -856,12 +866,29 @@ Settled (Thomas, 2026-10-15):
     and one of the core's `power#` still gives a word a 0th power of its
     own (24).
 
-    Built 2026-10-20. The facts are March, and `identity#`'s search is
-    Rust, in the stage, until a word's clauses are data March can read
-    (16): then it is March too (Thomas: "we have to ultimately implement
-    this in March itself"). A first build that day had the facts and the
-    search both in Rust, and decided an identity's type where `^0` was
-    written, so `max^0` and `concat^0` were errors.
+    Built 2026-10-20. The facts are March, and `identity#`'s search was
+    Rust, in the stage, until a word's clauses were data March can read
+    (16; Thomas: "we have to ultimately implement this in March itself").
+    A first build that day had the facts and the search both in Rust, and
+    decided an identity's type where `^0` was written, so `max^0` and
+    `concat^0` were errors.
+
+    The search is March since 2026-10-21, in core.march, over `clauses#`
+    and `effect#` (6): `u ins identity#`, u the identity, whose operation
+    `quote !` gives as code, `+' unit# !` being `[ + ]`, and ins the types
+    it is for, `[ i64 i64 ]`, which is how a type converts one, `i64: <
+    unit# >< i64 > [ [ i64 i64 ] identity# ] ;`. A word has the fact
+    `unit` states for it, if one does; else its one clause for those
+    types, followed; else two that pick one of two values by `gt` or `lt`,
+    only moving them, which it shows by applying each to two symbols,
+    `left' right'`. Code that applies one word, or swaps first, is
+    followed into the word. Whether a fact is stated is `clauses#` given a
+    value, `unit' [ int#-' ] clauses#` being empty, so the facts are only
+    facts, and where none holds, `fail` says which word, at which type, and
+    which clause would state one, as the Rust did. The stage keeps no
+    search of its own. The search's words end in `#`, as March's own (17),
+    so `choice` and `end` stay a program's. For it, `eq?` is false for a
+    symbol and a quotation, as code's elements are compared.
 
     A power is a quotation, which the word `power#` makes from a word or
     a quotation and the count, so a quotation's power is the quotation of
@@ -1195,10 +1222,22 @@ Settled (Thomas, 2026-10-15):
     which, March's values being persistent, is keeping their cells; what
     was done before the failure stands.
 
-    Not built. First, for the identity search, `fail` while compiling;
-    `( "…" kind' )` needs a sequence literal a clause takes as a tuple
-    (TYPES.md 2.10), where march8 now settles one holding a string and a
-    symbol as two strings.
+    An idea, not decided (2026-10-20): a trap's kind in its type, as
+    `i64 ary` gives an array's, so a handler is matched as any case is,
+    `load: < string no-file' trap > < string > [ drop drop "" ] ;`, with
+    no test written: `trap` alone takes any kind.
+
+    `fail` while compiling is built in march8 (2026-10-21). The machine's
+    own kinds are named as its errors are, `syntax'`, `no-word'`,
+    `mismatch'`, `literal'`, `unknown'`, `arithmetic'`, `limit'`,
+    `effect'` and `io'`, so March code can fail as the compiler does; any
+    other kind is the program's. Its message reads from the tuple while
+    compiling because an array literal of known elements is now known
+    there too (TYPES.md 2.10), and a symbol beside a string makes a tuple,
+    `( string sym )`, not two strings. A clause that fails is defined as
+    any other, checked only as far as `fail`. In code that may not run, a
+    choice made at run time or a loop's body, failing is the trap, not
+    built: march8 says so. Handlers, `trap`, `kind` and `why` wait for it.
 
 Open: for rules (25), what a group that may not match leaves,
 refused for now, and how an import names one alone; and the symbol for

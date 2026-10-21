@@ -145,3 +145,44 @@ fn tuple_types_in_brackets() {
     );
     assert_eq!(session(&["1 < ( ) > !"]).err(), Some(Kind::Mismatch));
 }
+
+#[test]
+fn a_symbol_beside_a_string_is_a_tuple() {
+    // A symbol is text where a string is taken (doc/design/SYMBOLIC-FORTH.md
+    // 28), and nothing takes it in the literal: so a string and a symbol,
+    // which a clause takes as it asks.
+    assert_eq!(
+        typed(&["( \"can't read it\" no-file' )"]),
+        "<1> ( \"can't read it\" no-file' ) < ( string sym ) >"
+    );
+    let ff = "ff: < string ary > [ ] ; ff: < ( string sym ) > [ 2 at ] ;";
+    assert_eq!(show(&[ff, "( \"a\" b' ) ff"]), "<1> b'");
+    let gg = "gg: < string ary >< string > [ 2 at ] ;";
+    assert_eq!(typed(&[gg, "( \"a\" b' ) gg"]), "<1> \"b\" < string >");
+    // Known only as the program runs, too.
+    assert_eq!(
+        typed(&[gg, "( \"a\" b' ) < ( string sym ) > !", "gg"]),
+        "<1> \"b\" < string >"
+    );
+}
+
+#[test]
+fn known_arrays_fold_while_compiling() {
+    // An array literal of known elements is known: built only where a value
+    // at run time is needed, so it folds as a number does.
+    let mut s = Session::new();
+    let same = |s: &mut Session, a: &str, b: &str| {
+        assert_eq!(s.compile(a).unwrap().0, s.compile(b).unwrap().0, "{a}");
+    };
+    same(&mut s, "( 1 2 3 ) 2 at", "2");
+    same(&mut s, "( 1 2 3 ) -1 at", "3");
+    same(&mut s, "( ( 1 2 ) ( 3 4 ) ) 2 at 1 at", "3");
+    same(&mut s, "( \"a\" b' ) 1 at", "\"a\"");
+    same(&mut s, "( 1 \"a\" ) length", "2");
+    // Built where needed, each copy its own.
+    assert_eq!(show(&["( 1 2 ) dup 2 at"]), "<2> ( 1 2 ) 2");
+    assert_eq!(show(&["( 1 2 ) [ 1 + ] map"]), "<1> ( 2 3 )");
+    // Its message shows it.
+    let e = Session::new().eval("( 1 2 ) < f64 ary > !").unwrap_err();
+    assert!(e.to_string().contains("found ( 1 2 ) (2 i64 vec)"), "{e}");
+}

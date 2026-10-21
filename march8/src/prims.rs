@@ -162,8 +162,9 @@ pub enum Prim {
     QuotePower,
     /// `w n width#`: w applied n wide.
     Width,
-    /// `u t identity#`: the identity u, of an operation, at the type t.
-    Identity,
+    /// `x fail`: fails, by a kind, `no-file' fail`, or a message and a
+    /// kind, `( "can't read it" no-file' ) fail`.
+    Fail,
     // A quotation's elements, as Low Stack holds them, while compiling.
     QuoteLength,
     QuoteAt,
@@ -598,7 +599,7 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::Dip, "dip", "< b c >", &[]),
     d(Prim::QuotePower, "quote-power", "< b c >", &[]),
     d(Prim::Width, "width#", "< b c >", &[]),
-    d(Prim::Identity, "identity#", "< b c >", &[]),
+    d(Prim::Fail, "fail", "< a >", &[]),
     d(Prim::QuoteLength, "quote-length", "< quote >< i64 >", &[]),
     d(Prim::QuoteAt, "quote-at", "< quote i64 >", &[]),
     d(
@@ -681,7 +682,6 @@ pub fn custom(p: Prim) -> bool {
             | Dip
             | QuotePower
             | Width
-            | Identity
             | QuoteLength
             | QuoteAt
             | QuoteSlice

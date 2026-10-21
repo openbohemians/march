@@ -263,46 +263,6 @@ bi: [ [ keep ] dip . ] ;
 
 power#: < a b > [ quote-power ] ;
 
--- Identities (doc/design/SYMBOLIC-FORTH.md 21). x⁰ is the identity of x's
--- operation, the value that leaves the other operand as it is: `+^0` is
--- `+' unit# !`, a literal whose type comes where it is used, as `0`'s
--- does, and a value's `three^0` is `*' unit# !`, its power being its
--- copies multiplied. Given a type, `identity#` finds which fact holds
--- there: `unit`'s, for the primitive the operation applies at that type,
--- or, for a choice of the greater or the lesser, as `max` and `min` are,
--- `least`'s or `greatest`'s, for the type's order. So `and^0` is true at
--- bool, `and` being `min`, and `max^0` is the least i64 at i64. A program
--- adds a fact by its path, `core.unit: < int#-' > [ drop 0 ] ;`.
-
-i64: < unit# >< i64 > [ i64 identity# ] ;
-f64: < unit# >< f64 > [ f64 identity# ] ;
-money: < unit# >< money > [ money identity# ] ;
-string: < unit# >< string > [ string identity# ] ;
-bool: < unit# >< bool > [ bool identity# ] ;
-int#: < unit# >< int# > [ int# identity# ] ;
-dec#: < unit# >< dec# > [ dec# identity# ] ;
-ratio#: < unit# >< ratio# > [ ratio# identity# ] ;
-
-unit: < int#+' > [ drop 0 ] ;
-unit: < dec#+' > [ drop 0 dec#! ] ;
-unit: < ratio#+' > [ drop 0 ratio#! ] ;
-unit: < i64+' > [ drop 0 i64! ] ;
-unit: < f64+' > [ drop 0 f64! ] ;
-unit: < money+' > [ drop 0 money! ] ;
-unit: < int#*' > [ drop 1 ] ;
-unit: < dec#*' > [ drop 1 dec#! ] ;
-unit: < ratio#*' > [ drop 1 ratio#! ] ;
-unit: < i64*' > [ drop 1 i64! ] ;
-unit: < f64*' > [ drop 1 f64! ] ;
-unit: < string-concat' > [ drop "" ] ;
-
-least: < i64' > [ drop -9223372036854775808 i64! ] ;
-greatest: < i64' > [ drop 9223372036854775807 i64! ] ;
-least: < f64' > [ drop -1.0 0.0 f64/ ] ;
-greatest: < f64' > [ drop 1.0 0.0 f64/ ] ;
-least: < bool' > [ drop false ] ;
-greatest: < bool' > [ drop true ] ;
-
 /(.+)\^([0-9]+)/: [ [ name# ] dip int# ! power# . ] ;
 /(.+)_([0-9]+)/: [ [ name# ] dip int# ! width# ] ;
 
@@ -517,6 +477,124 @@ first: < quote > [ 1 at ] ;
 last: < quote > [ -1 at ] ;
 rest: < quote >< quote > [ 2 -1 slice ] ;
 most: < quote >< quote > [ 1 -2 slice ] ;
+
+-- A symbol is never a quotation, so the elements of code compare.
+
+eq: < sym quote >< bool > [ drop drop false ] ;
+eq: < quote sym >< bool > [ drop drop false ] ;
+
+-- Identities (doc/design/SYMBOLIC-FORTH.md 21). x⁰ is the identity of x's
+-- operation, the value that leaves the other operand as it is: `+^0` is
+-- `+' unit# !`, a literal whose type comes where it is used, as `0`'s
+-- does, and a value's `three^0` is `*' unit# !`, its power being its
+-- copies multiplied. The facts are `unit`'s, the identity of each
+-- primitive operation, and `least`'s and `greatest`'s, the ends of each
+-- type's order. A program adds one by its path, `core.unit: < int#-' > [
+-- drop 0 ] ;`.
+
+unit: < int#+' > [ drop 0 ] ;
+unit: < dec#+' > [ drop 0 dec#! ] ;
+unit: < ratio#+' > [ drop 0 ratio#! ] ;
+unit: < i64+' > [ drop 0 i64! ] ;
+unit: < f64+' > [ drop 0 f64! ] ;
+unit: < money+' > [ drop 0 money! ] ;
+unit: < int#*' > [ drop 1 ] ;
+unit: < dec#*' > [ drop 1 dec#! ] ;
+unit: < ratio#*' > [ drop 1 ratio#! ] ;
+unit: < i64*' > [ drop 1 i64! ] ;
+unit: < f64*' > [ drop 1 f64! ] ;
+unit: < string-concat' > [ drop "" ] ;
+
+least: < i64' > [ drop -9223372036854775808 i64! ] ;
+greatest: < i64' > [ drop 9223372036854775807 i64! ] ;
+least: < f64' > [ drop -1.0 0.0 f64/ ] ;
+greatest: < f64' > [ drop 1.0 0.0 f64/ ] ;
+least: < bool' > [ drop false ] ;
+greatest: < bool' > [ drop true ] ;
+
+-- `x f stated#`: whether the fact f states one for x, `i64+' unit'
+-- stated#` being true.
+
+stated#: [ swap [ ] swap 0 insert clauses# length 0 eq? not ] ;
+
+-- Whether code only moves values, by `dup`, `drop` and `swap`, and
+-- whether it so picks one of two, `[ swap drop ]`.
+
+shuffles#: < quote [ length 0 eq? ] ? >< bool > [ drop true ] ;
+shuffles#: < quote >< bool > [ dup first dup dup' eq? over drop' eq? or over swap' eq? or swap '.' eq? or swap rest shuffles# and ] ;
+picks#: < quote [ shuffles# not ] ? >< bool > [ drop false ] ;
+picks#: < quote >< bool > [ effect# over -+ -1 eq? swap 3 lt? and ] ;
+
+-- `cs choice#`: what a word's two clauses choose between two values,
+-- `least'` if the greater, the first testing which is by `gt` or `lt`, as
+-- `max`'s do, `greatest'` if the lesser, as `min`'s, and `none'` if
+-- neither. Each clause must pick one of the two, which applying it to two
+-- symbols shows.
+
+chosen#: < gt' left' right' >< sym > [ drop drop drop least' ] ;
+chosen#: < gt' right' left' >< sym > [ drop drop drop greatest' ] ;
+chosen#: < lt' left' right' >< sym > [ drop drop drop greatest' ] ;
+chosen#: < lt' right' left' >< sym > [ drop drop drop least' ] ;
+chosen#: < a b c >< sym > [ drop drop drop none' ] ;
+
+choice#: < quote [ length 2 eq? not ] ? >< sym > [ drop none' ] ;
+choice#: < quote [ dup first first last '?' eq? swap last first last '?' eq? not and not ] ? >< sym > [ drop none' ] ;
+choice#: < quote [ dup first last picks# swap last last picks# and not ] ? >< sym > [ drop none' ] ;
+choice#: < quote >< sym > [ dup first first -2 at swap dup first last left' right' rot . swap last last left' right' rot . chosen# ] ;
+
+-- `w ins f end#`: the end of the type's order that the choice w makes
+-- has, f being `least'` or `greatest'`.
+
+end#: < sym quote least' [ swap first swap stated# swap drop ] ? > [ drop swap drop first least ] ;
+end#: < sym quote greatest' [ swap first swap stated# swap drop ] ? > [ drop swap drop first greatest ] ;
+end#: < sym quote least' > [ drop first dup dup "`\_` at \_ keeps the greater of two, and `least` gives \_ none: a clause of `least` would, `core.least: < \_' > [ drop … ] ;`" ( _ no-word' ) fail ] ;
+end#: < sym quote greatest' > [ drop first dup dup "`\_` at \_ keeps the lesser of two, and `greatest` gives \_ none: a clause of `greatest` would, `core.greatest: < \_' > [ drop … ] ;`" ( _ no-word' ) fail ] ;
+
+-- How to name what has an identity: a word by its name, `"`max`"`, and
+-- other code as a quotation.
+
+named#: < sym >< string > [ "`\_`" ] ;
+named#: < quote >< string > [ drop "the quotation" ] ;
+
+no-identity#: < string quote > [ first dup "\_ has no identity at \_ that its primitives give: at \_ it applies no one operation whose primitive `unit` knows, and chooses no greater or lesser" ( _ no-word' ) fail ] ;
+
+-- `u ins identity#`, reading the words as data (6): `u` is an identity,
+-- its operation as code, `[ + ]`, and `ins` the types it is for, `[ i64
+-- i64 ]`. A word has the identity `unit` states for it, as a primitive
+-- does; otherwise, with one clause for them, its code's; and with two
+-- that keep one of the two by their order, the type's least value if they
+-- keep the greater, as `max`'s do, its greatest if the lesser, as
+-- `min`'s. Code that applies one word has the word's identity, and code
+-- that swaps the two values first has the same, `[ swap + ]`. So `and^0`
+-- is true at bool, `and` being `min`, and `max^0` the least i64. Any other
+-- word has none, `-+` and `avg` among them. While it looks, code is held
+-- with how to name it. The search's words end in `#`, being March's own
+-- (17), so a program keeps the plain names.
+
+identity#: < unit# quote > [ [ quote ! ] dip identity# ] ;
+identity#: < quote quote [ drop dup length 2 eq? swap last '.' eq? and ] ? > [ over first named# swap identity# ] ;
+identity#: < quote quote > [ "the quotation" swap identity# ] ;
+identity#: < quote string quote [ drop drop dup length 2 eq? swap last '.' eq? and ] ? > [ [ [ first ] dip ] dip identity# ] ;
+identity#: < quote string quote [ drop drop length 3 lt? ] ? > [ rot drop no-identity# ] ;
+identity#: < quote string quote [ drop drop dup first swap' eq? swap 2 at '.' eq? and ] ? > [ [ [ 3 -1 slice ] dip ] dip identity# ] ;
+identity#: < quote string quote > [ rot drop no-identity# ] ;
+identity#: < sym string quote [ drop drop unit' stated# ] ? > [ drop drop unit ] ;
+identity#: < sym string quote [ swap drop clauses# length 0 eq? ] ? > [ first rot dup "\_ at \_ applies `\_`, for which `unit` gives no identity: a clause of `unit` would, `core.unit: < \_' > [ drop … ] ;`" ( _ no-word' ) fail ] ;
+identity#: < sym string quote [ swap drop clauses# length 1 eq? ] ? > [ swap drop over over clauses# first last rot named# rot identity# ] ;
+identity#: < sym string quote [ swap drop clauses# choice# none' eq? not ] ? > [ swap drop over over clauses# choice# end# ] ;
+identity#: < sym string quote > [ swap drop swap named# swap no-identity# ] ;
+
+-- A type converts an identity to itself by the fact that holds for two
+-- values of it, which `identity#` finds.
+
+i64: < unit# >< i64 > [ [ i64 i64 ] identity# ] ;
+f64: < unit# >< f64 > [ [ f64 f64 ] identity# ] ;
+money: < unit# >< money > [ [ money money ] identity# ] ;
+string: < unit# >< string > [ [ string string ] identity# ] ;
+bool: < unit# >< bool > [ [ bool bool ] identity# ] ;
+int#: < unit# >< int# > [ [ int# int# ] identity# ] ;
+dec#: < unit# >< dec# > [ [ dec# dec# ] identity# ] ;
+ratio#: < unit# >< ratio# > [ [ ratio# ratio# ] identity# ] ;
 
 -- Loops. `each` applies a quotation to each element, from the first, and
 -- `each-right` from the last; the quotation takes its element and keeps the

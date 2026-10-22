@@ -66,7 +66,7 @@ reads them back to the same tokens, and runs them to the same results.
 | `'text'` | a quoted symbol: its text as it is, spaces and newlines among it, a quote in it doubled, `'it''s'` (doc/design/SYMBOLIC-FORTH.md 6.12); a string wherever one is taken (6.28) |
 | `name` | a name, applied: a primitive, a family, a constructor, or a type's name, which gives the type |
 | `Name` | a capitalized name, a name like any: it applies (doc/design/SYMBOLIC-FORTH.md 6.27) |
-| `a` | one lowercase letter: a variable, read as `a var# .` (doc/design/SYMBOLIC-FORTH.md 7), a type variable in a signature; it names no word, and its symbol, `a'`, is a value to match |
+| `a` | one lowercase letter: a variable, read as `a var# .` (doc/design/SYMBOLIC-FORTH.md 7), in code an input by its place from the top, `a` the top, and in a signature a type variable (14); it names no word, and its symbol, `a'`, is a value to match |
 | `name:` | a label: the symbol `name`, written where a name is defined or a key given |
 | `name'` | the symbol `name`, for a word passed rather than applied, `+' reduce`, or any symbol, `Snake'` |
 | `\name` | a symbol table entry, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
@@ -75,7 +75,7 @@ reads them back to the same tokens, and runs them to the same results.
 | `a.b` | one word: a dot inside a word is part of it, a number's point, `2.5`, or in a name a path in a namespace, `io.file.read` (TYPES.md 3.12), kept for namespaces and defining no word yet. Dots between names once chained them, `a.b.` for `a. b.` (2026-10-09), which left no spelling for a path (Thomas, 2026-10-10) |
 | `[ … ]` | a quotation: its words, unevaluated. Every bracket is one, made data where it closes, as Low Stack writes it (doc/design/SYMBOLIC-FORTH.md 7): `( … )` is `[ … ] seq# !`, `{ … }` is `[ … ] map# !` and `< … >` is `[ … ] sig# !` |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
-| `_` | an argument of the bracket it is written in, taken when the bracket is applied, the first written the deepest (Comprehensions) |
+| `_` | an input of the bracket it is written in, the first written the deepest, read as the letter of its place: `[ _ _ / ]` is `[ b a / ]` (Comprehensions) |
 | `< … >` | a bracket: code whose values are a type or a signature, a comprehension of types |
 
 **Literals, symbols and words** (Thomas, 2026-10-12). Literals spell
@@ -631,19 +631,34 @@ filter, flat-map and scan, with one loop:
 - **A collecting body may read the values below its element,** which are
   elements already collected, of the element type, as a scan reads the last;
   it may not take them.
-- **`_` is an argument of the bracket it is written in**
-  (doc/design/SYMBOLIC-FORTH.md 14; Thomas, 2026-10-16). A bracket with k
-  `_`s takes k values from below when it is applied, and each `_` puts the
-  next where it stands, the first written the deepest, so
-  `1 2 ( _ _ div )` is `( 1 2 div )`. A literal or a string is applied
-  where it stands, and a quotation by `.` or by what takes it, so
-  `[ _ _ + _ * ]` is an anonymous word of three inputs, and a word's body
-  takes the word's inputs. A `_` in a nested bracket is that bracket's:
-  `( xs [ _ 10 + ] each )` adds 10 to each element. Nothing is captured,
-  so there are no closures; a value from outside is written in or reached
-  on the stack. The arguments are taken first, so the code may reach
-  below them, and those known only at run time wait on the scratch stack,
-  as `dip`'s value does; one used first never moves.
+- **A letter is an input by its place** (doc/design/SYMBOLIC-FORTH.md
+  14; Thomas, 2026-10-17; built 2026-10-22). In a bracket one lowercase
+  letter is the input at its place from the top, `a` the top, `b` the
+  next, and `x`, `y` and `z` the first three; written again it is a copy.
+  `[ b a / ]` is `/`, `[ a b / ]` is `swap /`, and `[ b a b + ]` is
+  `over +`. A bracket takes as many inputs as its deepest letter names,
+  when it is applied, and drops those it names nowhere, so `[ c ]` takes
+  three and keeps the deepest. A literal or a string is applied where it
+  stands, and a quotation by `.` or by what takes it, so `[ b a + ]` is an
+  anonymous word of two inputs, and a word's body takes the word's inputs.
+  A letter in a nested bracket is that bracket's: `( xs [ a 10 + ] each )`
+  adds 10 to each element. Nothing is captured, so there are no closures;
+  a value from outside is written in or reached on the stack.
+- **`_` is the letter of its place** (Thomas, 2026-10-16, 2026-10-19): a
+  bracket with k `_`s takes k inputs, and each `_` puts the next where it
+  stands, the first written the deepest, so the reader writes
+  `[ _ _ + _ * ]` as `[ c b + a * ]` and `1 2 ( _ _ div )` is
+  `( 1 2 div )`. A bracket uses `_`s or letters, never both.
+- **How the stage moves them.** The inputs are taken first, so the code may
+  reach below them. The letters a quotation or a body begins with are a
+  shuffle, done on the stack, each input copied, or moved where it is
+  named last, those in order already never moving. The inputs named once
+  the code has begun wait, those known only at run time on the scratch
+  stack, as `dip`'s value does, the one used last at the bottom: each is
+  taken from there where it is used last if it is on top, and copied
+  before, so letters in the stack's order, as `_`s are, compile as the
+  plain words do. A literal's and a string's letters all wait, since their
+  elements are what their code leaves.
 
 Outside a literal the rules stay strict: a loop keeps its shape, and clauses
 chosen at run time leave as many values. A value that may be absent outside a
@@ -652,7 +667,8 @@ collection needs a union with nothing, `a or nil` (TYPES.md 3.6).
 ### Strings with holes
 
 A hole, `\[ code ]`, writes the value of its code into a string, and `\_` an
-input, short for `\[ _ ]` (march7/docs/STRINGS.md):
+input, short for `\[ _ ]` (march7/docs/STRINGS.md), as a letter in a hole
+is, `5 "\[ a ] is \[ a ]"` being "5 is 5":
 
 ```
 "1 + 2 = \[ 1 2 + ]"           "1 + 2 = 3", a constant
@@ -666,7 +682,7 @@ f: [ "<\[ _ 1 + ]>" ] ;     5 f is "<6>", 1.5 f is "<2.5>"
   after it (`"\[ n ]apples"`), and strings nest. It writes a string as Low
   Stack does (2026-10-22; doc/design/SYMBOLIC-FORTH.md 7, step 4): a
   quotation of its text, each run a symbol, and its holes' code, `\_`
-  being `_ .`, made text by `str# !`, so `"1 + 2 = \[ 1 2 + ]"` is
+  being a letter, `a var# .`, made text by `str# !`, so `"1 + 2 = \[ 1 2 + ]"` is
   `[ '1 + 2 = ' 1 2 + ] str# !`.
 - **The stage** runs the quotation's code where it stands and writes each
   value it leaves, by `>string`: a string's own text, a symbol's, or any
@@ -677,14 +693,13 @@ f: [ "<\[ _ 1 + ]>" ] ;     5 f is "<6>", 1.5 f is "<2.5>"
   values, and reaches what `.`'s would, the text before it among them
   (14), so `5 "\[ 1 + ]"` is "6" and `"a\[ drop 1 ]"` is "1". What the
   code has left is written as soon as the code after reaches none of it,
-  before the next text or argument, so a hole's value is written where it
+  before the next text or letter, so a hole's value is written where it
   is made, not brought up to be written last; before code holding a
   quotation, whose reach `each` and its kin leave unknown, it waits.
-- **`_` in a hole** is an argument of the string, taken where the string
-  stands, the first written the deepest, so a word whose body is such a
-  string takes them.
+- **`_` or a letter in a hole** is an input of the string, taken where
+  the string stands, so a word whose body is such a string takes them.
 - **`str# !` of a quotation** is text of the values its code leaves, in
-  order, `1 2 [ _ " and " _ ] str# !` being `"1 and 2"`
+  order, `1 2 [ b " and " a ] str# !` being `"1 and 2"`
   (doc/design/SYMBOLIC-FORTH.md 15), and of a symbol, text as it is,
   `'ab' str# !`, as `10 int# !` is a number. `string !` makes no text of a
   quotation, `string` being the type text has and not a kind (retired

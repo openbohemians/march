@@ -42,9 +42,10 @@ fn its_elements_are_low_stacks() {
         show("[ \"a\" ] length [ \"a\" ] 2 at [ \"a b\" ] first first"),
         "<3> 3 str#' 'a b'"
     );
+    // `\_` is a letter, `a var# .` (14, step 5).
     assert_eq!(
         show("[ \"x\\_\" ] first length 5 [ \"x\\_\" ] first str# !"),
-        "<2> 3 \"x5\""
+        "<2> 4 \"x5\""
     );
 }
 

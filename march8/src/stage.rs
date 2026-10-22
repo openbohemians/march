@@ -235,7 +235,8 @@ fn source_text(toks: &[Token]) -> String {
 }
 
 /// A string as it is written, `"…"`, from its quotation's code: a symbol is
-/// its text, `_ .` an argument, `\_`, and the code between them a hole.
+/// its text, and the code between them a hole, a letter among it,
+/// `\[ a ]`.
 fn string_text(toks: &[Token]) -> String {
     let text = |k: usize| {
         matches!(toks[k].tok, Tok::Name(_))
@@ -244,16 +245,10 @@ fn string_text(toks: &[Token]) -> String {
                     || matches!(&t.tok, Tok::Name(v) if is_var(v))
             })
     };
-    let arg = |k: usize| {
-        toks[k].tok == Tok::Name("_".into()) && toks.get(k + 1).is_some_and(|t| t.tok == Tok::Apply)
-    };
     let mut out = String::from('"');
     let mut i = 0;
     while i < toks.len() {
-        if arg(i) {
-            out.push_str("\\_");
-            i += 2;
-        } else if text(i) {
+        if text(i) {
             let Tok::Name(s) = &toks[i].tok else {
                 unreachable!("text is a symbol")
             };
@@ -269,7 +264,7 @@ fn string_text(toks: &[Token]) -> String {
             i += 1;
         } else {
             let mut j = i;
-            while j < toks.len() && !(j > i && (arg(j) || text(j))) {
+            while j < toks.len() && !(j > i && text(j)) {
                 j = match toks[j].tok {
                     Tok::Open(_) => {
                         let c = matching(toks, j);
@@ -350,33 +345,93 @@ impl Literal {
     }
 }
 
-/// The arguments of a bracket being applied (doc/design/SYMBOLIC-FORTH.md
-/// 14): its own `_`s, by their tokens' addresses, and the values they take,
-/// the deepest first. Those known only at run time wait on the scratch
-/// stack, the deepest on top, as `dip`'s value does.
-struct Args {
+/// The inputs of a bracket being applied (doc/design/SYMBOLIC-FORTH.md
+/// 14): its letters, by their tokens' addresses, in the order they run, and
+/// the places they name; the values at those places, taken when it was
+/// applied; and the places of those known only at run time, which wait on
+/// the scratch stack, the one used last at the bottom, as `dip`'s value
+/// does. The first `given` letters were put on the stack as it was applied.
+struct Inputs {
     owns: Vec<usize>,
-    vals: Vec<Jdg>,
-    next: usize,
+    places: Vec<usize>,
+    vals: Vec<Option<Jdg>>,
+    slots: Vec<usize>,
+    given: usize,
 }
 
-/// A bracket's arguments: the `_`s of its code, in the order written, by
-/// their tokens' addresses. Those of a bracket inside it, a string among
-/// them, are that bracket's.
-fn args_in(toks: &[Token]) -> Vec<usize> {
+/// A letter applied by `var#`, `a var# .`, at `i`: its letter.
+fn letter_at(toks: &[Token], i: usize) -> Option<u8> {
+    match (&toks[i].tok, toks.get(i + 1), toks.get(i + 2)) {
+        (Tok::Name(l), Some(v), Some(a))
+            if read::is_variable(l)
+                && matches!(&v.tok, Tok::Name(v) if is_var(v))
+                && a.tok == Tok::Apply =>
+        {
+            Some(l.as_bytes()[0])
+        }
+        _ => None,
+    }
+}
+
+/// The place a letter names, from the top (doc/design/SYMBOLIC-FORTH.md
+/// 14): `a` the first, and `x`, `y` and `z` the first three, as math names
+/// them, so `w` is the twenty-third.
+fn place(l: u8) -> usize {
+    match l {
+        b'x'..=b'z' => (l - b'x') as usize + 1,
+        l => (l - b'a') as usize + 1,
+    }
+}
+
+/// A bracket's letters, in the order written: each one's token's address,
+/// the place it names, and where it is. Those of a bracket inside it, a
+/// string among them, are that bracket's.
+fn letters_in(toks: &[Token]) -> Vec<(usize, usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < toks.len() {
-        match &toks[i].tok {
-            Tok::Open(_) => i = matching(toks, i),
-            Tok::Name(n) if &**n == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) => {
-                out.push(&toks[i] as *const Token as usize);
-            }
-            _ => {}
+        if let Tok::Open(_) = toks[i].tok {
+            i = matching(toks, i);
+        } else if let Some(l) = letter_at(toks, i) {
+            out.push((&toks[i] as *const Token as usize, place(l), i));
+            i += 2;
         }
         i += 1;
     }
     out
+}
+
+/// Code to run after other code, as composing does: as it is, or, if it
+/// names its inputs, a quotation applied, `[ … ] .`, so that its letters
+/// are its own (doc/design/SYMBOLIC-FORTH.md 14).
+fn applied(code: &[Token], at: Pos) -> Vec<Token> {
+    if letters_in(code).is_empty() {
+        return code.to_vec();
+    }
+    let tok = |tok| Token { tok, pos: at };
+    std::iter::once(tok(Tok::Open(b'[')))
+        .chain(code.iter().cloned())
+        .chain([tok(Tok::Close(b']')), tok(Tok::Apply)])
+        .collect()
+}
+
+/// How many inputs a bracket takes for its letters: the place of the
+/// deepest it names.
+fn inputs_of(toks: &[Token]) -> usize {
+    letters_in(toks).iter().map(|u| u.1).max().unwrap_or(0)
+}
+
+/// The ordinal of a place, for a message.
+fn ordinal(n: usize) -> String {
+    match n {
+        1 => "first".into(),
+        2 => "second".into(),
+        3 => "third".into(),
+        n if n % 10 == 1 && n != 11 => format!("{n}st"),
+        n if n % 10 == 2 && n != 12 => format!("{n}nd"),
+        n if n % 10 == 3 && n != 13 => format!("{n}rd"),
+        n => format!("{n}th"),
+    }
 }
 
 /// A signature: the input patterns, deepest first, and the outputs it
@@ -713,8 +768,8 @@ pub struct Stage {
     floor: usize,
     /// Open array and map literals.
     literals: Vec<Literal>,
-    /// The arguments of the brackets being applied, the innermost last.
-    args: Vec<Args>,
+    /// The inputs of the brackets being applied, the innermost last.
+    inputs: Vec<Inputs>,
     /// Families being applied, with the types they were applied to, so that
     /// one applying itself to the same types is caught.
     active: Vec<Key>,
@@ -888,10 +943,10 @@ fn definitions(toks: &[Token]) -> impl Iterator<Item = Rc<str>> + '_ {
     })
 }
 
-/// Whether a name applied names a word: not a meta-op, `!` or `;`, nor an
-/// argument, `_`, nor a variable.
+/// Whether a name applied names a word: not a meta-op, `!` or `;`, nor a
+/// variable.
 fn names(n: &str) -> bool {
-    !matches!(n, "!" | ";" | "_") && !read::is_variable(n)
+    !matches!(n, "!" | ";") && !read::is_variable(n)
 }
 
 fn matching(toks: &[Token], i: usize) -> usize {
@@ -958,7 +1013,7 @@ impl Stage {
             code: Vec::new(),
             floor: 0,
             literals: Vec::new(),
-            args: Vec::new(),
+            inputs: Vec::new(),
             active: Vec::new(),
             pos: Pos::default(),
             steps: 0,
@@ -1050,7 +1105,7 @@ impl Stage {
         self.code.clear();
         self.floor = 0;
         self.literals.clear();
-        self.args.clear();
+        self.inputs.clear();
         self.active.clear();
         self.frames.clear();
         self.effects = 0;
@@ -1138,11 +1193,12 @@ impl Stage {
                 Tok::Int(n) => self.push(INT_LIT, Val::Int(*n)),
                 Tok::Dec(d, s) => self.push(DEC_LIT, Val::Dec(*d, *s)),
                 Tok::Ratio(t) => self.push(RATIO_LIT, Val::Ratio(t.clone())),
-                Tok::Name(s)
-                    if &**s == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
-                {
-                    self.arg(t as *const Token as usize)?;
-                    i += 1;
+                // A letter in code, `a var# .`, is an input by its place, of
+                // the bracket it is written in (doc/design/SYMBOLIC-FORTH.md
+                // 14); in a signature, run over types, it is a type.
+                Tok::Name(s) if self.in_bracket == 0 && letter_at(toks, i).is_some() => {
+                    self.letter(t as *const Token as usize, s.as_bytes()[0] as char)?;
+                    i += 2;
                 }
                 Tok::Name(s) => self.push(SYMBOL, Val::Name(s.clone(), t.pos)),
                 Tok::Apply => self.apply()?,
@@ -1944,8 +2000,9 @@ impl Stage {
     /// `a var# .`: a variable of a one-letter name, which its bracket fills
     /// (doc/design/SYMBOLIC-FORTH.md 7): in a signature a type, filled by
     /// matching, `< a a >< a >`. A letter is read as one, and a letter's
-    /// symbol, `a'`, is a value to match, as any symbol is. In a body a
-    /// letter is an input by its place (6.14), not built yet.
+    /// symbol, `a'`, is a value to match, as any symbol is. In code a letter
+    /// is an input by its place (6.14), which `run` gives where the letter
+    /// is written, so here it is one made otherwise.
     fn var(&mut self) -> Result<()> {
         let j = self.stack.pop().expect("matched");
         let n = match &j.val {
@@ -1962,10 +2019,10 @@ impl Stage {
         };
         if self.in_bracket == 0 {
             return Err(self.err(
-                Kind::Limit,
+                Kind::Mismatch,
                 format!(
-                    "`{n}` in a body is an input by its place, which is not built yet \
-                     (doc/design/SYMBOLIC-FORTH.md 14); the symbol is `{n}'`"
+                    "a letter is an input of the bracket it is written in, `{n} var# .`, \
+                     and this `{n}` was not written before `var#`"
                 ),
             ));
         }
@@ -2804,7 +2861,7 @@ impl Stage {
             self.floor,
             self.literals.len(),
             self.effects,
-            self.args.len(),
+            self.inputs.len(),
         );
         self.active.push(key);
         let r = self.resolve(name, arity, at, false);
@@ -2817,7 +2874,7 @@ impl Stage {
                 self.floor = saved.2;
                 self.literals.truncate(saved.3);
                 self.effects = saved.4;
-                self.args.truncate(saved.5);
+                self.inputs.truncate(saved.5);
                 self.call_instance(name, arity)
             }
             r => r,
@@ -4169,9 +4226,9 @@ impl Stage {
         let mut ins = 0;
         let mut items: Vec<Item> = Vec::new();
         self.effect_on(toks, 0..toks.len(), ns, visiting, &mut items, &mut ins)?;
-        // Its arguments are taken first, so they are inputs beneath those its
-        // code reaches.
-        Some((ins + args_in(toks).len(), items.len()))
+        // Its inputs are taken first, so they are beneath those its code
+        // reaches.
+        Some((ins + inputs_of(toks), items.len()))
     }
 
     /// What code in `toks[span]` does to the items it finds, counting in
@@ -4190,12 +4247,10 @@ impl Stage {
             match &toks[i].tok {
                 Tok::Int(n) => items.push(Item::Int(*n)),
                 Tok::Dec(..) | Tok::Ratio(_) => items.push(Item::Other),
-                // An argument, taken before the code ran.
-                Tok::Name(s)
-                    if &**s == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
-                {
+                // A letter, an input taken before the code ran.
+                Tok::Name(_) if letter_at(toks, i).is_some() => {
                     items.push(Item::Other);
-                    i += 1;
+                    i += 2;
                 }
                 Tok::Name(s) => items.push(Item::Name(s.clone())),
                 Tok::Open(_) => {
@@ -4204,7 +4259,7 @@ impl Stage {
                         None => items.push(Item::Quote(i + 1, j)),
                         Some("sig#") => items.push(Item::Bracket(i + 1, j)),
                         // A sequence, a map or a string takes what its
-                        // code takes, its arguments among them.
+                        // code takes, its inputs among them.
                         Some(_) => {
                             let (k, _) = self.effect_in(&toks[i + 1..j], ns, visiting)?;
                             take(items, ins, k);
@@ -5202,7 +5257,8 @@ impl Stage {
             Prim::Compose => {
                 let r = self.words_of(name)?;
                 let q = self.words_of(name)?;
-                let words: Vec<Token> = q.iter().chain(r.iter()).cloned().collect();
+                let mut words = applied(&q, self.pos);
+                words.extend(applied(&r, self.pos));
                 self.push(QUOTE, Val::Quote(words.into()));
             }
             Prim::Def => self.semicolon()?,
@@ -5587,60 +5643,186 @@ impl Stage {
         r
     }
 
-    /// Applies a bracket's code, its `_`s taking its arguments first
+    /// Applies a bracket's code, its letters taking its inputs first
     /// (doc/design/SYMBOLIC-FORTH.md 14).
     fn run_quote(&mut self, q: &[Token]) -> Result<()> {
-        let owns = args_in(q);
-        if owns.is_empty() {
+        let uses = letters_in(q);
+        if uses.is_empty() {
             return self.run(q);
         }
-        self.take_args(owns)?;
-        let n = self.args.len();
+        self.take_inputs(q, uses, true)?;
+        let n = self.inputs.len();
         let r = self.run(q);
-        self.args.truncate(n - 1);
+        self.inputs.truncate(n - 1);
         r
     }
 
-    /// Takes a bracket's arguments from the top of the stack, one for each
-    /// of its `_`s: those known only at run time go to the scratch stack,
-    /// so its code may reach below them.
-    fn take_args(&mut self, owns: Vec<usize>) -> Result<()> {
-        let k = owns.len();
+    /// Takes a bracket's inputs as it is applied (doc/design/SYMBOLIC-FORTH.md
+    /// 14): as many as its deepest letter names, from the top, those no
+    /// letter names dropped, so its code may reach below them. Those its
+    /// letters name once its code has begun wait, those known only at run
+    /// time on the scratch stack, the one used last at the bottom, so that
+    /// letters in the stack's order give the plain word. If `given`, the
+    /// letters its code begins with are given now, the inputs copied and
+    /// moved into their places; a literal's are not, its elements being
+    /// what its code leaves above its inputs.
+    fn take_inputs(
+        &mut self,
+        q: &[Token],
+        uses: Vec<(usize, usize, usize)>,
+        given: bool,
+    ) -> Result<()> {
+        let k = uses.iter().map(|u| u.1).max().unwrap_or(0);
+        let have = self.stack.len() - self.floor;
+        if have < k {
+            let i = uses.iter().find(|u| u.1 == k).expect("the deepest").2;
+            let Tok::Name(l) = &q[i].tok else {
+                unreachable!("a letter")
+            };
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "`{l}`, at {}, is the {} input from the top, and {} in reach",
+                    q[i].pos,
+                    ordinal(k),
+                    match have {
+                        1 => "1 is".to_string(),
+                        h => format!("{h} are"),
+                    }
+                ),
+            ));
+        }
         self.need(k)?;
-        let mut vals = Vec::with_capacity(k);
-        for _ in 0..k {
-            let j = self.stack.pop().expect("needed");
+        let base = self.stack.len() - k;
+        let places: Vec<usize> = uses.iter().map(|u| u.1).collect();
+        let first = if given {
+            uses.iter()
+                .enumerate()
+                .take_while(|(n, u)| u.2 == 3 * n)
+                .count()
+        } else {
+            0
+        };
+        let last = |p: usize| places.iter().rposition(|&q| q == p);
+        let mut wait: Vec<usize> = Vec::new();
+        for &p in &places[first..] {
+            if !wait.contains(&p) {
+                wait.push(p);
+            }
+        }
+        wait.sort_by_key(|&p| last(p));
+        let order: Vec<usize> = places[..first]
+            .iter()
+            .chain(&wait)
+            .map(|&p| k - p)
+            .collect();
+        self.shuffle(base, &order)?;
+        let mut vals = vec![None; k + 1];
+        let mut slots = Vec::new();
+        for &p in wait.iter().rev() {
+            let j = self.stack.pop().expect("shuffled");
             if !j.known() {
                 self.emit(Op::Prim(P::ScratchPush));
+                slots.push(p);
             }
-            vals.push(j);
+            vals[p] = Some(j);
         }
-        vals.reverse();
-        self.args.push(Args {
-            owns,
+        self.inputs.push(Inputs {
+            owns: uses.iter().map(|u| u.0).collect(),
+            places,
             vals,
-            next: 0,
+            slots,
+            given: first,
         });
         Ok(())
     }
 
-    /// `_`: the next argument of the bracket it is written in, the first
-    /// written the deepest.
-    fn arg(&mut self, at: usize) -> Result<()> {
-        let Some(f) = self.args.iter().rposition(|f| f.owns.contains(&at)) else {
+    /// A letter, `a var# .`: the input at its place, of the bracket it is
+    /// written in (doc/design/SYMBOLIC-FORTH.md 14). One known only at run
+    /// time is taken from the scratch stack where it is used last, if it is
+    /// on top, and copied before; those on top used for the last time then
+    /// go.
+    fn letter(&mut self, at: usize, l: char) -> Result<()> {
+        let Some(f) = self.inputs.iter().rposition(|f| f.owns.contains(&at)) else {
             return Err(self.err(
                 Kind::Syntax,
-                "`_` is an argument of the bracket it is written in, and this one is in none",
+                format!(
+                    "`{l}` is an input of the bracket it is written in, and this one is in \
+                     none; the symbol is `{l}'`"
+                ),
             ));
         };
-        let f = &mut self.args[f];
-        let j = f.vals[f.next].clone();
-        f.next += 1;
+        let f = &mut self.inputs[f];
+        let u = f.owns.iter().position(|&a| a == at).expect("owned");
+        if u < f.given {
+            return Ok(());
+        }
+        let p = f.places[u];
+        let j = f.vals[p].clone().expect("taken");
+        let mut ops = Vec::new();
         if !j.known() {
-            self.emit(Op::Prim(P::ScratchPop));
+            let rest = &f.places[u + 1..];
+            match f.slots.iter().rev().position(|&s| s == p).expect("waiting") {
+                0 if !rest.contains(&p) => {
+                    ops.push(Op::Prim(P::ScratchPop));
+                    f.slots.pop();
+                }
+                0 => ops.push(Op::Prim(P::ScratchPeek)),
+                d => ops.extend([Op::Lit(d as u64), Op::Prim(P::ScratchAt)]),
+            }
+            while f.slots.last().is_some_and(|s| !rest.contains(s)) {
+                ops.extend([Op::Prim(P::ScratchPop), Op::Prim(P::Drop)]);
+                f.slots.pop();
+            }
+        }
+        for op in ops {
+            self.emit(op);
         }
         self.stack.push(j);
         Ok(())
+    }
+
+    /// Puts in place of the values from `base` those `order` names by their
+    /// places from `base`, the first the deepest: one named twice is copied,
+    /// and one named nowhere dropped. Those in order already stay, and the
+    /// rest are brought up in turn, each moved where it is named last and
+    /// copied before. A known value moves for nothing.
+    fn shuffle(&mut self, base: usize, order: &[usize]) -> Result<()> {
+        let k = self.stack.len() - base;
+        let mut at: Vec<Option<usize>> = (0..k).map(|v| Some(base + v)).collect();
+        for v in (0..k).rev().filter(|v| !order.contains(v)) {
+            if !self.lift(&mut at, v).known() {
+                self.emit(Op::Prim(P::Drop));
+            }
+        }
+        let left: Vec<usize> = (0..k).filter(|&v| at[v].is_some()).collect();
+        let kept = left.iter().zip(order).take_while(|(a, b)| a == b).count();
+        for (n, &v) in order.iter().enumerate().skip(kept) {
+            if left[kept..].contains(&v) && !order[n + 1..].contains(&v) {
+                let j = self.lift(&mut at, v);
+                self.stack.push(j);
+            } else {
+                self.copy(at[v].expect("not moved"))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Takes value `v` of those `at` follows from where it is, its cell, if
+    /// it has one, brought to the top.
+    fn lift(&mut self, at: &mut [Option<usize>], v: usize) -> Jdg {
+        let i = at[v].take().expect("not moved");
+        for a in at.iter_mut().flatten() {
+            if *a > i {
+                *a -= 1;
+            }
+        }
+        let j = self.stack.remove(i);
+        if !j.known() {
+            let above = cells(&self.stack[i..]);
+            self.roll(above + 1);
+        }
+        j
     }
 
     /// A word followed through other names for it, words whose one clause
@@ -6239,7 +6421,7 @@ impl Stage {
         let at = self.pos;
         let mut q: Vec<Token> = Vec::new();
         for _ in 0..times {
-            q.extend(code.iter().cloned());
+            q.extend(applied(&code, at));
         }
         for _ in 0..products {
             q.push(Token {
@@ -7603,7 +7785,7 @@ impl Stage {
             self.types.intern(Term::Vec(n, parts[0]))
         };
         self.floor = lit.floor;
-        self.args.pop();
+        self.inputs.pop();
         // Its elements all known, and no code since its mark, it is known.
         let known = self.stack[start..].iter().all(Jdg::known);
         if b == b')' && !runs && known && self.code.len() == lit.mark + 1 {
@@ -7714,11 +7896,11 @@ impl Stage {
     }
 
     /// A sequence or a map of what the quotation's code leaves. It is
-    /// applied where it stands, so its arguments are taken there
+    /// applied where it stands, so its inputs are taken there
     /// (doc/design/SYMBOLIC-FORTH.md 14), and its code reaches what `.`'s
     /// would, its elements being all it leaves, from as deep as it reached.
     fn quote_literal(&mut self, q: &[Token], bracket: u8, closed: Pos) -> Result<()> {
-        self.take_args(args_in(q))?;
+        self.take_inputs(q, letters_in(q), false)?;
         let mark = self.code.len();
         self.emit(Op::Prim(P::Mark));
         let start = self.stack.len();
@@ -7780,14 +7962,14 @@ impl Stage {
 
     /// `[ … ] str# !`, as `"…"` is read
     /// (doc/design/SYMBOLIC-FORTH.md 15): its code runs where it stands,
-    /// taking its arguments, and each value it leaves is written, in order,
+    /// taking its inputs, and each value it leaves is written, in order,
     /// into one string, a string as its text, a symbol known as its name and
     /// any other value by `>string`. Its code reaches what `.`'s would, as a
     /// sequence's does (14), and the values it leaves are all it writes, from
     /// as deep as it reached.
     fn quote_text(&mut self, q: &[Token]) -> Result<()> {
-        self.take_args(args_in(q))?;
-        let n = self.args.len();
+        self.take_inputs(q, letters_in(q), false)?;
+        let n = self.inputs.len();
         let start = self.stack.len();
         self.literals.push(Literal {
             bracket: b'"',
@@ -7803,7 +7985,7 @@ impl Stage {
             r
         });
         let lit = self.literals.pop().expect("pushed");
-        self.args.truncate(n - 1);
+        self.inputs.truncate(n - 1);
         r?;
         let start = lit.from();
         self.reached(start);
@@ -7812,7 +7994,7 @@ impl Stage {
     }
 
     /// Runs a string's code, and writes what it has left as soon as the code
-    /// after reaches none of it, before a symbol or an argument: so a hole's
+    /// after reaches none of it, before a symbol or a letter: so a hole's
     /// value is written where it is made, and not brought up to be written
     /// once all have run. What `each` and its kin reach is not known for
     /// sure, so before code holding a quotation, nothing is written yet.
@@ -7826,10 +8008,10 @@ impl Stage {
             };
             let end = match &q[i].tok {
                 Tok::Open(_) => matching(q, i) + 1,
-                Tok::Name(s) if &**s == "_" && applied(i) => i + 2,
+                Tok::Name(_) if letter_at(q, i).is_some() => i + 3,
                 _ => i + 1,
             };
-            let next = matches!(&q[i].tok, Tok::Name(s) if &**s == "_" || !applied(i));
+            let next = matches!(&q[i].tok, Tok::Name(_) if !applied(i));
             if i > 0 && next && !q[i..].iter().any(|t| matches!(t.tok, Tok::Open(_))) {
                 let (mut items, mut ins) = (Vec::new(), 0);
                 let known = self

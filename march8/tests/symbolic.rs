@@ -68,7 +68,7 @@ fn every_application_is_a_dot() {
     // text, each run a symbol, its escapes read, and its holes' code.
     assert_eq!(
         lowered(r#""say \"hi\" \\ \_ and \[ 1 2 + ]" """#),
-        r#"[ 'say "hi" \ ' _ . ' and ' 1 int# ! 2 int# ! + . ] str# ! [ ] str# !"#
+        r#"[ 'say "hi" \ ' a var# . ' and ' 1 int# ! 2 int# ! + . ] str# ! [ ] str# !"#
     );
 }
 
@@ -199,8 +199,14 @@ fn a_letter_is_a_variable_and_its_symbol_a_value() {
     )
     .unwrap();
     assert_eq!(s.show(), "<2> 2 1");
-    // In a body a letter is an input by its place, not built yet.
-    let e = Session::new().eval("1 [ a ] .").unwrap_err();
-    assert_eq!(e.kind, march8::Kind::Limit);
+    // In code a letter is an input by its place (14, step 5), the same
+    // word given it, and outside a bracket it is none.
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval("6 int# ! 2 int# ! [ a var# . b var# . -+ . ] .")
+        .unwrap();
+    assert_eq!(s.show(), "<1> -4");
+    let e = Session::new().eval("1 a").unwrap_err();
+    assert_eq!(e.kind, march8::Kind::Syntax);
     assert!(e.msg.contains("the symbol is `a'`"), "{}", e.msg);
 }

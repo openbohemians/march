@@ -43,7 +43,8 @@ steps 2 and 3, each High Stack form read as Low Stack writes it (section
 compiling, so a quotation is a sequence then, and at run time only code
 (6.30). Revised 2026-10-22: Low Stack's step 4, a string read as a
 quotation of its text and code made text, `[ … ] str# !`, and unsealed
-as a sequence is (6.15, section 7). Built.
+as a sequence is (6.15, section 7). Built. And step 5, letters as places,
+`_` read as the letter of its place (6.14, section 7). Built.
 
 ## 1. What it is
 
@@ -468,7 +469,8 @@ Settled (Thomas, 2026-10-14), not built:
     variable only above it. A body's letter is given by the same word,
     `b var# .` (section 7). Built in march8 for signatures (2026-10-21):
     the reader writes every letter as `a var# .`, so a letter's symbol,
-    `a'`, is the symbol in a signature too, a value to match.
+    `a'`, is the symbol in a signature too, a value to match. And for code
+    (2026-10-22), where a letter is an input by its place (14).
 12. **Quoting.** A quote inside a quoted symbol is doubled, `'it''s'`,
     the one rule the reader needs to find where `'…'` ends. A symbol holds
     its characters as they are, newlines among them. Escapes, `\n;` and
@@ -517,7 +519,9 @@ Settled (Thomas, 2026-10-14), not built:
     [ _ 2 / ]                [ a var# . 2 int# ! / . ]
     ```
 
-    March8 lowers `_` as `_ .`, a word, until letters are built.
+    Built in march8 (2026-10-22): the reader counts a bracket's `_`s and
+    writes each as its letter, and refuses a bracket with both, and `_` in
+    a signature, whose letters are types.
 
     This replaces holes filled first (2026-10-14): a bracket's values
     written into its code where it stood, a hole in a nested bracket the
@@ -581,7 +585,28 @@ Settled (Thomas, 2026-10-14), not built:
     nothing is captured. In a signature a letter is still a type variable,
     filled by matching (section 2), so in `at: < a ary i64 >< a > [ … ]`
     the signature's `a` and the body's are two variables. In Low Stack a
-    body's letter is `b var# .` (section 7). Not built yet.
+    body's letter is `b var# .` (section 7).
+
+    Built in march8 (2026-10-22). A bracket takes its inputs as it is
+    applied, so its code may reach below them, and the stage gives each
+    letter its input where it is written, the input of the bracket it is
+    written in. The letters a quotation or a body begins with are a
+    shuffle, done on the stack: each input copied, or moved where it is
+    named last, and those in order already never moving, so `[ b a b + ]`
+    compiles as `over +`, `[ a b / ]` as `swap /` and `[ c a ]` as
+    `swap drop`. Those named once its code has begun wait, those known
+    only at run time on the scratch stack, the one used last at the
+    bottom, each taken from there where it is used last if it is on top
+    and copied before; so letters in the stack's order, as `_`s are,
+    compile as the plain words do, and every `_` compiles as it did. A
+    literal's and a string's letters all wait, its elements being what its
+    code leaves. A bracket given fewer inputs than its deepest letter
+    names says which: "`n`, at 1:3, is the 14th input from the top". A
+    quotation's power applies its code each time, `[ a 1 + ]^3`, and
+    `compose` each quotation that names its inputs, `[ … ] .`, so each
+    time its letters are its own and composing is composition still.
+    `concat` joins tokens, code taken as data being Low Stack's (6.30), so
+    `[ a ] [ a ] concat` is `[ a a ]`, a `dup`.
 
     Names can be an editor's (Thomas, 2026-10-17, an idea). A letter being
     only a place, a word may carry a key naming its places, and an editor
@@ -1417,8 +1442,8 @@ Types are words (section 2).
    reader writes the form as Low Stack does, by spelling alone, every
    letter being `a var# .` in a body too; the stage no longer reads it,
    and the word that gives it a meaning is the core's, `var#`. A
-   message writes it back as it was written. In a body `var#` says that
-   places are not built (step 5).
+   message writes it back as it was written. In a body `var#` said that
+   places were not built until step 5.
 3. **Brackets**, the largest step: `( … )` and `{ … }` unsealed (6.14)
    and lowered to `seq# !` and `map# !`, and `< … >` lowered to `sig#
    !`, which `;` takes (6.8). Lowered 2026-10-21, as step 2 was: the
@@ -1441,7 +1466,12 @@ Types are words (section 2).
    writes `"…"` back. Unsealed with it (6.14). The compiled code is the
    same, the core's and every example's.
 5. **Letters as places**, built in High Stack (6.14), lowering to
-   `b var# .`, with each `_` lowered to its letter.
+   `b var# .`, with each `_` lowered to its letter. Built 2026-10-22, as
+   steps 2 to 4 were: the reader writes each bracket's `_`s as their
+   letters, and the stage reads no `_`. A letter in code is `a var# .`
+   still, the stage giving it its place where it is written, since the
+   place is its bracket's. The compiled code is the same, the core's and
+   every example's, and a message names the letter, `\_` being `a`.
 6. **Rules**, as above, matched in lookup against the symbol `.`
    applies, not the word as typed (6.25); then the syllogism runs
    lowered. Built 2026-10-20: a recognizer is a rewrite rule, the core's

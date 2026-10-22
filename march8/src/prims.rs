@@ -126,7 +126,8 @@ pub enum Prim {
     Reverse,
     ArySlice,
     StrSlice,
-    /// `q r compose`: one quotation, q's words then r's.
+    /// `q r compose`: one quotation, q's words then r's, each that names
+    /// its inputs applied as a quotation, so its letters are its own.
     Compose,
     /// `xs q within`: q run on the array's last elements as its stack.
     Within,

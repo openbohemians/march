@@ -91,8 +91,110 @@ fn read_form(src: &str, symbols: &Symbols, symbolic: bool) -> Result<Vec<Token>>
         line: 1,
         col: 1,
         symbolic,
+        args: Vec::new(),
     };
-    tokens(&mut r, symbols, None)
+    let toks = tokens(&mut r, symbols, None)?;
+    places(toks, &r.args)
+}
+
+/// High Stack's `_`s written as letters (doc/design/SYMBOLIC-FORTH.md 14):
+/// a bracket's counted, and each written as the letter of its place, the
+/// first written the deepest, so `[ _ _ / ]` is `[ b a / ]`. A bracket
+/// names its inputs by `_`s or by letters, never both, and a signature's
+/// letters are types.
+fn places(toks: Vec<Token>, args: &[Pos]) -> Result<Vec<Token>> {
+    if args.is_empty() {
+        return Ok(toks);
+    }
+    let arg = |i: usize| {
+        toks[i].tok == Tok::Name("_".into())
+            && args.contains(&toks[i].pos)
+            && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply)
+    };
+    let letter = |i: usize| {
+        matches!(&toks[i].tok, Tok::Name(l) if is_variable(l))
+            && toks
+                .get(i + 1)
+                .is_some_and(|t| t.tok == Tok::Name("var#".into()))
+    };
+    // Each bracket open: its `_`s, and a letter in it.
+    let mut open: Vec<(Vec<usize>, Option<Pos>)> = Vec::new();
+    let mut letters = std::collections::HashMap::new();
+    for i in 0..toks.len() {
+        match &toks[i].tok {
+            Tok::Open(_) => open.push((Vec::new(), None)),
+            Tok::Close(_) => {
+                let (us, named) = open.pop().expect("brackets nest");
+                let Some(&first) = us.first() else { continue };
+                let at = Some(toks[first].pos);
+                if toks
+                    .get(i + 1)
+                    .is_some_and(|t| t.tok == Tok::Name("sig#".into()))
+                {
+                    return Err(Error::new(
+                        Kind::Syntax,
+                        at,
+                        "`_` is an input of a bracket of code, and a signature's letters are \
+                         types, `< a a >< a >`",
+                    ));
+                }
+                if let Some(p) = named {
+                    return Err(Error::new(
+                        Kind::Syntax,
+                        at,
+                        format!(
+                            "a bracket names its inputs by `_`s or by letters, not both, and \
+                             this one has a letter at {p}: `[ _ _ / ]` is `[ b a / ]`"
+                        ),
+                    ));
+                }
+                if us.len() > 23 {
+                    return Err(Error::new(
+                        Kind::Limit,
+                        at,
+                        "a bracket names at most 23 inputs, `a` to `w`",
+                    ));
+                }
+                for (n, &u) in us.iter().enumerate() {
+                    letters.insert(u, (b'a' + (us.len() - n - 1) as u8) as char);
+                }
+            }
+            _ if arg(i) => match open.last_mut() {
+                Some(o) => o.0.push(i),
+                None => {
+                    return Err(Error::new(
+                        Kind::Syntax,
+                        Some(toks[i].pos),
+                        "`_` is an input of the bracket it is written in, and this one is in none",
+                    ));
+                }
+            },
+            _ if letter(i) => {
+                if let Some(o) = open.last_mut() {
+                    o.1.get_or_insert(toks[i].pos);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::with_capacity(toks.len() + letters.len());
+    for (i, t) in toks.into_iter().enumerate() {
+        match letters.get(&i) {
+            Some(l) => {
+                let pos = t.pos;
+                out.push(Token {
+                    tok: Tok::Name(l.to_string().into()),
+                    pos,
+                });
+                out.push(Token {
+                    tok: Tok::Name("var#".into()),
+                    pos,
+                });
+            }
+            None => out.push(t),
+        }
+    }
+    Ok(out)
 }
 
 /// Reads tokens to the end, or, for a hole opened at `hole`, to the `]` that
@@ -242,6 +344,11 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             // (doc/design/SYMBOLIC-FORTH.md 18).
             (stem, stem == ";")
         };
+        // `_` is an input, written as a letter once its bracket's are
+        // counted (doc/design/SYMBOLIC-FORTH.md 14).
+        if stem == "_" && applies && !r.symbolic {
+            r.args.push(pos);
+        }
         // A quotation's power is a spelling (doc/design/SYMBOLIC-FORTH.md
         // 21): `[ dup + ]^3` reads as `[ dup + ] 3 power# .`, still a
         // quotation. A name's power and subscript stay in its name, `dup_2^3`,
@@ -606,6 +713,8 @@ struct Reader<'a> {
     col: u32,
     /// Reading Symbolic Forth, where no name applies by itself.
     symbolic: bool,
+    /// Where High Stack's `_`s were read, which `places` writes as letters.
+    args: Vec<Pos>,
 }
 
 impl<'a> Reader<'a> {
@@ -759,7 +868,7 @@ impl<'a> Reader<'a> {
                         out.extend(code);
                         from = self.pos();
                     }
-                    // `\_` is an input, `\[ _. ]`, unless a subscript's name
+                    // `\_` is an input, as `_` is, unless a subscript's name
                     // and `;` follow: `\_1;` is `₁`.
                     Some('_') => {
                         let mut next = self.src[self.at..].chars();
@@ -776,6 +885,7 @@ impl<'a> Reader<'a> {
                             for tok in [Tok::Name("_".into()), Tok::Apply] {
                                 out.push(Token { tok, pos: here });
                             }
+                            self.args.push(here);
                             from = self.pos();
                         }
                     }
@@ -1249,7 +1359,8 @@ mod tests {
             toks(r#""\_ and \[ 1 2 + ]!" """#),
             [
                 string(&[
-                    n("_"),
+                    n("a"),
+                    n("var#"),
                     Tok::Apply,
                     n(" and "),
                     Tok::Int(1),

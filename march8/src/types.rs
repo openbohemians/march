@@ -89,6 +89,8 @@ pub const SEQ_LIT: Type = 13;
 pub const MAP_LIT: Type = 14;
 pub const SIG_LIT: Type = 15;
 pub const STR_LIT: Type = 16;
+/// Every trap's type, interned after the base types.
+pub const TRAP: Type = 17;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Term {
@@ -117,6 +119,12 @@ pub enum Term {
     Tuple(u32),
     /// In a pattern, any tuple: a class, as `atom` is.
     AnyTuple,
+    /// A failure being handled, `k trap` (doc/design/SYMBOLIC-FORTH.md 29):
+    /// its kind is known only when it fails, so every trap has this type,
+    /// and a pattern of one kind, `no-file' trap`, is tested as the program
+    /// runs, as a union's member is. At run time, a vector of its message
+    /// and its kind.
+    Trap,
 }
 
 /// The constructors a bracket or `.` can apply.
@@ -126,6 +134,7 @@ pub enum Con {
     Vec,
     Map,
     Or,
+    Trap,
 }
 
 pub struct Types {
@@ -157,6 +166,7 @@ impl Types {
         for (b, _) in Base::ALL {
             t.intern(Term::Base(b));
         }
+        t.intern(Term::Trap);
         t
     }
     pub fn intern(&mut self, term: Term) -> Type {
@@ -183,11 +193,22 @@ impl Types {
     pub fn is_pattern(&self, t: Type) -> bool {
         match self.term(t) {
             Term::Var(_) | Term::Atom | Term::Or(..) | Term::AnyTuple => true,
-            Term::Base(_) | Term::Nat(_) => false,
+            Term::Base(_) | Term::Nat(_) | Term::Trap => false,
             Term::Tuple(r) => self.rows[r as usize].iter().any(|&e| self.is_pattern(e)),
             Term::Ary(e) => self.is_pattern(e),
             Term::Vec(n, e) | Term::Map(n, e) => self.is_pattern(n) || self.is_pattern(e),
         }
+    }
+    /// Whether a value of type `t` may hold one of type `x`: it is `x`, or
+    /// an array, a map, a tuple or a union of something that may.
+    pub fn holds(&self, t: Type, x: Type) -> bool {
+        t == x
+            || match self.term(t) {
+                Term::Ary(e) | Term::Vec(_, e) => self.holds(e, x),
+                Term::Map(k, v) | Term::Or(k, v) => self.holds(k, x) || self.holds(v, x),
+                Term::Tuple(r) => self.rows[r as usize].iter().any(|&e| self.holds(e, x)),
+                _ => false,
+            }
     }
     /// Whether `t` is a class: it matches types without binding them.
     pub fn is_class(&self, t: Type) -> bool {
@@ -257,7 +278,7 @@ impl Types {
                 let (a, b) = (self.subst(a, env), self.subst(b, env));
                 self.union(a, b)
             }
-            Term::Base(_) | Term::Nat(_) => t,
+            Term::Base(_) | Term::Nat(_) | Term::Trap => t,
             Term::Ary(e) => {
                 let e = self.subst(e, env);
                 self.intern(Term::Ary(e))
@@ -301,6 +322,7 @@ impl Types {
                 format!("( {} )", es.join(" "))
             }
             Term::AnyTuple => "tuple".into(),
+            Term::Trap => "k trap".into(),
         }
     }
 }

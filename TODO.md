@@ -19,16 +19,16 @@ dressing on top of it. March is to build itself in time: do in March
 what can be, and keep the Rust a stone's throw from it (Thomas,
 2026-10-21).
 
-- **Handlers for traps,** a clause of the same word for its inputs and a
-  `k trap`, its kind in its type, then `kind` and `why` (SYMBOLIC-FORTH.md
-  6.29). Failing at run time is built (2026-10-22); the machine's own
-  failures, overflow and a file not read, are to be traps of their kinds.
 - **Where a trap happened,** reported from a table beside the code, since
   a position in the code would change a word's identity with its layout.
 - **`width#`'s test and `quote-power`'s cases in March,** as the identity
   search now is (SYMBOLIC-FORTH.md 6.6, 22).
 - **A `fold` over a quotation,** so March walks one past about sixty
   elements, depth's bound (SYMBOLIC-FORTH.md 6.6).
+- **Kinds joined by `or`,** `no-file' io' or trap`, a handler taking
+  either: `or` joins types, and a kind is a symbol (SYMBOLIC-FORTH.md
+  6.29). Finer kinds for the machine's failures go with it, a missing file
+  `no-file'` under `io'`.
 
 ## To think on
 

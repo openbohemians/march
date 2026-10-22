@@ -22,7 +22,10 @@ fn a_kind_or_a_message_and_a_kind() {
     // Anything else is no kind.
     let e = error("1 fail");
     assert_eq!(e.kind, Kind::Mismatch);
-    assert!(e.to_string().contains("and 1 (int#) is neither"), "{e}");
+    assert!(
+        e.to_string().contains("and 1 (int#) is none of them"),
+        "{e}"
+    );
     assert_eq!(error("( 1 no-file' ) fail").kind, Kind::Mismatch);
 }
 
@@ -129,4 +132,124 @@ fn what_is_sure_to_fail_fails_while_compiling() {
     let e = error("( 1 2 ) [ drop nope' fail ] each");
     assert_eq!(e.kind, Kind::Mismatch);
     assert!(e.to_string().contains("always fails"), "{e}");
+}
+
+#[test]
+fn a_handler_is_a_clause_for_the_inputs_and_a_trap() {
+    // When anything inside the word fails, its inputs come back, the trap
+    // goes on top, and the word is applied again, its handler chosen
+    // (doc/design/SYMBOLIC-FORTH.md 29). A file not read, at run time:
+    let size = "size: < string >< i64 > [ io.file.read length ] ; \
+                size: < string k trap >< i64 > [ drop drop 0 ] ;";
+    let mut s = Session::new();
+    s.eval(size).unwrap();
+    s.eval("\"no/such/file\" size").unwrap();
+    assert_eq!(s.show(), "<1> 0");
+    // Arithmetic known while compiling fails where it is handled as the
+    // program runs, so it is caught there too.
+    let sd = "sd: < i64 i64 > [ div ] ; sd: < i64 i64 k trap > [ drop drop drop 0 ] ;";
+    let mut s = Session::new();
+    s.eval(sd).unwrap();
+    s.eval("7 2 sd 5 0 sd").unwrap();
+    assert_eq!(s.show(), "<2> 3 0");
+    // A program's own failure, in a word it applies, and in a loop.
+    let ww = "ck: < 0 > [ ] ; ck: < i64 > [ no-good' fail ] ; \
+              ww: < i64 > [ ck 1 + ] ; ww: < i64 k trap > [ drop drop 99 ] ;";
+    let mut s = Session::new();
+    s.eval(ww).unwrap();
+    s.eval("( 0 3 0 )").unwrap();
+    s.eval("[ ww ] map").unwrap();
+    assert_eq!(s.show(), "<1> ( 1 99 1 )");
+    // Nothing fails, nothing is caught; its effect is the word's own.
+    let mut s = Session::new();
+    s.eval(sd).unwrap();
+    s.eval("sd' effect#").unwrap();
+    assert_eq!(s.show(), "<2> 2 1");
+}
+
+#[test]
+fn a_kind_in_the_type_chooses_the_handler() {
+    // `no-file' trap` before `k trap`, as `i64 ary` before `a ary`; a trap no
+    // handler takes goes on outward.
+    let sd = "sd: < i64 i64 > [ div ] ; sd: < i64 i64 arithmetic' trap > [ drop drop drop -1 ] ;";
+    let mut s = Session::new();
+    s.eval(sd).unwrap();
+    s.eval("5 0 sd").unwrap();
+    assert_eq!(s.show(), "<1> -1");
+    s.eval("sd: < i64 i64 k trap > [ drop drop drop -2 ] ;")
+        .unwrap();
+    s.eval("drop 5 0 sd").unwrap();
+    assert_eq!(s.show(), "<1> -1");
+    let mut s = Session::new();
+    s.eval("sd: < i64 i64 > [ div ] ; sd: < i64 i64 io' trap > [ drop drop drop -1 ] ;")
+        .unwrap();
+    let e = s.eval("5 0 sd").unwrap_err();
+    assert_eq!(e.to_string(), "arithmetic overflow, or division by zero");
+    // `kind` and `why`, its message or, with none, its kind's name.
+    let mut s = Session::new();
+    s.eval("gg: < i64 >< string > [ drop nope' fail ] ; gg: < i64 k trap >< string > [ why swap drop ] ;")
+        .unwrap();
+    s.eval("3").unwrap();
+    s.eval("gg").unwrap();
+    assert_eq!(s.show(), "<1> \"nope\"");
+    let mut s = Session::new();
+    s.eval(
+        "size: < string >< sym > [ io.file.read sym! ] ; \
+         size: < string k trap >< sym > [ kind swap drop ] ; \"no/such/file\" size",
+    )
+    .unwrap();
+    assert_eq!(s.show(), "<1> io'");
+}
+
+#[test]
+fn the_innermost_handler_catches() {
+    // A handler that fails passes the trap on, as it is.
+    let mut s = Session::new();
+    s.eval(
+        "in: < i64 > [ ( \"inner\" deep' ) fail ] ; in: < i64 k trap > [ fail ] ; \
+         out: < i64 >< string > [ in drop \"no\" ] ; out: < i64 k trap >< string > [ why swap drop ] ; \
+         1 out",
+    )
+    .unwrap();
+    assert_eq!(s.show(), "<1> \"inner\"");
+    // A recursion is handled at each application.
+    let mut s = Session::new();
+    s.eval(
+        "dn: < 0 >< i64 > [ bottom' fail ] ; dn: < i64 >< i64 > [ 1 -+ dn 1 + ] ; \
+         dn: < i64 k trap >< i64 > [ drop 100 + ] ; 3",
+    )
+    .unwrap();
+    s.eval("dn").unwrap();
+    assert_eq!(s.show(), "<1> 103");
+}
+
+#[test]
+fn a_trap_lives_only_while_it_is_handled() {
+    // A handler leaves what its word leaves, and never the trap.
+    let e =
+        error("sd: < i64 i64 > [ div ] ; sd: < i64 i64 k trap > [ swap drop swap drop ] ; 5 0 sd");
+    assert_eq!(e.kind, Kind::Mismatch);
+    assert!(e.to_string().contains("leaves its trap"), "{e}");
+    let e = error(
+        "sd: < i64 i64 > [ div ] ; sd: < i64 i64 k trap > [ ( a ) swap drop swap drop ] ; 5 0 sd",
+    );
+    assert!(e.to_string().contains("leaves its trap"), "{e}");
+    // It takes the inputs and the trap.
+    let e = error("sd: < i64 i64 > [ div ] ; sd: < i64 k trap > [ drop drop 0 ] ; 5 0 sd");
+    assert!(
+        e.to_string()
+            .contains("takes its inputs and a trap, 3 values"),
+        "{e}"
+    );
+    // `trap` takes its kind, or a letter for any.
+    let e = error("ff: < i64 trap > [ ] ;");
+    assert!(e.to_string().contains("`trap` takes a kind"), "{e}");
+    // A word that takes a trap is applied as any is, in a handler.
+    let mut s = Session::new();
+    s.eval(
+        "lg: < k trap > [ drop \"logged\" ] ; sd: < i64 i64 >< string > [ div drop \"ok\" ] ; \
+         sd: < i64 i64 k trap >< string > [ lg swap drop swap drop ] ; 5 0 sd 4 2 sd",
+    )
+    .unwrap();
+    assert_eq!(s.show(), "<2> \"logged\" \"ok\"");
 }

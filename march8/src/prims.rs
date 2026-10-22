@@ -164,8 +164,12 @@ pub enum Prim {
     /// `w n width#`: w applied n wide.
     Width,
     /// `x fail`: fails, by a kind, `no-file' fail`, or a message and a
-    /// kind, `( "can't read it" no-file' ) fail`.
+    /// kind, `( "can't read it" no-file' ) fail`, or a trap, as it is.
     Fail,
+    /// `t trap-kind` and `t trap-why`: a trap's kind, and its message,
+    /// empty if it has none (doc/design/SYMBOLIC-FORTH.md 29).
+    TrapKind,
+    TrapWhy,
     // A quotation's elements, as Low Stack holds them, while compiling.
     QuoteLength,
     QuoteAt,
@@ -606,6 +610,8 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::QuotePower, "quote-power", "< b c >", &[]),
     d(Prim::Width, "width#", "< b c >", &[]),
     d(Prim::Fail, "fail", "< a >", &[]),
+    d(Prim::TrapKind, "trap-kind", "< k trap >< sym >", &[]),
+    d(Prim::TrapWhy, "trap-why", "< k trap >< string >", &[]),
     d(Prim::QuoteLength, "quote-length", "< quote >< i64 >", &[]),
     d(Prim::QuoteAt, "quote-at", "< quote i64 >", &[]),
     d(

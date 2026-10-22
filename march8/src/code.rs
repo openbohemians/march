@@ -64,6 +64,7 @@ pub enum Primitive {
     Publish = 29,
     BlobCid = 30,
     BlobRead = 31,
+    // ( why kind -- ) Fails, by a kind and with a message, each text.
     Trap = 32,
     ScratchPush = 33,
     ScratchPop = 34,
@@ -225,6 +226,14 @@ pub enum Primitive {
     // literal whose code reached n cells below where it began
     // (doc/design/SYMBOLIC-FORTH.md 14), so its gather takes them too.
     Reach = 126,
+    // ( x1 … xm m -- x1 … xm 0 ) A handler for what follows, keeping the m
+    // cells on top: until `unhandle`, a trap puts the stack back as it was
+    // here, the m cells on it, then the trap, a vector of its message and
+    // its kind, and 1, and goes on from here (doc/design/SYMBOLIC-FORTH.md
+    // 29).
+    Handle = 127,
+    // ( -- ) The innermost handler is done with.
+    Unhandle = 128,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -354,6 +363,8 @@ impl Primitive {
         (Self::SymShow, "symbol-show"),
         (Self::TextJoin, "text-join"),
         (Self::Reach, "reach"),
+        (Self::Handle, "handle"),
+        (Self::Unhandle, "unhandle"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

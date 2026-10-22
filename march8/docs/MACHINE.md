@@ -1015,7 +1015,7 @@ in March cost what primitives did. A final call becomes a tail call, and a
 return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with forty-seven primitives added: `pick`; checked
+The machine is march7's, with fifty-four primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
@@ -1027,9 +1027,11 @@ array or map literal's mark by the cells its code reached below it;
 `vector-insert` and `vector-remove`; `union-make`, `union-tag` and
 `union-value`; `grade-ints`, `grade-floats` and `grade-texts`, and their
 `grade-down-` forms; `vector-keep`; `split`, `lines`, `words`, `lower` and
-`upper`; `parse-int` and `parse-float`, which leave a value and a flag; and
-`read-file` and `read-stdin`, whose failure is an `Io` error with the
-system's reason.
+`upper`; `snake-case`, `kebab-case`, `camel-case` and `pascal-case`;
+`symbol-show`; `parse-int` and `parse-float`, which leave a value and a
+flag; `read-file` and `read-stdin`, whose failure is an `Io` error with the
+system's reason; and `handle` and `unhandle`, which keep a word's inputs
+for its handlers while it runs (above, "Errors").
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -1092,6 +1094,25 @@ pair and are not as long, or too short for `within`'s quotation, by
 a position written in the code would make a word's identity depend on
 where its source is laid out, so it wants a table beside the code.
 
+**A trap is handled** by clauses of the word that take its inputs and a
+trap on top, `size: < string io' trap >< i64 > [ drop drop 0 ]`, the
+trap's kind in its type, or any kind, `k trap` (SYMBOLIC-FORTH.md 29,
+2026-10-22). Where such a word is applied, the machine's `handle` keeps
+the inputs that are values at run time, and `unhandle` lets them go when
+the word is done. A trap before then, `Error::Trap` or the machine's own,
+overflow (`arithmetic'`) or a file not read (`io'`), but not the fuel
+limit, puts the stacks back as they were, the inputs on them and the trap
+on top, and goes on into the handlers' choice, compiled where the word is
+applied; a trap none of them takes traps again, for a handler further
+out. So the innermost handler catches first, a recursion's at each level.
+The word's results and the handlers' are joined as a choice's
+alternatives are, a different type making a union, and a handler that
+leaves a trap, alone or in an array, is an error. `kind` and `why` read a
+trap, its kind a symbol and its message a string, the kind's name if it
+has none, and `fail` fails with it again. A clause that takes a trap last
+is a handler only where clauses of its word take the inputs; elsewhere it
+is a word applied to a trap, as a helper is in a handler.
+
 **A program fails by `fail`** (doc/design/SYMBOLIC-FORTH.md 29), which takes
 a kind, `no-file' fail`, or a message and a kind, `( "can't read it"
 no-file' ) fail`, and never returns. While compiling it is an error of that
@@ -1108,7 +1129,10 @@ only then, a symbol, or a tuple `( string sym )` made as the program runs;
 with no message, it is reported by its kind. A path that fails ends in its
 trap and leaves nothing, so the other alternatives give the choice its
 results; a choice all of whose alternatives fail never returns either.
-Code that is sure to fail fails while compiling: where its kind is known
+Inside a handled word, every failure is the program's, a trap, so a
+handler may catch it, arithmetic on known values among it. A handler runs
+only if something fails, so its code is code that may not run. Elsewhere,
+code that is sure to fail fails while compiling: where its kind is known
 only as the program runs, a choice every clause of which fails or a
 `fail` of a kind made then, that is an error that says so, and a loop's
 quotation that always fails has no effect to compile the loop by. A
@@ -1188,15 +1212,12 @@ different lengths both may match (above).
 Bugs, what is next, and what is still to think on are in TODO.md, at the
 repo's root.
 
-- **Handling traps** (doc/design/SYMBOLIC-FORTH.md 29, 2026-10-20). `fail`
-  while compiling and at run time is built (above, "Errors"); a trap is
-  handled by a clause of the same word for its inputs and a `k trap` on
-  top, its kind in its type, `no-file' trap` (2026-10-22), the
-  inputs restored as they were when the word was applied, so the handler
-  leaves what the word leaves. A trap may be neither left by a clause that
-  takes one nor stored. The machine's failures become traps of their
-  kinds, all but the fuel limit; `kind` and `why` read one. A trap's
-  position is not reported yet.
+- **More of traps** (doc/design/SYMBOLIC-FORTH.md 29). Handlers are built
+  (above, "Errors"); not yet are kinds joined by `or`, `no-file' io' or
+  trap`, since `or` joins types and a kind is a symbol, finer kinds for the
+  machine's failures, a missing file among them, and where a trap
+  happened. A trap may not be stored; with no global store in march8 yet,
+  nothing checks that.
 - **Recursion on known numbers and symbols while compiling.** A family
   applied to itself on values that have cells becomes an instance on
   values at run time (above, "Recursion and instances"), even when they

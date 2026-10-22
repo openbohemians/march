@@ -47,8 +47,8 @@ as a sequence is (6.15, section 7). Built. And step 5, letters as places,
 `_` read as the letter of its place (6.14, section 7). Built. And step 7,
 the litmus test with no exceptions: the core runs lowered, and every
 example, and compiles to the same code (sections 5 and 7). Decided: a
-trap's kind is in its type, `no-file' trap`, and failing at run time is
-built (6.29).
+trap's kind is in its type, `no-file' trap`; failing at run time and
+handlers are built (6.29).
 
 ## 1. What it is
 
@@ -1283,7 +1283,8 @@ Settled (Thomas, 2026-10-15):
     any array; `trap` alone would take whatever is below it as its kind
     (Thomas). The most particular clause is chosen, `no-file' trap`
     before `k trap`, as `i64 ary` is before `a ary`; `no-file' io' or
-    trap` takes either. A trap's
+    trap` would take either, which is not built, since `or` joins types
+    and a kind is a symbol. A trap's
     kind is known only when it fails, so the choice is made at run time,
     as a union's is: a trap is the union of its kinds. A guard still
     chooses by anything else, its message among them. A trap no handler
@@ -1321,8 +1322,7 @@ Settled (Thomas, 2026-10-15):
     `( string sym )`, not two strings. A clause that fails is defined as
     any other, checked only as far as `fail`.
 
-    Failing at run time is built in march8 (2026-10-22), the first of
-    three pieces, handlers and then `kind` and `why` to follow. In code
+    Failing at run time is built in march8 (2026-10-22). In code
     that may not run, a choice made at run time, a union's arm or a loop's
     body, `fail` is a trap, its kind and message known while compiling or
     only as the program runs; the session reports it, by its message or,
@@ -1335,6 +1335,27 @@ Settled (Thomas, 2026-10-15):
     compiling. Where a trap happened is not reported yet: written into the
     code, a position would make a word's identity depend on how its source
     is laid out, so it wants a table beside the code.
+
+    Handlers are built too (2026-10-22), with `kind`, `why`, and `fail` of
+    a trap. A word is handled where clauses of its own take its inputs and
+    a trap on top: the machine's `handle` keeps the inputs that are values
+    at run time, and `unhandle` lets them go when the word is done; a trap
+    before then puts the stack back with them on it and the trap on top,
+    and goes on into the handlers' choice, compiled where the word is
+    applied, a trap none of them takes failing again, outward. The word's
+    results and the handlers' are joined as a choice's alternatives are,
+    so the effect is checked while compiling, and a handler that leaves
+    its trap, alone or in an array, is an error. Inside a handled word a
+    failure is caught, so it fails as the program runs, arithmetic on
+    known values among it; a handler runs only if something fails, so it
+    is code that may not run. A recursion is handled at each application,
+    the innermost catching first. Overflow and a file not read are traps
+    of `arithmetic'` and `io'`; a missing file is `io'`, finer kinds to
+    come when a handler needs one. A clause that takes a trap last is a
+    handler only where its word's other clauses take the inputs;
+    elsewhere it is a word applied to a trap, as `log: < k trap > [ … ]`
+    is in a handler. Not built: kinds joined by `or`, and where a trap
+    happened.
 
 30. **Code is data only while compiling** (Thomas, 2026-10-21: "we are
     headed into Lisp territory now. and guess what? I don't want to go

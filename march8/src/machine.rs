@@ -21,6 +21,44 @@ pub enum Error {
     /// Input or output failed, and why.
     Io(String),
 }
+impl Error {
+    /// A failure as a trap, its kind and its message: a program's, or the
+    /// machine's, overflow or a file not read. Not the fuel limit, the
+    /// session's, nor a fault of the machine's.
+    pub fn trap(&self) -> Option<(String, String)> {
+        match self {
+            Error::Trap(kind, why) => Some((kind.clone(), why.clone())),
+            Error::Arithmetic => Some((
+                "arithmetic".into(),
+                "arithmetic overflow, or division by zero".into(),
+            )),
+            Error::Io(why) => Some(("io".into(), why.clone())),
+            _ => None,
+        }
+    }
+}
+
+/// Where a run goes on: the word, the next operation, and the bases of its
+/// frame's scratch values and marks.
+#[derive(Clone, Copy)]
+struct Resume {
+    word: usize,
+    ip: usize,
+    base: usize,
+    mbase: usize,
+}
+
+/// A handler, `handle`: where the run goes on when a trap comes, how deep
+/// each stack was, and the cells it keeps.
+struct Handler {
+    at: Resume,
+    returns: usize,
+    scratch: usize,
+    marks: usize,
+    depth: usize,
+    inputs: Vec<u64>,
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self:?}")
@@ -652,19 +690,62 @@ impl Machine {
         Ok(self.read(r, o, n)?.to_vec())
     }
     pub fn run(&mut self, xt: u64, mut fuel: u64) -> Result<(), Error> {
-        let mut word = self.token(xt)?;
-        let mut ip = 0usize;
-        // Each return frame also records its caller's scratch and mark bases.
-        let mut returns: Vec<(usize, usize, usize, usize)> = Vec::new();
-        let mut base = 0usize;
-        let mut mbase = 0usize;
+        let mut at = Resume {
+            word: self.token(xt)?,
+            ip: 0,
+            base: 0,
+            mbase: 0,
+        };
+        let mut returns = Vec::new();
+        let mut handlers: Vec<Handler> = Vec::new();
         self.scratch.clear();
         self.marks.clear();
+        // A trap goes to the innermost handler, if there is one, and the
+        // run goes on there (doc/design/SYMBOLIC-FORTH.md 29).
         loop {
-            if fuel == 0 {
+            let e = match self.execute(at, &mut returns, &mut handlers, &mut fuel) {
+                Ok(()) => return Ok(()),
+                Err(e) => e,
+            };
+            let (Some((kind, why)), Some(h)) = (e.trap(), handlers.pop()) else {
+                return Err(e);
+            };
+            if self.stack.len() < h.depth {
+                return Err(Error::Stack);
+            }
+            returns.truncate(h.returns);
+            self.scratch.truncate(h.scratch);
+            self.marks.truncate(h.marks);
+            self.stack.truncate(h.depth);
+            self.stack.extend(h.inputs);
+            let why = self.text_cell(&why)?;
+            let kind = self.text_cell(&kind)?;
+            let trap = self.vector_cell(vec![why, kind])?;
+            self.push(trap)?;
+            self.push(1)?;
+            at = h.at;
+        }
+    }
+
+    /// Runs from where `at` says until the outermost word returns.
+    fn execute(
+        &mut self,
+        at: Resume,
+        returns: &mut Vec<(usize, usize, usize, usize)>,
+        handlers: &mut Vec<Handler>,
+        fuel: &mut u64,
+    ) -> Result<(), Error> {
+        let Resume {
+            mut word,
+            mut ip,
+            mut base,
+            mut mbase,
+        } = at;
+        loop {
+            if *fuel == 0 {
                 return Err(Error::Fuel);
             }
-            fuel -= 1;
+            *fuel -= 1;
             self.stats.steps += 1;
             let op = *self.words[word].ops.get(ip).ok_or(Error::InvalidCode)?;
             ip += 1;
@@ -769,6 +850,30 @@ impl Machine {
                     }
                     let v = self.scratch[i];
                     self.push(v)?;
+                }
+                Instruction::Prim(Primitive::Handle) => {
+                    let m = usize::try_from(self.pop()?).map_err(|_| Error::Stack)?;
+                    let depth = self.stack.len().checked_sub(m).ok_or(Error::Stack)?;
+                    if handlers.len() >= 16384 {
+                        return Err(Error::Stack);
+                    }
+                    handlers.push(Handler {
+                        at: Resume {
+                            word,
+                            ip,
+                            base,
+                            mbase,
+                        },
+                        returns: returns.len(),
+                        scratch: self.scratch.len(),
+                        marks: self.marks.len(),
+                        depth,
+                        inputs: self.stack[depth..].to_vec(),
+                    });
+                    self.push(0)?;
+                }
+                Instruction::Prim(Primitive::Unhandle) => {
+                    handlers.pop().ok_or(Error::Stack)?;
                 }
                 Instruction::Prim(Primitive::Mark) => {
                     if self.marks.len() >= 65536 {
@@ -1577,7 +1682,7 @@ impl Machine {
                 self.push(r)?;
             }
             Execute | ScratchPush | ScratchPop | ScratchPeek | ScratchAt | Mark | Gather
-            | MapGather | Reach => {
+            | MapGather | Reach | Handle | Unhandle => {
                 unreachable!()
             }
         }

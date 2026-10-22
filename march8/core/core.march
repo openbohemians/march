@@ -392,6 +392,15 @@ take: < a ary string or i64 > [ over length min 1 swap slice ] ;
 skip: < a ary string or i64 negative? > [ - over length min over length swap -+ 1 swap slice ] ;
 skip: < a ary string or i64 > [ over length min 1 + over length slice ] ;
 
+-- Failing (doc/design/SYMBOLIC-FORTH.md 29). A handler is a clause of the
+-- word it handles, for its inputs and a trap on top, `k trap` of any kind
+-- and `no-file' trap` of one. `kind` is a trap's kind, `why` its message,
+-- or with none, its kind's name, and `fail` passes it on as it is.
+
+kind: < k trap >< sym > [ trap-kind ] ;
+why: < k trap [ trap-why "" eq? ] ? >< string > [ trap-kind ] ;
+why: < k trap >< string > [ trap-why ] ;
+
 -- Reading, in the core's first namespaces (TYPES.md 3.12): `io.stdin.read`
 -- is standard input's text, and `"data.csv" io.file.read` a file's, when
 -- the program runs, an effect; `"notes.txt" io.file.embed` a file's text

@@ -471,6 +471,13 @@ impl Clause {
     fn guarded(&self) -> bool {
         self.sig.as_ref().is_some_and(|s| !s.guards.is_empty())
     }
+    /// Whether it takes a trap last, as a handler does
+    /// (doc/design/SYMBOLIC-FORTH.md 29).
+    fn handles(&self) -> bool {
+        self.sig
+            .as_ref()
+            .is_some_and(|s| s.ins.last() == Some(&TRAP))
+    }
 }
 
 /// One way a family's application can go: its code, and what it leaves, if
@@ -545,6 +552,7 @@ const REACH: i32 = 1 << 12;
 fn longest(clauses: &[Rc<Clause>]) -> usize {
     clauses
         .iter()
+        .filter(|c| !c.handles())
         .filter_map(|c| c.sig.as_ref().map(|s| s.ins.len()))
         .max()
         .unwrap_or(0)
@@ -800,6 +808,16 @@ pub struct Stage {
     /// Set while compiling code that may not run, a choice's alternative
     /// or a loop's body: there `fail` fails only when the program runs.
     unsure: u32,
+    /// Set while compiling the body of a word with a handler for its
+    /// inputs: a failure there is caught as the program runs, so it fails
+    /// then (doc/design/SYMBOLIC-FORTH.md 29).
+    handled: u32,
+    /// Set for the dispatch among a family's handlers, which `resolve`
+    /// takes: it chooses among those alone, and none of them is chosen
+    /// otherwise.
+    catching: bool,
+    /// The families whose handlers are being compiled, with their inputs.
+    catches: Vec<(Rc<str>, Vec<Type>)>,
     /// The machine primitives are folded on, made when first needed.
     machine: Option<Machine>,
     /// Set while a word is applied wide (doc/design/SYMBOLIC-FORTH.md 22).
@@ -1028,6 +1046,9 @@ impl Stage {
             site: None,
             in_bracket: 0,
             unsure: 0,
+            handled: 0,
+            catching: false,
+            catches: Vec::new(),
             machine: None,
             wide: None,
             applied_in: "".into(),
@@ -1050,6 +1071,7 @@ impl Stage {
             (Con::Vec, "vec"),
             (Con::Map, "map"),
             (Con::Or, "or"),
+            (Con::Trap, "trap"),
         ] {
             s.word(&core_path(name)).con = Some(con);
         }
@@ -2780,6 +2802,7 @@ impl Stage {
             (Term::Base(Base::String), Term::Base(Base::Symbol)) => Some(6),
             (Term::Base(a), Term::Base(b)) => (a == b).then_some(8),
             (Term::Nat(a), Term::Nat(b)) => (a == b).then_some(8),
+            (Term::Trap, Term::Trap) => Some(8),
             (Term::Ary(e), Term::Ary(f)) => Some(8 + self.unify(e, f, env)?),
             (Term::Ary(e), Term::Vec(_, f)) => Some(4 + self.unify(e, f, env)?),
             (Term::Vec(n, e), Term::Vec(m, f)) => {
@@ -2812,11 +2835,149 @@ impl Stage {
     // ---- Families ----
 
     /// Applies a family (TYPES.md 2.6, 2.8), evaluated where it is applied,
-    /// on these judgments. A family applied again to the same types inside
-    /// its own application is recursive: the outer application starts over
-    /// as a call to an instance, a word of its own for those types, and the
-    /// inner one, compiled inside that instance, calls it.
+    /// on these judgments, handled if it has handlers for them.
     fn family(&mut self, name: &Rc<str>) -> Result<()> {
+        if self.has_handlers(name) {
+            return self.handled(name);
+        }
+        self.apply_family(name)
+    }
+
+    /// Whether a family has handlers for the values on top: clauses that
+    /// take no trap take them, and clauses for them and a trap on top
+    /// (doc/design/SYMBOLIC-FORTH.md 29). A clause that takes a trap is
+    /// otherwise chosen as any is, as a word applied to a trap.
+    fn has_handlers(&mut self, name: &Rc<str>) -> bool {
+        if !self.words[name].clauses.iter().any(|c| c.handles()) {
+            return false;
+        }
+        let handlers = self.clauses(name, true);
+        let plain = self.clauses(name, false);
+        if self.candidates(&plain).is_empty() {
+            return false;
+        }
+        self.push(TRAP, Val::Run);
+        let found = !self.candidates(&handlers).is_empty();
+        self.stack.pop();
+        found
+    }
+
+    /// Applies a family whose handlers take the values on top, handled
+    /// (doc/design/SYMBOLIC-FORTH.md 29): the machine keeps the inputs that
+    /// are values at run time, and when anything inside fails, they come
+    /// back, the trap goes on top, and the handlers choose for them as any
+    /// clauses do, a trap none of them takes going on outward. Either way
+    /// the word leaves what it leaves, its results joined as a choice's.
+    /// Inside, a failure is caught as the program runs, so it fails then.
+    fn handled(&mut self, name: &Rc<str>) -> Result<()> {
+        let arity = self.arity(name);
+        let at = self.pos;
+        let snapshot = self.stack.clone();
+        let base = snapshot.len() - arity;
+        let key = (
+            name.clone(),
+            snapshot[base..].iter().map(|j| j.ty).collect(),
+        );
+        if snapshot[base..].iter().any(|j| j.val == Val::Many) || self.catches.contains(&key) {
+            return Err(self.err(
+                Kind::Limit,
+                format!(
+                    "`{name}` is handled here, and inside its own handler for the same \
+                     inputs, or on a run of values: that is not built yet"
+                ),
+            ));
+        }
+        let kept = snapshot[base..].iter().filter(|j| !j.known()).count();
+        // The handlers, given the inputs and the trap.
+        self.push(TRAP, Val::Run);
+        let handlers = self.clauses(name, true);
+        for (_, c, _) in self.candidates(&handlers) {
+            let n = c.sig.as_ref().map_or(0, |s| s.ins.len());
+            if n != arity + 1 {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "a handler of `{name}` takes its inputs and a trap, {}, \
+                         and the one defined at {} takes {}",
+                        values(arity + 1),
+                        c.at,
+                        values(n)
+                    ),
+                ));
+            }
+        }
+        // A handler runs only if something fails.
+        let outer = std::mem::take(&mut self.code);
+        self.catches.push(key);
+        self.catching = true;
+        self.unsure += 1;
+        let r = self.resolve(name, arity + 1, at, false);
+        self.unsure -= 1;
+        self.catching = false;
+        self.catches.pop();
+        let code = std::mem::replace(&mut self.code, outer);
+        let caught = match r {
+            Err(e) if e.kind == Kind::Fails => None,
+            Err(e) => return Err(e),
+            Ok(()) => Some(self.stack.clone()),
+        };
+        if let Some(st) = &caught
+            && st[base.min(st.len())..]
+                .iter()
+                .any(|j| self.types.holds(j.ty, TRAP))
+        {
+            self.pos = at;
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "a handler of `{name}` leaves its trap: a trap lives only while it is handled"
+                ),
+            ));
+        }
+        // The word itself.
+        self.stack = snapshot.clone();
+        let outer = std::mem::take(&mut self.code);
+        self.handled += 1;
+        let r = self.apply_family(name);
+        self.handled -= 1;
+        let mut body = std::mem::replace(&mut self.code, outer);
+        let done = match r {
+            Err(e) if e.kind == Kind::Fails => None,
+            Err(e) => return Err(e),
+            Ok(()) => {
+                body.push(Ins::Op(Op::Prim(P::Unhandle)));
+                Some(self.stack.clone())
+            }
+        };
+        // `handle` goes on past itself, to the body, or, given the trap, to
+        // the handlers.
+        let start = self.label();
+        self.emit(Op::Lit(kept as u64));
+        self.emit(Op::Prim(P::Handle));
+        self.code.push(Ins::JumpZero(start));
+        let alts = vec![
+            Alt {
+                code,
+                stack: caught,
+                skip: Some(start),
+            },
+            Alt {
+                code: body,
+                stack: done,
+                skip: None,
+            },
+        ];
+        let r = self.merge(alts, &snapshot, base, true);
+        self.pos = at;
+        self.fails_here(r, name)
+    }
+
+    /// Applies a family on these judgments. A family applied again to the
+    /// same types inside its own application is recursive: the outer
+    /// application starts over as a call to an instance, a word of its own
+    /// for those types, and the inner one, compiled inside that instance,
+    /// calls it.
+    fn apply_family(&mut self, name: &Rc<str>) -> Result<()> {
         let arity = self.arity(name);
         let reach = arity.min(self.stack.len() - self.floor);
         let types: Vec<Type> = self.stack[self.stack.len() - reach..]
@@ -2881,6 +3042,16 @@ impl Stage {
         }
     }
 
+    /// A family's clauses that take a trap last, or those that do not.
+    fn clauses(&self, name: &str, handlers: bool) -> Vec<Rc<Clause>> {
+        self.words[name]
+            .clauses
+            .iter()
+            .filter(|c| c.handles() == handlers)
+            .cloned()
+            .collect()
+    }
+
     /// How many values an application of a family takes: the most that the
     /// clauses which may be chosen for the values on top take, as a choice
     /// at run time between them leaves those deeper than a shorter one
@@ -2906,9 +3077,14 @@ impl Stage {
     /// last. `top` says this is an instance's own family, whose recursive
     /// alternatives may wait for its results' types.
     fn resolve(&mut self, name: &Rc<str>, arity: usize, at: Pos, top: bool) -> Result<()> {
-        let clauses = self.words[name].clauses.clone();
+        let catching = std::mem::take(&mut self.catching);
+        let clauses = match catching {
+            true => self.clauses(name, true),
+            false => self.words[name].clauses.clone(),
+        };
         let mut cands = self.candidates(&clauses);
         if let Some(i) = self.union_input(arity)
+            && !catching
             && self.must_split(&clauses, &cands, i)
         {
             return self.split(name, i, arity);
@@ -2929,7 +3105,8 @@ impl Stage {
             // Literals settle by the best match, and the clauses match again.
             let (_, c, env) = primary(&cands).expect("not empty");
             self.settle_literals(&c, &env)?;
-            if !top {
+            // A handlers' dispatch is no application of its own.
+            if !top && !catching {
                 // Its key is now the settled types, as an inner application's
                 // will be.
                 let reach = arity.min(self.stack.len() - self.floor);
@@ -2940,7 +3117,7 @@ impl Stage {
                 self.active.last_mut().expect("this application").1 = types;
             }
             cands = self.candidates(&clauses);
-            return self.chain(name, &cands, arity, at, top);
+            return self.chain(name, &cands, arity, at, top, catching);
         }
         match self.best(name, &cands, arity)? {
             Some((c, env)) => self.apply_clause(name, &c, env, at),
@@ -3054,6 +3231,7 @@ impl Stage {
         arity: usize,
         at: Pos,
         top: bool,
+        catching: bool,
     ) -> Result<()> {
         let longest = longest(&self.words[name].clauses);
         let n = cands
@@ -3103,6 +3281,15 @@ impl Stage {
                     Outcome::Dropped => unreachable!("no guards"),
                 }
                 order.push((cand, false));
+            } else if catching {
+                // A trap no handler takes goes on outward, as it is.
+                let mut code: Vec<Ins> = Self::rethrow().into_iter().map(Ins::Op).collect();
+                code.push(Ins::Op(Op::Prim(P::Trap)));
+                alts.push(Some(Alt {
+                    code,
+                    stack: None,
+                    skip: None,
+                }));
             } else if alts.is_empty() {
                 // Said where the family was applied, not where a guard was.
                 self.pos = at;
@@ -3199,15 +3386,21 @@ impl Stage {
     /// runs, an error.
     fn fails_here(&self, r: Result<()>, name: &str) -> Result<()> {
         match r {
-            Err(e) if e.kind == Kind::Fails && self.unsure == 0 && self.checking == 0 => Err(self
-                .err(
+            Err(e)
+                if e.kind == Kind::Fails
+                    && self.unsure == 0
+                    && self.handled == 0
+                    && self.checking == 0 =>
+            {
+                Err(self.err(
                     Kind::Unknown,
                     format!(
                         "`{name}` fails here whichever clause is chosen, and code sure to \
                          fail fails while compiling, but which kind is known only as the \
                          program runs"
                     ),
-                )),
+                ))
+            }
             r => r,
         }
     }
@@ -3557,6 +3750,7 @@ impl Stage {
             // Its code is its own, whether or not where it is applied runs.
             std::mem::replace(&mut self.unsure, 0),
             std::mem::replace(&mut self.checking, 0),
+            std::mem::replace(&mut self.handled, 0),
         );
         let ghost = self.promised(name);
         self.frames.push(Frame {
@@ -3629,6 +3823,7 @@ impl Stage {
             self.effects,
             self.unsure,
             self.checking,
+            self.handled,
         ) = saved;
         let outs = r?;
         let (_, cid) = self.seal(code);
@@ -4015,6 +4210,16 @@ impl Stage {
                     self.depth -= 1;
                     r
                 }),
+                // A trap's pattern is its kind (doc/design/SYMBOLIC-FORTH.md
+                // 29).
+                Test::Equals(v) if v.ty == TRAP => {
+                    self.trap_part(1);
+                    self.stack.push(Jdg {
+                        ty: SYMBOL,
+                        val: v.val.clone(),
+                    });
+                    self.apply_word(&core_path("eq"))
+                }
                 // A value pattern is the input `eq` the value.
                 Test::Equals(v) => {
                     self.stack.push(v.clone());
@@ -4115,7 +4320,8 @@ impl Stage {
         for g in &sig.guards {
             let Test::Equals(v) = &g.test else { continue };
             let i = base + g.slot;
-            if self.stack[i].val != Val::Run {
+            // A trap's value is not its kind.
+            if self.stack[i].val != Val::Run || v.ty == TRAP {
                 continue;
             }
             let ty = self.stack[i].ty;
@@ -4200,20 +4406,26 @@ impl Stage {
             return Some((0, 1));
         }
         if let Some(c) = w.con {
-            return Some(if c == Con::Ary { (1, 1) } else { (2, 1) });
+            return Some(if matches!(c, Con::Ary | Con::Trap) {
+                (1, 1)
+            } else {
+                (2, 1)
+            });
         }
         if visiting.contains(name) {
             return None;
         }
         visiting.push(name.clone());
+        // A handler leaves what its word leaves, given a trap more.
+        let mut clauses: Vec<&Rc<Clause>> = w.clauses.iter().filter(|c| !c.handles()).collect();
+        if clauses.is_empty() {
+            clauses = w.clauses.iter().collect();
+        }
         let longest = longest(&w.clauses);
-        let r = if w.clauses.iter().all(|c| length(c, longest) == longest) {
-            w.clauses
-                .iter()
-                .find_map(|c| self.clause_effect(c, visiting))
+        let r = if clauses.iter().all(|c| length(c, longest) == longest) {
+            clauses.iter().find_map(|c| self.clause_effect(c, visiting))
         } else {
-            let effects: Vec<(usize, usize)> = w
-                .clauses
+            let effects: Vec<(usize, usize)> = clauses
                 .iter()
                 .filter_map(|c| self.clause_effect(c, visiting))
                 .collect();
@@ -4582,7 +4794,11 @@ impl Stage {
     /// change what applying the family did; a new longer one, under a
     /// shorter without guards, is not chosen where that one matches.
     fn shadows(&mut self, name: &Rc<str>, new: &Sig) {
-        let clauses = self.words[name].clauses.clone();
+        // A handler is chosen only for a trap, which no other clause is.
+        if new.ins.last() == Some(&TRAP) {
+            return;
+        }
+        let clauses = self.clauses(name, false);
         for old in &clauses {
             let Some(o) = &old.sig else { continue };
             let msg = if o.ins.len() > new.ins.len() && self.overlap(new, o) {
@@ -4713,6 +4929,16 @@ impl Stage {
         for (j, pos) in self.comprehend(toks)? {
             match j.val {
                 Val::Type(t) => ins.push(t),
+                // A trap of one kind, `no-file' trap`, a value to match.
+                Val::Name(..) if j.ty == TRAP => {
+                    equals.push(Guard {
+                        test: Test::Equals(j.clone()),
+                        slot: ins.len(),
+                        arity: 1,
+                        pos,
+                    });
+                    ins.push(TRAP);
+                }
                 // A name left is a symbol, `< string Camel >`: a type's name
                 // applies, and gives the type (Thomas, 2026-10-12).
                 Val::Name(n, at) => {
@@ -4880,6 +5106,8 @@ impl Stage {
             Con::Map | Con::Or => vec![TYPE, TYPE],
             // A length or a variable, then a type: `vec` builds types alone.
             Con::Vec => return true,
+            // A kind or a variable, and nothing else is one: `trap` alone.
+            Con::Trap => return true,
         };
         let sig = Sig {
             ins,
@@ -4929,6 +5157,29 @@ impl Stage {
                 let a = self.pop_type()?;
                 let t = self.types.union(a, b);
                 self.push(TYPE, Val::Type(t));
+                return Ok(());
+            }
+            // A trap's kind is in its type (doc/design/SYMBOLIC-FORTH.md 29):
+            // a letter takes any, `k trap`, as `a ary` is any array, and a
+            // kind is a value of the type, a trap of that kind, to match.
+            Con::Trap => {
+                let j = self.pop()?;
+                match j.val {
+                    Val::Type(v) if matches!(self.types.term(v), Term::Var(_)) => {
+                        self.push(TYPE, Val::Type(TRAP))
+                    }
+                    Val::Name(k, at) if j.ty == SYMBOL => self.push(TRAP, Val::Name(k, at)),
+                    _ => {
+                        return Err(self.err(
+                            Kind::Mismatch,
+                            format!(
+                                "`trap` takes a kind, `no-file'`, or a letter for any, `k`, \
+                                 and {} is neither",
+                                self.describe(&j)
+                            ),
+                        ));
+                    }
+                }
                 return Ok(());
             }
         };
@@ -5119,6 +5370,8 @@ impl Stage {
             Prim::QuotePower => self.quote_power()?,
             Prim::Width => self.width()?,
             Prim::Fail => return Err(self.fail()),
+            Prim::TrapKind => self.trap_part(1),
+            Prim::TrapWhy => self.trap_part(0),
             Prim::QuoteLength
             | Prim::QuoteAt
             | Prim::QuoteSlice
@@ -5355,6 +5608,8 @@ impl Stage {
             let def = PRIMS.iter().find(|d| d.prim == p).expect("listed");
             match self.run_now(def.ops, &args, outs) {
                 Ok(vals) => vals,
+                // Where it is handled, it fails as the program runs.
+                Err(e) if self.handled > 0 && e.trap().is_some() => return Ok(false),
                 Err(e) => {
                     let ins: Vec<String> = args.iter().map(value_text).collect();
                     let outs: Vec<String> = outs.iter().map(|&t| self.types.name(t)).collect();
@@ -5949,18 +6204,20 @@ impl Stage {
             _ => None,
         };
         let runs = !x.known()
-            && (x.ty == SYMBOL || self.types.elements(x.ty) == Some(&[STRING, SYMBOL][..]));
+            && (x.ty == SYMBOL
+                || x.ty == TRAP
+                || self.types.elements(x.ty) == Some(&[STRING, SYMBOL][..]));
         if taken.is_none() && !runs {
             return self.err(
                 Kind::Mismatch,
                 format!(
-                    "`fail` takes a kind, `no-file'`, or a message and a kind, \
-                     `( \"can't read it\" no-file' )`, and {} is neither",
+                    "`fail` takes a kind, `no-file'`, a message and a kind, \
+                     `( \"can't read it\" no-file' )`, or a trap, and {} is none of them",
                     self.describe(&x)
                 ),
             );
         }
-        if self.unsure > 0 {
+        if self.unsure > 0 || self.handled > 0 {
             match taken {
                 Some((why, kind)) => {
                     self.code.push(Ins::Str(why.unwrap_or_else(|| "".into())));
@@ -5971,14 +6228,7 @@ impl Stage {
                     self.emit(Op::Prim(P::Swap));
                 }
                 None => {
-                    for op in [
-                        Op::Prim(P::Dup),
-                        Op::Lit(0),
-                        Op::Prim(P::VecAt),
-                        Op::Prim(P::Swap),
-                        Op::Lit(1),
-                        Op::Prim(P::VecAt),
-                    ] {
+                    for op in Self::rethrow() {
                         self.emit(op);
                     }
                 }
@@ -6015,6 +6265,33 @@ impl Stage {
             _ => Kind::Fail(kind.to_string()),
         };
         self.err(kind, msg)
+    }
+
+    /// The operations that leave a trap's message and its kind, the trap
+    /// on top, for `trap` to fail with them again.
+    fn rethrow() -> [Op; 6] {
+        [
+            Op::Prim(P::Dup),
+            Op::Lit(0),
+            Op::Prim(P::VecAt),
+            Op::Prim(P::Swap),
+            Op::Lit(1),
+            Op::Prim(P::VecAt),
+        ]
+    }
+
+    /// A trap's message, 0, or its kind, 1, in place of the trap on top.
+    fn trap_part(&mut self, i: usize) {
+        let j = self.stack.pop().expect("a trap");
+        let ty = [STRING, SYMBOL][i];
+        match j.val {
+            Val::Seq(es) => self.stack.push(es[i].clone()),
+            _ => {
+                self.emit(Op::Lit(i as u64));
+                self.emit(Op::Prim(P::VecAt));
+                self.push(ty, Val::Run);
+            }
+        }
     }
 
     /// Fails by `kind`, with `why`, as the program runs: a trap.

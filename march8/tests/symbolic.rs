@@ -4,10 +4,12 @@
 //! and a number is a symbol given its kind, `10 int# !`. The form march8
 //! parses is an intermediate one over it, and this is its litmus test: all
 //! of it lowers to Symbolic Forth and parses back the same, and the lowered
-//! programs run.
+//! core and programs run the same (doc/design/SYMBOLIC-FORTH.md 5).
 use march8::read::{Tok, lower, read, read_symbolic};
 use march8::symbols::Symbols;
 use march8::{CORE, Session};
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 /// The tokens of source, wherever they were written.
 fn toks(src: &str, symbolic: bool) -> Vec<Tok> {
@@ -90,30 +92,70 @@ fn the_lowest_form_written_inline() {
     assert!(error("[| ( 1 ) |]").starts_with("`(` is High Stack's"));
 }
 
+/// A session whose core was read lowered, as Symbolic Forth.
+fn lowered_core() -> Session {
+    let mut s = Session::bare();
+    s.stage.core = true;
+    s.symbolic = true;
+    s.eval(&lowered(CORE)).unwrap();
+    s.stage.core = false;
+    s.symbolic = false;
+    s
+}
+
 #[test]
 fn the_core_vocabulary_lowers() {
     lowered(CORE);
+    lowered_core();
 }
 
 #[test]
 fn the_examples_lower_and_run_the_same() {
+    // Lowered, the core and a program compile to the same code, words and
+    // all, since a word is known by its code. The syllogism's rule rewrites
+    // its capitalized names where `.` applies them, as it does where they
+    // are written (doc/design/SYMBOLIC-FORTH.md 25).
     for src in EXAMPLES {
-        lowered(src);
+        let a = Session::new().compile(src).unwrap();
+        let mut low = lowered_core();
+        low.symbolic = true;
+        assert_eq!(a, low.compile(&lowered(src)).unwrap());
     }
-    // Run lowered, a program does what it did: core is read as it is, and
-    // the program as Symbolic Forth. The syllogism's rule rewrites its
-    // capitalized names where `.` applies them, as it does where they are
-    // written (doc/design/SYMBOLIC-FORTH.md 25). The summary reads its
-    // input, and runs in tests/programs.rs.
+    // And run, a program does what it did.
     for src in &EXAMPLES[..3] {
         let mut a = Session::new();
         a.eval(src).unwrap();
-        let mut b = Session::new();
+        let mut b = lowered_core();
         b.symbolic = true;
         b.eval(&lowered(src)).unwrap();
         assert_eq!(a.show(), b.show());
         assert_eq!(a.take_output(), b.take_output());
     }
+    // The summary reads its input, so it runs as a file, a `.s4` one.
+    let path = format!("{}/summary.s4", env!("CARGO_TARGET_TMPDIR"));
+    std::fs::write(&path, lowered(EXAMPLES[3])).unwrap();
+    let csv = include_str!("../examples/fruit.csv");
+    let high = format!("{}/examples/summary.march", env!("CARGO_MANIFEST_DIR"));
+    assert_eq!(run(&path, csv), run(&high, csv));
+}
+
+/// What march8 prints, given a file and its input.
+fn run(path: &str, input: &str) -> String {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_march8"))
+        .arg(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{path}");
+    String::from_utf8(out.stdout).unwrap()
 }
 
 #[test]

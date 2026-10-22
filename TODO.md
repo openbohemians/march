@@ -11,19 +11,13 @@ march8/docs/MACHINE.md, "Not yet".
   `value_text` (march8/src/stage.rs) has no type names to show.
   (2026-10-21)
 
-## Next: Low Stack running
+## Next
 
-Low Stack first; High Stack is dressing on top of it. March is to build
-itself in time: do in March what can be, and keep the Rust a stone's
-throw from it (Thomas, 2026-10-21).
-
-- **The rest of Low Stack** (SYMBOLIC-FORTH.md 7), its step 7, the
-  litmus test with no exceptions: the core run lowered, and the summary
-  example, which reads its input. Steps 2 to 5 are built (2026-10-21,
-  2026-10-22): the reader writes the form as Low Stack does, and the
-  stage stops reading it.
-
-## Then
+Low Stack runs (SYMBOLIC-FORTH.md 7, all its steps built 2026-10-22):
+the core and every example run lowered, to the same code. High Stack is
+dressing on top of it. March is to build itself in time: do in March
+what can be, and keep the Rust a stone's throw from it (Thomas,
+2026-10-21).
 
 - **Traps at run time,** and their handlers, `trap`, `kind` and `why`
   (SYMBOLIC-FORTH.md 6.29). `fail` while compiling is built.

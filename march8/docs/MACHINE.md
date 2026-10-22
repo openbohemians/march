@@ -55,7 +55,9 @@ writes any March in Symbolic Forth, Low Stack, and `--symbolic` reads it,
 as march8 reads a file ending in `.s4`, where High Stack's end in
 `.march` (2026-10-21); the litmus
 test, `tests/symbolic.rs`, lowers the core vocabulary and the examples,
-reads them back to the same tokens, and runs them to the same results.
+reads them back to the same tokens, and runs them lowered, the core too:
+on the core read as Low Stack each example compiles to the same code and
+does what it did (2026-10-22).
 
 | Form | What it is |
 |---|---|

@@ -44,7 +44,9 @@ compiling, so a quotation is a sequence then, and at run time only code
 (6.30). Revised 2026-10-22: Low Stack's step 4, a string read as a
 quotation of its text and code made text, `[ … ] str# !`, and unsealed
 as a sequence is (6.15, section 7). Built. And step 5, letters as places,
-`_` read as the letter of its place (6.14, section 7). Built.
+`_` read as the letter of its place (6.14, section 7). Built. And step 7,
+the litmus test with no exceptions: the core runs lowered, and every
+example, and compiles to the same code (sections 5 and 7).
 
 ## 1. What it is
 
@@ -312,8 +314,12 @@ assembly its own way, just an abstract one"), symbolic Forth as `.4th`
 is Forth, and one of High Stack in `.march`; march8 reads each by its
 ending. march8/tests/symbolic.rs
 lowers the core vocabulary and the examples, reads them back to the same
-tokens, and runs the examples lowered to the same results. Code as data
-is this form: what a program builds as code, it builds in Symbolic Forth.
+tokens, and runs them lowered, the core too: on the core read as Symbolic
+Forth, each example compiles to the code it does in High Stack, the
+core's words with it, since a word is known by its code, and does what it
+did, the summary run as a `.s4` file on its input (2026-10-22). Code as
+data is this form: what a program builds as code, it builds in Symbolic
+Forth.
 
 ## 6. Toward a specification
 
@@ -1479,4 +1485,10 @@ Types are words (section 2).
    subscript and its power when lowered, so lowering needs no namespace
    (6.21, 6.22).
 7. **The litmus test with no exceptions:** the core and every example
-   lower, read back to the same tokens, and run the same.
+   lower, read back to the same tokens, and run the same. Built
+   2026-10-22: nothing in the stage needed to change, since steps 2 to 5
+   left it reading Low Stack alone. The core read lowered compiles every
+   example to the same code, byte for byte, and all of march8's tests
+   pass on it; the summary, which reads its input, runs lowered as a
+   `.s4` file. Only a message's position in the core differs, since
+   `lower` keeps a line's breaks but not its blank and comment lines.

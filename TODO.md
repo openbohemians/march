@@ -6,30 +6,37 @@ march8/docs/MACHINE.md, "Not yet".
 
 ## Bugs
 
-- **A one-letter symbol in a bracket is a variable.** `< a' >` reads as
-  `< a >`, a type variable, so `ff: < a' > [ drop 1 ] ; 7 ff` leaves 1:
-  the reader gives `a'` and `a` the same token, a name that does not
-  apply, and in a bracket the stage takes any one-letter name as a
-  variable. The token should say a symbol was written. (2026-10-21)
 - **A known array of types shows as values in messages.**
   `max' ( i64 i64 ) clauses#` says `( a value a value ) (2 type vec)`:
   `value_text` (march8/src/stage.rs) has no type names to show.
   (2026-10-21)
 
-## Next
+## Next: Low Stack running
 
-- **`width#`'s test and `quote-power`'s cases in March,** as the identity
-  search now is (doc/design/SYMBOLIC-FORTH.md 6.6, 22).
+Low Stack first; High Stack is dressing on top of it. March is to build
+itself in time: do in March what can be, and keep the Rust a stone's
+throw from it (Thomas, 2026-10-21).
+
+- **The rest of Low Stack** (SYMBOLIC-FORTH.md 7), its steps 4 strings,
+  unsealed as sequences now are (6.14), 5 letters as places, and 7 the
+  litmus test with no exceptions. Each the way steps 2 and 3 were
+  (2026-10-21): the reader writes the form as Low Stack does, the stage
+  stops reading it, and a core word gives it its meaning. `str#` is not
+  a word yet.
 
 ## Then
 
 - **Traps at run time,** and their handlers, `trap`, `kind` and `why`
   (SYMBOLIC-FORTH.md 6.29). `fail` while compiling is built.
-- **The rest of Low Stack** (SYMBOLIC-FORTH.md 7), its steps 2 a
-  signature's variables, 3 brackets, 4 strings, 5 letters as places, and
-  7 the litmus test with no exceptions.
+- **`width#`'s test and `quote-power`'s cases in March,** as the identity
+  search now is (SYMBOLIC-FORTH.md 6.6, 22).
 - **A `fold` over a quotation,** so March walks one past about sixty
   elements, depth's bound (SYMBOLIC-FORTH.md 6.6).
+- **One thing, a sequence:** a quotation and an array as one, a kind
+  saying what `!` makes of it (SYMBOLIC-FORTH.md 6.30; Thomas,
+  2026-10-21). After Low Stack, since it changes what a value is; its
+  open questions are there, a number's elements, quotations at run time,
+  and their effects.
 
 ## To think on
 

@@ -133,3 +133,20 @@ fn stdin_read_reads_standard_input() {
     let out = march8(&["--eval", "io.stdin.read words"], "one two\nthree\n");
     assert_eq!(out, "<1> ( \"one\" \"two\" \"three\" )\n");
 }
+
+#[test]
+fn a_s4_file_is_low_stack() {
+    // `march8 lower` writes High Stack, `.march`, as Low Stack, which a file
+    // ending in `.s4` is read as, and it runs the same.
+    let src = include_str!("../examples/door.march");
+    let low = march8(&["lower"], src);
+    let path = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("door.s4");
+    std::fs::write(&path, &low).unwrap();
+    let high = march8(&["examples/door.march"], "");
+    assert_eq!(march8(&[path.to_str().unwrap()], ""), high);
+    assert_eq!(high, "<2> Locked' Closed'\n");
+    // Read as High Stack, Low Stack's names apply where a dot would.
+    let path = path.with_extension("march");
+    std::fs::write(&path, &low).unwrap();
+    assert_ne!(march8(&[path.to_str().unwrap()], ""), high);
+}

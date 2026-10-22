@@ -57,7 +57,8 @@ fn pulls_take_values_from_below() {
         show(&["( 1 2 3 )", "( _ [ 10 _ + ] each )"]),
         "<1> ( 11 12 13 )"
     );
-    assert!(session(&["10 ( ( 1 2 3 ) [ _ + ] each )"]).is_err());
+    // Its code reaches below, as any code does: `+` folds into the 10.
+    assert_eq!(show(&["10 ( ( 1 2 3 ) [ _ + ] each )"]), "<1> ( 16 )");
     // An array known only at run time, filtered.
     assert_eq!(
         show(&[KEEP, "( 9 1 4 0 )", "( _ keep' each )"]),

@@ -314,8 +314,41 @@ fn array_literals_share_one_type_or_are_tuples() {
     // Elements of different types are a tuple (doc/design/TYPES.md 2.5).
     assert_eq!(show("( 1 \"a\" )"), "<1> ( 1 \"a\" )");
     assert_eq!(show("( 1 i64! \"a\" ) length"), "<1> 2");
-    // An element may not take values from outside its literal.
-    assert_eq!(fails("1 ( 2 + )"), Kind::Mismatch);
+    // A literal's code reaches what `.`'s would (doc/design/SYMBOLIC-FORTH.md
+    // 14, 30), and its elements are all it leaves, from as deep as it
+    // reached.
+    assert_eq!(show("1 ( 2 + )"), "<1> ( 3 )");
+}
+
+#[test]
+fn a_literal_is_its_code_applied_and_kept_together() {
+    assert_eq!(show("1 2 3 ( + )"), "<2> 1 ( 5 )");
+    assert_eq!(show("1 2 3 [ + ] seq# !"), "<2> 1 ( 5 )");
+    assert_eq!(show("5 ( 7 over )"), "<1> ( 5 7 5 )");
+    // What it reaches it takes, even to leave it where it was.
+    assert_eq!(show("5 5 ( swap )"), "<1> ( 5 5 )");
+    assert_eq!(show("5 ( 1 ( + ) )"), "<1> ( ( 6 ) )");
+    assert_eq!(show("7 { k' swap }"), "<1> { k' 7 }");
+    assert_eq!(show("5 ( \"\\_ x\" )"), "<1> ( \"5 x\" )");
+    // A `_` orders what it takes; it does not seal.
+    assert_eq!(show("1 2 ( _ _ + )"), show("1 2 ( + )"));
+    // Values at run time below where it began are gathered with it.
+    assert_eq!(run("\"3\" i64! \"4\" i64! ( swap )").unwrap().len(), 1);
+    assert_eq!(
+        show("\"3\" i64! \"4\" i64! ( swap ) dup 1 at swap 2 at"),
+        "<2> 4 3"
+    );
+    assert_eq!(show("\"3\" i64! 5 ( swap 1 )"), "<1> ( 5 3 1 )");
+    assert_eq!(
+        show("\"a b c\" words ( [ dup ] each )"),
+        "<1> ( \"a\" \"a\" \"b\" \"b\" \"c\" \"c\" )"
+    );
+    // A word's inputs are still all its body reaches.
+    assert_eq!(
+        fails("ff: < i64 >< i64 ary > [ ( drop drop ) ] ; 3 ff"),
+        Kind::Mismatch
+    );
+    assert_eq!(fails("( dup )"), Kind::Mismatch);
 }
 
 #[test]

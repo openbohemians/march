@@ -22,18 +22,19 @@ fn error(src: &str) -> (Kind, String) {
 #[test]
 fn a_clause_is_its_signature_and_its_body() {
     // `max: < a a gt? >< a > [ drop ] ;`: what `;` takes after the name,
-    // each bracket as its code, `a a gt ?` and `a`, then the body, `drop .`.
+    // each bracket as its code, `a var# . a var# . gt ?` and `a var# .`, a
+    // letter being a variable, then the body, `drop .`.
     let first = "max' < i64 i64 > clauses# first";
     assert_eq!(show(&format!("{first} length")), "<1> 3");
     assert_eq!(
         show(&format!(
-            "{first} first dup length swap dup first swap dup 3 at swap last"
+            "{first} first dup length swap dup first swap dup 2 at swap dup -2 at swap last"
         )),
-        "<4> 4 a' gt' ?'"
+        "<5> 8 a' var#' gt' ?'"
     );
     assert_eq!(
         show(&format!("{first} 2 at dup length swap first")),
-        "<2> 1 a'"
+        "<2> 3 a'"
     );
     assert_eq!(
         show(&format!("{first} last dup length swap first")),
@@ -64,7 +65,7 @@ fn a_clause_is_its_signature_and_its_body() {
 fn they_are_the_clauses_dispatch_would_choose() {
     // Those with guards first, as defined, then the best without.
     assert_eq!(show("max' [ i64 i64 ] clauses# length"), "<1> 2");
-    assert_eq!(show("max' [ i64 i64 ] clauses# last first length"), "<1> 2");
+    assert_eq!(show("max' [ i64 i64 ] clauses# last first length"), "<1> 6");
     let fib = "fib: < 0 > [ 0 ] ; fib: < 1 > [ 1 ] ; fib: < i64 > [ 2 ] ; fib: < f64 > [ 3 ] ;";
     assert_eq!(show(&format!("{fib} fib' i64 clauses# length")), "<1> 3");
     // A value pattern, `0`, matches a value of any type its literal becomes.

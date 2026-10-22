@@ -61,15 +61,23 @@ const EXAMPLES: [&str; 4] = [
 fn every_application_is_a_dot() {
     assert_eq!(
         lowered("fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;"),
-        "fib < n > [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;"
+        "fib [ n var# . ] sig# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;"
+    );
+    // A bracket is a quotation made data where it closes (7, step 3): a
+    // sequence, a map, or a signature, its code run over types.
+    assert_eq!(
+        lowered("( 1 2 ) { a: 1 } < ( i64 string ) >< i64 >"),
+        "[ 1 int# ! 2 int# ! ] seq# ! [ a 1 int# ! ] map# ! \
+         [ [ i64 . string . ] seq# ! ] sig# ! [ i64 . ] sig# !"
     );
     // A symbol, a label or a word passed is a symbol, and a type is given
     // by applying its word, then `!` converts. A number is a symbol given
-    // its kind (doc/design/SYMBOLIC-FORTH.md 6.7).
+    // its kind (doc/design/SYMBOLIC-FORTH.md 6.7), and a letter a
+    // variable, `x var# .` (7).
     assert_eq!(
         lowered("Closed' Open' door ( 1 2 ) +' reduce 2 i64! x y < i64 f64 > !"),
-        "Closed Open door . ( 1 int# ! 2 int# ! ) + reduce . 2 int# ! i64 . ! \
-         x y < i64 . f64 . > !"
+        "Closed Open door . [ 1 int# ! 2 int# ! ] seq# ! + reduce . 2 int# ! i64 . ! \
+         x var# . y var# . [ i64 . f64 . ] sig# ! !"
     );
     // A name keeps its subscript and its power, for a rule to rewrite where
     // the name is applied, and a quotation's power is `power#` (6.21, 6.22).
@@ -99,6 +107,8 @@ fn the_lowest_form_written_inline() {
     assert_eq!(error("[ sq |]"), "`|]` closes the `[` at 1:1");
     assert_eq!(error("sq |]"), "`|]` closes nothing");
     assert_eq!(error("[| sq"), "`[|` is never closed");
+    // Low Stack has one bracket.
+    assert!(error("[| ( 1 ) |]").starts_with("`(` is High Stack's"));
 }
 
 #[test]
@@ -166,4 +176,31 @@ fn symbolic_forth_runs() {
     s.symbolic = true;
     s.eval("3 int# ! dup Snake").unwrap();
     assert_eq!(s.show_typed(), "<3> 3 < i64 > dup' < sym > Snake' < sym >");
+}
+
+#[test]
+fn a_letter_is_a_variable_and_its_symbol_a_value() {
+    // A signature's letter is `a var# .`, a type its bracket fills by
+    // matching, and a bare letter in Low Stack is a symbol, a value to match,
+    // as `a'` is in High Stack (SYMBOLIC-FORTH.md 7, step 2).
+    assert_eq!(
+        lowered("ff: < a' a >< a > [ drop ] ;"),
+        "ff [ a a var# . ] sig# ! [ a var# . ] sig# ! [ drop . ] ;"
+    );
+    let high = "ff: < a' > [ drop 1 ] ; ff: < a > [ drop 2 ] ; 7 ff a' ff";
+    let mut s = Session::new();
+    s.eval(high).unwrap();
+    assert_eq!(s.show(), "<2> 2 1");
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval(
+        "ff [ a ] sig# ! [ drop . 1 int# ! ] ; ff [ a var# . ] sig# ! [ drop . 2 int# ! ] ; \
+         7 int# ! ff . a ff .",
+    )
+    .unwrap();
+    assert_eq!(s.show(), "<2> 2 1");
+    // In a body a letter is an input by its place, not built yet.
+    let e = Session::new().eval("1 [ a ] .").unwrap_err();
+    assert_eq!(e.kind, march8::Kind::Limit);
+    assert!(e.msg.contains("the symbol is `a'`"), "{}", e.msg);
 }

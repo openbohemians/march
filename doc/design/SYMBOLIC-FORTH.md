@@ -3,8 +3,8 @@
 Status: design note, 2026-10-13, from a conversation with Thomas. A first
 account of March's lowest form; a precise specification is to come.
 March8 reads and writes it: `march8 lower` writes any March in Symbolic
-Forth, `--symbolic` reads it, and march8/tests/symbolic.rs is its litmus
-test (section 5). Revised 2026-10-14: one bracket, a quotation; six
+Forth, `--symbolic` reads it, as march8 reads a file ending in `.s4`, and
+march8/tests/symbolic.rs is its litmus test (section 5). Revised 2026-10-14: one bracket, a quotation; six
 meta-ops; numbers as symbols; signatures as two sequences; holes as sugar;
 text made by `string !`; namespaces as maps, with imports and exports;
 and no rules of spelling. March8 does not have these yet. Revised
@@ -35,7 +35,12 @@ syllogism runs lowered (section 25); a signature's two brackets touch,
 data is what `;` takes, inputs, outputs and body (6.6); and a guard in a
 bracket is always tested, `[ … ] ?` (section 2). All built. Designed, not
 built: failing, `fail`, and handling a trap by a clause of the same word
-(6.29).
+(6.29). Revised 2026-10-21: `fail` while compiling, and the identity
+search in March (6.21, 6.29); a signature is a quotation made one,
+`[ … ] sig# !`, as a sequence is made by `seq# !` (6.8); and Low Stack's
+steps 2 and 3, each High Stack form read as Low Stack writes it (section
+7), and literals unsealed (6.14). Built. A quotation and a sequence are
+one thing, the direction (6.30).
 
 ## 1. What it is
 
@@ -88,8 +93,8 @@ application already.
 ```
 1 i64 ! 1 i64 ! + .
 sq [ dup . * . ] ;
-sq [ i64 . ] seq# ! [ i64 . ] seq# ! [ dup . * . ] ;
-fib [ n var# . ] seq# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;
+sq [ i64 . ] sig# ! [ i64 . ] sig# ! [ dup . * . ] ;
+fib [ n var# . ] sig# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;
 Closed Open door . Close door . Lock door . Locked eq? .
 ```
 
@@ -179,8 +184,7 @@ which become spellings above it (decided 2026-10-14, not built):
   while compiling (Thomas, 2026-10-14). `[ + ] seq# !` takes nothing: it
   holds the symbol `+`, since nothing applies without a dot. A `_` in it
   is one of its arguments, taken where it stands (6.14).
-  March8 does not have this yet: there `( … )` is sealed, and `5 ( 1 + )`
-  is an error.
+  Built in march8 (2026-10-21): `5 ( 1 + )` is `( 6 )`.
 - **`{ … }`** is a map literal, `[ … ] map# !`: a set of pairs (section
   1), undecided, and taking from below, in the same way (Thomas,
   2026-10-14).
@@ -209,22 +213,22 @@ which become spellings above it (decided 2026-10-14, not built):
   Elm and Elixir. A map form, `{| … |}` perhaps, is to come. Built in
   march8 (2026-10-15), as `[| … |]` on 2026-10-19, closed by `|]` alone.
 
-A signature in the lowest form is two sequences, inputs then outputs, and
-needs no divider (Thomas, 2026-10-14): `< a* >< b* >` is `[ a* ] [ b* ]`,
-each a sequence of types, `[ a* ] seq# ! [ b* ] seq# !`. One sequence
+A signature in the lowest form is two, inputs then outputs, and needs no
+divider (Thomas, 2026-10-14): `< a* >< b* >` is `[ a* ] [ b* ]`, each a
+quotation made a signature, `[ a* ] sig# ! [ b* ] sig# !` (6.8). One
 gives the inputs alone, and the stage finds the outputs; `[ n var# . ]
-seq# ! [ ] seq# !` declares that there are none. `;` takes a clause's
+sig# ! [ ] sig# !` declares that there are none. `;` takes a clause's
 signature before its body, so no bracket is read by where it stands:
 
 ```
 sq [ dup . * . ] ;                         -- name, body
-fib [ n var# . ] seq# ! [ … ] ;             -- name, inputs, body
-sq [ i64 . ] seq# ! [ i64 . ] seq# !
+fib [ n var# . ] sig# ! [ … ] ;             -- name, inputs, body
+sq [ i64 . ] sig# ! [ i64 . ] sig# !
    [ dup . * . ] ;                         -- name, inputs, outputs, body
 ```
 
 `;` tells these apart by type, since a name is a symbol and a
-sequence is not. And with no divider, `--` begins a comment everywhere,
+signature is not. And with no divider, `--` begins a comment everywhere,
 inside a quotation and a bracket as well; High Stack writes the two
 brackets touching, `< i64 >< i64 >` (6.8, 6.9).
 
@@ -265,9 +269,10 @@ rules live here, not below:
 | `2 i64!` | `2 i64 . !` | `!` structures by a type |
 | `positive?` | `positive ?` | `?` tests |
 | `10`, `1.5`, `1:2` | `10 int# !`, `1.5 dec# !`, `1:2 ratio# !` | a number's spelling gives its kind |
-| `< i64 >< i64 >` | `[ i64 . ] seq# ! [ i64 . ] seq# !` | a signature is two sequences |
+| `< i64 >< i64 >` | `[ i64 . ] sig# ! [ i64 . ] sig# !` | a signature is two, each a quotation made one |
 | `[\| sq math.pi \|]` | `[ sq math.pi ]` | the lowest form inline |
 | `( 1 2 )` | `[ 1 int# ! 2 int# ! ] seq# !` | a sequence literal |
+| `{ a: 1 }` | `[ a 1 int# ! ] map# !` | a map literal |
 | `5 ( _ 1 )` | `5 [ a var# . 1 int# ! ] seq# !` | `_`, an argument, is a letter |
 | `"\_ apples"` | `[ a var# . ' apples' ] str# !` | a string with an argument |
 | `dup_2`, `dup₂` | `dup_2 .` | a name, its subscript an index; for `dup`, the core's width, by a rule (6.22, 6.25) |
@@ -296,7 +301,11 @@ What cannot be said in Symbolic Forth is not March. Every notation above
 it must lower to it, mechanically, and mean the same.
 
 March8 runs the test. `march8 lower` writes March as Symbolic Forth,
-keeping its lines, and `--symbolic` reads it. march8/tests/symbolic.rs
+keeping its lines, and `--symbolic` reads it. A file of it ends in `.s4`
+(Thomas, 2026-10-21: "fitting a low level language, it is a bit of an
+assembly its own way, just an abstract one"), symbolic Forth as `.4th`
+is Forth, and one of High Stack in `.march`; march8 reads each by its
+ending. march8/tests/symbolic.rs
 lowers the core vocabulary and the examples, reads them back to the same
 tokens, and runs the examples lowered to the same results. Code as data
 is this form: what a program builds as code, it builds in Symbolic Forth.
@@ -360,11 +369,13 @@ Settled (Thomas, 2026-10-14), not built:
    together mean what each meant. Only while compiling, as a quotation has no value at run
    time; and a family applied again to one unfolds there, its guards
    decided by the values, so a word walks a quotation by recursion.
-   Built in march8 (2026-10-20). Not yet: `(`, `{`, `<` and strings,
-   which Low Stack has after steps 3 and 4 (section 7); a quotation
+   Built in march8 (2026-10-20). A bracket in one is three elements,
+   its quotation, its kind and `!`, `[ … ] seq# !` (section 7, step 3).
+   Not yet: strings, which Low Stack has after step 4; a quotation
    holding the symbol `'.'` pushed, which would be one with the meta-op
    taken out; a walk past about sixty elements, depth's bound, which a
-   `fold` over a quotation would lift.
+   `fold` over a quotation would lift. Taken seriously, a quotation and a
+   sequence are one thing (30).
 
    **A word's clauses are data too** (2026-10-20; Thomas: "that seems
    reasonable"), and its effect, so March reads a word as it reads a
@@ -379,9 +390,9 @@ Settled (Thomas, 2026-10-14), not built:
    clauses#` gives two, the first `[ [ a a gt ? ] [ a ] [ drop ] ]`; a
    type given alone is written by its name, `[ i64 . ]`; a clause with no
    signature is its body alone, `[ [ + ] ]`; and a primitive has no
-   clauses, its code being the machine's. Once brackets lower to
-   sequences (section 7, step 3), a clause can hold them as `[ … ] seq#
-   !`, and run, leave just what `;` takes. `w effect#` gives how many
+   clauses, its code being the machine's. Brackets lowered (section 7,
+   step 3), a clause still holds each as the code in it, which `sig# !`
+   makes what `;` takes. `w effect#` gives how many
    values a word or a quotation takes and leaves, `max' effect#` being 2
    and 1, as the stage knows them. Both run while compiling. Built in
    march8 (2026-10-20); a clause of two, its signature with `--` and its
@@ -403,9 +414,14 @@ Settled (Thomas, 2026-10-14), not built:
    a literal is looked for, a count or a value to match. A symbol not of
    the kind, `1.5 int# !`, is left for `!`, which says why. Inside `[| …
    |]` a number is a symbol too (3).
-8. **Signatures are two sequences**, inputs then outputs, `[ a* ] [ b*
-   ]`, each a sequence of types, `seq# !`; one gives the inputs alone.
-   `;` takes them before the body (section 3). High Stack writes them as
+8. **Signatures are two**, inputs then outputs, `[ a* ] [ b* ]`, each a
+   quotation made a signature, `sig# !`; one gives the inputs alone.
+   `;` takes them before the body (section 3). They were sequences,
+   `seq# !`, until 2026-10-21 (Thomas chose `sig#`): a sequence's code
+   runs where it stands, its letters places and its tests run, where a
+   signature's runs over types, its letters type variables and its tests
+   guards, so which it is must be said where the quotation is made, as a
+   bracket's kind always is (6.6), not left to `;`. High Stack writes them as
    two brackets touching, `< a a gt? >< a >`, so `><` is `>` then `<`
    and needs no meaning of its own (Thomas, 2026-10-20, from the bowtie
    `⋈`, which it looks like; the glyph stays out of source). An empty
@@ -439,11 +455,14 @@ Settled (Thomas, 2026-10-14), not built:
     writes, or paired, `[ … ] map# !`, which `{ … }` writes; their code
     takes what it needs from below, and they are undecided until taken,
     as `int#` is. A sequence that waits to be made is a quotation, held
-    until `seq# !`.
+    until `seq# !`. A signature is made by `sig# !`, which `< … >`
+    writes, its code run over types (8).
 11. **Variables are given by a word**, `n var# .`, as types are, so no rule
     of spelling is left in the lowest form; one lowercase letter is a
     variable only above it. A body's letter is given by the same word,
-    `b var# .` (section 7).
+    `b var# .` (section 7). Built in march8 for signatures (2026-10-21):
+    the reader writes every letter as `a var# .`, so a letter's symbol,
+    `a'`, is the symbol in a signature too, a value to match.
 12. **Quoting.** A quote inside a quoted symbol is doubled, `'it''s'`,
     the one rule the reader needs to find where `'…'` ends. A symbol holds
     its characters as they are, newlines among them. Escapes, `\n;` and
@@ -506,8 +525,9 @@ Settled (Thomas, 2026-10-14), not built:
     Built in march8 (2026-10-16): a quotation, a word's body, a literal
     and a string each take their arguments, and `mark-pick` is gone. A
     run-time argument used first never moves; one used later waits on the
-    scratch stack. `march8 lower` still writes `( … )` and `"…"` as they
-    are, until `seq#` and `str# !` are the lowest form's.
+    scratch stack. `march8 lower` writes `( … )` as `[ … ] seq# !`
+    (2026-10-21), and `"…"` as it is, until `str# !` is the lowest
+    form's.
 
     No bracket is sealed (Thomas, 2026-10-17): a quotation and a literal
     alike take what their code needs, so `[ + ]` takes two and `1 2 ( + )`
@@ -515,8 +535,13 @@ Settled (Thomas, 2026-10-14), not built:
     easy, `[ _ foo _ bar ]` for `[ swap foo swap bar ]` when `foo` leaves
     one value; it does not declare what a bracket takes, so `( _ _ + )` is
     `( + )`. Sealing every bracket, each taking only its `_`s, would put
-    them in every word that takes an input, `sq: [ _ dup * ] ;`. March8's
-    literals are still sealed (section 3).
+    them in every word that takes an input, `sq: [ _ dup * ] ;`. Built in
+    march8 for sequences and maps (2026-10-21): a literal is its code
+    applied, as `.` applies it, and what it leaves kept together (30), so
+    its elements are what its code left, from as deep as it reached:
+    `5 ( 7 over )` is `( 5 7 5 )`, and `0 ( xs [ + ] each )` a sum, `( 0 )`
+    when xs is empty. A string is still sealed, until it is Low Stack's
+    (section 7, step 4).
 
     **A letter names an input by its place** (Thomas, 2026-10-17). In a
     bracket one lowercase letter is the input at its place from the top,
@@ -570,8 +595,9 @@ Settled (Thomas, 2026-10-14), not built:
     march8 (2026-10-16): `"…"` and `[ … ] string !` join their pieces in
     one buffer, the machine's `text-join`, where march8 had joined them
     with `concat` one at a time, copying the growing string at each piece.
-    As `( … )` is in march8, its code reaches only its arguments and what
-    it makes, for now.
+    Its code reaches only its arguments and what it makes, until strings
+    are Low Stack's (section 7, step 4), when they are unsealed as
+    sequences are (14).
 
     Text is a literal kind, `str#`, as a number is (Thomas, 2026-10-19):
     strings differ along two axes, their encoding, UTF-8 or ASCII, and
@@ -1239,6 +1265,52 @@ Settled (Thomas, 2026-10-15):
     choice made at run time or a loop's body, failing is the trap, not
     built: march8 says so. Handlers, `trap`, `kind` and `why` wait for it.
 
+30. **One thing, a sequence** (Thomas, 2026-10-21: "suddenly a quotation
+    is something we can treat like an array -- an array of symbols. If you
+    take that seriously, not just a solution to the immediate problem ...
+    it is a radical simplification"). The direction, not built. A
+    quotation taken apart is a sequence (6), and a sequence is what a
+    quotation applied leaves, kept together (10), so March has one
+    compound thing, a sequence of elements, each a symbol or a value, as
+    Joy has its list, and the rest is what is done to it:
+
+    - **`.` applies it,** each element landing where it is applied, a
+      symbol applied and a value pushed, so `( 1 2 3 ) .` spreads it and
+      needs no word of its own.
+    - **`!` structures it.** `seq#` applies it and keeps what it leaves
+      together, a sequence again, so `1 2 3 [ + ] seq# !` is `1 ( 5 )`
+      (Thomas: "apply but keep the result contained"); `map#` pairs what it
+      leaves (2); `sig#` applies it over types (8); `str#` writes it as
+      text (15); and `i64 ary !` makes each element an i64, as a symbol is
+      text or a number until a type structures it (7, 28).
+    - **The core's sequence words take it apart and put it together,**
+      `length`, `at`, `slice`, `concat` and `insert`, one family, not one
+      for quotations and one for arrays.
+
+    So a quotation, an array, a map, a signature and a string are one
+    thing and a kind, as Low Stack's one bracket said already. It settles
+    sealing too: `seq# !` is `.` with what it leaves kept together, so its
+    code reaches what `.`'s does (14), built 2026-10-21.
+
+    Open:
+
+    - **A number, one element or three.** 6 has `10` three, `10 int# !`.
+      For `[ 1 2 ]` and `( 1 2 )` to be one sequence, a number is one
+      element, its value, and `10 int# !` how Low Stack writes it, as
+      march8's reader already folds it into one (7).
+    - **Quotations at run time.** A quotation is a value only while
+      compiling (6). If an array is one, a sequence known only at run time
+      can be applied: spreading values costs little, but applying symbols
+      is choosing words while running, immediate mode (19), designed and
+      not built.
+    - **Effects.** A sequence of symbols is data, and as code it has an
+      effect. One known while compiling has both; one known only at run
+      time has none the stage can check, so applying it waits on immediate
+      mode too.
+
+    It changes what a value is, not how Low Stack is written, so it comes
+    after the rest of Low Stack (section 7).
+
 Open: for rules (25), what a group that may not match leaves,
 refused for now, and how an import names one alone; and the symbol for
 the verb `map` (section 2). To revisit: a map form, `{| … |}` perhaps, as
@@ -1268,13 +1340,13 @@ one bool, and in a signature is a guard (6.20). `!` structures the value
 below by the type on top, and a symbol on top names its type by its
 word, `2 i64 !` being `2 i64 . !` (section 2). `;` binds the name below to
 the value on top, with a signature between them if there is one, inputs
-then outputs, each a sequence (section 3, 6.18); the name is a symbol, a
+then outputs, each made by `sig# !` (section 3, 6.8, 6.18); the name is a symbol, a
 path among them, or a pattern, which `;` tells from a symbol by its type.
 
 **The core's words it leans on.** What the higher forms spell, Low Stack
 says with words of the core, which lowering writes (section 4): `int#`,
 `dec#` and `ratio#` make a number of a symbol (6.7); `seq#` and `map#`
-make data of a quotation (6.10), a signature being two sequences (6.8);
+make data of a quotation (6.10), and `sig#` a signature of one (6.8);
 `str#` makes text of one (6.15); `var#` makes a variable of a name, in
 a signature a type filled by matching, in a body an input by its place
 (6.11, 6.14); `power#` makes a power (6.21), `unit#` an identity and
@@ -1322,10 +1394,27 @@ Types are words (section 2).
    `convert`, the word `!` is read as today, goes (6.5). Built
    2026-10-19 (6.7).
 2. **A signature's variables** lower to `a var# .`, and a bare letter in a
-   Low Stack signature is a value to match, as any symbol is.
+   Low Stack signature is a value to match, as any symbol is. Built
+   2026-10-21, the first step done the way the rest are to be (Thomas,
+   2026-10-21: Low Stack running first, High Stack dressing on top): the
+   reader writes the form as Low Stack does, by spelling alone, every
+   letter being `a var# .` in a body too; the stage no longer reads it,
+   and the word that gives it a meaning is the core's, `var#`. A
+   message writes it back as it was written. In a body `var#` says that
+   places are not built (step 5).
 3. **Brackets**, the largest step: `( … )` and `{ … }` unsealed (6.14)
-   and lowered to `seq# !` and `map# !`, and `< … >` lowered to two
-   sequences, which `;` takes (6.8).
+   and lowered to `seq# !` and `map# !`, and `< … >` lowered to `sig#
+   !`, which `;` takes (6.8). Lowered 2026-10-21, as step 2 was: the
+   reader writes each bracket as `[`, and where it closes its kind and
+   `!`, the kind where the bracket opened, which says it; the stage
+   reads `[` alone, and `!` makes the quotation a sequence, a map or a
+   signature, so a primitive's signature, a definition's parts and a
+   message read the new form too, the message writing `( … )` back. The
+   compiled code is the same, the core's and every example's. Unsealed
+   the same day (6.14): a sequence's or a map's code reaches what `.`'s
+   would, and the stage notes how deep, where its elements start; the
+   compiled code is still the same, since nothing compiled before reached
+   below.
 4. **Strings**, as `[ … ] str# !` of `'…'` pieces and code (6.15).
 5. **Letters as places**, built in High Stack (6.14), lowering to
    `b var# .`, with each `_` lowered to its letter.

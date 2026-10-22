@@ -51,7 +51,9 @@ type's symbol: `2 i64 !`. A number is a symbol there too, given its kind,
 literal as it reads (2026-10-19). March8 reads the
 intermediate form and lowers it by spelling alone: `fib` is `fib .`,
 `Snake'` and `+'` are symbols, and `2 i64!` is `2 i64 . !`. `march8 lower`
-writes any March in Symbolic Forth, and `--symbolic` reads it; the litmus
+writes any March in Symbolic Forth, Low Stack, and `--symbolic` reads it,
+as march8 reads a file ending in `.s4`, where High Stack's end in
+`.march` (2026-10-21); the litmus
 test, `tests/symbolic.rs`, lowers the core vocabulary and the examples,
 reads them back to the same tokens, and runs them to the same results.
 
@@ -64,14 +66,14 @@ reads them back to the same tokens, and runs them to the same results.
 | `'text'` | a quoted symbol: its text as it is, spaces and newlines among it, a quote in it doubled, `'it''s'` (doc/design/SYMBOLIC-FORTH.md 6.12); a string wherever one is taken (6.28) |
 | `name` | a name, applied: a primitive, a family, a constructor, or a type's name, which gives the type |
 | `Name` | a capitalized name, a name like any: it applies (doc/design/SYMBOLIC-FORTH.md 6.27) |
-| `a` | one lowercase letter: a variable, a type variable in a bracket; it names no word |
+| `a` | one lowercase letter: a variable, read as `a var# .` (doc/design/SYMBOLIC-FORTH.md 7), a type variable in a signature; it names no word, and its symbol, `a'`, is a value to match |
 | `name:` | a label: the symbol `name`, written where a name is defined or a key given |
 | `name'` | the symbol `name`, for a word passed rather than applied, `+' reduce`, or any symbol, `Snake'` |
 | `\name` | a symbol table entry, in any word: `\times` is `×`, `x\_1` is `x₁` (core/symbols.txt; march7/docs/SURFACE.md) |
 | `.` | applies the value on top, a word or a quotation; each dot at the end of a word applies once more: `[ 2 + ].` |
 | `!` | converts the value below by the type on top, a meta-op, as `;` is, read as the primitive `!` applied: `2 i64!`, `x y < i64 f64 > !` (Thomas, 2026-10-13; no word `convert` since 2026-10-19) |
 | `a.b` | one word: a dot inside a word is part of it, a number's point, `2.5`, or in a name a path in a namespace, `io.file.read` (TYPES.md 3.12), kept for namespaces and defining no word yet. Dots between names once chained them, `a.b.` for `a. b.` (2026-10-09), which left no spelling for a path (Thomas, 2026-10-10) |
-| `[ … ]` | a quotation: its words, unevaluated |
+| `[ … ]` | a quotation: its words, unevaluated. Every bracket is one, made data where it closes, as Low Stack writes it (doc/design/SYMBOLIC-FORTH.md 7): `( … )` is `[ … ] seq# !`, `{ … }` is `[ … ] map# !` and `< … >` is `[ … ] sig# !` |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
 | `_` | an argument of the bracket it is written in, taken when the bracket is applied, the first written the deepest (Comprehensions) |
 | `< … >` | a bracket: code whose values are a type or a signature, a comprehension of types |
@@ -132,6 +134,7 @@ leaves is the signature, by what each value is:
 ```
 case: < string Camel > [ … ] ;        a string, and the symbol Camel
 at: < a ary i64 >< a > [ … ] ;        one letter is a type variable
+ff: < a' > [ … ] ;                    its symbol is a value: the symbol a
 sign: < i64 positive? > [ … ] ;       a word tested, by ?: a guard
 even: < i64 [ 2 mod zero ] ? > [ … ] ;    a quotation tested is one too
 fib: < 0 > [ … ] ;    < 0 i64! >    < true >    a value left: equal to it
@@ -142,8 +145,12 @@ pair: < ( i64 string ) > [ … ] ;      an array of types: a tuple type
 that (doc/design/SYMBOLIC-FORTH.md 20): `positive?` is `positive ?`, and
 `.` applies the word unchecked. In a bracket a test is a guard on the
 inputs before it. A name left in a bracket,
-unapplied, is a symbol or a variable, so no definition changes what a
-bracket means: a symbol is never a type. Reading a signature takes knowing
+unapplied, is a symbol, so no definition changes what a bracket means: a
+symbol is never a type. A letter is a variable, which the reader writes
+as Low Stack does, `a var# .`, and `var#` gives in a bracket the type
+variable its letter names (2026-10-21); in a body a letter is to be an
+input by its place (SYMBOLIC-FORTH.md 14), which is not built, and `var#`
+says so. Reading a signature takes knowing
 what a constructor takes, `< k i64 map k >` being a map and a key, as
 reading any FORTH does. The code runs while compiling, so it leaves only
 known values. Before a definition's body, a bracket is the clause's
@@ -671,6 +678,19 @@ f: [ "<\[ _ 1 + ]>" ] ;     5 f is "<6>", 1.5 f is "<2.5>"
   order, each written as a hole's is, `1 2 [ _ " and " _ ] string !` being
   `"1 and 2"` (doc/design/SYMBOLIC-FORTH.md 15). Its code reaches only its
   arguments and what it makes, as a hole's does.
+- **`seq# !`, `map# !` and `sig# !` of a quotation** make it an array
+  literal, a map literal or a signature, which is how the reader writes
+  `( … )`, `{ … }` and `< … >` (2026-10-21; doc/design/SYMBOLIC-FORTH.md
+  7, step 3). A literal's code runs where it stands and reaches what
+  `.`'s would, and its elements are what it leaves, from as deep as it
+  reached (14, 30): `1 2 3 ( + )` is `1 ( 5 )`, and `0 ( xs [ + ] each )` a
+  sum. The stage notes the deepest value its code takes, and where that
+  had a cell, `reach` lowers the mark by as many before the gather, so
+  code that reaches nothing below compiles as it did. A signature's runs
+  over types, so its
+  letters are type variables and its tests guards, and in it `seq# !` is
+  a tuple type. The three kinds are words, `seq#`, `map#` and `sig#`,
+  as `int#` is, and no value has one.
 - **`show`,** in `core.march`, writes a value as the display does, so it
   reads back: a string quoted, money with its cents, an array in
   parentheses, element by element, and a map in braces, sorted by key (Thomas,
@@ -941,7 +961,8 @@ that dispatch would choose for inputs of the types ins gives, a type or
 code that leaves them, `< i64 i64 >`, or values, `[ i64+' ]`, a value
 pattern for another value not chosen, in the order it would try them, each
 a quotation of what `;` takes after the name, each bracket as its code,
-`[ [ a a gt ? ] [ a ] [ drop ] ]`, a primitive having none, and `effect#`, how many values a word or a
+`[ [ a var# . a var# . gt ? ] [ a var# . ] [ drop . ] ]`, a primitive
+having none, and `effect#`, how many values a word or a
 quotation takes and leaves, so March reads a word as it reads a quotation
 (SYMBOLIC-FORTH.md 6.6); `name#`, a symbol as a name where a rule's
 name was applied, the word expanding finds there, by the shortest name the
@@ -966,11 +987,13 @@ in March cost what primitives did. A final call becomes a tail call, and a
 return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with forty-six primitives added: `pick`; checked
+The machine is march7's, with forty-seven primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
-`text-join`, which joins texts in one buffer; `money>text` and
+`text-join`, which joins texts in one buffer; `reach`, which lowers an
+array or map literal's mark by the cells its code reached below it;
+`money>text` and
 `string-show`; `sort-ints`, `sort-floats` and `sort-texts`; `f64-sqrt`,
 `f64-pow` and `i64-pow`; `f64-floor`, `f64-ceil` and `f64-round`;
 `vector-insert` and `vector-remove`; `union-make`, `union-tag` and

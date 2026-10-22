@@ -139,19 +139,60 @@ fn unapplied(n: &str) -> bool {
     read::is_variable(n)
 }
 
+/// Whether a name is `var#`, which makes a variable of a letter, by its
+/// path or not.
+fn is_var(n: &str) -> bool {
+    n == "var#" || n == "core.var#"
+}
+
 /// Tokens as they are written, for a message: a name and its application
-/// are the name, `!` and `;` among them, and a symbol or a variable is
-/// spelled as one.
+/// are the name, `!` and `;` among them, a variable, `a var# .`, is its
+/// letter, a quotation made data is its bracket, `[ … ] seq# !` being
+/// `( … )`, and a symbol is spelled as one.
 fn source_text(toks: &[Token]) -> String {
+    // Each bracket's spelling, by where it is, and the words that make one,
+    // which it stands for.
+    let mut spelled: Vec<Option<&str>> = vec![None; toks.len()];
+    let mut made = vec![false; toks.len()];
+    let mut open = Vec::new();
+    for (i, t) in toks.iter().enumerate() {
+        match t.tok {
+            Tok::Open(_) => open.push(i),
+            Tok::Close(_) => {
+                let (o, c) = match (open.pop(), made_at(toks, i + 1)) {
+                    (Some(o), Some("seq#")) => (o, ["(", ")"]),
+                    (Some(o), Some("map#")) => (o, ["{", "}"]),
+                    (Some(o), Some(_)) => (o, ["<", ">"]),
+                    _ => continue,
+                };
+                (spelled[o], spelled[i]) = (Some(c[0]), Some(c[1]));
+                made[i + 1..i + 4].fill(true);
+            }
+            _ => {}
+        }
+    }
     let mut out = String::new();
     let mut i = 0;
     while i < toks.len() {
+        if made[i] {
+            i += 1;
+            continue;
+        }
         let word = match &toks[i].tok {
             Tok::Apply => ".".into(),
             Tok::Test => "?".into(),
             Tok::Name(s) if toks.get(i + 1).is_some_and(|t| t.tok == Tok::Test) => {
                 i += 1;
                 format!("{s}?")
+            }
+            // A variable, `a var# .`, is its letter.
+            Tok::Name(s)
+                if unapplied(s)
+                    && matches!(toks.get(i + 1).map(|t| &t.tok), Some(Tok::Name(v)) if is_var(v))
+                    && toks.get(i + 2).is_some_and(|t| t.tok == Tok::Apply) =>
+            {
+                i += 2;
+                s.to_string()
             }
             Tok::Name(s) if toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) => {
                 i += 1;
@@ -161,7 +202,6 @@ fn source_text(toks: &[Token]) -> String {
                     s.to_string()
                 }
             }
-            Tok::Name(s) if unapplied(s) => s.to_string(),
             Tok::Name(s) => {
                 let mut out = String::new();
                 crate::show::symbol(s, &mut out);
@@ -171,7 +211,7 @@ fn source_text(toks: &[Token]) -> String {
             Tok::Dec(d, s) => prims::show_dec(*d, *s),
             Tok::Ratio(t) => prims::show_ratio(t),
             Tok::Str(s) => format!("{s:?}"),
-            Tok::Open(b) | Tok::Close(b) => (*b as char).to_string(),
+            Tok::Open(b) | Tok::Close(b) => spelled[i].map_or((*b as char).to_string(), Into::into),
             Tok::Template(_) => "\"…\"".into(),
         };
         if !out.is_empty() {
@@ -218,13 +258,30 @@ fn value_text(j: &Jdg) -> String {
     }
 }
 
+/// How many of these values have cells on the machine's stack.
+fn cells(stack: &[Jdg]) -> usize {
+    stack.iter().filter(|j| !j.known()).count()
+}
+
 /// An open array, map or string literal: its bracket, where its elements
-/// start, the floor outside it, and where in the code its mark is.
+/// start, the floor outside it, and where in the code its mark is. An array
+/// or a map is not sealed (doc/design/SYMBOLIC-FORTH.md 14), so `low` is the
+/// deepest its code has reached, where its elements start once it closes,
+/// and `cells` how many values below its start had cells at its mark.
 struct Literal {
     bracket: u8,
     start: usize,
     floor: usize,
     mark: usize,
+    low: usize,
+    cells: usize,
+}
+
+impl Literal {
+    /// Where its elements start: its start, or as deep as its code reached.
+    fn from(&self) -> usize {
+        self.start.min(self.low)
+    }
 }
 
 /// The arguments of a bracket being applied (doc/design/SYMBOLIC-FORTH.md
@@ -710,7 +767,23 @@ fn quotation_type(q: &[Token], pos: Pos) -> Error {
     )
 }
 
-/// The index of the bracket that closes the one opened at `i`.
+/// The kind a quotation closed at `j - 1` is made by `!` if it is, `[ … ]
+/// seq# !`, `map# !` or `sig# !`, as High Stack's brackets are read: its
+/// name, `seq#`.
+fn made_at(toks: &[Token], j: usize) -> Option<&str> {
+    match toks
+        .get(j..j + 3)
+        .map(|t| [&t[0].tok, &t[1].tok, &t[2].tok])
+    {
+        Some([Tok::Name(k), Tok::Name(b), Tok::Apply])
+            if matches!(&**k, "seq#" | "map#" | "sig#") && &**b == "!" =>
+        {
+            Some(k)
+        }
+        _ => None,
+    }
+}
+
 /// Where a definition that starts at `i` ends, at its `;`: a name, then
 /// its signature and body, brackets, or one value, then `;`.
 fn definition(toks: &[Token], i: usize) -> Option<usize> {
@@ -720,6 +793,9 @@ fn definition(toks: &[Token], i: usize) -> Option<usize> {
     let mut j = i + 1;
     while toks.get(j).is_some_and(|t| matches!(t.tok, Tok::Open(_))) {
         j = matching(toks, j) + 1;
+        if made_at(toks, j).is_some() {
+            j += 3;
+        }
     }
     let value = |t: &Token| {
         matches!(
@@ -871,14 +947,16 @@ impl Stage {
         let none = crate::symbols::Symbols::parse("").expect("an empty table");
         for p in PRIMS {
             let toks = crate::read::read(p.sig, &none).expect("a primitive's signature reads");
-            // Its inputs, and its outputs in a second bracket.
+            // Its inputs, and its outputs in a second bracket, each
+            // `[ … ] sig# !`.
             let end = matching(&toks, 0);
             let mut sig = s
                 .bracket(&toks[1..end])
                 .expect("a primitive's signature is well formed");
-            if end + 1 < toks.len() {
+            let outs = end + 4;
+            if outs < toks.len() {
                 sig.outs = Some(
-                    s.outputs(&toks[end + 2..toks.len() - 1])
+                    s.outputs(&toks[outs + 1..matching(&toks, outs)])
                         .expect("a primitive's outputs are types"),
                 );
             }
@@ -945,8 +1023,9 @@ impl Stage {
         self.stack.push(Jdg { ty, val });
     }
 
-    /// Checks that `n` values are within reach.
-    fn need(&self, n: usize) -> Result<()> {
+    /// Checks that `n` values are within reach, and notes that the code
+    /// reached them, so a literal knows how deep its code reached.
+    fn need(&mut self, n: usize) -> Result<()> {
         let have = self.stack.len() - self.floor;
         if self.stack[self.stack.len() - n.min(have)..]
             .iter()
@@ -970,7 +1049,16 @@ impl Stage {
                 ),
             ));
         }
+        self.reached(self.stack.len() - n);
         Ok(())
+    }
+
+    /// Notes that the code reached the value at `at`, for the innermost
+    /// literal open.
+    fn reached(&mut self, at: usize) {
+        if let Some(l) = self.literals.last_mut() {
+            l.low = l.low.min(at);
+        }
     }
 
     fn pop(&mut self) -> Result<Jdg> {
@@ -1000,12 +1088,6 @@ impl Stage {
                     self.arg(t as *const Token as usize)?;
                     i += 1;
                 }
-                // In a bracket, a variable, one lowercase letter, is a type
-                // variable.
-                Tok::Name(s) if self.in_bracket > 0 && read::is_variable(s) => {
-                    let v = self.types.intern(Term::Var(s.as_bytes()[0] - b'a'));
-                    self.push(TYPE, Val::Type(v));
-                }
                 Tok::Name(s) => self.push(SYMBOL, Val::Name(s.clone(), t.pos)),
                 Tok::Apply => self.apply()?,
                 Tok::Test => self.apply_test()?,
@@ -1015,47 +1097,15 @@ impl Stage {
                     self.push(QUOTE, Val::Quote(q));
                     i = j;
                 }
-                // A bracket is a value, as a quotation is (Thomas,
-                // 2026-10-12): a type, or, of more than one type, a
-                // signature, which applied gives the values below their
-                // types, `x y < i64 f64 > .`. Before a definition's body it
-                // is the clause's context, read by `;`.
-                Tok::Open(b'<') => {
-                    let j = matching(toks, i);
-                    let sig = self.bracket(&toks[i + 1..j])?;
-                    self.pos = t.pos;
-                    if let ([t], None, []) = (&sig.ins[..], &sig.outs, &sig.guards[..]) {
-                        self.push(TYPE, Val::Type(*t));
-                    } else {
-                        self.push(QUOTE, Val::Quote(toks[i..=j].into()));
-                    }
-                    i = j;
+                // The reader writes High Stack's brackets as Low Stack's
+                // one, and the stage keeps its own `<` inside a signature's
+                // value only.
+                Tok::Open(_) | Tok::Close(_) => {
+                    return Err(self.err(
+                        Kind::Syntax,
+                        "Low Stack's one bracket is `[ … ]`, made data by `!`",
+                    ));
                 }
-                // An array of types, in a bracket, is a tuple type: no code.
-                Tok::Open(b'(') if self.in_bracket > 0 => {
-                    self.literals.push(Literal {
-                        bracket: b'(',
-                        start: self.stack.len(),
-                        floor: self.floor,
-                        mark: self.code.len(),
-                    });
-                    self.floor = self.stack.len();
-                }
-                // A literal is applied where it stands, so its arguments are
-                // taken here (doc/design/SYMBOLIC-FORTH.md 14).
-                Tok::Open(b) => {
-                    self.take_args(args_in(&toks[i + 1..matching(toks, i)]))?;
-                    let mark = self.code.len();
-                    self.emit(Op::Prim(P::Mark));
-                    self.literals.push(Literal {
-                        bracket: *b,
-                        start: self.stack.len(),
-                        floor: self.floor,
-                        mark,
-                    });
-                    self.floor = self.stack.len();
-                }
-                Tok::Close(b) => self.close_literal(*b)?,
             }
             i += 1;
         }
@@ -1134,6 +1184,13 @@ impl Stage {
             }
         };
         self.need(1)?;
+        if matches!(t, SEQ_LIT | MAP_LIT | SIG_LIT) {
+            let at = match f.val {
+                Val::Name(_, at) => at,
+                _ => self.pos,
+            };
+            return self.made(t, at);
+        }
         // `string !` of a quotation is text of what its code leaves.
         if t == STRING
             && let Some(Jdg {
@@ -1843,6 +1900,39 @@ impl Stage {
         Ok(())
     }
 
+    /// `a var# .`: a variable of a one-letter name, which its bracket fills
+    /// (doc/design/SYMBOLIC-FORTH.md 7): in a signature a type, filled by
+    /// matching, `< a a >< a >`. A letter is read as one, and a letter's
+    /// symbol, `a'`, is a value to match, as any symbol is. In a body a
+    /// letter is an input by its place (6.14), not built yet.
+    fn var(&mut self) -> Result<()> {
+        let j = self.stack.pop().expect("matched");
+        let n = match &j.val {
+            Val::Name(n, _) if read::is_variable(n) => n.clone(),
+            _ => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "`var#` takes a letter, `a` to `z`, and {} is not one",
+                        self.describe(&j)
+                    ),
+                ));
+            }
+        };
+        if self.in_bracket == 0 {
+            return Err(self.err(
+                Kind::Limit,
+                format!(
+                    "`{n}` in a body is an input by its place, which is not built yet \
+                     (doc/design/SYMBOLIC-FORTH.md 14); the symbol is `{n}'`"
+                ),
+            ));
+        }
+        let v = self.types.intern(Term::Var(n.as_bytes()[0] - b'a'));
+        self.push(TYPE, Val::Type(v));
+        Ok(())
+    }
+
     /// Where a name was applied, by its path: the longest part before a dot
     /// that is a namespace, and the rest, which a rule there may match; the
     /// root for a bare name.
@@ -2039,7 +2129,9 @@ impl Stage {
             }]),
             _ => return Err(self.err(Kind::Mismatch, usage)),
         };
-        if let Some(Tok::Open(b'<')) = q.first().map(|t| &t.tok) {
+        if let Some(Tok::Open(_)) = q.first().map(|t| &t.tok)
+            && made_at(&q, matching(&q, 0) + 1) == Some("sig#")
+        {
             return Err(self.err(
                 Kind::Syntax,
                 format!("a clause's signature comes before its body: `{name}: < … > [ … ] ;`"),
@@ -3234,7 +3326,7 @@ impl Stage {
     /// there.
     fn collecting(&self, base: usize) -> Option<usize> {
         let l = self.literals.last()?;
-        (l.bracket == b'(' && l.start <= base).then_some(l.start)
+        (l.bracket == b'(' && l.from() <= base).then_some(l.from())
     }
 
     // ---- Instances and recursion ----
@@ -3957,6 +4049,7 @@ impl Stage {
                 Prim::NameOf => (1, 1),
                 Prim::Clauses => (2, 1),
                 Prim::Effect => (1, 2),
+                Prim::Var => (1, 1),
                 Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
                 Prim::Each | Prim::EachRight => (2, 0),
                 Prim::Within => (2, 1),
@@ -4068,27 +4161,20 @@ impl Stage {
                     i += 1;
                 }
                 Tok::Name(s) => items.push(Item::Name(s.clone())),
-                Tok::Open(b'[') => {
-                    let j = matching(toks, i);
-                    items.push(Item::Quote(i + 1, j));
-                    i = j;
-                }
-                Tok::Open(b'<') => {
-                    let j = matching(toks, i);
-                    items.push(Item::Bracket(i + 1, j));
-                    i = j;
-                }
-                // A literal takes its arguments, and its code reaches no
-                // further.
                 Tok::Open(_) => {
                     let j = matching(toks, i);
-                    let k = args_in(&toks[i + 1..j]).len();
-                    if self.effect_in(&toks[i + 1..j], ns, visiting)?.0 != k {
-                        return None;
+                    match made_at(toks, j + 1) {
+                        None => items.push(Item::Quote(i + 1, j)),
+                        Some("sig#") => items.push(Item::Bracket(i + 1, j)),
+                        // A sequence or a map takes what its code takes,
+                        // its arguments among them.
+                        Some(_) => {
+                            let (k, _) = self.effect_in(&toks[i + 1..j], ns, visiting)?;
+                            take(items, ins, k);
+                            items.push(Item::Other);
+                        }
                     }
-                    take(items, ins, k);
-                    items.push(Item::Other);
-                    i = j;
+                    i = j + if made_at(toks, j + 1).is_some() { 3 } else { 0 };
                 }
                 Tok::Apply | Tok::Test => {
                     let top = match items.pop()? {
@@ -4260,10 +4346,13 @@ impl Stage {
                         n += b as isize - a as isize - 1;
                     }
                 }
-                Tok::Open(b'[') => i = matching(toks, i),
+                // A quotation is no slot, a guard's, and a tuple type is one.
                 Tok::Open(_) => {
                     i = matching(toks, i);
-                    n += 1;
+                    if made_at(toks, i + 1).is_some() {
+                        i += 3;
+                        n += 1;
+                    }
                 }
                 _ => {}
             }
@@ -4295,6 +4384,7 @@ impl Stage {
         };
         self.settle(sig, &env)?;
         let base = self.stack.len() - sig.ins.len();
+        self.reached(base);
         let floor = self.floor;
         self.floor = base;
         let r = self.run_quote(&c.body);
@@ -4910,6 +5000,7 @@ impl Stage {
             Prim::NameOf => self.name_of()?,
             Prim::Clauses => self.clauses_of()?,
             Prim::Effect => self.effect_counts()?,
+            Prim::Var => self.var()?,
             Prim::VecLength => {
                 let k = len(self, 13);
                 if !self.stack[base].known() {
@@ -7401,12 +7492,14 @@ impl Stage {
         }))
     }
 
-    fn close_literal(&mut self, b: u8) -> Result<()> {
-        if self.in_bracket > 0 && b == b')' {
-            return self.close_tuple_type();
-        }
-        let lit = self.literals.pop().expect("the reader checks nesting");
-        let start = lit.start;
+    /// Closes the array literal, `b` being `(`, or the map literal, `{`.
+    fn close_literal(&mut self, open: u8) -> Result<()> {
+        let b = closer(open);
+        let lit = self.literals.pop().expect("pushed");
+        // Its elements are what its code left, from as deep as it reached,
+        // so it is in reach of the literal around it as deep (30).
+        let start = lit.from();
+        self.reached(start);
         let n = self.stack.len() - start;
         let what = if b == b')' { "an array" } else { "a map" };
         let runs = self.stack[start..].iter().any(|j| j.val == Val::Many);
@@ -7494,6 +7587,16 @@ impl Stage {
         for _ in start..self.stack.len() {
             self.stack.pop();
         }
+        // The gather starts below the mark by as many cells as the code
+        // reached below its start.
+        let reach = lit
+            .cells
+            .checked_sub(cells(&self.stack))
+            .expect("nothing below where a literal's code reached changes");
+        if reach > 0 {
+            self.emit(Op::Lit(reach as u64));
+            self.emit(Op::Prim(P::Reach));
+        }
         self.emit(Op::Prim(op));
         self.push(ty, Val::Run);
         Ok(())
@@ -7502,8 +7605,9 @@ impl Stage {
     /// `( … )` in a bracket: the types in it, a tuple type.
     fn close_tuple_type(&mut self) -> Result<()> {
         let lit = self.literals.pop().expect("the reader checks nesting");
+        self.reached(lit.from());
         let mut elems = Vec::new();
-        for j in self.stack.drain(lit.start..).collect::<Vec<_>>() {
+        for j in self.stack.drain(lit.from()..).collect::<Vec<_>>() {
             match j.val {
                 Val::Type(t) => elems.push(t),
                 _ if j.ty == NIL => elems.push(NIL),
@@ -7540,6 +7644,8 @@ impl Stage {
             start,
             floor: self.floor,
             mark: self.code.len(),
+            low: start,
+            cells: 0,
         });
         let r = self.pieces(pieces, pos);
         let lit = self.literals.pop().expect("pushed");
@@ -7575,6 +7681,101 @@ impl Stage {
         Ok(())
     }
 
+    /// `[ … ] seq# !`, `map# !` or `sig# !`: the quotation below made a
+    /// sequence, a map or a signature (doc/design/SYMBOLIC-FORTH.md 6.8,
+    /// 6.10), as High Stack's `( … )`, `{ … }` and `< … >` are read. The kind
+    /// decides when and how its code runs (6.6). `at` is where the kind was
+    /// written, where High Stack's bracket opened.
+    fn made(&mut self, kind: Type, at: Pos) -> Result<()> {
+        let j = self.pop()?;
+        let q = match j.val {
+            Val::Quote(q) if !signature(&q) => q,
+            _ => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "`{}` makes data of a quotation, and {} is not one",
+                        self.types.name(kind),
+                        self.describe(&j)
+                    ),
+                ));
+            }
+        };
+        let closed = std::mem::replace(&mut self.pos, at);
+        match kind {
+            SIG_LIT => self.quote_sig(&q),
+            SEQ_LIT if self.in_bracket > 0 => self.quote_tuple(&q, closed),
+            SEQ_LIT => self.quote_literal(&q, b'(', closed),
+            _ => self.quote_literal(&q, b'{', closed),
+        }
+    }
+
+    /// A sequence or a map of what the quotation's code leaves. It is
+    /// applied where it stands, so its arguments are taken there
+    /// (doc/design/SYMBOLIC-FORTH.md 14), and its code reaches what `.`'s
+    /// would, its elements being all it leaves, from as deep as it reached
+    /// (30).
+    fn quote_literal(&mut self, q: &[Token], bracket: u8, closed: Pos) -> Result<()> {
+        self.take_args(args_in(q))?;
+        let mark = self.code.len();
+        self.emit(Op::Prim(P::Mark));
+        let start = self.stack.len();
+        self.literals.push(Literal {
+            bracket,
+            start,
+            floor: self.floor,
+            mark,
+            low: start,
+            cells: cells(&self.stack),
+        });
+        self.enter()?;
+        let r = self.run(q);
+        self.depth -= 1;
+        r?;
+        self.pos = closed;
+        self.close_literal(bracket)
+    }
+
+    /// A sequence in a signature, its code run over types: a tuple type,
+    /// `< ( i64 string ) >`, of the types it leaves, from as deep as it
+    /// reached.
+    fn quote_tuple(&mut self, q: &[Token], closed: Pos) -> Result<()> {
+        let start = self.stack.len();
+        self.literals.push(Literal {
+            bracket: b'(',
+            start,
+            floor: self.floor,
+            mark: self.code.len(),
+            low: start,
+            cells: 0,
+        });
+        self.run(q)?;
+        self.pos = closed;
+        self.close_tuple_type()
+    }
+
+    /// A signature, its code run over types (TYPES.md 2.2): a type, or, of
+    /// more than one, a signature, which applied gives the values below
+    /// their types, `x y < i64 f64 > !`. Before a definition's body it is
+    /// the clause's context, which `;` reads. The stage keeps it as its code
+    /// between `<` and `>`.
+    fn quote_sig(&mut self, q: &[Token]) -> Result<()> {
+        let at = self.pos;
+        let sig = self.bracket(q)?;
+        self.pos = at;
+        if let ([t], None, []) = (&sig.ins[..], &sig.outs, &sig.guards[..]) {
+            self.push(TYPE, Val::Type(*t));
+            return Ok(());
+        }
+        let tok = |tok| Token { tok, pos: at };
+        let toks: Vec<Token> = std::iter::once(tok(Tok::Open(b'<')))
+            .chain(q.iter().cloned())
+            .chain(std::iter::once(tok(Tok::Close(b'>'))))
+            .collect();
+        self.push(QUOTE, Val::Quote(toks.into()));
+        Ok(())
+    }
+
     /// `string !` of a quotation (doc/design/SYMBOLIC-FORTH.md 15): its code
     /// runs where it stands, taking its arguments, and each value it leaves
     /// is written, in order, into one string, a string as its text and any
@@ -7589,6 +7790,8 @@ impl Stage {
             start,
             floor: self.floor,
             mark: self.code.len(),
+            low: start,
+            cells: 0,
         });
         self.floor = start;
         let r = self.enter().and_then(|()| {

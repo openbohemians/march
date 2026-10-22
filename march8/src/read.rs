@@ -26,9 +26,10 @@ pub enum Tok {
     /// or in a signature holds it as a guard (doc/design/SYMBOLIC-FORTH.md
     /// 20): `positive?` is `positive ?`.
     Test,
-    /// `[`, `(`, `{` or `<`.
+    /// `[`, the one bracket High Stack's are read as. Only the stage writes
+    /// another: it keeps a signature as its code between `<` and `>`.
     Open(u8),
-    /// `]`, `)`, `}` or `>`.
+    /// `]`, or the stage's `>`.
     Close(u8),
     /// A string with holes: text and code, in order.
     Template(Rc<[Piece]>),
@@ -46,6 +47,16 @@ pub enum Piece {
 pub struct Token {
     pub tok: Tok,
     pub pos: Pos,
+}
+
+/// The kind `!` makes of a quotation written in a High Stack bracket.
+fn kind_of(open: u8) -> Option<&'static str> {
+    match open {
+        b'(' => Some("seq#"),
+        b'{' => Some("map#"),
+        b'<' => Some("sig#"),
+        _ => None,
+    }
 }
 
 fn closer(open: u8) -> u8 {
@@ -192,11 +203,12 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
                 piece(
                     b,
                     false,
+                    false,
                     &[],
                     "",
                     at,
                     at,
-                    false,
+                    true,
                     symbols,
                     &mut open,
                     &mut out,
@@ -230,6 +242,9 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             || !stem.is_empty()
                 && !stem.starts_with(['[', '(', '{', '<', ']', ')', '}', '>'])
                 && matches!(number(stem, pos), Ok(None));
+        // A letter is a variable, `a var# .` (doc/design/SYMBOLIC-FORTH.md 7):
+        // by spelling alone, the bracket it is written in filling it.
+        let variable = named && !r.symbolic && is_variable(stem);
         let (stem, applies) = if named && !r.symbolic {
             let (stem, applies) = spelled(stem);
             (stem, applies && !marks.starts_with('?'))
@@ -277,6 +292,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         piece(
             stem,
             applies,
+            variable,
             &scripts,
             marks,
             pos,
@@ -330,9 +346,9 @@ fn is_name(w: &str) -> bool {
 
 /// A name, and whether it applies (Thomas, 2026-10-12): a name applies, as
 /// in FORTH, everywhere, and a symbol or a variable is spelled as one. One
-/// lowercase letter is a variable, `a`; `name:` labels what follows, a name
-/// being defined or a key; and `name'` is a symbol, a word passed rather
-/// than applied, `+'`. A capital marks nothing (doc/design/SYMBOLIC-FORTH.md
+/// lowercase letter is a variable, `a`, which `var#` gives; `name:` labels
+/// what follows, a name being defined or a key; and `name'` is a symbol, a
+/// word passed rather than applied, `+'`. A capital marks nothing (doc/design/SYMBOLIC-FORTH.md
 /// 27): `Snake` applies, and the symbol is `Snake'`.
 fn spelled(w: &str) -> (&str, bool) {
     let marked = |m: char| w.len() > m.len_utf8() && w.ends_with(m);
@@ -343,8 +359,9 @@ fn spelled(w: &str) -> (&str, bool) {
     }
 }
 
-/// Whether a name is a variable: one lowercase letter, `a` to `z`, a type
-/// variable in a bracket. It never applies, and no word has its name.
+/// Whether a name is a variable: one lowercase letter, `a` to `z`, which
+/// High Stack reads as `a var# .`, a type variable in a signature. No word
+/// has its name.
 pub fn is_variable(w: &str) -> bool {
     w.len() == 1 && w.as_bytes()[0].is_ascii_lowercase()
 }
@@ -379,19 +396,23 @@ pub(crate) fn fold(out: &mut Vec<Token>) -> Result<()> {
     Ok(())
 }
 
-/// One word: its token, a number only if `numbers`, a quotation's power
-/// spelled out, its own application if it is a name that applies, and for
-/// each mark after it, the first at `at`, an application, `.`, or `!`
-/// applied.
+/// One word: its token, a number only if `high`, `var#` applied if it is a
+/// variable, a quotation's power spelled out, its own application if it is a
+/// name that applies, and for each mark after it, the first at `at`, an
+/// application, `.`, or `!` applied. High Stack's brackets are Low Stack's
+/// one, a quotation, made what each is by `!` where it closes
+/// (doc/design/SYMBOLIC-FORTH.md 7): `( … )` is `[ … ] seq# !`, `{ … }` is
+/// `[ … ] map# !` and `< … >` is `[ … ] sig# !`.
 #[allow(clippy::too_many_arguments)]
 fn piece(
     stem: &str,
     applies: bool,
+    variable: bool,
     scripts: &[(i128, &str)],
     marks: &str,
     pos: Pos,
     at: Pos,
-    numbers: bool,
+    high: bool,
     symbols: &Symbols,
     open: &mut Vec<(u8, Pos)>,
     out: &mut Vec<Token>,
@@ -404,17 +425,30 @@ fn piece(
             "·" | "∙" => "⋅",
             s => s,
         };
+        let mut made = None;
         let tok = match stem {
             "" => None,
+            "(" | "{" | "<" if !high => {
+                return Err(Error::new(
+                    Kind::Syntax,
+                    Some(pos),
+                    format!(
+                        "`{stem}` is High Stack's: Low Stack's one bracket is `[ … ]`, \
+                         made data by `!`, `[ … ] seq# !`, `map# !` or `sig# !`"
+                    ),
+                ));
+            }
             "[" | "(" | "{" | "<" => {
-                let b = stem.as_bytes()[0];
-                open.push((b, pos));
-                Some(Tok::Open(b))
+                open.push((stem.as_bytes()[0], pos));
+                Some(Tok::Open(b'['))
             }
             "]" | ")" | "}" | ">" => {
                 let b = stem.as_bytes()[0];
                 match open.pop() {
-                    Some((o, _)) if closer(o) == b => Some(Tok::Close(b)),
+                    Some((o, p)) if closer(o) == b => {
+                        made = kind_of(o).map(|k| (k, p));
+                        Some(Tok::Close(b']'))
+                    }
                     Some((o, p)) => {
                         return Err(Error::new(
                             Kind::Syntax,
@@ -432,13 +466,33 @@ fn piece(
                 }
             }
             w => Some(
-                if numbers { number(w, pos)? } else { None }.unwrap_or_else(|| {
+                if high { number(w, pos)? } else { None }.unwrap_or_else(|| {
                     Tok::Name(crate::symbols::unscripted(&symbolize(w, symbols)).into())
                 }),
             ),
         };
         if let Some(tok) = tok {
             out.push(Token { tok, pos });
+        }
+        // The kind is where the bracket opened, which says it.
+        if let Some((kind, opened)) = made {
+            out.push(Token {
+                tok: Tok::Name(kind.into()),
+                pos: opened,
+            });
+            for tok in [Tok::Name("!".into()), Tok::Apply] {
+                out.push(Token { tok, pos });
+            }
+        }
+        if variable {
+            out.push(Token {
+                tok: Tok::Name("var#".into()),
+                pos,
+            });
+            out.push(Token {
+                tok: Tok::Apply,
+                pos,
+            });
         }
         for &(n, word) in scripts {
             out.push(Token {
@@ -897,6 +951,8 @@ mod tests {
             n("log_2"),
             Tok::Open(b'['),
             n("q"),
+            n("var#"),
+            a.clone(),
             Tok::Close(b']'),
             Tok::Int(3),
             n("power#"),
@@ -949,14 +1005,20 @@ mod tests {
                 n("xs"),
                 Tok::Apply,
                 Tok::Close(b']'),
-                Tok::Open(b'<'),
+                Tok::Open(b'['),
                 n("i64"),
                 Tok::Apply,
-                Tok::Close(b'>'),
-                Tok::Open(b'<'),
+                Tok::Close(b']'),
+                n("sig#"),
+                n("!"),
+                Tok::Apply,
+                Tok::Open(b'['),
                 n("i64"),
                 Tok::Apply,
-                Tok::Close(b'>'),
+                Tok::Close(b']'),
+                n("sig#"),
+                n("!"),
+                Tok::Apply,
                 n("×"),
                 Tok::Apply,
             ]
@@ -989,8 +1051,8 @@ mod tests {
     fn names_apply_and_symbols_are_spelled() {
         // A name applies, in a bracket too, a capitalized one as any
         // (doc/design/SYMBOLIC-FORTH.md 27); `name:`, a label, and `name'`
-        // are symbols; one lowercase letter is a variable; and `name?` is
-        // tested, not applied.
+        // are symbols; one lowercase letter is a variable, `a var# .`; and
+        // `name?` is tested, not applied.
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
             toks("dup Snake Snake' fib: +' < string Camel' a ary odd? > σ'"),
@@ -1002,16 +1064,21 @@ mod tests {
                 n("Snake"),
                 n("fib"),
                 n("+"),
-                Tok::Open(b'<'),
+                Tok::Open(b'['),
                 n("string"),
                 Tok::Apply,
                 n("Camel"),
                 n("a"),
+                n("var#"),
+                Tok::Apply,
                 n("ary"),
                 Tok::Apply,
                 n("odd"),
                 Tok::Test,
-                Tok::Close(b'>'),
+                Tok::Close(b']'),
+                n("sig#"),
+                n("!"),
+                Tok::Apply,
                 n("σ"),
             ]
         );
@@ -1073,10 +1140,13 @@ mod tests {
                 Tok::Apply,
                 n("!"),
                 Tok::Apply,
-                Tok::Open(b'<'),
+                Tok::Open(b'['),
                 n("i64"),
                 Tok::Apply,
-                Tok::Close(b'>'),
+                Tok::Close(b']'),
+                n("sig#"),
+                n("!"),
+                Tok::Apply,
                 n("!"),
                 Tok::Apply,
             ]

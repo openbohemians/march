@@ -221,6 +221,10 @@ pub enum Primitive {
     // ( t1 … tn n -- t ) n texts joined into one, in one buffer: a string
     // with holes, or `string !` of a quotation.
     TextJoin = 125,
+    // ( n -- ) The innermost mark lowered by n cells: an array or map
+    // literal whose code reached n cells below where it began
+    // (doc/design/SYMBOLIC-FORTH.md 14), so its gather takes them too.
+    Reach = 126,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -349,6 +353,7 @@ impl Primitive {
         (Self::Pascal, "pascal-case"),
         (Self::SymShow, "symbol-show"),
         (Self::TextJoin, "text-join"),
+        (Self::Reach, "reach"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

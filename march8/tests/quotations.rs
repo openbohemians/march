@@ -31,6 +31,12 @@ fn its_elements_are_low_stacks() {
         show("[ 2 i64 ! ] last [ positive? ] last [ x ; ] last"),
         "<3> !' ?' ;'"
     );
+    // A bracket is three, a quotation made data by `!`, `[ … ] seq# !`.
+    assert_eq!(show("[ ( 1 2 ) ] length [ { a: 1 } ] 2 at"), "<2> 3 map#'");
+    assert_eq!(
+        show("[ ( 1 2 ) ] first length [ ( 1 2 ) ] ."),
+        "<2> 6 ( 1 2 )"
+    );
 }
 
 #[test]
@@ -88,10 +94,8 @@ fn a_word_walks_one_by_recursion() {
 
 #[test]
 fn what_low_stack_has_not_yet_is_not_taken_apart() {
-    let (kind, msg) = error("[ ( 1 2 ) ] length");
+    let (kind, msg) = error("[ \"a\" ] length");
     assert_eq!(kind, Kind::Mismatch);
-    assert!(msg.contains("Low Stack has no `(` yet"), "{msg}");
-    let (_, msg) = error("[ \"a\" ] length");
     assert!(msg.contains("Low Stack has no strings yet"), "{msg}");
     // A symbol a meta-op would be taken for.
     let (_, msg) = error("[ '.' ] length");

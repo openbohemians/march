@@ -774,6 +774,14 @@ impl Machine {
                     }
                     self.marks.push(self.stack.len() as u64);
                 }
+                Instruction::Prim(Primitive::Reach) => {
+                    let n = self.pop()?;
+                    if self.marks.len() <= mbase {
+                        return Err(Error::Stack);
+                    }
+                    let mark = self.marks.last_mut().ok_or(Error::Stack)?;
+                    *mark = mark.checked_sub(n).ok_or(Error::Stack)?;
+                }
                 Instruction::Prim(Primitive::MapGather) => {
                     if self.marks.len() <= mbase {
                         return Err(Error::Stack);
@@ -1558,7 +1566,7 @@ impl Machine {
                 self.push(r)?;
             }
             Execute | ScratchPush | ScratchPop | ScratchPeek | ScratchAt | Mark | Gather
-            | MapGather => {
+            | MapGather | Reach => {
                 unreachable!()
             }
         }

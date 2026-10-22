@@ -66,8 +66,9 @@ const USAGE: &str =
        march8                 a REPL, reading lines from the terminal or stdin
        march8 fmt             rewrites `\\name` escapes as symbols, and `dup_2` and `+^4`
                               as `dup₂` and `+⁴`, stdin to stdout
-       march8 lower           writes March as Symbolic Forth, the lowest form, stdin to stdout
-       --symbolic             reads the sources after it as Symbolic Forth";
+       march8 lower           writes High Stack, `.march`, as Low Stack, `.s4`, stdin to stdout
+       FILE                   High Stack, or Low Stack if it ends in `.s4`
+       --symbolic             reads the sources after it as Low Stack";
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1).peekable();
@@ -114,7 +115,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{USAGE}");
                 return Ok(());
             }
-            path => s.eval(&std::fs::read_to_string(path)?),
+            // A `.s4` file is Low Stack, Symbolic Forth (Thomas, 2026-10-21).
+            path => {
+                let source = std::fs::read_to_string(path)?;
+                let given = s.symbolic;
+                s.symbolic = given || path.ends_with(".s4");
+                let r = s.eval(&source);
+                s.symbolic = given;
+                r
+            }
         };
         ran = true;
         flush(&mut s);

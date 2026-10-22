@@ -68,7 +68,7 @@ bracket is a quotation, made data the same way, `[ … ] seq# !`, and so is
 a number, which is
 only a symbol there: `10 i64 !`, or `10 int# !` for a literal whose type
 what takes it decides (2.10). A signature there is two sets, inputs then
-outputs, `[ i64 . ] seq# ! [ i64 . ] seq# !`, so `--` is only a comment,
+outputs, `[ i64 . ] sig# ! [ i64 . ] sig# !`, so `--` is only a comment,
 and a type variable is given by a word, `n var# .`: no rule of spelling is
 left there. (First the form was `1 i64
 . 1 i64 . + .`, when applying a type's name converted.) March8 reads an

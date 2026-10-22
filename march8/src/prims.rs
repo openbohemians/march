@@ -178,6 +178,9 @@ pub enum Prim {
     Clauses,
     /// `w effect#`: how many values a word or a quotation takes and leaves.
     Effect,
+    /// `a var# .`: a variable of a one-letter name, in a signature a type
+    /// filled by matching (doc/design/SYMBOLIC-FORTH.md 7).
+    Var,
     // Compile time.
     Def,
 }
@@ -199,6 +202,8 @@ const fn d(prim: Prim, name: &'static str, sig: &'static str, ops: &'static [P])
 }
 
 pub const PRIMS: &[PrimDef] = &[
+    // First, since the signatures after it give their variables by it.
+    d(Prim::Var, "var#", "< sym >", &[]),
     d(Prim::IntAdd, "int#+", "< int# int# >< int# >", &[]),
     d(Prim::IntSub, "int#-", "< int# int# >< int# >", &[]),
     d(Prim::IntMul, "int#*", "< int# int# >< int# >", &[]),
@@ -690,6 +695,7 @@ pub fn custom(p: Prim) -> bool {
             | NameOf
             | Clauses
             | Effect
+            | Var
             | Def
     )
 }

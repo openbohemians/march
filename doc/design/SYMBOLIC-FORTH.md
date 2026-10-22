@@ -39,8 +39,9 @@ built: failing, `fail`, and handling a trap by a clause of the same word
 search in March (6.21, 6.29); a signature is a quotation made one,
 `[ … ] sig# !`, as a sequence is made by `seq# !` (6.8); and Low Stack's
 steps 2 and 3, each High Stack form read as Low Stack writes it (section
-7), and literals unsealed (6.14). Built. A quotation and a sequence are
-one thing, the direction (6.30).
+7), and literals unsealed (6.14). Built. Code is data only while
+compiling, so a quotation is a sequence then, and at run time only code
+(6.30).
 
 ## 1. What it is
 
@@ -374,8 +375,8 @@ Settled (Thomas, 2026-10-14), not built:
    Not yet: strings, which Low Stack has after step 4; a quotation
    holding the symbol `'.'` pushed, which would be one with the meta-op
    taken out; a walk past about sixty elements, depth's bound, which a
-   `fold` over a quotation would lift. Taken seriously, a quotation and a
-   sequence are one thing (30).
+   `fold` over a quotation would lift. At run time a quotation is code
+   only, never taken apart (30).
 
    **A word's clauses are data too** (2026-10-20; Thomas: "that seems
    reasonable"), and its effect, so March reads a word as it reads a
@@ -537,7 +538,7 @@ Settled (Thomas, 2026-10-14), not built:
     `( + )`. Sealing every bracket, each taking only its `_`s, would put
     them in every word that takes an input, `sq: [ _ dup * ] ;`. Built in
     march8 for sequences and maps (2026-10-21): a literal is its code
-    applied, as `.` applies it, and what it leaves kept together (30), so
+    applied, as `.` applies it, and what it leaves kept together, so
     its elements are what its code left, from as deep as it reached:
     `5 ( 7 over )` is `( 5 7 5 )`, and `0 ( xs [ + ] each )` a sum, `( 0 )`
     when xs is empty. A string is still sealed, until it is Low Stack's
@@ -807,7 +808,9 @@ Settled (Thomas, 2026-10-14), not built:
     The language stays static, and the dynamism is FORTH's own, on
     request. Unlike FORTH's, a word is a family whose clause is chosen by
     type, so a word named at run time may have no body compiled for the
-    types it meets: that is why the stage must be there.
+    types it meets: that is why the stage must be there. It is the one
+    way data becomes code at run time, compiled whole by the stage; a
+    quotation is never edited at run time (30).
 
     A future idea (Thomas): a pure word's results may be cached too, by a
     memoization modifier, which is easy in context-oriented code, where
@@ -1265,51 +1268,42 @@ Settled (Thomas, 2026-10-15):
     choice made at run time or a loop's body, failing is the trap, not
     built: march8 says so. Handlers, `trap`, `kind` and `why` wait for it.
 
-30. **One thing, a sequence** (Thomas, 2026-10-21: "suddenly a quotation
-    is something we can treat like an array -- an array of symbols. If you
-    take that seriously, not just a solution to the immediate problem ...
-    it is a radical simplification"). The direction, not built. A
-    quotation taken apart is a sequence (6), and a sequence is what a
-    quotation applied leaves, kept together (10), so March has one
-    compound thing, a sequence of elements, each a symbol or a value, as
-    Joy has its list, and the rest is what is done to it:
+30. **Code is data only while compiling** (Thomas, 2026-10-21: "we are
+    headed into Lisp territory now. and guess what? I don't want to go
+    there. That's why a quotation is not just a sequence"). While
+    compiling, a quotation is a sequence (6): March takes it apart, builds
+    it and reads it, as the identity search does and as March compiling
+    itself will, which is staging, as macros are, not evaluation. At run
+    time it is code only, passed and applied, never taken apart or
+    edited, so every quotation a program applies is one the stage saw
+    whole, and every effect is checked. `!` makes data of what a
+    quotation's code leaves, a sequence by `seq# !`, and nothing at run
+    time makes code of data
+    again: an array is not a quotation, and `.` does not apply one, as
+    spreading one is a word of its own, `vec-spread`.
 
-    - **`.` applies it,** each element landing where it is applied, a
-      symbol applied and a value pushed, so `( 1 2 3 ) .` spreads it and
-      needs no word of its own.
-    - **`!` structures it.** `seq#` applies it and keeps what it leaves
-      together, a sequence again, so `1 2 3 [ + ] seq# !` is `1 ( 5 )`
-      (Thomas: "apply but keep the result contained"); `map#` pairs what it
-      leaves (2); `sig#` applies it over types (8); `str#` writes it as
-      text (15); and `i64 ary !` makes each element an i64, as a symbol is
-      text or a number until a type structures it (7, 28).
-    - **The core's sequence words take it apart and put it together,**
-      `length`, `at`, `slice`, `concat` and `insert`, one family, not one
-      for quotations and one for arrays.
+    Code at run time is then what FORTH's is (Thomas: "interesting Forth
+    itself seem to manage it"): an execution token, opaque, which
+    `EXECUTE` applies, or text, which `EVALUATE` hands to the outer
+    interpreter to compile whole. In March the first is a word of a known
+    set, or one compiled at a named signature, a value whose type says its
+    effect (19); the second is immediate mode (19), a symbol or text from
+    data compiled whole by the stage, on request, and checked against the
+    shape its caller declares, since March, unlike FORTH, checks effects.
+    What March leaves out is Lisp's third, code as a list built at run
+    time and applied: Joy's quotation, and Factor's, a sequence at run
+    time, which needs `call( -- )` to be applied. Kitten's quotation, a
+    typed function, is the nearest kin.
 
-    So a quotation, an array, a map, a signature and a string are one
-    thing and a kind, as Low Stack's one bracket said already. It settles
-    sealing too: `seq# !` is `.` with what it leaves kept together, so its
-    code reaches what `.`'s does (14), built 2026-10-21.
-
-    Open:
-
-    - **A number, one element or three.** 6 has `10` three, `10 int# !`.
-      For `[ 1 2 ]` and `( 1 2 )` to be one sequence, a number is one
-      element, its value, and `10 int# !` how Low Stack writes it, as
-      march8's reader already folds it into one (7).
-    - **Quotations at run time.** A quotation is a value only while
-      compiling (6). If an array is one, a sequence known only at run time
-      can be applied: spreading values costs little, but applying symbols
-      is choosing words while running, immediate mode (19), designed and
-      not built.
-    - **Effects.** A sequence of symbols is data, and as code it has an
-      effect. One known while compiling has both; one known only at run
-      time has none the stage can check, so applying it waits on immediate
-      mode too.
-
-    It changes what a value is, not how Low Stack is written, so it comes
-    after the rest of Low Stack (section 7).
+    Weighed first (2026-10-21) and set aside: a quotation and an array as
+    one thing, a sequence, a kind saying what `!` makes of it. Any array
+    would then be code, applying it a choice of words at run time, and
+    its effect unknown while compiling. Weighed too and too far (Thomas):
+    no quotations, every piece of code a named word. Low Stack is built on
+    them, a word's body being one and every bracket made from one, and
+    FORTH added `[: … :]` to be rid of naming every piece. What stands:
+    `seq# !` is `.` with what it leaves kept together, so a literal's code
+    reaches what `.`'s does (14).
 
 Open: for rules (25), what a group that may not match leaves,
 refused for now, and how an import names one alone; and the symbol for
@@ -1338,7 +1332,13 @@ so spelling counts in lookup alone.
 word it names, a quotation, run. `?` applies it as a test, which leaves
 one bool, and in a signature is a guard (6.20). `!` structures the value
 below by the type on top, and a symbol on top names its type by its
-word, `2 i64 !` being `2 i64 . !` (section 2). `;` binds the name below to
+word, `2 i64 !` being `2 i64 . !` (section 2). Anything else on top is
+refused, a quotation among them (Thomas, 2026-10-21: `[ 1 2 + ] !`
+"doesn't mean anything"). Its code is not run to find a type, so
+`5 [ i64 ] !` is not `5 i64 !`: a bracket's kind is said where it is
+made (6.6), and `[ i64 ] sig# !` makes a signature, which `!` takes, here
+the type alone. In `[ … ] seq# !` the quotation is the value below, and
+`seq#` the type on top. March8 refuses it so. `;` binds the name below to
 the value on top, with a signature between them if there is one, inputs
 then outputs, each made by `sig# !` (section 3, 6.8, 6.18); the name is a symbol, a
 path among them, or a pattern, which `;` tells from a symbol by its type.

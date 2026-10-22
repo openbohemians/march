@@ -1124,11 +1124,11 @@ impl Stage {
                 self.apply_name(&n, at)
             }
             // A type is data, and is not called (Thomas, 2026-10-13): `!`
-            // converts by it.
+            // structures by it.
             Val::Type(_) => Err(self.err(
                 Kind::Mismatch,
                 format!(
-                    "{} is not called: `!` converts by it, `2 i64!`",
+                    "{} is not called: `!` structures by it, `2 i64!`",
                     self.describe(&f)
                 ),
             )),
@@ -1173,11 +1173,20 @@ impl Stage {
                 return self.annotate_top(&sig);
             }
             _ if f.ty == NIL => NIL,
+            // Its code is not run to find one: a bracket's kind is said where
+            // it is made (doc/design/SYMBOLIC-FORTH.md 6.6, section 7).
+            Val::Quote(_) => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    "`!` structures by a type, and a quotation is not one: \
+                     `[ … ] sig# !` makes it a signature, as `< … >` does",
+                ));
+            }
             _ => {
                 return Err(self.err(
                     Kind::Mismatch,
                     format!(
-                        "`!` converts by a type, and {} is not one",
+                        "`!` structures by a type, and {} is not one",
                         self.describe(&f)
                     ),
                 ));
@@ -1294,7 +1303,7 @@ impl Stage {
         } else if let Some(t) = w.ty {
             // A type's name is a word that gives the type, as any word that
             // builds a value gives it (Thomas, 2026-10-12): types are
-            // structure, made by words. `!` converts by the type, `2 i64!`.
+            // structure, made by words. `!` structures by the type, `2 i64!`.
             self.push(TYPE, Val::Type(t));
             Ok(())
         } else if !w.clauses.is_empty() {
@@ -4330,7 +4339,7 @@ impl Stage {
         }
     }
 
-    /// How many values a bracket in a body types when `!` converts by it:
+    /// How many values a bracket in a body types when `!` structures by it:
     /// its code's values, each word applied taking and leaving what its
     /// effect says.
     fn bracket_size(&self, toks: &[Token]) -> usize {
@@ -7497,7 +7506,7 @@ impl Stage {
         let b = closer(open);
         let lit = self.literals.pop().expect("pushed");
         // Its elements are what its code left, from as deep as it reached,
-        // so it is in reach of the literal around it as deep (30).
+        // so it is in reach of the literal around it as deep.
         let start = lit.from();
         self.reached(start);
         let n = self.stack.len() - start;
@@ -7713,8 +7722,7 @@ impl Stage {
     /// A sequence or a map of what the quotation's code leaves. It is
     /// applied where it stands, so its arguments are taken there
     /// (doc/design/SYMBOLIC-FORTH.md 14), and its code reaches what `.`'s
-    /// would, its elements being all it leaves, from as deep as it reached
-    /// (30).
+    /// would, its elements being all it leaves, from as deep as it reached.
     fn quote_literal(&mut self, q: &[Token], bracket: u8, closed: Pos) -> Result<()> {
         self.take_args(args_in(q))?;
         let mark = self.code.len();

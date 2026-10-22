@@ -32,11 +32,6 @@ throw from it (Thomas, 2026-10-21).
   search now is (SYMBOLIC-FORTH.md 6.6, 22).
 - **A `fold` over a quotation,** so March walks one past about sixty
   elements, depth's bound (SYMBOLIC-FORTH.md 6.6).
-- **One thing, a sequence:** a quotation and an array as one, a kind
-  saying what `!` makes of it (SYMBOLIC-FORTH.md 6.30; Thomas,
-  2026-10-21). After Low Stack, since it changes what a value is; its
-  open questions are there, a number's elements, quotations at run time,
-  and their effects.
 
 ## To think on
 

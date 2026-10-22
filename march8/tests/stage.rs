@@ -315,7 +315,7 @@ fn array_literals_share_one_type_or_are_tuples() {
     assert_eq!(show("( 1 \"a\" )"), "<1> ( 1 \"a\" )");
     assert_eq!(show("( 1 i64! \"a\" ) length"), "<1> 2");
     // A literal's code reaches what `.`'s would (doc/design/SYMBOLIC-FORTH.md
-    // 14, 30), and its elements are all it leaves, from as deep as it
+    // 14), and its elements are all it leaves, from as deep as it
     // reached.
     assert_eq!(show("1 ( 2 + )"), "<1> ( 3 )");
 }

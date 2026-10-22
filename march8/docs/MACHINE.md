@@ -683,7 +683,7 @@ f: [ "<\[ _ 1 + ]>" ] ;     5 f is "<6>", 1.5 f is "<2.5>"
   `( … )`, `{ … }` and `< … >` (2026-10-21; doc/design/SYMBOLIC-FORTH.md
   7, step 3). A literal's code runs where it stands and reaches what
   `.`'s would, and its elements are what it leaves, from as deep as it
-  reached (14, 30): `1 2 3 ( + )` is `1 ( 5 )`, and `0 ( xs [ + ] each )` a
+  reached (14): `1 2 3 ( + )` is `1 ( 5 )`, and `0 ( xs [ + ] each )` a
   sum. The stage notes the deepest value its code takes, and where that
   had a cell, `reach` lowers the mark by as many before the gather, so
   code that reaches nothing below compiles as it did. A signature's runs

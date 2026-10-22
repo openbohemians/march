@@ -224,7 +224,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             continue;
         }
         // Each dot at the end of a word applies once more, `[ … ].`, and
-        // each `!` converts by what is on top (Thomas, 2026-10-13): `2 i64!`,
+        // each `!` structures by what is on top (Thomas, 2026-10-13): `2 i64!`,
         // `x y < i64 f64 > !`. So no name ends in either. A dot inside a word
         // is part of it: `2.5` is a number, and in a name it divides a path
         // in a namespace, `io.file.read` (doc/design/TYPES.md 3.12).

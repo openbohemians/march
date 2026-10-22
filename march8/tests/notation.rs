@@ -2,7 +2,7 @@
 //! FORTH, in code and in a bracket alike; a capitalized name is a symbol,
 //! one lowercase letter a variable; `name:` labels what follows, and `name'`
 //! is a symbol, a word passed. A type is built by words, so a type's name
-//! gives the type; a type is data, and `!` converts by it (Thomas,
+//! gives the type; a type is data, and `!` structures by it (Thomas,
 //! 2026-10-13). This is an intermediate form over Symbolic Forth, where
 //! everything is a symbol, `.` or `!`. A definition names first,
 //! then what it names. A bracket is a value, a type or a signature, except
@@ -55,7 +55,7 @@ fn a_type_is_built_by_words() {
         typed(&["\"42\"", "i64! string i64 map empty"]),
         "<2> 42 < i64 nil or > { } < string i64 map >"
     );
-    // `!` converts by a type, built or named. It is a meta-op, as `;` is
+    // `!` structures by a type, built or named. It is a meta-op, as `;` is
     // (doc/design/SYMBOLIC-FORTH.md 6.5), and no word `convert` remains.
     assert_eq!(
         typed(&["2 i64! 2 f64! ( 1 2 ) i64 ary !"]),
@@ -65,10 +65,17 @@ fn a_type_is_built_by_words() {
     // A type is data, and is not called.
     let e = error("2 i64.");
     assert!(
-        e.contains("the type `i64` is not called: `!` converts by it"),
+        e.contains("the type `i64` is not called: `!` structures by it"),
         "{e}"
     );
     assert!(error("1 2 < i64 i64 > .").contains("a signature is not called"));
+    // Nor is a quotation run to find one: its kind is said where it is made.
+    let e = error("5 [ i64 ] !");
+    assert!(
+        e.contains("a quotation is not one: `[ … ] sig# !` makes it a signature"),
+        "{e}"
+    );
+    assert!(error("5 3 !").contains("`!` structures by a type, and 3"));
     // A bracket reads as code does, so the same text means the same there.
     let n = "size: < string i64 map >< i64 > [ length ] ;";
     assert_eq!(show(&[n, "string i64 map empty size"]), "<1> 0");

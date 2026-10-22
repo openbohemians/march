@@ -46,7 +46,8 @@ quotation of its text and code made text, `[ … ] str# !`, and unsealed
 as a sequence is (6.15, section 7). Built. And step 5, letters as places,
 `_` read as the letter of its place (6.14, section 7). Built. And step 7,
 the litmus test with no exceptions: the core runs lowered, and every
-example, and compiles to the same code (sections 5 and 7).
+example, and compiles to the same code (sections 5 and 7). Decided: a
+trap's kind is in its type, `no-file' trap` (6.29).
 
 ## 1. What it is
 
@@ -1270,12 +1271,22 @@ Settled (Thomas, 2026-10-15):
 
     ```
     size: < string >< i64 > [ io.file.read length ] ;
-    size: < string trap >< i64 > [ drop drop 0 ] ;
-    size: < string trap [ kind no-file' eq ] ? >< i64 > [ drop drop 0 ] ;
+    size: < string k trap >< i64 > [ drop drop 0 ] ;
+    size: < string no-file' trap >< i64 > [ drop drop 0 ] ;
     ```
 
-    A guard chooses among kinds, and a trap no handler's guard takes goes
-    on outward, as though the word had none. `kind` gives a trap's kind
+    A trap's kind is in its type (Thomas, 2026-10-22), as `i64 ary` gives
+    an array's elements, so a handler takes a kind as any clause takes a
+    case, with no test written. `trap` takes its kind as `ary` takes its
+    elements' type, so a letter takes any kind, `k trap`, as `a ary` is
+    any array; `trap` alone would take whatever is below it as its kind
+    (Thomas). The most particular clause is chosen, `no-file' trap`
+    before `k trap`, as `i64 ary` is before `a ary`; `no-file' io' or
+    trap` takes either. A trap's
+    kind is known only when it fails, so the choice is made at run time,
+    as a union's is: a trap is the union of its kinds. A guard still
+    chooses by anything else, its message among them. A trap no handler
+    takes goes on outward, as though the word had none. `kind` gives a trap's kind
     and `why` its message, or with none, its kind's name; where it failed
     is kept for the report. `fail` takes a trap too, and passes it on as
     it is. The nearest word applied with a handler catches; with none,
@@ -1298,11 +1309,6 @@ Settled (Thomas, 2026-10-15):
     Only a word with a handler pays, keeping its inputs as it is entered,
     which, March's values being persistent, is keeping their cells; what
     was done before the failure stands.
-
-    An idea, not decided (2026-10-20): a trap's kind in its type, as
-    `i64 ary` gives an array's, so a handler is matched as any case is,
-    `load: < string no-file' trap > < string > [ drop drop "" ] ;`, with
-    no test written: `trap` alone takes any kind.
 
     `fail` while compiling is built in march8 (2026-10-21). The machine's
     own kinds are named as its errors are, `syntax'`, `no-word'`,

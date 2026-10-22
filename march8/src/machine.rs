@@ -15,7 +15,9 @@ pub enum Error {
     Arithmetic,
     Fuel,
     Limit,
-    User(u64),
+    /// A failure, a program's or the core's, by its kind, with its message,
+    /// empty if it has none (doc/design/SYMBOLIC-FORTH.md 29).
+    Trap(String, String),
     /// Input or output failed, and why.
     Io(String),
 }
@@ -1027,7 +1029,13 @@ impl Machine {
                 self.push(0)?;
                 self.push(n as u64)?;
             }
-            Trap => return Err(Error::User(self.pop()?)),
+            // The kind on top, its message beneath, each text.
+            Trap => {
+                let kind = self.pop()?;
+                let why = self.pop()?;
+                let text = |r| self.text(r)?.to_text().ok_or(Error::Memory);
+                return Err(Error::Trap(text(kind)?, text(why)?));
+            }
             // On a string, length counts characters and `at` gives one; on a
             // map, length counts entries and `at` looks a key up.
             VecLen => {
@@ -1518,7 +1526,10 @@ impl Machine {
                 let mask = self.array(m)?.whole();
                 let whole = self.array(a)?.whole();
                 if mask.len() != whole.len() {
-                    return Err(Error::User(4));
+                    return Err(Error::Trap(
+                        "mismatch".into(),
+                        "`keep`: the array and its mask are not as long".into(),
+                    ));
                 }
                 let kept: merkle_champ::Sequence<u64> = whole
                     .iter()

@@ -3114,8 +3114,7 @@ impl Stage {
                     ),
                 ));
             } else {
-                // The trap leaves its message beneath its code, for the
-                // session to report.
+                // As the program runs, it fails as it would now.
                 let msg = self.shorten(&format!(
                     "no word `{name}` for {}: no clause's guard holds",
                     self.top_types(arity)
@@ -3123,7 +3122,7 @@ impl Stage {
                 alts.push(Some(Alt {
                     code: vec![
                         Ins::Str(msg.into()),
-                        Ins::Op(Op::Lit(1)),
+                        Ins::Str("no-word".into()),
                         Ins::Op(Op::Prim(P::Trap)),
                     ],
                     stack: None,
@@ -3184,12 +3183,33 @@ impl Stage {
                 .and_then(|s| s.outs.as_ref())
                 .is_some_and(|o| o.iter().any(|&t| self.is_union(t)))
         });
-        self.merge(
+        let r = self.merge(
             alts.into_iter().flatten().collect(),
             &snapshot,
             base,
             !declared,
-        )
+        );
+        self.pos = at;
+        self.fails_here(r, name)
+    }
+
+    /// A choice every alternative of which fails never returns. Where it
+    /// may not run, nothing after it is reached, as after `fail`; where it
+    /// surely runs, it is sure to fail, by a kind known only as the program
+    /// runs, an error.
+    fn fails_here(&self, r: Result<()>, name: &str) -> Result<()> {
+        match r {
+            Err(e) if e.kind == Kind::Fails && self.unsure == 0 && self.checking == 0 => Err(self
+                .err(
+                    Kind::Unknown,
+                    format!(
+                        "`{name}` fails here whichever clause is chosen, and code sure to \
+                         fail fails while compiling, but which kind is known only as the \
+                         program runs"
+                    ),
+                )),
+            r => r,
+        }
     }
 
     /// One alternative of a choice, compiled from the saved judgments into
@@ -3234,18 +3254,21 @@ impl Stage {
         self.unsure -= unsure as u32;
         let code = std::mem::replace(&mut self.code, outer);
         let sure = guarded && test == Some(true);
-        match r {
-            Err(e) if top && e.kind == Kind::Ghost => Ok(Outcome::Waits(sure)),
-            Err(e) => Err(e),
-            Ok(()) => Ok(Outcome::Taken(
-                Alt {
-                    code,
-                    stack: Some(self.stack.clone()),
-                    skip: test.is_none().then_some(skip),
-                },
-                sure,
-            )),
-        }
+        // One that fails ends in its trap, and leaves nothing.
+        let stack = match r {
+            Err(e) if top && e.kind == Kind::Ghost => return Ok(Outcome::Waits(sure)),
+            Err(e) if e.kind == Kind::Fails => None,
+            Err(e) => return Err(e),
+            Ok(()) => Some(self.stack.clone()),
+        };
+        Ok(Outcome::Taken(
+            Alt {
+                code,
+                stack,
+                skip: test.is_none().then_some(skip),
+            },
+            sure,
+        ))
     }
 
     /// The types of a recursion's results, from the alternatives that have
@@ -3387,6 +3410,9 @@ impl Stage {
         }
         self.code.push(Ins::Label(end));
         self.stack = below;
+        if lists.is_empty() {
+            return Err(self.err(Kind::Fails, "fails"));
+        }
         match collect {
             Some(t) => self.push(t, Val::Many),
             None => {
@@ -3528,6 +3554,9 @@ impl Stage {
             std::mem::take(&mut self.active),
             std::mem::replace(&mut self.depth, 0),
             std::mem::replace(&mut self.effects, 0),
+            // Its code is its own, whether or not where it is applied runs.
+            std::mem::replace(&mut self.unsure, 0),
+            std::mem::replace(&mut self.checking, 0),
         );
         let ghost = self.promised(name);
         self.frames.push(Frame {
@@ -3598,6 +3627,8 @@ impl Stage {
             self.active,
             self.depth,
             self.effects,
+            self.unsure,
+            self.checking,
         ) = saved;
         let outs = r?;
         let (_, cid) = self.seal(code);
@@ -3734,21 +3765,25 @@ impl Stage {
             self.unsure -= 1;
             self.pos = at;
             let code = std::mem::replace(&mut self.code, outer);
-            r.map_err(|mut e| {
-                e.trace.push(format!(
-                    "where the value of `{}` is {}",
-                    self.types.name(u),
-                    self.types.name(m)
-                ));
-                e
-            })?;
-            alts.push(Alt {
-                code,
-                stack: Some(self.stack.clone()),
-                skip,
-            });
+            // One that fails ends in its trap, and leaves nothing.
+            let stack = match r {
+                Err(e) if e.kind == Kind::Fails => None,
+                r => {
+                    r.map_err(|mut e| {
+                        e.trace.push(format!(
+                            "where the value of `{}` is {}",
+                            self.types.name(u),
+                            self.types.name(m)
+                        ));
+                        e
+                    })?;
+                    Some(self.stack.clone())
+                }
+            };
+            alts.push(Alt { code, stack, skip });
         }
-        self.merge(alts, &snapshot, base, false)
+        let r = self.merge(alts, &snapshot, base, false);
+        self.fails_here(r, name)
     }
 
     fn split_arm(&mut self, name: &Rc<str>, i: usize, m: Type, skip: Option<u32>) -> Result<()> {
@@ -5455,7 +5490,7 @@ impl Stage {
         let r = self.run_quote(&q);
         self.unsure -= 1;
         self.depth -= 1;
-        r?;
+        self.loop_fails(r, name)?;
         let kept = self.stack.len() == below.len() + 1
             && self.stack[..below.len()]
                 .iter()
@@ -5564,7 +5599,7 @@ impl Stage {
         let r = self.run_quote(&q);
         self.unsure -= 1;
         self.depth -= 1;
-        r?;
+        self.loop_fails(r, name)?;
         if let Some(t) = collect {
             // Collecting: the values it leaves above the loop's are elements,
             // left on the machine's stack for the literal to gather.
@@ -5892,8 +5927,9 @@ impl Stage {
     /// It never returns: while compiling, it is an error where the failing
     /// code was applied, of the kind it names, the machine's own kinds by
     /// their names, `no-word'`; the program's, its own. Where the code may
-    /// not run, in a choice made at run time or a loop's body, it would
-    /// fail only if it ran, a trap, which is not built yet.
+    /// not run, in a choice made at run time or a loop's body, it fails only
+    /// if it runs, a trap, and its kind and message may be known only then.
+    /// Either way nothing after it is reached, which `Kind::Fails` says.
     fn fail(&mut self) -> Error {
         let x = self.stack.pop().expect("matched");
         let taken = match &x.val {
@@ -5912,7 +5948,9 @@ impl Stage {
             },
             _ => None,
         };
-        if taken.is_none() && x.known() {
+        let runs = !x.known()
+            && (x.ty == SYMBOL || self.types.elements(x.ty) == Some(&[STRING, SYMBOL][..]));
+        if taken.is_none() && !runs {
             return self.err(
                 Kind::Mismatch,
                 format!(
@@ -5922,30 +5960,46 @@ impl Stage {
                 ),
             );
         }
+        if self.unsure > 0 {
+            match taken {
+                Some((why, kind)) => {
+                    self.code.push(Ins::Str(why.unwrap_or_else(|| "".into())));
+                    self.code.push(Ins::Str(kind));
+                }
+                None if x.ty == SYMBOL => {
+                    self.code.push(Ins::Str("".into()));
+                    self.emit(Op::Prim(P::Swap));
+                }
+                None => {
+                    for op in [
+                        Op::Prim(P::Dup),
+                        Op::Lit(0),
+                        Op::Prim(P::VecAt),
+                        Op::Prim(P::Swap),
+                        Op::Lit(1),
+                        Op::Prim(P::VecAt),
+                    ] {
+                        self.emit(op);
+                    }
+                }
+            }
+            self.emit(Op::Prim(P::Trap));
+            return self.err(Kind::Fails, "fails");
+        }
         // Where the clause is checked, it leaves whatever it must from here.
         if self.checking > 0 {
             return self.err(Kind::Fails, "fails");
         }
         let Some((msg, kind)) = taken else {
             return self.err(
-                Kind::Limit,
+                Kind::Unknown,
                 format!(
-                    "`fail` takes a kind known while compiling, and {} is known only as the \
-                     program runs: failing then, a trap, is not built yet \
-                     (doc/design/SYMBOLIC-FORTH.md 29)",
+                    "this `fail` is sure to be reached, and code sure to fail fails while \
+                     compiling, but its kind, {}, is known only as the program runs",
                     self.describe(&x)
                 ),
             );
         };
-        if self.unsure > 0 {
-            return self.err(
-                Kind::Limit,
-                format!(
-                    "`{kind}` would fail here only if this code ran, as the program runs: \
-                     failing then, a trap, is not built yet (doc/design/SYMBOLIC-FORTH.md 29)"
-                ),
-            );
-        }
         let msg = msg.map_or_else(|| format!("fails: `{kind}`"), |m| m.to_string());
         let kind = match &*kind {
             "syntax" => Kind::Syntax,
@@ -5961,6 +6015,13 @@ impl Stage {
             _ => Kind::Fail(kind.to_string()),
         };
         self.err(kind, msg)
+    }
+
+    /// Fails by `kind`, with `why`, as the program runs: a trap.
+    fn trap(&mut self, kind: &str, why: &str) {
+        self.code.push(Ins::Str(self.shorten(why).into()));
+        self.code.push(Ins::Str(kind.into()));
+        self.emit(Op::Prim(P::Trap));
     }
 
     // ---- A quotation as data (doc/design/SYMBOLIC-FORTH.md 6) ----
@@ -6976,8 +7037,8 @@ impl Stage {
             self.emit(Op::Lit(k as u64));
             self.emit(Op::Prim(P::ILt));
             self.code.push(Ins::JumpZero(ok));
-            self.emit(Op::Lit(2));
-            self.emit(Op::Prim(P::Trap));
+            let why = format!("`{name}`: the array has fewer elements than its quotation takes");
+            self.trap("mismatch", &why);
             self.code.push(Ins::Label(ok));
         }
         // The last k elements, above a mark, are the quotation's stack.
@@ -7223,6 +7284,19 @@ impl Stage {
         }
     }
 
+    /// A loop's quotation that fails whenever it runs never finishes, so it
+    /// has no effect to compile the loop by: an error, unless the clause it
+    /// is in is being checked, which it passes.
+    fn loop_fails(&self, r: Result<()>, name: &str) -> Result<()> {
+        match r {
+            Err(e) if e.kind == Kind::Fails && self.checking == 0 => Err(self.err(
+                Kind::Mismatch,
+                format!("the quotation `{name}` applies always fails, so it has no effect"),
+            )),
+            r => r,
+        }
+    }
+
     /// Compiles a pair loop's body once, on an element of each array: it
     /// may read the values below but must leave them, and leave one value,
     /// a value at run time; its type is returned.
@@ -7235,7 +7309,7 @@ impl Stage {
         let r = self.run_quote(q);
         self.unsure -= 1;
         self.depth -= 1;
-        r?;
+        self.loop_fails(r, name)?;
         let kept = self.stack.len() == below.len() + 1
             && self.stack[..below.len()]
                 .iter()
@@ -7295,8 +7369,7 @@ impl Stage {
             self.code.push(Ins::JumpZero(bad));
             self.code.push(Ins::Jump(ok));
             self.code.push(Ins::Label(bad));
-            self.emit(Op::Lit(3));
-            self.emit(Op::Prim(P::Trap));
+            self.trap("mismatch", &format!("`{name}`: the arrays are not as long"));
             self.code.push(Ins::Label(ok));
         }
         self.stack.truncate(base);
@@ -7609,7 +7682,7 @@ impl Stage {
             let after = std::mem::replace(&mut self.stack, saved.1);
             self.code = saved.0;
             self.effects = saved.2;
-            r?;
+            self.loop_fails(r, name)?;
             if after.len() > below.len() && after[..below.len()] == below[..] {
                 let Some(start) = self.collecting(base) else {
                     return Err(self.loop_shape(name));

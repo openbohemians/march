@@ -1,7 +1,7 @@
 //! Failing (doc/design/SYMBOLIC-FORTH.md 29): `fail` takes a kind, or a
 //! message and a kind, and never returns. While compiling it is an error
-//! where the failing code was applied; at run time it would be a trap, which
-//! is not built yet.
+//! where the failing code was applied; where the code may not run, it fails
+//! only if it runs, a trap, which the session reports.
 use march8::{Kind, Session};
 
 fn error(src: &str) -> march8::Error {
@@ -56,16 +56,77 @@ fn where_the_failing_code_was_applied() {
     );
 }
 
-#[test]
-fn at_run_time_not_yet() {
-    // Code that may not run fails only if it runs: a trap, not built.
-    for src in [
-        "ff: < 0 > [ ] ; ff: < i64 > [ nope' fail ] ; io.stdin.read length ff",
-        "( 1 2 ) [ drop nope' fail ] each",
-        "io.stdin.read sym! fail",
-    ] {
-        let e = error(src);
-        assert_eq!(e.kind, Kind::Limit, "{src}");
-        assert!(e.to_string().contains("a trap, is not built yet"), "{e}");
+/// The trap a program's run ended in, its kind and its message.
+fn trap(s: &mut Session, src: &str) -> (String, String) {
+    match s.eval(src).unwrap_err().kind {
+        Kind::Run(march8::machine::Error::Trap(kind, why)) => (kind, why),
+        k => panic!("{src}: {k:?}"),
     }
+}
+
+#[test]
+fn at_run_time_it_traps() {
+    // Code that may not run fails only if it runs, a trap: the clause a
+    // choice made as the program runs, here on a value known only then.
+    let ff = "ff: < 0 > [ ] ; ff: < i64 > [ ( \"not zero\" no-good' ) fail ] ;";
+    let mut s = Session::new();
+    s.eval(ff).unwrap();
+    s.eval("0").unwrap();
+    s.eval("ff").unwrap();
+    assert_eq!(s.show(), "<1> 0");
+    s.eval("drop 3").unwrap();
+    assert_eq!(trap(&mut s, "ff"), ("no-good".into(), "not zero".into()));
+    // The stack is as it was.
+    assert_eq!(s.show(), "<1> 3");
+    let e = s.eval("ff").unwrap_err();
+    assert_eq!(e.to_string(), "not zero");
+    // A kind alone has no message, and is reported by its kind.
+    let mut s = Session::new();
+    s.eval("gg: < 0 > [ ] ; gg: < i64 > [ nope' fail ] ; 3")
+        .unwrap();
+    assert_eq!(trap(&mut s, "gg"), ("nope".into(), "".into()));
+    assert_eq!(s.eval("gg").unwrap_err().to_string(), "fails: `nope`");
+    // Inside a loop's body, as the choice is made for each element.
+    let mut s = Session::new();
+    s.eval(ff).unwrap();
+    s.eval("( 0 0 ) ( 0 5 0 )").unwrap();
+    assert_eq!(trap(&mut s, "[ ff ] map").0, "no-good");
+    s.eval("drop [ ff ] map").unwrap();
+    assert_eq!(s.show(), "<1> ( 0 0 )");
+}
+
+#[test]
+fn its_kind_and_message_may_be_known_only_then() {
+    // A message made as the program runs.
+    let mut s = Session::new();
+    s.eval("ff: < i64 [ 0 lt? ] ? > [ ( \"\\_ is negative\" bad' ) fail ] ; ff: < i64 > [ ] ;")
+        .unwrap();
+    s.eval("-5").unwrap();
+    assert_eq!(trap(&mut s, "ff"), ("bad".into(), "-5 is negative".into()));
+    // And a kind.
+    let mut s = Session::new();
+    s.eval("gg: < string [ length 0 gt? ] ? > [ sym! fail ] ; gg: < string > [ ] ;")
+        .unwrap();
+    s.eval("\"oops\"").unwrap();
+    assert_eq!(trap(&mut s, "gg"), ("oops".into(), "".into()));
+}
+
+#[test]
+fn what_is_sure_to_fail_fails_while_compiling() {
+    // Code that is sure to fail is an error while compiling, and where its
+    // kind is known only as the program runs, it says so.
+    let mut s = Session::new();
+    s.eval("ff: < 0 > [ a' fail ] ; ff: < i64 > [ b' fail ] ; 3")
+        .unwrap();
+    let e = s.eval("ff").unwrap_err();
+    assert_eq!(e.kind, Kind::Unknown);
+    assert!(e.to_string().contains("whichever clause is chosen"), "{e}");
+    let mut s = Session::new();
+    s.eval("\"x\"").unwrap();
+    let e = s.eval("sym! fail").unwrap_err();
+    assert_eq!(e.kind, Kind::Unknown, "{e}");
+    // A loop's quotation that always fails has no effect to compile by.
+    let e = error("( 1 2 ) [ drop nope' fail ] each");
+    assert_eq!(e.kind, Kind::Mismatch);
+    assert!(e.to_string().contains("always fails"), "{e}");
 }

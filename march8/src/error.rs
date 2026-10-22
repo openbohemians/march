@@ -47,9 +47,10 @@ pub enum Kind {
     /// inside its own application, unwinding to that application, the
     /// `n`th, to make it an instance.
     Again(usize),
-    /// Inside the compiler only: `fail` reached while a clause is checked
-    /// where it is defined. The clause never returns from there, so it
-    /// leaves whatever it must, and what follows is never reached.
+    /// Inside the compiler only: code that never returns from here, as
+    /// `fail`. Where a clause is checked where it is defined, it leaves
+    /// whatever it must; where the code may not run, its trap is emitted.
+    /// What follows is never reached.
     Fails,
     /// A file that could not be read while compiling, for `embed`.
     Io,
@@ -140,14 +141,8 @@ impl From<crate::machine::Error> for Error {
         let msg = match &e {
             crate::machine::Error::Arithmetic => "arithmetic overflow, or division by zero".into(),
             crate::machine::Error::Fuel => "step budget exhausted".into(),
-            crate::machine::Error::User(1) => "no word: no clause's guard holds".into(),
-            crate::machine::Error::User(2) => {
-                "`within`: the array has fewer elements than its quotation takes".into()
-            }
-            crate::machine::Error::User(3) => "`zip`: the arrays are not as long".into(),
-            crate::machine::Error::User(4) => {
-                "`keep`: the array and its mask are not as long".into()
-            }
+            crate::machine::Error::Trap(kind, why) if why.is_empty() => format!("fails: `{kind}`"),
+            crate::machine::Error::Trap(_, why) => why.clone(),
             crate::machine::Error::Io(why) => why.clone(),
             other => format!("{other}"),
         };

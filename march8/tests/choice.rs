@@ -42,7 +42,10 @@ fn guards_choose_at_run_time() {
     assert_eq!(cells(&[only, "5", "only"]).unwrap(), [7]);
     assert_eq!(
         cells(&[only, "-1", "only"]),
-        Err(Kind::Run(machine::Error::User(1)))
+        Err(Kind::Run(machine::Error::Trap(
+            "no-word".into(),
+            "no word `only` for i64: no clause's guard holds".into()
+        )))
     );
     // A guard over two inputs: the smaller of two, with no `if`.
     let min = "mn: < i64 i64 lt? > [ drop ] ; mn: < i64 i64 > [ swap drop ] ;";

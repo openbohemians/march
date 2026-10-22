@@ -50,7 +50,10 @@ fn lengths_must_agree() {
     let any = "( ( 1 2 ) ( 3 ) ) 1 at";
     assert_eq!(
         session(&[any, "( 1 2 3 ) +"]).err(),
-        Some(Kind::Run(march8::machine::Error::User(3)))
+        Some(Kind::Run(march8::machine::Error::Trap(
+            "mismatch".into(),
+            "`zip`: the arrays are not as long".into()
+        )))
     );
     assert_eq!(show(&[any, "( 10 20 ) +"]), "<1> ( 11 22 )");
 }

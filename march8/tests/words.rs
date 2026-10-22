@@ -148,7 +148,10 @@ fn within_runs_a_word_on_the_end_of_an_array() {
     let short = "( ( 5 ) ( 6 7 ) ) 1 at";
     assert_eq!(
         session(&[short, "~' within"]).err(),
-        Some(Kind::Run(march8::machine::Error::User(2)))
+        Some(Kind::Run(march8::machine::Error::Trap(
+            "mismatch".into(),
+            "`within`: the array has fewer elements than its quotation takes".into()
+        )))
     );
     assert_eq!(
         show(&["( ( 5 6 ) ( 7 ) ) 1 at", "~' within"]),
@@ -259,7 +262,10 @@ fn order_keep_and_positions() {
     );
     assert_eq!(
         session(&["( 1 2 3 )", "( true false ) keep"]).err(),
-        Some(Kind::Run(march8::machine::Error::User(4)))
+        Some(Kind::Run(march8::machine::Error::Trap(
+            "mismatch".into(),
+            "`keep`: the array and its mask are not as long".into()
+        )))
     );
 }
 

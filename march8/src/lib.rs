@@ -103,13 +103,8 @@ impl Session {
         let before = self.machine.stack.clone();
         let xt = self.machine.define(&ops)?;
         if let Err(e) = self.machine.run(xt, self.fuel) {
-            let why = self.trap_message(&e);
             self.machine.stack = before;
-            let mut e = Error::from(e);
-            if let Some(why) = why {
-                e.msg = why;
-            }
-            return Err(e);
+            return Err(e.into());
         }
         assert_eq!(
             self.machine.stack.len(),
@@ -118,16 +113,6 @@ impl Session {
         );
         self.types = types;
         Ok(())
-    }
-
-    /// What a trap with a message says: the trap of a family no clause of
-    /// which holds leaves its message beneath its code.
-    fn trap_message(&self, e: &machine::Error) -> Option<String> {
-        if *e != machine::Error::User(1) {
-            return None;
-        }
-        let &top = self.machine.stack.last()?;
-        self.machine.text(top).ok()?.to_text()
     }
 
     /// The values on the stack, written by their types: `<2> 42 "abab"`.

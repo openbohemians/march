@@ -1082,9 +1082,15 @@ cannot become its type; a value needed while compiling that is known only
 at run time, as `embed`'s file; arithmetic that overflows or divides by zero,
 found at compile time; an effect where none is allowed; a limit. An error
 inside a core clause is reported where the clause was applied. Errors while
-running are the machine's, but for a family none of whose clauses holds at
-run time, which says which, as compiling does: ``no word `door` for sym
-sym: no clause's guard holds``.
+running are the machine's, overflow, a file not read, or a trap: the
+machine's `trap` takes a message and a kind, each text, and fails with them,
+`Error::Trap` (2026-10-22). A family none of whose clauses holds at run
+time traps so, by `no-word`, saying which, as compiling does: ``no word
+`door` for sym sym: no clause's guard holds``; arrays that `zip` or `keep`
+pair and are not as long, or too short for `within`'s quotation, by
+`mismatch`, as compiling would. Where a trap happened is not yet reported:
+a position written in the code would make a word's identity depend on
+where its source is laid out, so it wants a table beside the code.
 
 **A program fails by `fail`** (doc/design/SYMBOLIC-FORTH.md 29), which takes
 a kind, `no-file' fail`, or a message and a kind, `( "can't read it"
@@ -1096,8 +1102,18 @@ the one given, or ``fails: `no-file` ``, said where `fail` is with the
 words applied around it. A clause that fails is defined as any other, and
 leaves whatever it must, since nothing after `fail` is reached; it is
 checked where defined only as far as `fail`. Where the code may not run,
-in a choice made at run time or a loop's body, it would fail only as the
-program runs: a trap, not built yet, so that is a limit for now.
+in a choice made at run time, a union's arm or a loop's body, it fails
+only if it runs, a trap (2026-10-22), whose kind and message may be known
+only then, a symbol, or a tuple `( string sym )` made as the program runs;
+with no message, it is reported by its kind. A path that fails ends in its
+trap and leaves nothing, so the other alternatives give the choice its
+results; a choice all of whose alternatives fail never returns either.
+Code that is sure to fail fails while compiling: where its kind is known
+only as the program runs, a choice every clause of which fails or a
+`fail` of a kind made then, that is an error that says so, and a loop's
+quotation that always fails has no effect to compile the loop by. A
+recursive word's instance is compiled for itself, as code that surely
+runs, wherever it was first applied.
 
 Warnings have three levels: informative, minor and severe (Thomas,
 2026-10-09). The session collects them, and `march8` writes them to
@@ -1172,13 +1188,15 @@ different lengths both may match (above).
 Bugs, what is next, and what is still to think on are in TODO.md, at the
 repo's root.
 
-- **Traps** (doc/design/SYMBOLIC-FORTH.md 29, 2026-10-20). `fail` while
-  compiling is built (above, "Errors"); at run time it is a trap, which a
-  clause of the same word for its inputs and a `trap` on top handles, the
+- **Handling traps** (doc/design/SYMBOLIC-FORTH.md 29, 2026-10-20). `fail`
+  while compiling and at run time is built (above, "Errors"); a trap is
+  handled by a clause of the same word for its inputs and a `k trap` on
+  top, its kind in its type, `no-file' trap` (2026-10-22), the
   inputs restored as they were when the word was applied, so the handler
   leaves what the word leaves. A trap may be neither left by a clause that
   takes one nor stored. The machine's failures become traps of their
-  kinds, all but the fuel limit.
+  kinds, all but the fuel limit; `kind` and `why` read one. A trap's
+  position is not reported yet.
 - **Recursion on known numbers and symbols while compiling.** A family
   applied to itself on values that have cells becomes an instance on
   values at run time (above, "Recursion and instances"), even when they

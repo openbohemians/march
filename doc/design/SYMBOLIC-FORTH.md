@@ -47,7 +47,8 @@ as a sequence is (6.15, section 7). Built. And step 5, letters as places,
 `_` read as the letter of its place (6.14, section 7). Built. And step 7,
 the litmus test with no exceptions: the core runs lowered, and every
 example, and compiles to the same code (sections 5 and 7). Decided: a
-trap's kind is in its type, `no-file' trap` (6.29).
+trap's kind is in its type, `no-file' trap`, and failing at run time is
+built (6.29).
 
 ## 1. What it is
 
@@ -1318,9 +1319,22 @@ Settled (Thomas, 2026-10-15):
     compiling because an array literal of known elements is now known
     there too (TYPES.md 2.10), and a symbol beside a string makes a tuple,
     `( string sym )`, not two strings. A clause that fails is defined as
-    any other, checked only as far as `fail`. In code that may not run, a
-    choice made at run time or a loop's body, failing is the trap, not
-    built: march8 says so. Handlers, `trap`, `kind` and `why` wait for it.
+    any other, checked only as far as `fail`.
+
+    Failing at run time is built in march8 (2026-10-22), the first of
+    three pieces, handlers and then `kind` and `why` to follow. In code
+    that may not run, a choice made at run time, a union's arm or a loop's
+    body, `fail` is a trap, its kind and message known while compiling or
+    only as the program runs; the session reports it, by its message or,
+    with none, its kind. A path that fails leaves nothing, so the others
+    give a choice its results, and one every path of which fails never
+    returns. Code sure to fail fails while compiling, so where its kind is
+    known only as the program runs, it is an error that says so. The
+    machine's own traps carry their kinds too: no clause's guard holding
+    is `no-word'`, arrays not as long `mismatch'`, as they are while
+    compiling. Where a trap happened is not reported yet: written into the
+    code, a position would make a word's identity depend on how its source
+    is laid out, so it wants a table beside the code.
 
 30. **Code is data only while compiling** (Thomas, 2026-10-21: "we are
     headed into Lisp territory now. and guess what? I don't want to go

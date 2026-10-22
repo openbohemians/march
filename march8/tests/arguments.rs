@@ -59,15 +59,19 @@ fn a_nested_bracket_has_its_own_arguments() {
 
 #[test]
 fn a_string_is_text_of_a_quotation() {
-    assert_eq!(show(&["1 2 [ _ \" and \" _ ] string !"]), "<1> \"1 and 2\"");
-    assert_eq!(show(&["[ 1 2 + \"x\" 2.5 ] string !"]), "<1> \"3x2.5\"");
+    assert_eq!(show(&["1 2 [ _ \" and \" _ ] str# !"]), "<1> \"1 and 2\"");
+    assert_eq!(show(&["[ 1 2 + \"x\" 2.5 ] str# !"]), "<1> \"3x2.5\"");
     assert_eq!(
-        show(&["1 2", "[ _ \" and \" _ ] string !"]),
+        show(&["1 2", "[ _ \" and \" _ ] str# !"]),
         "<1> \"1 and 2\""
     );
-    assert_eq!(show(&["[ ] string !"]), "<1> \"\"");
-    // Its code reaches only its arguments and what it makes.
-    assert!(session(&["1 [ 2 + ] string !"]).is_err());
+    assert_eq!(show(&["[ ] str# !"]), "<1> \"\"");
+    // `"…"` is read as it, and its code reaches what `.`'s would
+    // (doc/design/SYMBOLIC-FORTH.md 14).
+    assert_eq!(show(&["1 [ 2 + ] str# !"]), "<1> \"3\"");
+    // `string` is no kind: a quotation is not text (Thomas, 2026-10-22).
+    let e = Session::new().eval("[ 1 2 ] string !").unwrap_err();
+    assert!(e.msg.contains("`[ … ] str# !` makes text"), "{}", e.msg);
 }
 
 #[test]

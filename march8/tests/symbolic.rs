@@ -1,13 +1,13 @@
 //! Symbolic Forth, the lowest form (doc/design/TYPES.md 2.2; Thomas,
 //! 2026-10-13): symbols, `.` and `!`. Every name is a symbol until `.`
-//! applies it, a type is given by applying its word, `i64 .`, `!` converts,
+//! applies it, a type is given by applying its word, `i64 .`, `!` structures,
 //! and a number is a symbol given its kind, `10 int# !`. The form march8
 //! parses is an intermediate one over it, and this is its litmus test: all
 //! of it lowers to Symbolic Forth and parses back the same, and the lowered
 //! programs run.
-use march8::read::{Piece, Tok, Token, lower, read, read_symbolic};
+use march8::read::{Tok, lower, read, read_symbolic};
 use march8::symbols::Symbols;
-use march8::{CORE, Pos, Session};
+use march8::{CORE, Session};
 
 /// The tokens of source, wherever they were written.
 fn toks(src: &str, symbolic: bool) -> Vec<Tok> {
@@ -17,29 +17,7 @@ fn toks(src: &str, symbolic: bool) -> Vec<Tok> {
     } else {
         read(src, &s)
     };
-    t.unwrap().into_iter().map(placeless).collect()
-}
-
-fn placeless(t: Token) -> Tok {
-    match t.tok {
-        Tok::Template(pieces) => Tok::Template(
-            pieces
-                .iter()
-                .map(|p| match p {
-                    Piece::Hole(code) => Piece::Hole(
-                        code.iter()
-                            .map(|t| Token {
-                                tok: placeless(t.clone()),
-                                pos: Pos { line: 0, col: 0 },
-                            })
-                            .collect(),
-                    ),
-                    text => text.clone(),
-                })
-                .collect(),
-        ),
-        tok => tok,
-    }
+    t.unwrap().into_iter().map(|t| t.tok).collect()
 }
 
 /// The source lowered to Symbolic Forth, checked to read back to the same
@@ -86,10 +64,11 @@ fn every_application_is_a_dot() {
         "-2 int# ! 1.10 dec# ! 1:2 ratio# ! 12:30:15 ratio# ! 10 \
          dup_2 . +^4 . [ dup . + . ] 3 int# ! power# ."
     );
-    // Strings keep their escapes, and a hole its code, lowered too.
+    // A string is a quotation made text where it closes (7, step 4): its
+    // text, each run a symbol, its escapes read, and its holes' code.
     assert_eq!(
-        lowered(r#""say \"hi\" \\ \_ and \[ 1 2 + ]""#),
-        r#""say \"hi\" \\ \[ _ . ] and \[ 1 int# ! 2 int# ! + . ]""#
+        lowered(r#""say \"hi\" \\ \_ and \[ 1 2 + ]" """#),
+        r#"[ 'say "hi" \ ' _ . ' and ' 1 int# ! 2 int# ! + . ] str# ! [ ] str# !"#
     );
 }
 
@@ -141,9 +120,30 @@ fn the_examples_lower_and_run_the_same() {
 fn symbolic_forth_runs() {
     let mut s = Session::new();
     s.symbolic = true;
-    s.eval("sq [ dup . * . ] ; 3 int# ! sq . 2.5 dec# ! sq . 2 int# ! f64 ! \"42\" i64 !")
+    s.eval("sq [ dup . * . ] ; 3 int# ! sq . 2.5 dec# ! sq . 2 int# ! f64 ! '42' i64 !")
         .unwrap();
     assert_eq!(s.show(), "<4> 9 6.25 2.0 42");
+    // Text is a symbol, and a string a quotation made text by `str# !`;
+    // `"…"` is High Stack's.
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval("[ 'n = ' 2 int# ! 3 int# ! + . ] str# ! [ ] str# !")
+        .unwrap();
+    assert_eq!(s.show(), "<2> \"n = 5\" \"\"");
+    // A symbol is text as it is, as `10 int# !` is a number; `string` is
+    // the type it becomes.
+    let mut s = Session::new();
+    s.symbolic = true;
+    s.eval("'a b' str# ! x str# !").unwrap();
+    assert_eq!(s.show_typed(), "<2> \"a b\" < string > \"x\" < string >");
+    let e = s.eval("5 int# ! str# !").unwrap_err();
+    assert!(
+        e.msg.contains("a symbol or a quotation, and 5"),
+        "{}",
+        e.msg
+    );
+    let e = s.eval("\"n\"").unwrap_err();
+    assert!(e.msg.starts_with("`\"…\"` is High Stack's"), "{}", e.msg);
     // A subscript and a power are the core's rules, which rewrite a name
     // where `.` applies it, as in High Stack.
     let mut s = Session::new();

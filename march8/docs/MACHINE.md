@@ -663,21 +663,32 @@ f: [ "<\[ _ 1 + ]>" ] ;     5 f is "<6>", 1.5 f is "<2.5>"
 
 - **The reader** reads a hole's code with its own words, to a `]` where a
   word would start with the hole's own brackets closed, so text resumes right
-  after it (`"\[ n ]apples"`), and strings nest.
-- **The stage** pushes each piece: the text, and each hole's value written
-  in by `>string`, a string's own text, a symbol's, or any other value as
-  `show` writes it; and joins them in one buffer, `text-join`, not a chain
-  of `concat`s.
+  after it (`"\[ n ]apples"`), and strings nest. It writes a string as Low
+  Stack does (2026-10-22; doc/design/SYMBOLIC-FORTH.md 7, step 4): a
+  quotation of its text, each run a symbol, and its holes' code, `\_`
+  being `_ .`, made text by `str# !`, so `"1 + 2 = \[ 1 2 + ]"` is
+  `[ '1 + 2 = ' 1 2 + ] str# !`.
+- **The stage** runs the quotation's code where it stands and writes each
+  value it leaves, by `>string`: a string's own text, a symbol's, or any
+  other value as `show` writes it; and joins them in one buffer,
+  `text-join`, not a chain of `concat`s.
   Pieces known while compiling join then, so on known values the string is
-  one constant. A hole leaves one value and reaches only its string's
-  arguments and what it makes.
+  one constant. A hole is code written in: it may leave any number of
+  values, and reaches what `.`'s would, the text before it among them
+  (14), so `5 "\[ 1 + ]"` is "6" and `"a\[ drop 1 ]"` is "1". What the
+  code has left is written as soon as the code after reaches none of it,
+  before the next text or argument, so a hole's value is written where it
+  is made, not brought up to be written last; before code holding a
+  quotation, whose reach `each` and its kin leave unknown, it waits.
 - **`_` in a hole** is an argument of the string, taken where the string
   stands, the first written the deepest, so a word whose body is such a
   string takes them.
-- **`string !` of a quotation** is text of the values its code leaves, in
-  order, each written as a hole's is, `1 2 [ _ " and " _ ] string !` being
-  `"1 and 2"` (doc/design/SYMBOLIC-FORTH.md 15). Its code reaches only its
-  arguments and what it makes, as a hole's does.
+- **`str# !` of a quotation** is text of the values its code leaves, in
+  order, `1 2 [ _ " and " _ ] str# !` being `"1 and 2"`
+  (doc/design/SYMBOLIC-FORTH.md 15), and of a symbol, text as it is,
+  `'ab' str# !`, as `10 int# !` is a number. `string !` makes no text of a
+  quotation, `string` being the type text has and not a kind (retired
+  2026-10-22).
 - **`seq# !`, `map# !` and `sig# !` of a quotation** make it an array
   literal, a map literal or a signature, which is how the reader writes
   `( … )`, `{ … }` and `< … >` (2026-10-21; doc/design/SYMBOLIC-FORTH.md

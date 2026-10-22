@@ -219,7 +219,7 @@ pub enum Primitive {
     // `"two words" sym!`.
     SymShow = 124,
     // ( t1 … tn n -- t ) n texts joined into one, in one buffer: a string
-    // with holes, or `string !` of a quotation.
+    // with holes, `str# !` of a quotation.
     TextJoin = 125,
     // ( n -- ) The innermost mark lowered by n cells: an array or map
     // literal whose code reached n cells below where it began

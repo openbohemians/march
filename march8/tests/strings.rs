@@ -77,9 +77,30 @@ fn print_writes_any_value() {
 #[test]
 fn bad_holes() {
     assert_eq!(session(&["\"\\[ ]\""]).err(), Some(Kind::Syntax));
-    assert_eq!(session(&["\"\\[ 1 2 ]\""]).err(), Some(Kind::Mismatch));
     assert_eq!(session(&["\"abc \\[ 1 "]).err(), Some(Kind::Unfinished));
     assert_eq!(session(&["\"\\_\""]).err(), Some(Kind::Mismatch));
-    // A hole reaches only what it makes.
-    assert_eq!(session(&["\"a\\[ drop 1 ]\""]).err(), Some(Kind::Mismatch));
+}
+
+#[test]
+fn a_string_is_its_code_applied_and_written() {
+    // A string is a quotation of its text and its holes' code, made text by
+    // `str# !` (doc/design/SYMBOLIC-FORTH.md 6.15): each value its code
+    // leaves is written, so a hole may leave several, or none.
+    assert_eq!(
+        show(&["\"\\[ 1 2 ]\" \"a\\[ 1 drop ]b\""]),
+        "<2> \"12\" \"ab\""
+    );
+    // It is not sealed (14): its code reaches what `.`'s would, the text
+    // before a hole among it, and it writes all it leaves, from as deep as
+    // it reached.
+    assert_eq!(
+        show(&["5 \"\\[ 1 + ]\" 1 2 \"\\[ + ]!\""]),
+        "<2> \"6\" \"3!\""
+    );
+    assert_eq!(show(&["\"a\\[ drop 1 ]\""]), "<1> \"1\"");
+    assert_eq!(show(&["1 2 \"\\[ swap ]\""]), "<1> \"21\"");
+    assert_eq!(
+        show(&["\"3\" i64! \"4\" i64! \"\\[ swap ]\""]),
+        "<1> \"43\""
+    );
 }

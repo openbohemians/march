@@ -16,7 +16,6 @@ pub enum Tok {
     /// A ratio literal, `1:2`: its terms as written, the sign on the first.
     /// `1:2` is `1:2 ratio# !` in Symbolic Forth.
     Ratio(Rc<[i128]>),
-    Str(Rc<str>),
     Name(Rc<str>),
     /// `.`, which applies the value on top; the reader puts one after each
     /// name that applies, and `!` and `;` are the words `!` and `;`
@@ -31,16 +30,6 @@ pub enum Tok {
     Open(u8),
     /// `]`, or the stage's `>`.
     Close(u8),
-    /// A string with holes: text and code, in order.
-    Template(Rc<[Piece]>),
-}
-
-/// A part of a string with holes.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Piece {
-    Text(Rc<str>),
-    /// `\[ code ]`, whose value is written in; `\_` is `\[ _. ]`.
-    Hole(Rc<[Token]>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -141,15 +130,15 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             return Ok(out);
         }
         if c == '"' {
-            let tok = r.string(symbols, hole.is_some() && open.is_empty())?;
-            out.push(Token { tok, pos });
+            out.extend(r.string(symbols, hole.is_some() && open.is_empty())?);
             continue;
         }
         let word = r.word();
-        if word.len() > 1 && word.starts_with('\'') {
+        if word.starts_with('\'') {
             // A quoted symbol runs to the next `'` not doubled, spaces and
-            // all (doc/design/SYMBOLIC-FORTH.md 6.12): text until a type
-            // structures it, a string where one is taken (28).
+            // all, a space first among them (doc/design/SYMBOLIC-FORTH.md
+            // 6.12): text until a type structures it, a string where one is
+            // taken (28).
             r.at -= word.len();
             r.col = pos.col;
             let s = r.quoted(pos)?;
@@ -719,13 +708,37 @@ impl<'a> Reader<'a> {
         Ok(s)
     }
     /// A string literal, from its opening `"`, with its escapes and holes
-    /// (march7/docs/STRINGS.md). In a hole, its `]` may follow at once.
-    fn string(&mut self, symbols: &Symbols, in_hole: bool) -> Result<Tok> {
+    /// (march7/docs/STRINGS.md), as Low Stack writes it
+    /// (doc/design/SYMBOLIC-FORTH.md 6.15, section 7): a quotation of its
+    /// text, each run of it a symbol, and its holes' code, made text by
+    /// `str# !`. `\_` is `_ .`. In a hole, its `]` may follow at once.
+    fn string(&mut self, symbols: &Symbols, in_hole: bool) -> Result<Vec<Token>> {
         let start = self.pos();
+        if self.symbolic {
+            return Err(Error::new(
+                Kind::Syntax,
+                Some(start),
+                "`\"…\"` is High Stack's: Low Stack's text is a quoted symbol, `'…'`, and a \
+                 string of it and code `[ … ] str# !`",
+            ));
+        }
         self.bump();
         let mut s = String::new();
-        let mut pieces: Vec<Piece> = Vec::new();
-        loop {
+        // Where the text being read began.
+        let mut from = self.pos();
+        let mut out = vec![Token {
+            tok: Tok::Open(b'['),
+            pos: start,
+        }];
+        let text = |s: &mut String, from: Pos, out: &mut Vec<Token>| {
+            if !s.is_empty() {
+                out.push(Token {
+                    tok: Tok::Name(std::mem::take(s).into()),
+                    pos: from,
+                });
+            }
+        };
+        let close = loop {
             let here = self.pos();
             let bad = |msg: &str| Error::new(Kind::Syntax, Some(here), msg.to_string());
             match self.bump() {
@@ -736,14 +749,15 @@ impl<'a> Reader<'a> {
                         "a string is never closed",
                     ));
                 }
-                Some('"') => break,
+                Some('"') => break here,
                 Some('\\') => match self.bump() {
                     Some('\\') => s.push('\\'),
                     Some('"') => s.push('"'),
                     Some('[') => {
                         let code = tokens(self, symbols, Some(here))?;
-                        pieces.push(Piece::Text(std::mem::take(&mut s).into()));
-                        pieces.push(Piece::Hole(code.into()));
+                        text(&mut s, from, &mut out);
+                        out.extend(code);
+                        from = self.pos();
                     }
                     // `\_` is an input, `\[ _. ]`, unless a subscript's name
                     // and `;` follow: `\_1;` is `₁`.
@@ -758,18 +772,11 @@ impl<'a> Reader<'a> {
                             self.bump();
                             self.bump();
                         } else {
-                            let pull = [
-                                Token {
-                                    tok: Tok::Name("_".into()),
-                                    pos: here,
-                                },
-                                Token {
-                                    tok: Tok::Apply,
-                                    pos: here,
-                                },
-                            ];
-                            pieces.push(Piece::Text(std::mem::take(&mut s).into()));
-                            pieces.push(Piece::Hole(pull.into()));
+                            text(&mut s, from, &mut out);
+                            for tok in [Tok::Name("_".into()), Tok::Apply] {
+                                out.push(Token { tok, pos: here });
+                            }
+                            from = self.pos();
                         }
                     }
                     Some(c) => {
@@ -796,7 +803,7 @@ impl<'a> Reader<'a> {
                 },
                 Some(c) => s.push(c),
             }
-        }
+        };
         if self
             .peek()
             .is_some_and(|c| !(c.is_whitespace() || in_hole && c == ']'))
@@ -807,12 +814,20 @@ impl<'a> Reader<'a> {
                 "text runs on after a string's closing `\"`",
             ));
         }
-        if pieces.is_empty() {
-            return Ok(Tok::Str(s.into()));
+        text(&mut s, from, &mut out);
+        out.push(Token {
+            tok: Tok::Close(b']'),
+            pos: close,
+        });
+        // The kind is where the string opened, as a bracket's is.
+        out.push(Token {
+            tok: Tok::Name("str#".into()),
+            pos: start,
+        });
+        for tok in [Tok::Name("!".into()), Tok::Apply] {
+            out.push(Token { tok, pos: close });
         }
-        pieces.push(Piece::Text(s.into()));
-        pieces.retain(|p| !matches!(p, Piece::Text(t) if t.is_empty()));
-        Ok(Tok::Template(pieces.into()))
+        Ok(out)
     }
 }
 
@@ -868,12 +883,10 @@ pub fn quote(n: &str, out: &mut String) {
 
 /// One token in Symbolic Forth.
 fn lowered(tok: &Tok) -> String {
-    let text = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"");
     match tok {
         Tok::Int(n) => format!("{n} int# !"),
         Tok::Dec(d, s) => format!("{} dec# !", crate::prims::show_dec(*d, *s)),
         Tok::Ratio(t) => format!("{} ratio# !", crate::prims::show_ratio(t)),
-        Tok::Str(s) => format!("\"{}\"", text(s)),
         Tok::Name(n) => {
             let mut s = String::new();
             symbol(n, &mut s);
@@ -882,21 +895,6 @@ fn lowered(tok: &Tok) -> String {
         Tok::Apply => ".".into(),
         Tok::Test => "?".into(),
         Tok::Open(b) | Tok::Close(b) => (*b as char).to_string(),
-        Tok::Template(pieces) => {
-            let mut s = String::from('"');
-            for p in pieces.iter() {
-                match p {
-                    Piece::Text(t) => s.push_str(&text(t)),
-                    Piece::Hole(code) => {
-                        s.push_str("\\[ ");
-                        s.push_str(&lower(code).replace('\n', " "));
-                        s.push_str(" ]");
-                    }
-                }
-            }
-            s.push('"');
-            s
-        }
     }
 }
 
@@ -1157,7 +1155,7 @@ mod tests {
     fn numbers_are_symbols_in_symbolic_forth() {
         // Digits mark nothing there (doc/design/SYMBOLIC-FORTH.md 6.7): a
         // number is a symbol given its kind, which reads as the literal the
-        // intermediate form reads, in a hole too.
+        // intermediate form reads, in a quotation too.
         let s = Symbols::standard();
         let read = |src| -> Vec<Tok> {
             read_symbolic(src, &s)
@@ -1176,18 +1174,19 @@ mod tests {
             toks("10 -2 1.10 1:2")
         );
         assert_eq!(
-            read(r#""\[ 1 int# ! ]""#),
-            [Tok::Template(
-                [Piece::Hole(
-                    [Token {
-                        tok: Tok::Int(1),
-                        pos: Pos { line: 1, col: 5 },
-                    }]
-                    .into()
-                )]
-                .into()
-            )]
+            read("[ 1 int# ! ] str# !"),
+            [
+                Tok::Open(b'['),
+                Tok::Int(1),
+                Tok::Close(b']'),
+                n("str#"),
+                n("!"),
+                Tok::Apply
+            ]
         );
+        // A string is High Stack's.
+        let e = read_symbolic(r#""\[ 1 int# ! ]""#, &s).unwrap_err();
+        assert_eq!(e.kind, Kind::Syntax);
         // A symbol not of its kind is left for `!`, which says why; one that
         // is too large is an error here.
         assert_eq!(
@@ -1226,14 +1225,42 @@ mod tests {
     fn strings_and_escapes() {
         // A string's escapes are decoded; a quoted symbol has none, and
         // doubles a quote in it (doc/design/SYMBOLIC-FORTH.md 6.12).
-        assert_eq!(toks("'it''s'"), [Tok::Name("it's".into())]);
+        let n = |s: &str| Tok::Name(s.into());
+        assert_eq!(toks("'it''s'"), [n("it's")]);
+        // A string is a quotation of its text and its holes' code, made text
+        // by `str# !` (6.15, section 7), each run of text a symbol.
+        let made = [Tok::Close(b']'), n("str#"), n("!"), Tok::Apply];
+        let string = |inner: &[Tok]| -> Vec<Tok> {
+            std::iter::once(Tok::Open(b'['))
+                .chain(inner.iter().cloned())
+                .chain(made.iter().cloned())
+                .collect()
+        };
         assert_eq!(
             toks(r#""a b\n;\"\\" 'C:\new' "\#x2603;\times;""#),
             [
-                Tok::Str("a b\n\"\\".into()),
-                Tok::Name("C:\\new".into()),
-                Tok::Str("☃×".into()),
+                string(&[n("a b\n\"\\")]),
+                vec![n("C:\\new")],
+                string(&[n("☃×")]),
             ]
+            .concat()
+        );
+        assert_eq!(
+            toks(r#""\_ and \[ 1 2 + ]!" """#),
+            [
+                string(&[
+                    n("_"),
+                    Tok::Apply,
+                    n(" and "),
+                    Tok::Int(1),
+                    Tok::Int(2),
+                    n("+"),
+                    Tok::Apply,
+                    n("!"),
+                ]),
+                string(&[]),
+            ]
+            .concat()
         );
     }
 

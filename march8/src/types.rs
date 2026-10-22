@@ -39,17 +39,18 @@ pub enum Base {
     /// where it is used, as a literal's is (doc/design/SYMBOLIC-FORTH.md 21).
     UnitLit,
     /// The kinds `!` makes of a quotation (doc/design/SYMBOLIC-FORTH.md
-    /// 6.8, 6.10): a sequence of what its code leaves, `[ … ] seq# !`,
-    /// which `( … )` writes; a map of it paired, `map# !`, `{ … }`; and a
-    /// signature, `sig# !`, `< … >`, its code run over types. No value has
-    /// one.
+    /// 6.8, 6.10, 6.15): a sequence of what its code leaves, `[ … ] seq# !`,
+    /// which `( … )` writes; a map of it paired, `map# !`, `{ … }`; a
+    /// signature, `sig# !`, `< … >`, its code run over types; and text of
+    /// it, `str# !`, `"…"`. No value has one.
     SeqLit,
     MapLit,
     SigLit,
+    StrLit,
 }
 
 impl Base {
-    pub const ALL: [(Base, &'static str); 16] = [
+    pub const ALL: [(Base, &'static str); 17] = [
         (Base::I64, "i64"),
         (Base::F64, "f64"),
         (Base::Money, "money"),
@@ -66,6 +67,7 @@ impl Base {
         (Base::SeqLit, "seq#"),
         (Base::MapLit, "map#"),
         (Base::SigLit, "sig#"),
+        (Base::StrLit, "str#"),
     ];
 }
 
@@ -86,6 +88,7 @@ pub const UNIT_LIT: Type = 12;
 pub const SEQ_LIT: Type = 13;
 pub const MAP_LIT: Type = 14;
 pub const SIG_LIT: Type = 15;
+pub const STR_LIT: Type = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Term {

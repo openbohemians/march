@@ -41,7 +41,9 @@ search in March (6.21, 6.29); a signature is a quotation made one,
 steps 2 and 3, each High Stack form read as Low Stack writes it (section
 7), and literals unsealed (6.14). Built. Code is data only while
 compiling, so a quotation is a sequence then, and at run time only code
-(6.30).
+(6.30). Revised 2026-10-22: Low Stack's step 4, a string read as a
+quotation of its text and code made text, `[ … ] str# !`, and unsealed
+as a sequence is (6.15, section 7). Built.
 
 ## 1. What it is
 
@@ -200,6 +202,7 @@ which become spellings above it (decided 2026-10-14, not built):
   string with holes is a quotation of its pieces made text,
   `[ '1 + 2 = ' 1 int# ! 2 int# ! + . ] str# !`, as `seq# !` makes a
   sequence of one (6.15).
+  Built in march8 (2026-10-22): `5 "\[ 1 + ]"` is "6".
 - **`[| … |]`** is the lowest form's quotation written inline, a pure
   container of symbols (Thomas, 2026-10-14): its contents are read as
   Symbolic Forth, so nothing applies without a dot, a number is a symbol,
@@ -318,9 +321,10 @@ Settled (Thomas, 2026-10-13):
 1. **Text** is a symbol that may hold white space, written quoted, `'this
    is symbols with spaces in it'`, and a type structures it into a
    string. An ordered set of code points would do too, but that is the
-   long way round. March8 reads `'…'` as a symbol (28), which `string !`
-   makes a string, but lowering still writes strings as strings (section
-   7, step 4).
+   long way round. March8 reads `'…'` as a symbol (28), which `str# !`
+   makes text, `'ab' str# !`, as `10 int# !` makes a number, and a string
+   as a quotation of its text and code, which `str# !` makes text too
+   (section 7, step 4).
 2. **Maps** are ordered sets of pairs, not a fundamental.
 3. **`!`** structures a value by a type. It was `convert .` first, a
    convenience over a primitive word; it is now a meta-op (5). March8
@@ -372,7 +376,8 @@ Settled (Thomas, 2026-10-14), not built:
    decided by the values, so a word walks a quotation by recursion.
    Built in march8 (2026-10-20). A bracket in one is three elements,
    its quotation, its kind and `!`, `[ … ] seq# !` (section 7, step 3).
-   Not yet: strings, which Low Stack has after step 4; a quotation
+   A string is three too, `[ … ] str# !`, its text a symbol (step 4).
+   Not yet: a quotation
    holding the symbol `'.'` pushed, which would be one with the meta-op
    taken out; a walk past about sixty elements, depth's bound, which a
    `fold` over a quotation would lift. At run time a quotation is code
@@ -527,8 +532,7 @@ Settled (Thomas, 2026-10-14), not built:
     and a string each take their arguments, and `mark-pick` is gone. A
     run-time argument used first never moves; one used later waits on the
     scratch stack. `march8 lower` writes `( … )` as `[ … ] seq# !`
-    (2026-10-21), and `"…"` as it is, until `str# !` is the lowest
-    form's.
+    (2026-10-21), and `"…"` as `[ … ] str# !` (2026-10-22).
 
     No bracket is sealed (Thomas, 2026-10-17): a quotation and a literal
     alike take what their code needs, so `[ + ]` takes two and `1 2 ( + )`
@@ -541,8 +545,9 @@ Settled (Thomas, 2026-10-14), not built:
     applied, as `.` applies it, and what it leaves kept together, so
     its elements are what its code left, from as deep as it reached:
     `5 ( 7 over )` is `( 5 7 5 )`, and `0 ( xs [ + ] each )` a sum, `( 0 )`
-    when xs is empty. A string is still sealed, until it is Low Stack's
-    (section 7, step 4).
+    when xs is empty. And for strings (2026-10-22), whose text is among
+    what their code leaves, so a hole reaches the text before it:
+    `5 "\[ 1 + ]"` is "6", and `"a\[ drop 1 ]"` is "1".
 
     **A letter names an input by its place** (Thomas, 2026-10-17). In a
     bracket one lowercase letter is the input at its place from the top,
@@ -596,9 +601,16 @@ Settled (Thomas, 2026-10-14), not built:
     march8 (2026-10-16): `"…"` and `[ … ] string !` join their pieces in
     one buffer, the machine's `text-join`, where march8 had joined them
     with `concat` one at a time, copying the growing string at each piece.
-    Its code reaches only its arguments and what it makes, until strings
-    are Low Stack's (section 7, step 4), when they are unsealed as
-    sequences are (14).
+    `[ … ] string !` was retired for `str# !` (Thomas, 2026-10-22): a
+    bracket's kind is said by a kind, as `seq#` says a sequence's, and
+    `string` is a type.
+    Its code is not sealed (14): it reaches what `.`'s would, and all it
+    leaves from as deep as it reached is written. `"…"` is read as one
+    quotation, its text a symbol for each run of it and its holes' code
+    between (section 7, step 4), so a hole is code written in, which may
+    leave any number of values and reach the text before it. Built in
+    march8 (2026-10-22), where until then each hole had left one value
+    and reached only its string's arguments and what it made.
 
     Text is a literal kind, `str#`, as a number is (Thomas, 2026-10-19):
     strings differ along two axes, their encoding, UTF-8 or ASCII, and
@@ -621,7 +633,12 @@ Settled (Thomas, 2026-10-14), not built:
       does not say which.
 
     `str#` settles to `string` where nothing asks for more, as `int#`
-    settles to i64.
+    settles to i64. So `str#` makes text and `string` is the type text has,
+    what a signature names and a value has at run time, as `int#` makes a
+    number and i64 is a type (Thomas, 2026-10-22: "why do we need
+    `string`?"): `str# !` makes text of a symbol, `'ab' str# !`, as of a
+    quotation, and `[ … ] string !` was retired (above). In march8 `str# !`
+    gives a string at once, there being no other text type yet.
 
 16. **Namespaces** are maps all the way down (Thomas): a namespace's
     entries are words, data, or more namespaces, and a dot inside a name
@@ -1347,7 +1364,7 @@ path among them, or a pattern, which `;` tells from a symbol by its type.
 says with words of the core, which lowering writes (section 4): `int#`,
 `dec#` and `ratio#` make a number of a symbol (6.7); `seq#` and `map#`
 make data of a quotation (6.10), and `sig#` a signature of one (6.8);
-`str#` makes text of one (6.15); `var#` makes a variable of a name, in
+`str#` makes text of one, or of a symbol (6.15); `var#` makes a variable of a name, in
 a signature a type filled by matching, in a body an input by its place
 (6.11, 6.14); `power#` makes a power (6.21), `unit#` an identity and
 `identity#` finds it at a type (6.21); `width#` applies a word at a width
@@ -1416,6 +1433,13 @@ Types are words (section 2).
    compiled code is still the same, since nothing compiled before reached
    below.
 4. **Strings**, as `[ … ] str# !` of `'…'` pieces and code (6.15).
+   Built 2026-10-22, as steps 2 and 3 were: the reader writes `"…"` as a
+   quotation of its text, each run a symbol, and its holes' code, `\_`
+   being `_ .`, closed by `str#` and `!`, the kind where the string
+   opened; the stage reads no string, and `!` makes the quotation text by
+   `str#`, a kind as `seq#` is. Low Stack reads no `"`, and a message
+   writes `"…"` back. Unsealed with it (6.14). The compiled code is the
+   same, the core's and every example's.
 5. **Letters as places**, built in High Stack (6.14), lowering to
    `b var# .`, with each `_` lowered to its letter.
 6. **Rules**, as above, matched in lookup against the symbol `.`

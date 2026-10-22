@@ -37,6 +37,15 @@ fn its_elements_are_low_stacks() {
         show("[ ( 1 2 ) ] first length [ ( 1 2 ) ] ."),
         "<2> 6 ( 1 2 )"
     );
+    // A string is three too, `[ … ] str# !`, its text a symbol (7, step 4).
+    assert_eq!(
+        show("[ \"a\" ] length [ \"a\" ] 2 at [ \"a b\" ] first first"),
+        "<3> 3 str#' 'a b'"
+    );
+    assert_eq!(
+        show("[ \"x\\_\" ] first length 5 [ \"x\\_\" ] first str# !"),
+        "<2> 3 \"x5\""
+    );
 }
 
 #[test]
@@ -93,12 +102,9 @@ fn a_word_walks_one_by_recursion() {
 }
 
 #[test]
-fn what_low_stack_has_not_yet_is_not_taken_apart() {
-    let (kind, msg) = error("[ \"a\" ] length");
+fn a_symbol_a_meta_op_would_be_taken_for_is_not_taken_apart() {
+    let (kind, msg) = error("[ '.' ] length");
     assert_eq!(kind, Kind::Mismatch);
-    assert!(msg.contains("Low Stack has no strings yet"), "{msg}");
-    // A symbol a meta-op would be taken for.
-    let (_, msg) = error("[ '.' ] length");
     assert!(
         msg.contains("holding the symbol `.` is not taken apart"),
         "{msg}"

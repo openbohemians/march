@@ -11,7 +11,7 @@ use crate::code::{Blob, Cid, Op, Primitive as P};
 use crate::error::{Error, Kind, Level, Pos, Result, Warning};
 use crate::machine::{self, Machine};
 use crate::prims::{self, Effects, PRIMS, Prim};
-use crate::read::{self, Piece, Tok, Token};
+use crate::read::{self, Tok, Token};
 use crate::types::*;
 use regex::{Regex, RegexSet};
 use std::collections::{HashMap, HashSet};
@@ -148,18 +148,23 @@ fn is_var(n: &str) -> bool {
 /// Tokens as they are written, for a message: a name and its application
 /// are the name, `!` and `;` among them, a variable, `a var# .`, is its
 /// letter, a quotation made data is its bracket, `[ … ] seq# !` being
-/// `( … )`, and a symbol is spelled as one.
+/// `( … )`, a string is `"…"`, and a symbol is spelled as one.
 fn source_text(toks: &[Token]) -> String {
     // Each bracket's spelling, by where it is, and the words that make one,
-    // which it stands for.
+    // which it stands for; and where each string's quotation closes.
     let mut spelled: Vec<Option<&str>> = vec![None; toks.len()];
     let mut made = vec![false; toks.len()];
+    let mut strings: Vec<Option<usize>> = vec![None; toks.len()];
     let mut open = Vec::new();
     for (i, t) in toks.iter().enumerate() {
         match t.tok {
             Tok::Open(_) => open.push(i),
             Tok::Close(_) => {
                 let (o, c) = match (open.pop(), made_at(toks, i + 1)) {
+                    (Some(o), Some("str#")) => {
+                        strings[o] = Some(i);
+                        continue;
+                    }
                     (Some(o), Some("seq#")) => (o, ["(", ")"]),
                     (Some(o), Some("map#")) => (o, ["{", "}"]),
                     (Some(o), Some(_)) => (o, ["<", ">"]),
@@ -176,6 +181,14 @@ fn source_text(toks: &[Token]) -> String {
     while i < toks.len() {
         if made[i] {
             i += 1;
+            continue;
+        }
+        if let Some(c) = strings[i] {
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str(&string_text(&toks[i + 1..c]));
+            i = c + 4;
             continue;
         }
         let word = match &toks[i].tok {
@@ -210,9 +223,7 @@ fn source_text(toks: &[Token]) -> String {
             Tok::Int(n) => n.to_string(),
             Tok::Dec(d, s) => prims::show_dec(*d, *s),
             Tok::Ratio(t) => prims::show_ratio(t),
-            Tok::Str(s) => format!("{s:?}"),
             Tok::Open(b) | Tok::Close(b) => spelled[i].map_or((*b as char).to_string(), Into::into),
-            Tok::Template(_) => "\"…\"".into(),
         };
         if !out.is_empty() {
             out.push(' ');
@@ -220,6 +231,60 @@ fn source_text(toks: &[Token]) -> String {
         out.push_str(&word);
         i += 1;
     }
+    out
+}
+
+/// A string as it is written, `"…"`, from its quotation's code: a symbol is
+/// its text, `_ .` an argument, `\_`, and the code between them a hole.
+fn string_text(toks: &[Token]) -> String {
+    let text = |k: usize| {
+        matches!(toks[k].tok, Tok::Name(_))
+            && !toks.get(k + 1).is_some_and(|t| {
+                matches!(&t.tok, Tok::Apply | Tok::Test)
+                    || matches!(&t.tok, Tok::Name(v) if is_var(v))
+            })
+    };
+    let arg = |k: usize| {
+        toks[k].tok == Tok::Name("_".into()) && toks.get(k + 1).is_some_and(|t| t.tok == Tok::Apply)
+    };
+    let mut out = String::from('"');
+    let mut i = 0;
+    while i < toks.len() {
+        if arg(i) {
+            out.push_str("\\_");
+            i += 2;
+        } else if text(i) {
+            let Tok::Name(s) = &toks[i].tok else {
+                unreachable!("text is a symbol")
+            };
+            for c in s.chars() {
+                match c {
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    '\n' => out.push_str("\\n;"),
+                    '\t' => out.push_str("\\t;"),
+                    c => out.push(c),
+                }
+            }
+            i += 1;
+        } else {
+            let mut j = i;
+            while j < toks.len() && !(j > i && (arg(j) || text(j))) {
+                j = match toks[j].tok {
+                    Tok::Open(_) => {
+                        let c = matching(toks, j);
+                        c + if made_at(toks, c + 1).is_some() { 4 } else { 1 }
+                    }
+                    _ => j + 1,
+                };
+            }
+            out.push_str("\\[ ");
+            out.push_str(&source_text(&toks[i..j]));
+            out.push_str(" ]");
+            i = j;
+        }
+    }
+    out.push('"');
     out
 }
 
@@ -264,10 +329,11 @@ fn cells(stack: &[Jdg]) -> usize {
 }
 
 /// An open array, map or string literal: its bracket, where its elements
-/// start, the floor outside it, and where in the code its mark is. An array
-/// or a map is not sealed (doc/design/SYMBOLIC-FORTH.md 14), so `low` is the
+/// start, the floor outside it, and where in the code its mark is. No
+/// literal is sealed (doc/design/SYMBOLIC-FORTH.md 14), so `low` is the
 /// deepest its code has reached, where its elements start once it closes,
-/// and `cells` how many values below its start had cells at its mark.
+/// and `cells` how many values below its start had cells at an array's or
+/// a map's mark.
 struct Literal {
     bracket: u8,
     start: usize,
@@ -294,21 +360,9 @@ struct Args {
     next: usize,
 }
 
-/// A string's arguments: the `_`s of its holes.
-fn template_args(pieces: &[Piece]) -> Vec<usize> {
-    pieces
-        .iter()
-        .filter_map(|p| match p {
-            Piece::Hole(toks) => Some(args_in(toks)),
-            Piece::Text(_) => None,
-        })
-        .flatten()
-        .collect()
-}
-
 /// A bracket's arguments: the `_`s of its code, in the order written, by
-/// their tokens' addresses. Those of a bracket inside it are that
-/// bracket's, and those of a string's holes the string's.
+/// their tokens' addresses. Those of a bracket inside it, a string among
+/// them, are that bracket's.
 fn args_in(toks: &[Token]) -> Vec<usize> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -415,10 +469,14 @@ enum Item {
 }
 
 /// What an error making a `have` a `t` adds: a float becomes an integer
-/// only by a word that says how it rounds (core/core.march).
+/// only by a word that says how it rounds (core/core.march), and a
+/// quotation is text only of what its code leaves, by its kind
+/// (doc/design/SYMBOLIC-FORTH.md 15).
 fn narrowing(t: Type, have: Type) -> &'static str {
     if matches!(t, I64 | INT_LIT) && matches!(have, F64 | DEC_LIT | RATIO_LIT) {
         ": say how it rounds, `round`, `floor`, `ceil` or `trunc`"
+    } else if t == STRING && have == QUOTE {
+        ": `[ … ] str# !` makes text of what its code leaves, as `\"…\"` is"
     } else {
         ""
     }
@@ -768,15 +826,15 @@ fn quotation_type(q: &[Token], pos: Pos) -> Error {
 }
 
 /// The kind a quotation closed at `j - 1` is made by `!` if it is, `[ … ]
-/// seq# !`, `map# !` or `sig# !`, as High Stack's brackets are read: its
-/// name, `seq#`.
+/// seq# !`, `map# !`, `sig# !` or `str# !`, as High Stack's brackets and
+/// strings are read: its name, `seq#`.
 fn made_at(toks: &[Token], j: usize) -> Option<&str> {
     match toks
         .get(j..j + 3)
         .map(|t| [&t[0].tok, &t[1].tok, &t[2].tok])
     {
         Some([Tok::Name(k), Tok::Name(b), Tok::Apply])
-            if matches!(&**k, "seq#" | "map#" | "sig#") && &**b == "!" =>
+            if matches!(&**k, "seq#" | "map#" | "sig#" | "str#") && &**b == "!" =>
         {
             Some(k)
         }
@@ -800,7 +858,7 @@ fn definition(toks: &[Token], i: usize) -> Option<usize> {
     let value = |t: &Token| {
         matches!(
             t.tok,
-            Tok::Name(_) | Tok::Int(_) | Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_)
+            Tok::Name(_) | Tok::Int(_) | Tok::Dec(..) | Tok::Ratio(_)
         )
     };
     if j == i + 1 && toks.get(j).is_some_and(value) {
@@ -1080,8 +1138,6 @@ impl Stage {
                 Tok::Int(n) => self.push(INT_LIT, Val::Int(*n)),
                 Tok::Dec(d, s) => self.push(DEC_LIT, Val::Dec(*d, *s)),
                 Tok::Ratio(t) => self.push(RATIO_LIT, Val::Ratio(t.clone())),
-                Tok::Str(s) => self.push(STRING, Val::Str(s.clone())),
-                Tok::Template(pieces) => self.template(pieces, t.pos)?,
                 Tok::Name(s)
                     if &**s == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
                 {
@@ -1193,23 +1249,12 @@ impl Stage {
             }
         };
         self.need(1)?;
-        if matches!(t, SEQ_LIT | MAP_LIT | SIG_LIT) {
+        if matches!(t, SEQ_LIT | MAP_LIT | SIG_LIT | STR_LIT) {
             let at = match f.val {
                 Val::Name(_, at) => at,
                 _ => self.pos,
             };
             return self.made(t, at);
-        }
-        // `string !` of a quotation is text of what its code leaves.
-        if t == STRING
-            && let Some(Jdg {
-                val: Val::Quote(q), ..
-            }) = self.stack.last()
-            && !signature(q)
-        {
-            let q = q.clone();
-            self.stack.pop();
-            return self.quote_text(&q);
         }
         if self.types.is_pattern(t) {
             let sig = Sig {
@@ -1534,19 +1579,6 @@ impl Stage {
                     self.pos = t.pos;
                     out.push(Token {
                         tok: Tok::Name(self.path_of(ns, n)?),
-                        pos: t.pos,
-                    });
-                }
-                Tok::Template(pieces) => {
-                    let mut each = Vec::with_capacity(pieces.len());
-                    for p in pieces.iter() {
-                        each.push(match p {
-                            Piece::Hole(code) => Piece::Hole(self.expand(code, ns)?.into()),
-                            text => text.clone(),
-                        });
-                    }
-                    out.push(Token {
-                        tok: Tok::Template(each.into()),
                         pos: t.pos,
                     });
                 }
@@ -4157,11 +4189,7 @@ impl Stage {
         while i < span.end {
             match &toks[i].tok {
                 Tok::Int(n) => items.push(Item::Int(*n)),
-                Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_) => items.push(Item::Other),
-                Tok::Template(pieces) => {
-                    take(items, ins, template_args(pieces).len());
-                    items.push(Item::Other);
-                }
+                Tok::Dec(..) | Tok::Ratio(_) => items.push(Item::Other),
                 // An argument, taken before the code ran.
                 Tok::Name(s)
                     if &**s == "_" && toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply) =>
@@ -4175,8 +4203,8 @@ impl Stage {
                     match made_at(toks, j + 1) {
                         None => items.push(Item::Quote(i + 1, j)),
                         Some("sig#") => items.push(Item::Bracket(i + 1, j)),
-                        // A sequence or a map takes what its code takes,
-                        // its arguments among them.
+                        // A sequence, a map or a string takes what its
+                        // code takes, its arguments among them.
                         Some(_) => {
                             let (k, _) = self.effect_in(&toks[i + 1..j], ns, visiting)?;
                             take(items, ins, k);
@@ -4347,7 +4375,7 @@ impl Stage {
         let mut i = 0;
         while i < toks.len() {
             match &toks[i].tok {
-                Tok::Int(_) | Tok::Dec(..) | Tok::Ratio(_) | Tok::Str(_) | Tok::Name(_) => n += 1,
+                Tok::Int(_) | Tok::Dec(..) | Tok::Ratio(_) | Tok::Name(_) => n += 1,
                 Tok::Apply | Tok::Test => {
                     if let Some(Tok::Name(s)) = i.checked_sub(1).map(|k| &toks[k].tok)
                         && let Some((a, b)) = self.word_effect(s, &mut Vec::new())
@@ -5840,9 +5868,10 @@ impl Stage {
 
     /// A quotation's elements, as Low Stack holds them, each a run of its
     /// tokens: a name is a symbol, a number three, `10 int# !`, a meta-op
-    /// one, `.`, `?`, `!` or `;`, and a quotation inside one, whole. Low
-    /// Stack has no other bracket and no string yet (section 7, steps 3 and
-    /// 4), so a quotation holding one is not taken apart.
+    /// one, `.`, `?`, `!` or `;`, and a quotation inside one, whole, a
+    /// string's among them, `[ … ] str# !` (section 7). Low Stack has no
+    /// other bracket, so a quotation holding a signature the stage keeps,
+    /// `< … >`, is not taken apart.
     fn elements(&self, q: &[Token]) -> Result<Vec<Vec<Token>>> {
         let mut out = Vec::new();
         let mut i = 0;
@@ -5899,22 +5928,16 @@ impl Stage {
                     i = end;
                 }
                 tok => {
-                    let what = match tok {
-                        Tok::Str(_) | Tok::Template(_) => "strings".into(),
-                        tok => format!(
-                            "`{}`",
-                            read::lower(&[Token {
-                                tok: tok.clone(),
-                                pos: t.pos
-                            }])
-                        ),
-                    };
+                    let what = read::lower(&[Token {
+                        tok: tok.clone(),
+                        pos: t.pos,
+                    }]);
                     return Err(self.at_pos(
                         t.pos,
                         Kind::Mismatch,
                         format!(
                             "a quotation is taken apart as Low Stack holds it, and Low Stack \
-                             has no {what} yet (doc/design/SYMBOLIC-FORTH.md 7)"
+                             has no `{what}` (doc/design/SYMBOLIC-FORTH.md 7)"
                         ),
                     ));
                 }
@@ -7640,65 +7663,31 @@ impl Stage {
         Ok(())
     }
 
-    /// A string with holes: each hole's code runs, and its value is written
-    /// in by `>string`. A string is applied where it stands, so the `_`s of
-    /// its holes are its arguments, taken first (doc/design/SYMBOLIC-FORTH.md
-    /// 14), and a hole reaches only them and what it makes.
-    fn template(&mut self, pieces: &[Piece], pos: Pos) -> Result<()> {
-        self.take_args(template_args(pieces))?;
-        let n = self.args.len();
-        let start = self.stack.len();
-        self.literals.push(Literal {
-            bracket: b'"',
-            start,
-            floor: self.floor,
-            mark: self.code.len(),
-            low: start,
-            cells: 0,
-        });
-        let r = self.pieces(pieces, pos);
-        let lit = self.literals.pop().expect("pushed");
-        self.args.truncate(n - 1);
-        self.floor = lit.floor;
-        r?;
-        self.join_text(start)
-    }
-
-    fn pieces(&mut self, pieces: &[Piece], pos: Pos) -> Result<()> {
-        for piece in pieces {
-            match piece {
-                Piece::Text(t) => self.push(STRING, Val::Str(t.clone())),
-                Piece::Hole(toks) => {
-                    // A hole reaches only what it makes.
-                    let depth = self.stack.len();
-                    self.floor = depth;
-                    self.run(toks)?;
-                    self.pos = pos;
-                    if self.stack.len() != depth + 1 {
-                        return Err(self.err(
-                            Kind::Mismatch,
-                            format!(
-                                "a hole leaves one value, to write in, and this one leaves {}",
-                                values(self.stack.len() - depth)
-                            ),
-                        ));
-                    }
-                    self.apply_word(&core_path(">string"))?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// `[ … ] seq# !`, `map# !` or `sig# !`: the quotation below made a
-    /// sequence, a map or a signature (doc/design/SYMBOLIC-FORTH.md 6.8,
-    /// 6.10), as High Stack's `( … )`, `{ … }` and `< … >` are read. The kind
-    /// decides when and how its code runs (6.6). `at` is where the kind was
-    /// written, where High Stack's bracket opened.
+    /// `[ … ] seq# !`, `map# !`, `sig# !` or `str# !`: the quotation below
+    /// made a sequence, a map, a signature or text (doc/design/SYMBOLIC-FORTH.md
+    /// 6.8, 6.10, 6.15), as High Stack's `( … )`, `{ … }`, `< … >` and `"…"`
+    /// are read. The kind decides when and how its code runs (6.6). `at` is
+    /// where the kind was written, where High Stack's bracket or string
+    /// opened.
     fn made(&mut self, kind: Type, at: Pos) -> Result<()> {
         let j = self.pop()?;
+        // A symbol is text as it is, `'ab' str# !`, as `10 int# !` is a
+        // number (6.7): `string` is the type it becomes.
+        if kind == STR_LIT && j.ty == SYMBOL {
+            self.stack.push(j);
+            return self.convert(self.stack.len() - 1, STRING);
+        }
         let q = match j.val {
             Val::Quote(q) if !signature(&q) => q,
+            _ if kind == STR_LIT => {
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!(
+                        "`str#` makes text of a symbol or a quotation, and {} is neither",
+                        self.describe(&j)
+                    ),
+                ));
+            }
             _ => {
                 return Err(self.err(
                     Kind::Mismatch,
@@ -7715,6 +7704,11 @@ impl Stage {
             SIG_LIT => self.quote_sig(&q),
             SEQ_LIT if self.in_bracket > 0 => self.quote_tuple(&q, closed),
             SEQ_LIT => self.quote_literal(&q, b'(', closed),
+            STR_LIT => {
+                let r = self.quote_text(&q);
+                self.pos = closed;
+                r
+            }
             _ => self.quote_literal(&q, b'{', closed),
         }
     }
@@ -7784,11 +7778,13 @@ impl Stage {
         Ok(())
     }
 
-    /// `string !` of a quotation (doc/design/SYMBOLIC-FORTH.md 15): its code
-    /// runs where it stands, taking its arguments, and each value it leaves
-    /// is written, in order, into one string, a string as its text and any
-    /// other value by `>string`. Its code reaches only its arguments and what
-    /// it makes, as a string's holes do.
+    /// `[ … ] str# !`, as `"…"` is read
+    /// (doc/design/SYMBOLIC-FORTH.md 15): its code runs where it stands,
+    /// taking its arguments, and each value it leaves is written, in order,
+    /// into one string, a string as its text, a symbol known as its name and
+    /// any other value by `>string`. Its code reaches what `.`'s would, as a
+    /// sequence's does (14), and the values it leaves are all it writes, from
+    /// as deep as it reached.
     fn quote_text(&mut self, q: &[Token]) -> Result<()> {
         self.take_args(args_in(q))?;
         let n = self.args.len();
@@ -7801,43 +7797,96 @@ impl Stage {
             low: start,
             cells: 0,
         });
-        self.floor = start;
         let r = self.enter().and_then(|()| {
-            let r = self.run(q);
+            let r = self.text_code(q, start);
             self.depth -= 1;
             r
         });
         let lit = self.literals.pop().expect("pushed");
         self.args.truncate(n - 1);
-        self.floor = lit.floor;
         r?;
+        let start = lit.from();
+        self.reached(start);
+        self.write_text(start)?;
+        self.join_text(start)
+    }
+
+    /// Runs a string's code, and writes what it has left as soon as the code
+    /// after reaches none of it, before a symbol or an argument: so a hole's
+    /// value is written where it is made, and not brought up to be written
+    /// once all have run. What `each` and its kin reach is not known for
+    /// sure, so before code holding a quotation, nothing is written yet.
+    fn text_code(&mut self, q: &[Token], start: usize) -> Result<()> {
+        let mut written = start;
+        let mut i = 0;
+        while i < q.len() {
+            let applied = |k: usize| {
+                q.get(k + 1)
+                    .is_some_and(|t| matches!(t.tok, Tok::Apply | Tok::Test))
+            };
+            let end = match &q[i].tok {
+                Tok::Open(_) => matching(q, i) + 1,
+                Tok::Name(s) if &**s == "_" && applied(i) => i + 2,
+                _ => i + 1,
+            };
+            let next = matches!(&q[i].tok, Tok::Name(s) if &**s == "_" || !applied(i));
+            if i > 0 && next && !q[i..].iter().any(|t| matches!(t.tok, Tok::Open(_))) {
+                let (mut items, mut ins) = (Vec::new(), 0);
+                let known = self
+                    .effect_on(q, i..q.len(), "", &mut Vec::new(), &mut items, &mut ins)
+                    .is_some();
+                written = written.min(self.literals.last().expect("open").low);
+                if known && ins == 0 {
+                    self.write_text(written)?;
+                    written = self.stack.len();
+                }
+            }
+            self.run(&q[i..end])?;
+            i = end;
+        }
+        Ok(())
+    }
+
+    /// Writes the values from `start` as text, each in its place: a symbol
+    /// known as its name, and any other value not a string by `>string`.
+    fn write_text(&mut self, start: usize) -> Result<()> {
         if self.stack[start..].iter().any(|j| j.val == Val::Many) {
             return Err(self.err(
                 Kind::Mismatch,
-                "`string !` writes the values its code leaves, and a run of them is gathered \
+                "a string writes the values its code leaves, and a run of them is gathered \
                  by `( … )` first",
             ));
         }
-        // Each in turn brought to the top and written, from the deepest, so
-        // they end in their order.
-        if self.stack[start..].iter().any(|j| j.ty != STRING) {
-            for _ in start..self.stack.len() {
-                let j = self.stack.remove(start);
-                if !j.known() {
-                    let above = self.stack[start..].iter().filter(|j| !j.known()).count();
-                    self.roll(above + 1);
-                }
-                let ty = j.ty;
-                self.stack.push(j);
-                if ty != STRING {
-                    let floor = std::mem::replace(&mut self.floor, self.stack.len() - 1);
-                    let r = self.apply_word(&core_path(">string"));
-                    self.floor = floor;
-                    r?;
-                }
+        for j in &mut self.stack[start..] {
+            if let (SYMBOL, Val::Name(s, _)) = (j.ty, &j.val) {
+                *j = Jdg {
+                    ty: STRING,
+                    val: Val::Str(s.clone()),
+                };
             }
         }
-        self.join_text(start)
+        // Each from the first not a string in turn brought to the top and
+        // written, so they end in their order.
+        let Some(first) = self.stack[start..].iter().position(|j| j.ty != STRING) else {
+            return Ok(());
+        };
+        let first = start + first;
+        for _ in first..self.stack.len() {
+            let j = self.stack.remove(first);
+            if !j.known() {
+                let above = cells(&self.stack[first..]);
+                self.roll(above + 1);
+            }
+            let ty = j.ty;
+            self.stack.push(j);
+            if ty != STRING {
+                let floor = std::mem::replace(&mut self.floor, self.stack.len() - 1);
+                let r = self.apply_word(&core_path(">string"));
+                self.floor = floor;
+                r?;
+            }
+        }
+        Ok(())
     }
 
     /// Joins the strings from `start` into one: those known join now, and

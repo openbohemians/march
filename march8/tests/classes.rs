@@ -136,7 +136,7 @@ fn a_word_that_builds_types_is_chosen_by_what_it_takes() {
 fn a_symbol_is_no_type_until_applied() {
     let mut s = Session::new();
     s.symbolic = true;
-    assert!(s.eval("\"ab\" string . i64 . or . !").is_ok());
-    let e = s.eval("\"ab\" string i64 or . !").unwrap_err();
+    assert!(s.eval("[ ab ] str# ! string . i64 . or . !").is_ok());
+    let e = s.eval("[ ab ] str# ! string i64 or . !").unwrap_err();
     assert_eq!(e.kind, Kind::NoWord);
 }

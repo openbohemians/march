@@ -46,9 +46,10 @@ quotation of its text and code made text, `[ … ] str# !`, and unsealed
 as a sequence is (6.15, section 7). Built. And step 5, letters as places,
 `_` read as the letter of its place (6.14, section 7). Built. And step 7,
 the litmus test with no exceptions: the core runs lowered, and every
-example, and compiles to the same code (sections 5 and 7). Decided: a
-trap's kind is in its type, `no-file' trap`; failing at run time and
-handlers are built (6.29).
+example, and compiles to the same code (sections 5 and 7). Failing at
+run time and handlers are built (6.29). Decided: a trap's kind is a type,
+made where it is defined, `err.file.notfound`, which waits on defining
+types (6.29).
 
 ## 1. What it is
 
@@ -1276,15 +1277,14 @@ Settled (Thomas, 2026-10-15):
     size: < string no-file' trap >< i64 > [ drop drop 0 ] ;
     ```
 
-    A trap's kind is in its type (Thomas, 2026-10-22), as `i64 ary` gives
+    A trap's kind is in its type (Thomas, 2026-10-22, and revised the same
+    day: a kind is a type itself, below), as `i64 ary` gives
     an array's elements, so a handler takes a kind as any clause takes a
     case, with no test written. `trap` takes its kind as `ary` takes its
     elements' type, so a letter takes any kind, `k trap`, as `a ary` is
     any array; `trap` alone would take whatever is below it as its kind
     (Thomas). The most particular clause is chosen, `no-file' trap`
-    before `k trap`, as `i64 ary` is before `a ary`; `no-file' io' or
-    trap` would take either, which is not built, since `or` joins types
-    and a kind is a symbol. A trap's
+    before `k trap`, as `i64 ary` is before `a ary`. A trap's
     kind is known only when it fails, so the choice is made at run time,
     as a union's is: a trap is the union of its kinds. A guard still
     chooses by anything else, its message among them. A trap no handler
@@ -1311,6 +1311,66 @@ Settled (Thomas, 2026-10-15):
     Only a word with a handler pays, keeping its inputs as it is entered,
     which, March's values being persistent, is keeping their cells; what
     was done before the failure stands.
+
+    **A kind is a type, made where it is defined** (Thomas, 2026-10-22).
+    `trap` takes a map, whose `error#` holds the kind's message and its
+    path, and makes it a type, so a signature names a kind as it names any
+    type, with no `trap` written there, and `or` joins kinds as it joins
+    types. `ns#` gives the namespace where it is applied, as a symbol, so
+    a kind knows its own name (Thomas: "Just need a primative the returns
+    the current namespace as a symbol"), and two kinds with one message
+    are two. A kind's name is a word and a namespace both, the kinds
+    beneath it in it, as march8 already lets a word and a namespace share
+    a name; the hierarchy is the namespaces', not a symbol's spelling
+    (Thomas: "that would make just longer symbol `err.file'` that's not a
+    namespace. it has to be a word"). The core's kinds are under `err`:
+
+    ```
+    err.file:          { error#: ( "file error" ns# ) } trap ;
+    err.file.notfound: { error#: ( "file not found" ns# ) } trap ;
+    err.file.denied:   { error#: ( "permission denied" ns# ) } trap ;
+
+    size: < string err.file.notfound >< i64 > [ drop drop 0 ] ;
+    size: < string err.file >< i64 > [ drop drop -1 ] ;      -- any file error
+    size: < string err.file err.arith or >< i64 > [ … ] ;
+    ```
+
+    A kind takes the kinds beneath it, and the most particular is chosen,
+    `err.file.notfound`, then `err.file`, then `err`, the root, beneath
+    which is every kind, a program's too, so `err` takes any. A kind
+    misspelt is no word, never a handler that silently takes nothing.
+    `fail` takes a kind and, on top, a message of its own, `err.file "my
+    error message" fail`: a string is the message only on top, so one
+    below a kind is never taken for it, and no tuple is needed; with none,
+    `why` gives the kind's. A program's kinds are defined as the core's
+    are, and none is made as the program runs (Thomas: "I suppose in that
+    case we could make errors on the fly as needed?"; not now, and one
+    made under a defined kind would still be taken by its parent's
+    handlers). What a kind holds is known while compiling (Thomas: "a trap
+    is a map that knows it's name it then map space and a default
+    message"):
+
+    ```
+    {
+      error: < sym > ;
+      message: < str > ;
+      subspace: < sym trap map > ;
+    } ;
+    ```
+
+    A failure carries less, its kind's name and its message, so what is
+    beneath a kind is never made at run time: a handler knows the kinds it
+    takes while compiling. Whatever else is the same each time a kind
+    fails, `status: 404 ;`, the kind holds; what belongs to one failure,
+    which file, travels with it, in its message for now, and as a value
+    its handlers take once a kind can say what its failures carry, which
+    is still to design. The compiler's and the machine's own kinds move
+    under `err`, overflow and division by zero apart once the machine says
+    which, their names to be chosen. A kind is a type a program defines,
+    so it waits on defining types, records among them (Thomas: "clearly we
+    need to be able to define new types"). Decided, not built: march8's
+    kinds are still symbols, `no-file' fail`, and `trap` is written in a
+    signature, `k trap`.
 
     `fail` while compiling is built in march8 (2026-10-21). The machine's
     own kinds are named as its errors are, `syntax'`, `no-word'`,
@@ -1354,8 +1414,8 @@ Settled (Thomas, 2026-10-15):
     come when a handler needs one. A clause that takes a trap last is a
     handler only where its word's other clauses take the inputs;
     elsewhere it is a word applied to a trap, as `log: < k trap > [ … ]`
-    is in a handler. Not built: kinds joined by `or`, and where a trap
-    happened.
+    is in a handler. Not built: kinds as types (above), and where a
+    trap happened.
 
 30. **Code is data only while compiling** (Thomas, 2026-10-21: "we are
     headed into Lisp territory now. and guess what? I don't want to go

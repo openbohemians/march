@@ -212,8 +212,9 @@ Runtime values in types would make inference undecidable. So:
   still works on it. Unlike a vec's, this forgetting costs: each element
   is tagged then, a union made, with its informative warning (3.6). Built
   in march8 (march8/docs/MACHINE.md, "Tuples"); records are not yet.
-- **Fixed keys make a record:** `{ "port" 8080 "host" "x" }`, each field
-  typed. A record forgets its keys' types the same way where a map is
+- **Fixed keys make a record:** `{ port: 8080 host: "x" }`, each field
+  typed, its type a map of types, `{ port: < i64 > ; host: < string > ; }`
+  (2.11). A record forgets its keys' types the same way where a map is
   wanted, into a map of the union of its values' types.
 - **Genuinely variable mixtures need unions,** such as "i64 or string": a
   value whose type is one of several, decided only at run time, so it
@@ -358,12 +359,79 @@ any family.
 March7's checker already does a narrow version: it rewrites an integer
 literal as a float when a float clause needs it.
 
-### 2.11 Roles
+### 2.11 Defining types
 
-Money is a distinct type with the representation of a precise number type
-(a "newtype"): it cannot be mixed with plain numbers by accident, and costs
-nothing at run time. March has no precise number type yet (see
-LAZY-NUMBERS.md).
+Decided 2026-10-22 (Thomas: "clearly we need to be able to define new
+types"), from what a trap's kind needs (SYMBOLIC-FORTH.md 6.29). A type is
+a structure, data made of types, and a type of its own is a structure that
+holds its name. This replaces what this section first said, that Money was
+a "newtype" never mixed with plain numbers. There are four cases:
+
+- **An alias** is another name for a type, and the same type: `temp: [ f64
+  ] ;`, so `< temp >` is `< f64 >` and mixes with it freely. Built in
+  march8, since a word that leaves a type serves in a bracket. A word that
+  makes a type of another, `maybe: [ nil or ] ;`, so `i64 maybe`, is a
+  word as `ary` and `or` are, not a type of its own (Thomas: "it's not
+  really a type of it's own").
+- **A record** is a map of types, as a tuple is a sequence of them (2.5),
+  each field's type in a bracket, since a bare `f64` in a map would be
+  applied as a value (Thomas: "for the definition of a record, that make
+  complete sense to me"):
+
+  ```
+  point: [ { x: < f64 > ; y: < f64 > ; } ] ;
+  ```
+
+  A record is known by its content, as a tuple is, so two with the same
+  fields are one type, and a name given it by a definition is an alias.
+- **A type of its own** has a representation and a name, the path where
+  it is defined, which `ns#` gives as a symbol (SYMBOLIC-FORTH.md 6.29),
+  so no other type is the same: Money over a decimal, Celsius over f64. It
+  costs nothing at run time, its values being its representation's. It is
+  a subset of its representation, as `bool` is of i64 (2.16), so it is
+  accepted wherever the representation is, matched less well than a
+  clause of its own (Thomas: "if decimal can't accept money, it seems
+  rather restrictive -- we would be deifning money version for everything
+  or forcing he user to alwasy say `dec !` even for the simplist of math
+  functions"). Where its representation's word is applied it forgets
+  itself, as a vec forgets its length and a tuple its positions (2.5), so
+  `price sqrt` is a decimal, and a clause of its own keeps it where it
+  should:
+
+  ```
+  +: < money money >< money > [ < dec dec > ! + money ! ] ;
+  *: < money dec >< money > [ < dec dec > ! * money ! ] ;
+  ```
+
+  The rule is the one `bool` follows already, `true true +` being 2, an
+  i64, with dispatch's, the most particular clause chosen, and no list of
+  the words that keep a type (Thomas: "We need a rule, not a list we have
+  to maintain, just making specialized defintions also helps make that
+  choice when it differs from the rule"). Forgetting is the safe default,
+  never wrong, only less exact, where keeping by default can be wrong: a
+  bool of 2, or money times money as money. A literal takes its type from
+  context, so `price 3 +` takes money's `+`, and a decimal made as the
+  program runs is converted, `money !`. Proposed, not decided: a minor
+  warning where one word forgets two types of their own, dollars and
+  euros, or Celsius and Fahrenheit, which a units system will check
+  properly (Thomas: "we will get to units system, eventually. I
+  definitely want that").
+- **A kind**, a trap's, is a type of its own in a tree, its name a word
+  and a namespace both, holding the kinds beneath it: like an enum
+  (Thomas: "The Kind reminds me a bit of enums"), but open, since a
+  program may define a kind beneath any, and nested, since a kind takes
+  the kinds beneath it. What it holds is a record, known while compiling
+  (SYMBOLIC-FORTH.md 6.29):
+
+  ```
+  { error: < sym > ; message: < str > ; subspace: < sym trap map > ; }
+  ```
+
+The word that makes a type of its own from a representation and a name is
+still to name; `trap` is that word for kinds. Not built: records, types of
+their own and kinds. march8's `money`, exact cents in an i64, is a
+placeholder for a type of its own over a precise number, which March does
+not have yet (LAZY-NUMBERS.md).
 
 ### 2.12 If-free word bodies, as an experiment
 
@@ -516,8 +584,11 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
 2. **Representation:** how type values are stored (as content-addressed
    March data, so that type equality is identity?), and how compiled code
    and the display reach them.
-3. **Records** in detail, and the surface syntax for tuples, records, value
-   patterns and guards.
+3. **Records** in detail. A record's type is a map of types (2.11,
+   2026-10-22); open still are a record value's surface and how a field is
+   read, by `at` or by a path, whether a record is a namespace, a value of
+   it defining what its type declares, and how a record is laid out at run
+   time; and the surface syntax for tuples, value patterns and guards.
 4. **Literal type names.** Settled (Thomas, 2026-10-19): `int#`, `dec#`,
    `ratio#`, `seq#` and `map#`, as written, and `str#` for text, which
    strings' encodings make undecided too (SYMBOLIC-FORTH.md 6.15): `str#`

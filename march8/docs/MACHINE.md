@@ -1213,11 +1213,13 @@ Bugs, what is next, and what is still to think on are in TODO.md, at the
 repo's root.
 
 - **More of traps** (doc/design/SYMBOLIC-FORTH.md 29). Handlers are built
-  (above, "Errors"); not yet are kinds joined by `or`, `no-file' io' or
-  trap`, since `or` joins types and a kind is a symbol, finer kinds for the
-  machine's failures, a missing file among them, and where a trap
-  happened. A trap may not be stored; with no global store in march8 yet,
-  nothing checks that.
+  (above, "Errors"); not yet are kinds as types, decided 2026-10-22,
+  made where defined by `trap` from a map holding a message and its path,
+  `ns#`, `err.file.notfound` under `err.file`, a handler taking its kind
+  and every kind beneath it, the core's kinds under `err` and the
+  machine's failures among them, which waits on defining types; and where
+  a trap happened. A kind is a symbol here still. A trap may not be stored; with no global
+  store in march8 yet, nothing checks that.
 - **Recursion on known numbers and symbols while compiling.** A family
   applied to itself on values that have cells becomes an instance on
   values at run time (above, "Recursion and instances"), even when they

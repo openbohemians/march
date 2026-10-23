@@ -25,10 +25,19 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   search now is (SYMBOLIC-FORTH.md 6.6, 22).
 - **A `fold` over a quotation,** so March walks one past about sixty
   elements, depth's bound (SYMBOLIC-FORTH.md 6.6).
-- **Kinds joined by `or`,** `no-file' io' or trap`, a handler taking
-  either: `or` joins types, and a kind is a symbol (SYMBOLIC-FORTH.md
-  6.29). Finer kinds for the machine's failures go with it, a missing file
-  `no-file'` under `io'`.
+- **Defining types** (TYPES.md 2.11, decided 2026-10-22): records as maps
+  of types, and types of their own, each a subset of its representation
+  that forgets itself where the representation's word is applied, a
+  clause of its own keeping it. Still open: the word that makes a type of
+  its own, a record value's surface and how a field is read (TYPES.md 3,
+  open question 3), and the warning where two types of their own are
+  forgotten together. Kinds wait on it.
+- **Kinds as types,** made where defined, `err.file.notfound: { error#: (
+  "file not found" ns# ) } trap ;`, a handler taking its kind and every
+  kind beneath it, the core's under `err`, the compiler's and the
+  machine's moved there, `fail` with its message on top
+  (SYMBOLIC-FORTH.md 6.29, decided 2026-10-22). Their names are to be
+  chosen, and a failure's data beyond its message is to be designed.
 
 ## To think on
 

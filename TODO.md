@@ -31,7 +31,10 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   clause of its own keeping it. Still open: the word that makes a type of
   its own, a record value's surface and how a field is read (TYPES.md 3,
   open question 3), and the warning where two types of their own are
-  forgotten together. Kinds wait on it.
+  forgotten together. Kinds wait on it. A record is also how a caller
+  names a word's inputs, `{ term: 72 rate: 0.2 } payment`, opened into
+  places where the word is applied (SYMBOLIC-FORTH.md 6.31, decided
+  2026-10-23).
 - **Kinds as types,** made where defined, `err.file.notfound: { error#: (
   "file not found" ns# ) } trap ;`, a handler taking its kind and every
   kind beneath it, the core's under `err`, the compiler's and the

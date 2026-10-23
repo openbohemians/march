@@ -49,7 +49,10 @@ the litmus test with no exceptions: the core runs lowered, and every
 example, and compiles to the same code (sections 5 and 7). Failing at
 run time and handlers are built (6.29). Decided: a trap's kind is a type,
 made where it is defined, `err.file.notfound`, which waits on defining
-types (6.29).
+types (6.29). Revised 2026-10-23: a bracket names its inputs,
+`[ rate term | … ]`, read as the letters of their places, seen by a
+string or a literal inside it and not by a quotation, and a caller names
+a word's inputs by passing a record (6.31). Built, but for records.
 
 ## 1. What it is
 
@@ -625,6 +628,9 @@ Settled (Thomas, 2026-10-14), not built:
     nameless: renaming changes no code, and a name never clashes with a
     word. Where the key is kept waits for an editor (2026-10-19); a
     signature's labels are the likely place, `< qty: i64 price: f64 >`.
+    Names in the source came first (31, 2026-10-23): a bracket names its
+    inputs, `[ qty price | qty price * ]`, and the reader writes them as
+    letters, so Low Stack holds places only, as this would have.
 15. **Strings with holes.** `str# !` makes text of a quotation, as
     `seq# !` makes a sequence: it runs the code where it stands and writes
     each value the code leaves, in order, into one string, `'…'` symbols as
@@ -1453,6 +1459,111 @@ Settled (Thomas, 2026-10-15):
     FORTH added `[: … :]` to be rid of naming every piece. What stands:
     `seq# !` is `.` with what it leaves kept together, so a literal's code
     reaches what `.`'s does (14).
+31. **A bracket names its inputs** (Thomas, 2026-10-23: "stack-base
+    programming is not easy for humans or LLMs … The mind just does not
+    think well in terms of a stack past a few postions", and "am I wasting
+    our time building this on a foundaton of FORTH"). The foundation
+    stays: a parser's tree ends at a stack machine anyway, as wasm's, the
+    JVM's and CPython's do, and Low Stack, the stage and the rules are what
+    March is built on. What changes is what a person holds. A run of words
+    passing one value along reads as a pipe does, and needs nothing; a
+    word juggling three or four values needs a stack comment,
+    `( P r g g' )`, which is a programmer naming the values and tracking
+    them by hand, work the stage, which knows every place, can do. So a
+    bracket may name its inputs, before a lone `|`, in a signature's
+    order, the deepest first:
+
+    ```
+    growth:  < f64 f64 >< f64 >     [ rate term | rate 1 + term ^ ] ;
+    annuity: < f64 f64 f64 >< f64 > [ p r g | p r ⋅ g ⋅  g 1 -+  div ] ;
+    payment: < f64 f64 f64 >< f64 >
+      [ principal rate term | principal rate  rate term growth  annuity ] ;
+    ```
+
+    The names are the bracket's inputs: it takes as many as it names, and
+    drops those its code does not use (Thomas), where a bracket of letters
+    takes as many as its deepest letter. A name is the input, copied each
+    time it is written, as a letter is. Only names come before the bar, no
+    number, symbol, label, path or bracket, and they differ; a bracket
+    that names its inputs uses no other letter and no `_`, as a bracket
+    uses `_`s or letters, never both. A name may be a letter,
+    `[ x y | x y + ]`, and may be a word's name, which it hides in its
+    bracket. A signature names nothing, its letters being types, and a
+    string none, its text being what comes first.
+
+    The names belong to the bracket (Thomas: labeling "becomes the local
+    variable program that thwarts easy factoring. My solution was to
+    contain it to a block"). A quotation inside it does not see them
+    (Thomas: "let's say no, see how that fares"): one passed to `map` that
+    used them would be a closure, which March has none of (14), and could
+    not be lifted out alone. So a bracket that names its inputs is closed:
+    from outside it is a stack word like any, and it lifts out whole into
+    a word of its own, unchanged. A quotation inside it is given the value
+    on the stack, and naming its enclosing bracket's name is refused,
+    saying whose it is, unless it names it itself.
+
+    A string, a sequence and a map inside it see its names (Thomas,
+    2026-10-23, of refusing them: "that does feel too tight"). They are
+    made where they stand and never carried off, as their `_`s are filled
+    there (14), so nothing can be captured, and each name is passed in on
+    the stack just before the bracket and taken there by a letter, as one
+    would write it by hand:
+
+    ```
+    [ x y | ( x y ) ]                 [ x y | x y ( b a ) ]
+    [ n | "n is \[ n ]" ]             [ n | n "n is \_" ]
+    [ t r | { term: t rate: r } ]     [ t r | t r { term: b rate: a } ]
+    ```
+
+    Each name is passed once, the first used the deepest, and the
+    bracket's own inputs, its `_`s, letters or names, lie below those
+    passed in, so `9 5 [ n | "\_ and \[ n ]" ] .` is "9 and 5". A literal
+    inside a literal is passed them through each. A quotation inside a
+    literal still sees none, and a signature has no names in it, its
+    letters being types. A record built of a word's names, the way its
+    caller names them (below), needs nothing written twice.
+
+    One bar, after the names, since `[ | rate term | … ]` was too near
+    `[| … |]` (Thomas): Smalltalk's block, `[ :x :y | … ]`, without its
+    colons. Weighed and set aside the same day: `:x` in a body, binding the
+    value on top, Factor's `:>` and Kitten's `-> x;`. Names at the head
+    only keep one form, the bar being the stack comment, made something the
+    stage reads, and an intermediate value is named by a word of its own,
+    `annuity`, or by a bracket applied in place, `[ p r g | … ] .`, which is
+    given what it names. Set aside too: labels in the signature,
+    `< principal: f64 … >`, so a signature stays the interface, its types,
+    and the names stay the body's.
+
+    Low Stack has no names (section 7): by spelling alone, the reader
+    writes each name as the letter of its place and drops the bar, so
+    `[ rate term | rate 1 + term ^ ]` is `[ b var# . 1 int# ! + . a var# .
+    ^ . ]`, and Low Stack keeps one way to name an input. Where the code
+    does not use the deepest name, its letter is written once and dropped,
+    `c var# . drop .`, after the letters the code begins with, so the
+    bracket takes all it names and the shuffle stays one. Names are then
+    High Stack's, the presentation that the editor's names of 14 were to
+    be, and a message names the letter, as it does for `_`.
+
+    A word's inputs named by its caller are a record (Thomas, 2026-10-23:
+    "Passing records -- of course"): `{ term: 72 rate: 0.2 principal: 50000
+    } payment`, `payment` taking a record whose type is known where it is
+    applied, so the stage can open it into places at no cost. A misspelled
+    label is then an error, and two `f64`s are not swapped unseen. Set
+    aside: values labeled on the stack, `72 :term 0.2 :rate 50000
+    :principal payment`, since a label loose on the stack has no end, no
+    word saying which values are whose. Waits on records (TYPES.md 2.11).
+
+    Built in march8 (2026-10-23), names and not records: the reader writes
+    a bracket's names as their letters before it writes its `_`s, those
+    of a string or a literal passed names among them, so the stage reads
+    neither, and a named bracket compiles as the plain words do,
+    `[ x y | y x -+ ]` as `swap -+` and `[ x y z | y z + ]` as
+    `rot drop +`, and a literal passed names as one passed them by hand. For the second the shuffle keeps the inputs a bracket's
+    letters begin with in order already, `b a` in `b a c`, where it kept
+    only those in place, at the bottom; every example compiles to the same
+    code, word for word.
+    A `|` is a bar only where High Stack reads it, so in Low Stack it is a
+    symbol, as any name is.
 
 Open: for rules (25), what a group that may not match leaves,
 refused for now, and how an import names one alone; and the symbol for

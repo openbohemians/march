@@ -6074,9 +6074,10 @@ impl Stage {
 
     /// Puts in place of the values from `base` those `order` names by their
     /// places from `base`, the first the deepest: one named twice is copied,
-    /// and one named nowhere dropped. Those in order already stay, and the
-    /// rest are brought up in turn, each moved where it is named last and
-    /// copied before. A known value moves for nothing.
+    /// and one named nowhere dropped. Those `order` begins with that are in
+    /// order already stay, as `b a` in `b a c`, and the rest are brought up
+    /// in turn, each moved where it is named last and copied before. A known
+    /// value moves for nothing.
     fn shuffle(&mut self, base: usize, order: &[usize]) -> Result<()> {
         let k = self.stack.len() - base;
         let mut at: Vec<Option<usize>> = (0..k).map(|v| Some(base + v)).collect();
@@ -6085,10 +6086,10 @@ impl Stage {
                 self.emit(Op::Prim(P::Drop));
             }
         }
-        let left: Vec<usize> = (0..k).filter(|&v| at[v].is_some()).collect();
-        let kept = left.iter().zip(order).take_while(|(a, b)| a == b).count();
+        let kept = 1 + order.windows(2).take_while(|w| w[0] < w[1]).count();
+        let kept = kept.min(order.len());
         for (n, &v) in order.iter().enumerate().skip(kept) {
-            if left[kept..].contains(&v) && !order[n + 1..].contains(&v) {
+            if !order[..kept].contains(&v) && !order[n + 1..].contains(&v) {
                 let j = self.lift(&mut at, v);
                 self.stack.push(j);
             } else {

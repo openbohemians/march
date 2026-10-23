@@ -92,9 +92,402 @@ fn read_form(src: &str, symbols: &Symbols, symbolic: bool) -> Result<Vec<Token>>
         col: 1,
         symbolic,
         args: Vec::new(),
+        bars: Vec::new(),
     };
     let toks = tokens(&mut r, symbols, None)?;
-    places(toks, &r.args)
+    places(names(toks, &r.bars, &r.args)?, &r.args)
+}
+
+/// A name used in code at `i`, and how many tokens spell it: `rate .`, or a
+/// letter, `a var# .`, whose application is part of it. Before `?` a name
+/// is tested rather than applied, `rate?`, so the `?` stays.
+fn use_at(toks: &[Token], i: usize) -> Option<(&Rc<str>, usize)> {
+    let Tok::Name(n) = &toks[i].tok else {
+        return None;
+    };
+    let next = |k: usize| toks.get(i + k).map(|t| &t.tok);
+    if is_variable(n) {
+        let var = matches!(next(1), Some(Tok::Name(v)) if &**v == "var#");
+        return (var && next(2) == Some(&Tok::Apply)).then_some((n, 3));
+    }
+    match next(1) {
+        Some(Tok::Apply) => Some((n, 2)),
+        Some(Tok::Test) => Some((n, 1)),
+        _ => None,
+    }
+}
+
+/// What a bracket is, which says what it sees of the names around it
+/// (doc/design/SYMBOLIC-FORTH.md 6.31).
+#[derive(Clone, Copy, PartialEq)]
+enum Made {
+    /// Code outside any bracket.
+    Top,
+    /// A quotation, which may be carried off, so it sees no names but its own.
+    Code,
+    /// A sequence or a map, made where it stands, so it sees them.
+    Data,
+    /// A string, made where it stands, which names none of its own.
+    Text,
+    /// A signature, whose letters are types.
+    Types,
+}
+
+/// A bracket that names its inputs, as one inside it sees it: its names,
+/// where it opened, and whether the one inside sees them, every bracket
+/// between them being made where it stands.
+#[derive(Clone)]
+struct Scope {
+    names: Rc<[Rc<str>]>,
+    at: Pos,
+    seen: bool,
+}
+
+/// The names of brackets around one that it is lent, each once, in the
+/// order first used, and where.
+type Lent = Vec<(Rc<str>, Pos)>;
+
+/// What a bracket's code holds, its inputs not yet counted.
+enum Part {
+    Tok(Token),
+    /// One of its names, the deepest first.
+    Own(usize, Pos),
+    /// A name of a bracket around it, passed in on the stack, the first
+    /// passed the deepest.
+    Lent(usize, Pos),
+    /// A letter, its place and its tokens' range, or a `_`, the nth written.
+    Letter(usize, Pos, usize, usize),
+    Under(usize, Pos, usize),
+}
+
+/// High Stack's names written as letters (doc/design/SYMBOLIC-FORTH.md
+/// 6.31): a bracket's names come before its `|`, the deepest first, and each
+/// is written as the letter of its place, so `[ rate term | rate 1 + term ^
+/// ]` is `[ b 1 + a ^ ]`. A bracket takes all it names: the deepest, if its
+/// code does not use it, is written once and dropped after the letters its
+/// code begins with. A string or a literal inside it sees its names, each
+/// passed in on the stack just before it and taken there by a letter, as
+/// one would write it, so `[ x | ( x ) ]` is `[ x | x ( a ) ]`; a quotation
+/// inside it does not see them.
+fn names(toks: Vec<Token>, bars: &[Pos], args: &[Pos]) -> Result<Vec<Token>> {
+    if bars.is_empty() {
+        return Ok(toks);
+    }
+    let mut close = vec![0; toks.len()];
+    let mut open = Vec::new();
+    for (i, t) in toks.iter().enumerate() {
+        match t.tok {
+            Tok::Open(_) => open.push(i),
+            Tok::Close(_) => close[open.pop().expect("brackets nest")] = i,
+            _ => {}
+        }
+    }
+    let n = Names {
+        toks: &toks,
+        close,
+        bars,
+        args,
+    };
+    let at = toks.first().map_or(Pos { line: 1, col: 1 }, |t| t.pos);
+    Ok(n.code(0, toks.len(), Made::Top, at, &[], false)?.0)
+}
+
+struct Names<'a> {
+    toks: &'a [Token],
+    /// Where each bracket opened at closes.
+    close: Vec<usize>,
+    bars: &'a [Pos],
+    args: &'a [Pos],
+}
+
+impl Names<'_> {
+    fn bar(&self, i: usize) -> bool {
+        self.toks[i].tok == Tok::Name("|".into())
+            && self.bars.contains(&self.toks[i].pos)
+            && self.toks.get(i + 1).is_some_and(|t| t.tok == Tok::Apply)
+    }
+
+    /// What the bracket opened at `i` is, by the kind after its close.
+    fn made(&self, i: usize) -> Made {
+        match self.toks.get(self.close[i] + 1).map(|t| &t.tok) {
+            Some(Tok::Name(k)) if matches!(&**k, "seq#" | "map#") => Made::Data,
+            Some(Tok::Name(k)) if &**k == "str#" => Made::Text,
+            Some(Tok::Name(k)) if &**k == "sig#" => Made::Types,
+            _ => Made::Code,
+        }
+    }
+
+    /// The names before the `|` of the code from `from` to `to`, if it has
+    /// one at its own level, and where its code begins.
+    fn head(&self, from: usize, to: usize) -> Result<(Vec<Rc<str>>, usize)> {
+        let mut j = from;
+        while j < to && !self.bar(j) {
+            j = match self.toks[j].tok {
+                Tok::Open(_) => self.close[j] + 1,
+                _ => j + 1,
+            };
+        }
+        if j == to {
+            return Ok((Vec::new(), from));
+        }
+        let syntax = |at: Pos, msg: String| Error::new(Kind::Syntax, Some(at), msg);
+        let mut names: Vec<Rc<str>> = Vec::new();
+        let mut k = from;
+        while k < j {
+            let name = use_at(self.toks, k).filter(|&(n, len)| {
+                len > 1 && k + len <= j && !matches!(&**n, "_" | "!" | ";") && !n.contains('.')
+            });
+            let Some((n, len)) = name else {
+                return Err(syntax(
+                    self.toks[k].pos,
+                    "only names come before a bracket's `|`, the names of its inputs: \
+                     `[ rate term | rate 1 + term ^ ]`"
+                        .into(),
+                ));
+            };
+            if names.contains(n) {
+                return Err(syntax(
+                    self.toks[k].pos,
+                    format!("`{n}` names two of the bracket's inputs"),
+                ));
+            }
+            names.push(n.clone());
+            k += len;
+        }
+        if names.is_empty() {
+            return Err(syntax(
+                self.toks[j].pos,
+                "a bracket's `|` comes after the names of its inputs, and this one names \
+                 none: `[ rate term | rate 1 + term ^ ]`"
+                    .into(),
+            ));
+        }
+        if names.len() > 23 {
+            return Err(Error::new(
+                Kind::Limit,
+                Some(self.toks[from].pos),
+                "a bracket names at most 23 inputs, as many as its letters",
+            ));
+        }
+        Ok((names, j + 2))
+    }
+
+    /// The code from `from` to `to` of a bracket opened at `at`, its names
+    /// written as letters, and the names of brackets around it that it is
+    /// lent, each once, in the order first used, and where. In a signature,
+    /// `types`, nothing is a name.
+    fn code(
+        &self,
+        from: usize,
+        to: usize,
+        made: Made,
+        at: Pos,
+        around: &[Scope],
+        types: bool,
+    ) -> Result<(Vec<Token>, Lent)> {
+        let toks = self.toks;
+        let syntax = |at: Pos, msg: String| Error::new(Kind::Syntax, Some(at), msg);
+        let (own, start) = if made == Made::Top {
+            (Vec::new(), from)
+        } else {
+            self.head(from, to)?
+        };
+        if !own.is_empty() && matches!(made, Made::Text | Made::Types) {
+            return Err(syntax(
+                at,
+                if made == Made::Types {
+                    "a signature names no inputs, its letters being types, `< a a >< a >`; \
+                     the names are its body's, `[ x y | … ]`"
+                } else {
+                    "a string names no inputs, its text coming first; give it them on the \
+                     stack, `rate \"\\_\"`"
+                }
+                .into(),
+            ));
+        }
+        let own: Rc<[Rc<str>]> = own.into();
+        // What a bracket inside this one sees.
+        let inner = |made: Made| -> Vec<Scope> {
+            let sees = matches!(made, Made::Data | Made::Text);
+            let mut v: Vec<Scope> = around
+                .iter()
+                .map(|s| Scope {
+                    seen: s.seen && sees,
+                    ..s.clone()
+                })
+                .collect();
+            if !own.is_empty() {
+                v.push(Scope {
+                    names: own.clone(),
+                    at,
+                    seen: sees,
+                });
+            }
+            v
+        };
+        let mut parts = Vec::new();
+        let mut lent: Lent = Vec::new();
+        let mut used = vec![false; own.len()];
+        let (mut letter, mut unders) = (None, 0);
+        // A name used here: one of its own, or one lent it.
+        let mut name = |n: &Rc<str>, pos: Pos, lent: &mut Lent| -> Result<Option<Part>> {
+            if let Some(p) = own.iter().position(|m| m == n) {
+                used[p] = true;
+                return Ok(Some(Part::Own(p, pos)));
+            }
+            match around.iter().rev().find(|s| s.names.contains(n)) {
+                Some(s) if s.seen => {
+                    let i = lent.iter().position(|m| &m.0 == n).unwrap_or_else(|| {
+                        lent.push((n.clone(), pos));
+                        lent.len() - 1
+                    });
+                    Ok(Some(Part::Lent(i, pos)))
+                }
+                Some(s) => Err(syntax(
+                    pos,
+                    format!(
+                        "`{n}` is a name of the bracket at {}, and a quotation sees no names \
+                         but its own: give it the value on the stack",
+                        s.at
+                    ),
+                )),
+                None => Ok(None),
+            }
+        };
+        let mut i = start;
+        while i < to {
+            let t = &toks[i];
+            if let Tok::Open(_) = t.tok {
+                let made = self.made(i);
+                let end = self.close[i];
+                let types = types || made == Made::Types;
+                let (code, wants) = self.code(i + 1, end, made, t.pos, &inner(made), types)?;
+                for (n, pos) in &wants {
+                    parts.push(name(n, *pos, &mut lent)?.expect("seen here"));
+                }
+                parts.push(Part::Tok(t.clone()));
+                parts.extend(code.into_iter().map(Part::Tok));
+                parts.push(Part::Tok(toks[end].clone()));
+                i = end + 1;
+                continue;
+            }
+            if self.bar(i) {
+                let msg = if made == Made::Top {
+                    "a `|` comes after the names of a bracket's inputs, and this one is in no \
+                     bracket"
+                } else if !own.is_empty() {
+                    "a bracket has one `|`, after the names of its inputs"
+                } else {
+                    "only names come before a bracket's `|`, the names of its inputs: \
+                     `[ rate term | rate 1 + term ^ ]`"
+                };
+                return Err(syntax(t.pos, msg.into()));
+            }
+            let Some((n, len)) = use_at(toks, i).filter(|_| !types) else {
+                parts.push(Part::Tok(t.clone()));
+                i += 1;
+                continue;
+            };
+            if let Some(part) = name(n, t.pos, &mut lent)? {
+                parts.push(part);
+            } else if !own.is_empty() && (is_variable(n) || &**n == "_") {
+                return Err(syntax(
+                    t.pos,
+                    if &**n == "_" {
+                        format!("the bracket at {at} names its inputs, so it has no `_`")
+                    } else {
+                        format!(
+                            "the bracket at {at} names its inputs, so it uses no other \
+                             letter, and `{n}` is none of its names"
+                        )
+                    },
+                ));
+            } else if len == 3 {
+                letter.get_or_insert(t.pos);
+                parts.push(Part::Letter(place(n.as_bytes()[0]), t.pos, i, i + 3));
+            } else if &**n == "_" && self.args.contains(&t.pos) {
+                parts.push(Part::Under(unders, t.pos, i));
+                unders += 1;
+            } else {
+                parts.extend(toks[i..i + len].iter().cloned().map(Part::Tok));
+            }
+            i += len;
+        }
+        let (h, m) = (lent.len(), own.len());
+        if h > 0
+            && unders > 0
+            && let Some(p) = letter
+        {
+            let first = parts
+                .iter()
+                .find_map(|p| match p {
+                    Part::Under(_, pos, _) => Some(*pos),
+                    _ => None,
+                })
+                .expect("a `_`");
+            return Err(syntax(
+                first,
+                format!(
+                    "a bracket names its inputs by `_`s or by letters, not both, and this one \
+                     has a letter at {p}: `[ _ _ / ]` is `[ b a / ]`"
+                ),
+            ));
+        }
+        let mut out = Vec::with_capacity(parts.len());
+        let write = |place: usize, pos: Pos, out: &mut Vec<Token>| -> Result<()> {
+            if place > 23 {
+                return Err(Error::new(
+                    Kind::Limit,
+                    Some(pos),
+                    "a bracket takes at most 23 inputs by its letters, `a` to `w`, those \
+                     passed in among them",
+                ));
+            }
+            let letter = (b'a' + (place - 1) as u8) as char;
+            for tok in [
+                Tok::Name(letter.to_string().into()),
+                Tok::Name("var#".into()),
+                Tok::Apply,
+            ] {
+                out.push(Token { tok, pos });
+            }
+            Ok(())
+        };
+        for part in parts {
+            match part {
+                Part::Tok(t) => out.push(t),
+                Part::Own(p, pos) => write(h + m - p, pos, &mut out)?,
+                Part::Lent(l, pos) => write(h - l, pos, &mut out)?,
+                Part::Letter(_, _, a, b) if h == 0 => out.extend_from_slice(&toks[a..b]),
+                Part::Letter(p, pos, _, _) => write(p + h, pos, &mut out)?,
+                Part::Under(_, _, a) if h == 0 => out.extend_from_slice(&toks[a..a + 2]),
+                Part::Under(u, pos, _) => write(h + unders - u, pos, &mut out)?,
+            }
+        }
+        if m > 0 && !used[0] {
+            // The letters its code begins with.
+            let lead = out
+                .chunks(3)
+                .take_while(|c| use_at(c, 0).is_some_and(|(_, len)| len == 3))
+                .count();
+            let mut drop = Vec::new();
+            write(h + m, at, &mut drop)?;
+            for tok in [Tok::Name("drop".into()), Tok::Apply] {
+                drop.push(Token { tok, pos: at });
+            }
+            out.splice(3 * lead..3 * lead, drop);
+        }
+        Ok((out, lent))
+    }
+}
+
+/// The place a letter names, from the top: `a` the first, and `x`, `y` and
+/// `z` the first three, as math names them (doc/design/SYMBOLIC-FORTH.md 14).
+fn place(l: u8) -> usize {
+    match l {
+        b'x'..=b'z' => (l - b'x') as usize + 1,
+        l => (l - b'a') as usize + 1,
+    }
 }
 
 /// High Stack's `_`s written as letters (doc/design/SYMBOLIC-FORTH.md 14):
@@ -348,6 +741,10 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         // counted (doc/design/SYMBOLIC-FORTH.md 14).
         if stem == "_" && applies && !r.symbolic {
             r.args.push(pos);
+        }
+        // `|` ends a bracket's names (doc/design/SYMBOLIC-FORTH.md 6.31).
+        if word == "|" && !r.symbolic {
+            r.bars.push(pos);
         }
         // A quotation's power is a spelling (doc/design/SYMBOLIC-FORTH.md
         // 21): `[ dup + ]^3` reads as `[ dup + ] 3 power# .`, still a
@@ -715,6 +1112,9 @@ struct Reader<'a> {
     symbolic: bool,
     /// Where High Stack's `_`s were read, which `places` writes as letters.
     args: Vec<Pos>,
+    /// Where High Stack's `|`s were read, each after a bracket's names,
+    /// which `names` writes as letters.
+    bars: Vec<Pos>,
 }
 
 impl<'a> Reader<'a> {

@@ -78,6 +78,7 @@ does what it did (2026-10-22).
 | `[ … ]` | a quotation: its words, unevaluated. Every bracket is one, made data where it closes, as Low Stack writes it (doc/design/SYMBOLIC-FORTH.md 7): `( … )` is `[ … ] seq# !`, `{ … }` is `[ … ] map# !` and `< … >` is `[ … ] sig# !` |
 | `( … )`, `{ … }` | an array and a map literal; inside an array literal, whatever the code leaves is collected |
 | `_` | an input of the bracket it is written in, the first written the deepest, read as the letter of its place: `[ _ _ / ]` is `[ b a / ]` (Comprehensions) |
+| `[ x y \| … ]` | a bracket naming its inputs, before a lone `\|`, the deepest first, each read as the letter of its place: `[ rate term \| rate 1 + term ^ ]` is `[ b 1 + a ^ ]` (doc/design/SYMBOLIC-FORTH.md 6.31; Comprehensions) |
 | `< … >` | a bracket: code whose values are a type or a signature, a comprehension of types |
 
 **Literals, symbols and words** (Thomas, 2026-10-12). Literals spell
@@ -651,6 +652,21 @@ filter, flat-map and scan, with one loop:
   stands, the first written the deepest, so the reader writes
   `[ _ _ + _ * ]` as `[ c b + a * ]` and `1 2 ( _ _ div )` is
   `( 1 2 div )`. A bracket uses `_`s or letters, never both.
+- **A bracket may name its inputs** (doc/design/SYMBOLIC-FORTH.md 6.31;
+  Thomas, 2026-10-23; built 2026-10-23), before a lone `|`, in a
+  signature's order, the deepest first: `[ rate term | rate 1 + term ^ ]`.
+  It takes all it names, those its code does not use dropped, and each
+  name is the input, copied where written. The reader writes each as the
+  letter of its place, and where the deepest is unused, writes its letter
+  once and drops it, `c drop`, after the letters the code begins with. Only
+  names come before the bar, and the bracket uses no other letter and no
+  `_`. A quotation inside it does not see its names, so naming one there
+  is refused, saying whose it is; the quotation is given the value on the
+  stack. A string, a sequence or a map inside it, made where it stands,
+  sees them: the reader passes each name in on the stack just before the
+  bracket, once, the first used the deepest, and the bracket takes it by
+  a letter, its own inputs lying below, so `[ n | "n is \[ n ]" ]` is
+  `[ n | n "n is \_" ]`. A signature and a string name no inputs.
 - **How the stage moves them.** The inputs are taken first, so the code may
   reach below them. The letters a quotation or a body begins with are a
   shuffle, done on the stack, each input copied, or moved where it is

@@ -384,6 +384,11 @@ a "newtype" never mixed with plain numbers. There are four cases:
 
   A record is known by its content, as a tuple is, so two with the same
   fields are one type, and a name given it by a definition is an alias.
+  A record is also how a caller names a word's inputs (SYMBOLIC-FORTH.md
+  6.31; Thomas, 2026-10-23: "Passing records -- of course"): `{ term: 72
+  rate: 0.2 principal: 50000 } payment`, a misspelled label an error, and
+  the record's type known where `payment` is applied, so the stage can
+  open it into places at no cost.
 - **A type of its own** has a representation and a name, the path where
   it is defined, which `ns#` gives as a symbol (SYMBOLIC-FORTH.md 6.29),
   so no other type is the same: Money over a decimal, Celsius over f64. It

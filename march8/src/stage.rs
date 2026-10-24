@@ -818,8 +818,14 @@ pub struct Stage {
     catching: bool,
     /// The families whose handlers are being compiled, with their inputs.
     catches: Vec<(Rc<str>, Vec<Type>)>,
-    /// The machine primitives are folded on, made when first needed.
+    /// The machine primitives are folded on, and `[ … ] !` runs on, made
+    /// when first needed: it holds all the code sealed.
     machine: Option<Machine>,
+    /// What each quotation `[ … ] !` ran left, by its code's identity, so
+    /// each runs once.
+    ran: HashMap<Cid, Rc<[Jdg]>>,
+    /// What code run while compiling wrote, for the session to show.
+    pub output: Vec<u8>,
     /// Set while a word is applied wide (doc/design/SYMBOLIC-FORTH.md 22).
     wide: Option<Wide>,
     /// Where the name a rule rewrites was applied, a namespace, empty for
@@ -1049,6 +1055,39 @@ fn is_core_word(found: &str, name: &str) -> bool {
     found.strip_prefix(CORE).and_then(|p| p.strip_prefix('.')) == Some(name)
 }
 
+/// Steps code run while compiling may take, `[ … ] !`'s.
+const FUEL: u64 = 10_000_000;
+
+/// A value the machine left, of a type, as the stage knows one: a number
+/// by its cell, a string or a symbol by its text, and an array or a tuple by
+/// its elements. Others it does not know yet.
+fn known_of(m: &Machine, types: &Types, c: u64, t: Type) -> Option<Val> {
+    let elements = |es: Vec<Type>| -> Option<Val> {
+        let seq = m.sequence(c).ok()?;
+        let es = es.into_iter().cycle().take(seq.len());
+        let vals = seq
+            .iter()
+            .zip(es)
+            .map(|(&x, ty)| {
+                Some(Jdg {
+                    ty,
+                    val: known_of(m, types, x, ty)?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Val::Seq(vals.into()))
+    };
+    Some(match types.term(t) {
+        Term::Base(Base::I64 | Base::Money | Base::Bool | Base::Nil) => Val::Int((c as i64).into()),
+        Term::Base(Base::F64) => Val::Float(f64::from_bits(c)),
+        Term::Base(Base::String) => Val::Str(m.text(c).ok()?.to_text()?.into()),
+        Term::Base(Base::Symbol) => Val::Name(m.text(c).ok()?.to_text()?.into(), Pos::default()),
+        Term::Ary(e) | Term::Vec(_, e) => elements(vec![e])?,
+        Term::Tuple(_) => elements(types.elements(t)?.to_vec())?,
+        _ => return None,
+    })
+}
+
 fn float_bits(x: f64) -> u64 {
     if x.is_nan() {
         f64::NAN.to_bits()
@@ -1086,6 +1125,8 @@ impl Stage {
             catching: false,
             catches: Vec::new(),
             machine: None,
+            ran: HashMap::new(),
+            output: Vec::new(),
             wide: None,
             applied_in: "".into(),
             pending: HashSet::new(),
@@ -1341,15 +1382,9 @@ impl Stage {
                 return self.annotate_top(&sig);
             }
             _ if f.ty == NIL => NIL,
-            // Its code is not run to find one: a bracket's kind is said where
-            // it is made (doc/design/SYMBOLIC-FORTH.md 6.6, section 7).
-            Val::Quote(_) => {
-                return Err(self.err(
-                    Kind::Mismatch,
-                    "`!` structures by a type, and a quotation is not one: \
-                     `[ … ] sig# !` makes it a signature, as `< … >` does",
-                ));
-            }
+            // A quotation on top is run while compiling, and its values are
+            // made data (doc/design/SYMBOLIC-FORTH.md 6.32).
+            Val::Quote(q) => return self.now(q),
             _ => {
                 return Err(self.err(
                     Kind::Mismatch,
@@ -3969,7 +4004,7 @@ impl Stage {
                     let blob = Blob::Data(s.as_bytes().to_vec());
                     ops.push(Op::Data(blob.cid()));
                     ops.push(Op::Prim(P::Text));
-                    self.blobs.push(blob);
+                    self.keep(blob);
                 }
                 Ins::Label(_) => {}
                 Ins::Jump(l) => ops.push(Op::Branch(at[&l])),
@@ -3988,8 +4023,17 @@ impl Stage {
         }
         let blob = Blob::Code(crate::code::encode(&ops));
         let cid = blob.cid();
-        self.blobs.push(blob);
+        self.keep(blob);
         (ops, cid)
+    }
+
+    /// Keeps a blob for the session to publish, and gives it to the stage's
+    /// machine, where `[ … ] !` runs code. One it cannot take, past a limit,
+    /// fails there when the code that needs it runs.
+    fn keep(&mut self, blob: Blob) {
+        let m = self.machine.get_or_insert_with(Machine::empty);
+        let _ = m.publish(blob.clone());
+        self.blobs.push(blob);
     }
 
     /// Gives an alternative's results the types the alternatives share, and
@@ -4639,10 +4683,16 @@ impl Stage {
                         }
                         // `!` types as many values as the type on top has
                         // slots, and takes the type too.
+                        // A quotation on top runs while compiling, and leaves
+                        // what its code leaves (6.32).
                         Item::Name(s) if is_core_word(&s, "!") => match items.last() {
                             Some(Item::Bracket(from, to)) => {
                                 let n = self.bracket_size(&toks[*from..*to]);
                                 (n + 1, n)
+                            }
+                            Some(&Item::Quote(from, to)) => {
+                                let (a, b) = self.effect_in(&toks[from..to], ns, visiting)?;
+                                (a + 1, b)
                             }
                             _ => (2, 1),
                         },
@@ -4852,8 +4902,8 @@ impl Stage {
     /// already there replaces it. A clause whose signature types all its
     /// inputs is compiled once now, on values of those types, so that its
     /// errors show where it is defined; if it fails, the family is left as
-    /// it was. One that needs its inputs known while compiling, as `embed`'s
-    /// file, cannot be compiled on values at run time, and is checked where
+    /// it was. One that needs its inputs known while compiling, as `vec`'s
+    /// length, cannot be compiled on values at run time, and is checked where
     /// it is applied instead.
     fn define(&mut self, name: &Rc<str>, clause: Clause) -> Result<()> {
         // Instances compiled before may apply the family changed.
@@ -5561,21 +5611,6 @@ impl Stage {
             Prim::TupleAt => self.tuple_at(base)?,
             Prim::StrToI64 => self.parse(I64, base)?,
             Prim::StrToF64 => self.parse(F64, base)?,
-            // A file's text read while compiling, a known string, so what
-            // follows folds on it: macros by staging. The text goes into the
-            // code as data, so the code's identity follows the file.
-            Prim::Embed => {
-                let Val::Str(path) = self.stack[base].val.clone() else {
-                    return Err(self.err(
-                        Kind::Unknown,
-                        format!("`{name}` reads while compiling, so its file must be known then"),
-                    ));
-                };
-                let text = std::fs::read_to_string(&*path)
-                    .map_err(|e| self.err(Kind::Io, format!("cannot embed {path:?}: {e}")))?;
-                self.stack.pop();
-                self.push(STRING, Val::Str(text.into()));
-            }
             // An empty array or map of a type: `string i64 map empty`.
             Prim::Empty => {
                 let Val::Type(t) = self.stack[base].val else {
@@ -5791,6 +5826,139 @@ impl Stage {
                 }
                 _ => Val::Int((c as i64).into()),
             });
+        }
+        Ok(vals)
+    }
+
+    /// `[ … ] !`: runs a quotation while compiling, and leaves its values,
+    /// known (doc/design/SYMBOLIC-FORTH.md 6.32), as FORTH's `[ … ] LITERAL`
+    /// does. It takes nothing from below, known only as the program runs.
+    /// Its effects run, a file read as Rust's `include_str!` reads one, and
+    /// what it read goes into the code as data, so the code's identity
+    /// follows it; each quotation runs once, kept by its code's identity. A
+    /// value it leaves that is known as its code is compiled stays as it is,
+    /// a quotation or a type too, so `[ … ] ! .` applies code made while
+    /// compiling.
+    fn now(&mut self, q: Rc<[Token]>) -> Result<()> {
+        let at = self.pos;
+        if let Some((ins, _)) = self.effect(&q, &mut Vec::new())
+            && ins > 0
+        {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "`[ … ] !` takes nothing from below, known only as the program runs, \
+                     and this quotation takes {}",
+                    values(ins)
+                ),
+            ));
+        }
+        let saved = (
+            std::mem::take(&mut self.stack),
+            std::mem::take(&mut self.code),
+            std::mem::replace(&mut self.floor, 0),
+            std::mem::take(&mut self.literals),
+            std::mem::take(&mut self.inputs),
+            std::mem::take(&mut self.active),
+            std::mem::take(&mut self.frames),
+            std::mem::replace(&mut self.effects, 0),
+            // Its code runs now, whether or not where it is applied runs.
+            std::mem::replace(&mut self.unsure, 0),
+            std::mem::replace(&mut self.checking, 0),
+            std::mem::replace(&mut self.handled, 0),
+        );
+        let r = self.run_code(&q).and_then(|()| {
+            let reach = self
+                .stack
+                .iter()
+                .any(|j| matches!(j.val, Val::Many | Val::Pinned(_)));
+            match reach {
+                true => Err(self.err(Kind::Mismatch, "`[ … ] !` leaves values it cannot give")),
+                false => Ok(()),
+            }
+        });
+        let left = std::mem::take(&mut self.stack);
+        let code = std::mem::take(&mut self.code);
+        (
+            self.stack,
+            self.code,
+            self.floor,
+            self.literals,
+            self.inputs,
+            self.active,
+            self.frames,
+            self.effects,
+            self.unsure,
+            self.checking,
+            self.handled,
+        ) = saved;
+        r?;
+        self.pos = at;
+        // With no code, all it leaves is known already.
+        if code.is_empty() {
+            self.stack.extend(left);
+            return Ok(());
+        }
+        let (_, cid) = self.seal(code);
+        let vals = match self.ran.get(&cid) {
+            Some(vals) => vals.clone(),
+            None => {
+                let vals: Rc<[Jdg]> = self.ran_now(cid, left)?.into();
+                self.ran.insert(cid, vals.clone());
+                vals
+            }
+        };
+        self.stack.extend(vals.iter().cloned());
+        Ok(())
+    }
+
+    /// Runs code sealed while compiling, on the stage's machine, and reads
+    /// back what it left: the values known already as they were, and those
+    /// it made by their types.
+    fn ran_now(&mut self, cid: Cid, left: Vec<Jdg>) -> Result<Vec<Jdg>> {
+        let m = self.machine.get_or_insert_with(Machine::empty);
+        m.stack.clear();
+        let r = m.link(cid).and_then(|xt| m.run(xt, FUEL));
+        self.output.extend(m.take_output());
+        if let Err(e) = r {
+            let mut e: Error = e.into();
+            e.kind = match e.kind {
+                Kind::Run(machine::Error::Trap(kind, _)) => Kind::Fail(kind),
+                Kind::Run(machine::Error::Io(_)) => Kind::Io,
+                Kind::Run(machine::Error::Arithmetic) => Kind::Arithmetic,
+                Kind::Run(machine::Error::Fuel) => Kind::Limit,
+                k => k,
+            };
+            e.msg = format!("{}, in `[ … ] !`, run while compiling", e.msg);
+            e.pos = Some(self.pos);
+            return Err(e);
+        }
+        let m = self.machine.as_ref().expect("made");
+        let cells = m.stack.clone();
+        assert_eq!(
+            cells.len(),
+            left.iter().filter(|j| !j.known()).count(),
+            "the stage's judgments match the machine's stack"
+        );
+        let mut cells = cells.into_iter();
+        let mut vals = Vec::with_capacity(left.len());
+        for j in left {
+            if j.known() {
+                vals.push(j);
+                continue;
+            }
+            let c = cells.next().expect("counted");
+            let Some(val) = known_of(m, &self.types, c, j.ty) else {
+                return Err(self.err(
+                    Kind::Limit,
+                    format!(
+                        "`[ … ] !` leaves {}, which march8 cannot yet read back while \
+                         compiling: numbers, strings, symbols, and arrays and tuples of them",
+                        self.types.name(j.ty)
+                    ),
+                ));
+            };
+            vals.push(Jdg { ty: j.ty, val });
         }
         Ok(vals)
     }

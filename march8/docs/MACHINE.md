@@ -354,7 +354,7 @@ A family applied chooses its clause by the values on top (TYPES.md 2.8):
 - **A clause whose signature types all its inputs** is also compiled where
   it is defined, on values at run time of those types, so its errors show
   there. If it fails, it is not defined; unless it fails only for needing
-  a value known while compiling, as `embed`'s file, or a word its source
+  a value known while compiling, as `vec`'s length, or a word its source
   defines later, when it is checked where it is applied instead.
 - **A clause with the same context as one before replaces it,** as a FORTH
   redefinition does; otherwise the two would always tie.
@@ -971,9 +971,10 @@ which says how it rounds. `le?`, `ge?` and `neq?`, with
 NaN is at most and at least nothing. Reading is by the core's first
 namespaces (TYPES.md 3.12): `io.stdin.read` is standard input's text and
 `"data.csv" io.file.read` a file's, when the program runs, an effect, so a
-filter starts `io.stdin.read lines`; `"notes.txt" io.file.embed` a file's
-text while compiling, so what follows folds on it (TYPES.md 2.15). The
-primitives beneath are `stdin-read`, `file-read` and `file-embed`. The
+filter starts `io.stdin.read lines`; read while compiling, `[ "notes.txt"
+io.file.read ] !`, a file's text is known, so what follows folds on it
+(TYPES.md 2.15; below, "Code"). The primitives beneath are `stdin-read` and
+`file-read`. The
 `case` namespace puts a string in a style: `case.lower` and `case.upper`,
 element by element over arrays of strings too, and `"Hello World"
 case.snake` is "hello_world", with `case.kebab`, `case.camel` and
@@ -1060,6 +1061,24 @@ code itself, hashing it into blobs, and the session publishes them, callees
 first. `march8 --code SOURCE` prints the code a piece of source compiles to,
 and the code of the words it calls.
 
+**Running while compiling** (doc/design/SYMBOLIC-FORTH.md 6.32). `!` with a
+quotation on top runs it while compiling, as FORTH's `[ … ] LITERAL` does,
+and leaves its values known, so what follows folds on them: `[ "notes.txt"
+io.file.read ] ! length` compiles to the length. The quotation takes
+nothing from below, known only as the program runs, so `2 [ 1 + ] !` is
+refused. Its code is compiled as a word of its own and run on the stage's
+own machine, the one primitives on known values are folded on, which is
+given all the code the stage seals; then what it left is read back by its
+types, numbers, strings, symbols, and arrays and tuples of them. A map is
+not read back yet. A value known as the code is compiled stays as it is,
+a quotation or a type too, with no run if there is no code, so `[ … ] !
+.` applies code made while compiling. Each quotation runs once, kept by
+its code's identity, in at most ten million steps, and what it writes is
+shown before what the program writes. A failure as it runs is an error
+where it is applied, of the failure's kind: a file not read is an `Io`
+error, as `io.file.embed`'s was until 2026-10-24, when `[ … ] !` took its
+place.
+
 ## Sessions
 
 `Session` (`src/lib.rs`) holds a machine, a stage and the types of the
@@ -1102,7 +1121,7 @@ the words being applied:
 Their kinds: no word; a mismatch (types that disagree, clauses that tie,
 values missing or out of reach, a type left unapplied); a literal that
 cannot become its type; a value needed while compiling that is known only
-at run time, as `embed`'s file; arithmetic that overflows or divides by zero,
+at run time, as `vec`'s length; arithmetic that overflows or divides by zero,
 found at compile time; an effect where none is allowed; a limit. An error
 inside a core clause is reported where the clause was applied. Errors while
 running are the machine's, overflow, a file not read, or a trap: the
@@ -1234,13 +1253,13 @@ Bugs, what is next, and what is still to think on are in TODO.md, at the
 repo's root.
 
 - **The rest of bare bodies** (doc/design/SYMBOLIC-FORTH.md 6.32). Built
-  2026-10-24: a body bare, `sq: dup * ;`, a bracket in it a value, and a
-  signature a check applied, `sq: < i64 >. dup * < i64 >. ;`. Not yet: a
-  body reaching below its first check, `ff: < i64 >. + ;`, since a check
-  says only what it says; a check tested at run time, where a value's
-  type is not known while compiling; a guard in a check that is not a
-  body's first; and `[ … ] !` running a quotation while compiling, which
-  `io.file.embed` gives way to.
+  2026-10-24: a body bare, `sq: dup * ;`, a bracket in it a value, a
+  signature a check applied, `sq: < i64 >. dup * < i64 >. ;`, and `[ … ]
+  !` running a quotation while compiling. Not yet: a body reaching below
+  its first check, `ff: < i64 >. + ;`, since a check says only what it
+  says; a check tested at run time, where a value's type is not known
+  while compiling; a guard in a check that is not a body's first; and a
+  map left by `[ … ] !`, read back.
 
 - **More of traps** (doc/design/SYMBOLIC-FORTH.md 29). Handlers are built
   (above, "Errors"); not yet are kinds as types, decided 2026-10-22,
@@ -1357,9 +1376,8 @@ repo's root.
 - **More of known arrays.** An array literal of known elements is known
   (2026-10-21), but words that make an array, `words`, `split`, `lines`,
   `range`, still make it at run time, so they do not fold on known values,
-  and `file-embed`'s text folds only through words that make scalars: a
-  YAML file read into data while compiling needs arrays and maps the stage
-  knows. A known array is built once for each copy, so `( 1 2 ) dup` builds
+  but in `[ … ] !`, where the array they make is read back, known: a YAML
+  file read into data while compiling needs maps read back too. A known array is built once for each copy, so `( 1 2 ) dup` builds
   two.
 - **More of tuples, and records.** `rest`, `most`, `slice` and `concat` on
   tuples forget their positions, where they could make tuples; `eq?` has no

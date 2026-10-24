@@ -58,7 +58,7 @@ Revised 2026-10-24: a body is bare, between the label's colon and `;`,
 as FORTH's is, so a bracket in it is always a value; a signature is a
 check applied, `< i64 >.`, the first a body's inputs and the last what it
 leaves, so `><` retires; and `[ … ] !` runs a quotation while compiling
-(6.32). Built in march8 (2026-10-24), but `[ … ] !`. And a superscript, as a subscript, is a
+(6.32). Built in march8 (2026-10-24). And a superscript, as a subscript, is a
 convention, its meaning the word's family's, the core giving defaults by
 kind where they are useful (6.21, 22).
 
@@ -1713,7 +1713,7 @@ Settled (Thomas, 2026-10-15):
       sequence of tuples, `( ( a' 1 ) ( a' 2 ) )`.
 
     Built in march8 (2026-10-24), the core, the examples and every test
-    moved to it, but `[ … ] !`, which march8 still refuses. A label's body
+    moved to it. A label's body
     runs to the `;` that closes the label in its own bracket, so a label
     whose bracket closes first is a key, `{ a: 1 }`, and the reader
     writes the body as a quotation; input that ends inside a body is
@@ -1723,7 +1723,15 @@ Settled (Thomas, 2026-10-15):
     saying a bracket does. A type applied anywhere else checks the values
     on top while compiling, settling a literal, `3 < f64 >.` being 3.0.
     A primitive's signature is written so too, `< i64 i64 >. < i64 >.`.
-    Not yet: a body reaching below its first check, `ff: < i64 >. + ;`
+    `[ … ] !` compiles its quotation as a word of its own, with nothing
+    below, and runs it on the stage's machine, which holds all the code
+    sealed, then reads back what it left by its types, numbers, strings,
+    symbols, and arrays and tuples of them; a value known as the code is
+    compiled stays as it is, a quotation or a type too, so `[ … ] ! .`
+    works; each runs once, kept by its code's identity, what it writes
+    shown before what the program writes; and `io.file.embed` and
+    `file-embed` are gone. Not yet: a map it leaves, read back; and a
+    body reaching below its first check, `ff: < i64 >. + ;`
     being refused as before, since dispatch counts a clause's inputs by
     its signature; a check tested as the program runs, of a value whose
     type is known only then; and a guard in a check other than a body's

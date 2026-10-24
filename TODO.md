@@ -26,13 +26,13 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   2026-10-24: `name: … ;` lowered as `name [ … ] ;`, a bracket in a body
   a value, a signature a check applied, `sq: < i64 >. dup * < i64 >. ;`,
   the first a clause's inputs and the last what it leaves, `><`
-  retired, and the core, the examples, the tests and the docs moved to
-  it. To come: `[ … ] !` running a quotation while compiling, which
-  `io.file.embed` gives way to; a body reaching below its first check,
-  `ff: < i64 >. + ;`, since a check says only what it says, where march8
-  says 1 is in reach; a check tested at run time, where a value's type is
-  not known while compiling; and a guard in a check that is not a body's
-  first. `[ … ] !` before records.
+  retired, the core, the examples, the tests and the docs moved to it,
+  and `[ … ] !` running a quotation while compiling, `io.file.embed` gone.
+  To come: a body reaching below its first check, `ff: < i64 >. + ;`,
+  since a check says only what it says, where march8 says 1 is in reach;
+  a check tested at run time, where a value's type is not known while
+  compiling; a guard in a check that is not a body's first; and a map
+  left by `[ … ] !`, read back, for data read while compiling.
 - **Where a trap happened,** reported from a table beside the code, since
   a position in the code would change a word's identity with its layout.
 - **`width#`'s test and `quote-power`'s cases in March,** as the identity

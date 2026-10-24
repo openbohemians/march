@@ -128,9 +128,14 @@ turn: < i64 Right >. drop 2 * 0 ;
 
 #[test]
 fn a_clause_that_needs_known_values_is_checked_where_applied() {
-    // `io.file.embed` reads its file while compiling, so its clause cannot
-    // be compiled on a path known only at run time when it is defined.
-    let e = fails("\"Cargo.toml\" words first io.file.embed");
+    // `vec` needs its length while compiling, so a clause of it cannot be
+    // compiled on an i64 known only at run time when it is defined.
+    let vv = "vv: < i64 >. f64 vec drop 1 ;";
+    assert_eq!(show(&format!("{vv} 2 vv")), "<1> 1");
+    let e = fails(&format!("{vv} \"a b\" words length vv"));
     assert_eq!(e.kind, Kind::Unknown);
-    assert!(e.msg.contains("its file must be known then"), "{e}");
+    assert!(
+        e.msg.contains("`vec` needs a length known at compile time"),
+        "{e}"
+    );
 }

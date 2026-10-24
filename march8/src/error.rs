@@ -32,7 +32,7 @@ pub enum Kind {
     /// A literal that cannot become the type wanted.
     Literal,
     /// A value needed while compiling that is known only when the program
-    /// runs: a file to embed, a bracket's values, a vec's length.
+    /// runs: a bracket's values, a vec's length.
     Unknown,
     /// Arithmetic that overflows or divides by zero, found at compile time.
     Arithmetic,
@@ -52,7 +52,7 @@ pub enum Kind {
     /// whatever it must; where the code may not run, its trap is emitted.
     /// What follows is never reached.
     Fails,
-    /// A file that could not be read while compiling, for `embed`.
+    /// A file that could not be read while compiling, by `[ … ] !`.
     Io,
     /// A program's own failure, by its kind, `no-file' fail`
     /// (doc/design/SYMBOLIC-FORTH.md 29).

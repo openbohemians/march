@@ -603,14 +603,14 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   code runs in order.
 - **An effect runs while compiling only when asked** (Thomas, 2026-10-09).
   `file-read` reads a file when the program runs, even when its path is
-  known; `file-embed` reads it while compiling, so what follows folds on its
-  text:
+  known; read while compiling, as `file-embed` did until 2026-10-24, so
+  what follows folds on its text:
   macros by staging, as Crystal's `read_file` or Rust's `include_str!`, a
   YAML file read into values, even types, with no macro language. The text
   is data in the code, so the code's identity follows the file. Asked,
   since 2026-10-24, by `!` with a quotation on top, which runs it while
-  compiling, `[ "notes.txt" io.file.read ] !`, and `file-embed` gives way
-  to it (SYMBOLIC-FORTH.md 6.32).
+  compiling, `[ "notes.txt" io.file.read ] !`, which `file-embed` gave way
+  to (SYMBOLIC-FORTH.md 6.32; built in march8 2026-10-24).
 - **No match is no word.** When no clause matches, by types at compile time
   or by guards at run time, it is the same error as an undefined word. The
   name is a word's outermost context; types and guards narrow it.
@@ -788,7 +788,7 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     literal, `1..5` or the like, is open; SYMBOL's interval notation,
     `[1,2)`, is not to be had, `[` and `(` being March's brackets.
 12. **Namespaces** (Thomas, 2026-10-10). Words gather in namespaces,
-    `io.file.read`, `io.stdin.read`, `io.file.embed`, rather than a flat
+    `io.file.read`, `io.stdin.read`, rather than a flat
     dictionary's `file-read`. A dot inside a name divides the path, and the
     name applies the word it names: `"data.csv" io.file.read`.
     The dot chain, `a.b.` for `a. b.`, was tried and left for this, the two
@@ -804,7 +804,8 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     to settle, by a longer prefix, as in Elixir. Symbols stay one global
     namespace (2.2). Then `file-read` and its kin move in. Built in march8
     (2026-10-17), the core's first namespaces: `io.stdin.read`,
-    `io.file.read` and `io.file.embed`, and `case.lower`, `case.upper`,
+    `io.file.read` and `io.file.embed` (gone 2026-10-24, for `[ … ] !`),
+    and `case.lower`, `case.upper`,
     `case.snake`, `case.kebab`, `case.camel` and `case.pascal`, imported,
     all or one alone, as `lower` and the rest (Thomas). They
     replace a `read` and a `case` chosen by symbols, `"data.csv" File

@@ -95,7 +95,6 @@ pub enum Prim {
     Convert,
     FileRead,
     StdinRead,
-    Embed,
     SymEq,
     StrToSym,
     SymToStr,
@@ -602,7 +601,6 @@ pub const PRIMS: &[PrimDef] = &[
         "< string >. < string >.",
         &[P::Pascal],
     ),
-    d(Prim::Embed, "file-embed", "< string >. < string >.", &[]),
     d(Prim::VecLength, "vec-length", "< n a vec >. < i64 >.", &[]),
     d(
         Prim::VecAt,

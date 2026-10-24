@@ -1,6 +1,6 @@
 //! Files: `"data.csv" io.file.read` reads one when the program runs, and
-//! `io.file.embed` while compiling, so what follows folds. `file-read` and
-//! `file-embed` are the primitives beneath.
+//! `[ "notes.txt" io.file.read ] !` while compiling, so what follows folds.
+//! `file-read` is the primitive beneath.
 use march8::{Kind, Session};
 
 /// A file of this text, removed when dropped.
@@ -33,21 +33,19 @@ fn read_when_the_program_runs() {
 }
 
 #[test]
-fn embed_while_compiling() {
-    // The text is known while compiling, so what follows folds: the code is
-    // the constant.
-    let f = Temp::new("embed.txt", "one two three");
+fn read_while_compiling() {
+    // Read by `[ … ] !` (doc/design/SYMBOLIC-FORTH.md 6.32), the text is
+    // known while compiling, so what follows folds: the code is the
+    // constant.
+    let f = Temp::new("now.txt", "one two three");
     let mut s = Session::new();
-    let src = format!("\"{}\" io.file.embed case.upper length", f.path());
+    let src = format!("[ \"{}\" io.file.read ] ! case.upper length", f.path());
     assert_eq!(s.compile(&src).unwrap().0, s.compile("13").unwrap().0);
     s.eval(&src).unwrap();
     assert_eq!(s.show(), "<1> 13");
-    // Words that make arrays run when the program does: the stage has no
-    // known arrays yet.
-    let mut s = Session::new();
-    s.eval(&format!("\"{}\" io.file.embed words length", f.path()))
-        .unwrap();
-    assert_eq!(s.show(), "<1> 3");
+    // An array made of it is known too.
+    let src = format!("[ \"{}\" io.file.read words ] ! length", f.path());
+    assert_eq!(s.compile(&src).unwrap().0, s.compile("3").unwrap().0);
 }
 
 #[test]
@@ -63,9 +61,14 @@ fn a_path_is_text_and_files_can_be_missing() {
         e.to_string().contains("cannot read \"no-such-file.txt\""),
         "{e}"
     );
-    let e = s.eval("\"no-such-file.txt\" file-embed").unwrap_err();
+    // Read while compiling, a missing file is an error there.
+    let e = s
+        .eval("[ \"no-such-file.txt\" io.file.read ] !")
+        .unwrap_err();
     assert_eq!(e.kind, Kind::Io);
-    // `file-embed` needs its path while compiling.
+    assert!(e.msg.ends_with("in `[ … ] !`, run while compiling"), "{e}");
+    // `[ … ] !` takes nothing from below, so its path is in it.
     s.eval("\"no-such-file.txt\"").unwrap();
-    assert_eq!(s.eval("file-embed").unwrap_err().kind, Kind::Unknown);
+    let e = s.eval("[ io.file.read ] !").unwrap_err();
+    assert!(e.msg.contains("takes nothing from below"), "{e}");
 }

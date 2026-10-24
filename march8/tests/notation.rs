@@ -69,12 +69,9 @@ fn a_type_is_built_by_words() {
     assert_eq!(typed(&["1 2 < i64 f64 > ."]), "<2> 1 < i64 > 2.0 < f64 >");
     let e = error("2.5 i64.");
     assert!(e.contains("expected i64, found dec#"), "{e}");
-    // Nor is a quotation run to find one: its kind is said where it is made.
-    let e = error("5 [ i64 ] !");
-    assert!(
-        e.contains("a quotation is not one: `[ … ] sig# !` makes it a signature"),
-        "{e}"
-    );
+    // A quotation on top runs while compiling, and what it leaves is data
+    // (doc/design/SYMBOLIC-FORTH.md 6.32), here a type to structure by.
+    assert_eq!(typed(&["5 [ f64 ] ! !"]), "<1> 5.0 < f64 >");
     assert!(error("5 3 !").contains("`!` structures by a type, and 3"));
     // A bracket reads as code does, so the same text means the same there.
     let n = "size: < string i64 map >. length < i64 >. ;";

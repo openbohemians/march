@@ -142,8 +142,11 @@ impl Session {
         std::mem::take(&mut self.stage.warnings)
     }
 
-    /// What the program has written since this was last asked.
+    /// What the program has written since this was last asked, after what
+    /// code run while compiling wrote, `[ … ] !`'s.
     pub fn take_output(&mut self) -> Vec<u8> {
-        self.machine.take_output()
+        let mut out = std::mem::take(&mut self.stage.output);
+        out.extend(self.machine.take_output());
+        out
     }
 }

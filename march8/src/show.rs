@@ -62,6 +62,8 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
             }
             out.push_str(" )");
         }
+        // A type of its own shows as its representation does.
+        Term::Own(_, r) => value(m, types, v, r, out),
         // A record shows as a map does, its keys symbols (TYPES.md 2.11).
         Term::Record(_) | Term::RecordLit(_) => {
             let fs = types.fields(t).expect("a record");

@@ -1152,6 +1152,7 @@ impl Stage {
             (Con::Map, "map"),
             (Con::Or, "or"),
             (Con::Trap, "trap"),
+            (Con::Own, "own"),
         ] {
             s.word(&core_path(name)).con = Some(con);
         }
@@ -1347,11 +1348,14 @@ impl Stage {
             // A type applied checks that the values on top have it, where it
             // is applied (doc/design/SYMBOLIC-FORTH.md 6.32): `< i64 >.`, a
             // body's first check being its signature.
-            Val::Type(t) => self.annotate_top(&Sig {
-                ins: vec![t],
-                guards: Vec::new(),
-                outs: None,
-            }),
+            Val::Type(t) => {
+                let t = self.named(t)?;
+                self.annotate_top(&Sig {
+                    ins: vec![t],
+                    guards: Vec::new(),
+                    outs: None,
+                })
+            }
             Val::Quote(q) if signature(&q) => {
                 let sig = self.bracket(&q[1..q.len() - 1])?;
                 self.annotate_top(&sig)
@@ -1385,7 +1389,7 @@ impl Stage {
             _ => None,
         };
         let t = match f.val {
-            Val::Type(t) => t,
+            Val::Type(t) => self.named(t)?,
             Val::Name(..) if named.is_some() => named.expect("checked"),
             Val::Quote(q) if signature(&q) => {
                 let sig = self.bracket(&q[1..q.len() - 1])?;
@@ -1726,7 +1730,13 @@ impl Stage {
             );
             if let (Tok::Name(n), false, Some(end)) = (&t.tok, applied, definition(toks, i)) {
                 out.push(t.clone());
-                let n = self.defined(n);
+                // One in another's body, an entry in braces, is in its
+                // namespace, `ns`, as the source's own are in `home`.
+                let n: Rc<str> = match ns {
+                    "" => n.clone(),
+                    _ if is_path(n) => n.clone(),
+                    _ => format!("{ns}.{n}").into(),
+                };
                 out.extend(self.expand(&toks[i + 1..end], split_path(&n).0)?);
                 i = end;
                 continue;
@@ -2286,6 +2296,21 @@ impl Stage {
                 value.val = Val::Quote(q[body].into());
             } else if let Some(t) = self.type_body(&q)? {
                 value = t;
+            } else if matches!(q.first().map(|t| &t.tok), Some(Tok::Open(_)))
+                && made_at(&q, matching(&q, 0) + 1) == Some("map#")
+                && matching(&q, 0) + 4 == q.len()
+                && q.iter().any(|t| t.tok == Tok::Name(self.defined(&name)))
+            {
+                // A map naming the type it defines would be a type made of
+                // itself, which is to come, not code that applies itself.
+                self.pos = named_at;
+                return Err(self.err(
+                    Kind::Limit,
+                    format!(
+                        "`{name}` is named in its own definition, a type made of itself, \
+                         which is to come"
+                    ),
+                ));
             }
         }
         // The meta-ops are not names: the reader knows them, nothing looks
@@ -2461,9 +2486,10 @@ impl Stage {
                 let j = self.pop()?;
                 Ok(matches!(j.val, Val::Type(_)).then_some(j))
             }
-            // A map of types is a record type, `point: { x: < f64 > ; y: <
-            // f64 > ; } ;` (TYPES.md 2.11): made now, and if it is none, a
-            // map of values, the body is code.
+            // A body that takes nothing may leave a type, made now: a map of
+            // types, a record type, `point: { x: < f64 > ; y: < f64 > ; } ;`,
+            // or a type of its own, `celsius: f64 own ;` (TYPES.md 2.11). If
+            // it leaves anything else, or fails here, it is code.
             [
                 Token {
                     tok: Tok::Open(_), ..
@@ -2472,32 +2498,51 @@ impl Stage {
             ] if made_at(q, matching(q, 0) + 1) == Some("map#")
                 && matching(q, 0) + 4 == q.len() =>
             {
-                let saved = (
-                    self.stack.clone(),
-                    self.code.len(),
-                    self.literals.len(),
-                    self.floor,
-                    self.inputs.len(),
-                    self.effects,
-                );
-                let r = self.run(q);
-                if r.is_ok()
-                    && self.stack.len() == saved.0.len() + 1
-                    && self.code.len() == saved.1
-                    && matches!(self.stack.last().map(|j| &j.val), Some(Val::Type(_)))
-                {
-                    return self.pop().map(Some);
-                }
-                self.stack = saved.0;
-                self.code.truncate(saved.1);
-                self.literals.truncate(saved.2);
-                self.floor = saved.3;
-                self.inputs.truncate(saved.4);
-                self.effects = saved.5;
-                Ok(None)
+                self.made_now(q)
+            }
+            // Code run while compiling, `[ … ] !`, runs where its word is
+            // applied, not here.
+            [_, ..]
+                if self.effect(q, &mut Vec::new()) == Some((0, 1))
+                    && !q.windows(2).any(|w| {
+                        matches!(w[0].tok, Tok::Close(_))
+                            && matches!(&w[1].tok, Tok::Name(n) if &**n == "!")
+                    }) =>
+            {
+                self.made_now(q)
             }
             _ => Ok(None),
         }
+    }
+
+    /// The type a body leaves, run now, or none, and nothing done, if it
+    /// leaves anything else or fails here.
+    fn made_now(&mut self, q: &[Token]) -> Result<Option<Jdg>> {
+        let saved = (
+            self.stack.clone(),
+            self.code.len(),
+            self.literals.len(),
+            self.floor,
+            self.inputs.len(),
+            self.effects,
+            self.warnings.len(),
+        );
+        let r = self.run(q);
+        if r.is_ok()
+            && self.stack.len() == saved.0.len() + 1
+            && self.code.len() == saved.1
+            && matches!(self.stack.last().map(|j| &j.val), Some(Val::Type(_)))
+        {
+            return self.pop().map(Some);
+        }
+        self.stack = saved.0;
+        self.code.truncate(saved.1);
+        self.literals.truncate(saved.2);
+        self.floor = saved.3;
+        self.inputs.truncate(saved.4);
+        self.effects = saved.5;
+        self.warnings.truncate(saved.6);
+        Ok(None)
     }
 
     /// A signature from its value: a type, its one input, or a bracket.
@@ -2689,6 +2734,10 @@ impl Stage {
 
     fn accepts(&self, t: Type, lit: Type) -> bool {
         self.conversion(t, lit).is_some()
+            || self
+                .types
+                .own_parts(t)
+                .is_some_and(|(_, r)| r == lit || self.accepts(r, lit))
     }
 
     /// The type a literal takes when nothing says (TYPES.md 2.10).
@@ -2715,6 +2764,16 @@ impl Stage {
         // A class is checked, and the value keeps its type.
         let fits = |s: &mut Self| s.match_slot(t, have, &mut Env::default()).is_some();
         if have == t || (self.types.is_class(t) && fits(self)) {
+            return Ok(());
+        }
+        // A literal becomes a type of its own as its representation, where
+        // no conversion of its own says how, `price 3 +`, a map literal too.
+        if let Some((_, r)) = self.types.own_parts(t)
+            && (self.types.is_literal(have) || self.types.is_record_lit(have))
+            && self.conversion(t, have).is_none()
+        {
+            self.annotate(i, r)?;
+            self.stack[i].ty = t;
             return Ok(());
         }
         if self.types.is_record_lit(have) && !self.types.is_pattern(t) {
@@ -2792,6 +2851,8 @@ impl Stage {
                 (Term::Vec(n, e), Term::Vec(m, f)) => n == m && self.forgets(e, f),
                 (Term::Map(k, v), Term::Map(k2, v2)) => self.forgets(k, k2) && self.forgets(v, v2),
                 (Term::Base(Base::I64), Term::Base(Base::Bool)) => true,
+                // A type of its own is its representation, forgotten.
+                (_, Term::Own(_, r)) => self.forgets(t, r),
                 // A symbol is text, its name, a string once taken as one
                 // (doc/design/SYMBOLIC-FORTH.md 28).
                 (Term::Base(Base::String), Term::Base(Base::Symbol)) => true,
@@ -2955,6 +3016,11 @@ impl Stage {
         match (self.types.term(p), self.types.term(have)) {
             (Term::Var(v), _) => self.bind(v, have, env),
             (Term::Or(..), _) => self.match_union(p, have, env),
+            // A type of its own is only itself where it is wanted, and where
+            // its representation is, it is that, matched a little less well
+            // (TYPES.md 2.11), as a bool is an i64.
+            (Term::Own(..), _) => (p == have).then_some(8),
+            (_, Term::Own(_, r)) => Some((self.unify(p, r, env)? - 2).max(0)),
             // An atom: any type at run time that is not a container.
             (Term::Atom, Term::Base(b)) => {
                 (!matches!(b, Base::Type | Base::Symbol | Base::Quote)).then_some(2)
@@ -3062,7 +3128,15 @@ impl Stage {
         let base = self.stack.len() - sig.ins.len();
         for (k, &p) in sig.ins.iter().enumerate() {
             let t = self.types.subst(p, env);
-            let have = self.stack[base + k].ty;
+            let mut have = self.stack[base + k].ty;
+            // A type of its own forgets itself where its representation's
+            // word is applied (TYPES.md 2.11), `price sqrt` a decimal.
+            while let Some((_, r)) = self.types.own_parts(have)
+                && have != t
+            {
+                have = r;
+                self.stack[base + k].ty = r;
+            }
             // A vec given where an array is wanted keeps its length, which
             // the body may use: it is an array, more precisely known.
             if (sig.value(k) && self.types.is_literal(t)) || (have != t && self.forgets(t, have)) {
@@ -4780,7 +4854,7 @@ impl Stage {
             return Some((0, 1));
         }
         if let Some(c) = w.con {
-            return Some(if matches!(c, Con::Ary | Con::Trap) {
+            return Some(if matches!(c, Con::Ary | Con::Trap | Con::Own) {
                 (1, 1)
             } else {
                 (2, 1)
@@ -5361,6 +5435,9 @@ impl Stage {
             }
         }
         equals.extend(guards);
+        for &t in &ins {
+            self.named(t)?;
+        }
         Ok(Sig {
             ins,
             guards: equals,
@@ -5482,7 +5559,7 @@ impl Stage {
     /// standing for its type.
     fn constructs(&mut self, c: Con) -> bool {
         let ins = match c {
-            Con::Ary => vec![TYPE],
+            Con::Ary | Con::Own => vec![TYPE],
             Con::Map | Con::Or => vec![TYPE, TYPE],
             // A length or a variable, then a type: `vec` builds types alone.
             Con::Vec => return true,
@@ -5539,6 +5616,14 @@ impl Stage {
                 self.push(TYPE, Val::Type(t));
                 return Ok(());
             }
+            // A type of its own over a representation, named by the `;` that
+            // binds it (TYPES.md 2.11), `celsius: f64 own ;`.
+            Con::Own => {
+                let r = self.pop_type()?;
+                let t = self.types.own("", r);
+                self.push(TYPE, Val::Type(t));
+                return Ok(());
+            }
             // A trap's kind is in its type (doc/design/SYMBOLIC-FORTH.md 29):
             // a letter takes any, `k trap`, as `a ary` is any array, and a
             // kind is a value of the type, a trap of that kind, to match.
@@ -5571,6 +5656,16 @@ impl Stage {
     /// `;` on a type: the name is a name for it, as `num: < i64 f64 or > ;`
     /// names a class, in a bracket or applied to a value.
     fn name_type(&mut self, name: &Rc<str>, t: Type) -> Result<()> {
+        // A type of its own takes the name of the path that binds it, and
+        // one named already is an alias, `temp: celsius ;` (TYPES.md 2.11).
+        let t = match self.types.own_parts(t) {
+            Some((n, r)) if n.is_empty() => {
+                let t = self.types.own(name, self.named(r)?);
+                self.type_names.insert(t, name.clone());
+                t
+            }
+            _ => self.named(t)?,
+        };
         let w = self.word(name);
         if w.ty.is_some() || w.con.is_some() {
             return Err(self.err(Kind::Mismatch, format!("`{name}` names a type already")));
@@ -5582,10 +5677,25 @@ impl Stage {
         Ok(())
     }
 
+    /// A type, if each type of its own in it is named: one is named where
+    /// it is defined, by `;` (TYPES.md 2.11).
+    fn named(&self, t: Type) -> Result<Type> {
+        match self.types.unnamed(t) {
+            true => Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "{} is a type of its own, named where it is defined: `celsius: f64 own ;`",
+                    self.types.name(t)
+                ),
+            )),
+            false => Ok(t),
+        }
+    }
+
     fn pop_type(&mut self) -> Result<Type> {
         let j = self.pop()?;
         match &j.val {
-            Val::Type(t) => Ok(*t),
+            Val::Type(t) => self.named(*t),
             _ if j.ty == NIL => Ok(NIL),
             _ => Err(self.err(
                 Kind::Mismatch,
@@ -7705,6 +7815,16 @@ impl Stage {
             let at = self.pos;
             let name = self.types.name(t);
             return self.apply_clause(&name, &c, Env::default(), at);
+        }
+        // A type of its own is given by `!` to a value of its
+        // representation, which checks nothing (TYPES.md 2.11).
+        if let Some((_, r)) = self.types.own_parts(t)
+            && !self.types.is_literal(have)
+            && (have == r || self.forgets(r, have))
+        {
+            self.annotate(i, r)?;
+            self.stack[i].ty = t;
+            return Ok(());
         }
         self.annotate(i, t)
     }

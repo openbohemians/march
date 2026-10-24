@@ -169,7 +169,9 @@ among the namespace's import, then in the core, and a name found nowhere
 is the namespace's own, so a quotation of `math`'s that `map` runs still
 finds `math.sq`. The source's definitions are gathered first, and its
 `import#` and `export#` set, so a namespace's own later word counts; a
-definition's signature and body are expanded in its name's namespace.
+definition's signature and body are expanded in its name's namespace, and
+an entry in braces in its record's, `math.pt: { ab: < cc > ; } ;` finding
+`math.cc`.
 Lookup is then of a path, or of a bare name in the root. A symbol is
 global text and is never expanded: `sq' map` in `math` applies the root's
 `sq`, and `math.sq' map` or `[ sq ] map` applies `math.sq`; `Open'` equals
@@ -301,7 +303,7 @@ equal types are equal numbers.
 | Type | Meaning |
 |---|---|
 | `i64`, `f64` | numbers |
-| `money` | exact cents in an i64; a placeholder until March has precise numbers and newtypes (TYPES.md 2.11) |
+| `money` | exact cents in an i64; a placeholder until March has precise numbers, then a type of its own over one (TYPES.md 2.11) |
 | `string` | UTF-8 text |
 | `int#`, `dec#`, `ratio#` | an integer, a decimal and a ratio literal, undecided (TYPES.md 2.10); the names are placeholders (TYPES.md 3.4) |
 | `sym` | a symbol, a name not yet applied: at run time its name, an interned string, so symbols compare and key maps by identity |
@@ -319,6 +321,7 @@ equal types are equal numbers.
 | `tuple` | in patterns, any tuple: a class, as `atom` is |
 | `{ x: f64 y: string }` | a record: fixed keys, a type each, a map of types (TYPES.md 2.11). Known by its fields, in the order of their keys |
 | `record` | in patterns, any record: a class, as `tuple` is |
+| `celsius` | a type of its own, `celsius: f64 own ;`: its representation's values, and a type no other is (TYPES.md 2.11) |
 
 **An array literal is a vec:** `( 7 8 9 )` is a `3 i64 vec`, so its length
 is a constant. A symbol beside a string makes a tuple, `( "a" b' )` being a
@@ -880,6 +883,43 @@ norm: < point >. [ p | p.x dup * p.y dup * + sqrt ] . ;
   another. A field the record lacks is an error while compiling. An array
   of records holds them, `( { x: 1 y: "a" } { x: 2 y: "b" } ) [ y' at ]
   map`, and an array of undecided literals holds maps.
+
+A record type is not made of itself yet: one named in its own fields,
+`tree: { left: < tree > ; … } ;`, is an error, not code that applies
+itself.
+
+### Types of their own
+
+`own` makes **a type of its own** of a representation, and `;` names it
+with the path it defines (TYPES.md 2.11), so two over the same
+representation are two types, and its values are its representation's,
+costing nothing at run time:
+
+```
+celsius: f64 own ;
+fahrenheit: f64 own ;
+20.0 celsius !                       20.0, a celsius: `!` checks nothing
+20.0 celsius ! sqrt                  4.47…, an f64: the f64 word forgets it
+temp: celsius ;                      an alias, `celsius` named already
+```
+
+- **Named where it is defined.** One no `;` binds is an error wherever it
+  is used, "a type of its own, named where it is defined", and `;` binding
+  one named already is an alias. A namespace's is its path, `math.cc`.
+- **A subset of its representation,** as `bool` is of i64: accepted
+  wherever the representation is, matched a little less well than a
+  clause of its own, and forgotten where the representation's word is
+  applied, so `price sqrt` is a decimal. A word of any type, `dup` or
+  `max`, keeps it.
+- **A clause of its own keeps it**, added to the core's family by its
+  path as `money`'s are: `core.+: < cash cash >. < f64 f64 > ! + cash !
+  < cash >. ;`, `< f64 f64 > !` forgetting it into the core's `+`. A
+  literal takes its type from context, so `price 3 +` is that clause's.
+- **Made by `!`** of a value of its representation, or of one that
+  forgets into it, `20.0 sqrt celsius !`, and a literal becomes it as its
+  representation, `{ x: 1 y: 2 } place !` where `place: point own ;`.
+  Wanted by a clause, a value of the representation made as the program
+  runs is no match: `!` says it is meant.
 
 ### Recursion and instances
 

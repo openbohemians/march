@@ -132,6 +132,11 @@ pub enum Term {
     RecordLit(u32),
     /// In a pattern, any record: a class, as `tuple` is.
     AnyRecord,
+    /// A type of its own (TYPES.md 2.11): a representation and the name of
+    /// the path `;` binds it to, `celsius: f64 own ;`, so no other type is
+    /// the same. A subset of its representation, its values the same at run
+    /// time. Its name is empty until `;` binds it.
+    Own(u32, Type),
     /// A failure being handled, `k trap` (doc/design/SYMBOLIC-FORTH.md 29):
     /// its kind is known only when it fails, so every trap has this type,
     /// and a pattern of one kind, `no-file' trap`, is tested as the program
@@ -148,6 +153,7 @@ pub enum Con {
     Map,
     Or,
     Trap,
+    Own,
 }
 
 pub struct Types {
@@ -163,6 +169,9 @@ pub struct Types {
     /// each set once.
     fields: Vec<Fields>,
     field_index: HashMap<Fields, u32>,
+    /// The names of types of their own, each once, the first empty.
+    names: Vec<Rc<str>>,
+    name_index: HashMap<Rc<str>, u32>,
 }
 
 /// A record's fields: its keys, in order, each with its type.
@@ -184,6 +193,8 @@ impl Types {
             row_index: HashMap::new(),
             fields: Vec::new(),
             field_index: HashMap::new(),
+            names: Vec::new(),
+            name_index: HashMap::new(),
         };
         for (b, _) in Base::ALL {
             t.intern(Term::Base(b));
@@ -215,7 +226,7 @@ impl Types {
     pub fn is_pattern(&self, t: Type) -> bool {
         match self.term(t) {
             Term::Var(_) | Term::Atom | Term::Or(..) | Term::AnyTuple | Term::AnyRecord => true,
-            Term::Base(_) | Term::Nat(_) | Term::Trap => false,
+            Term::Base(_) | Term::Nat(_) | Term::Trap | Term::Own(..) => false,
             Term::Tuple(r) => self.rows[r as usize].iter().any(|&e| self.is_pattern(e)),
             Term::Record(r) | Term::RecordLit(r) => self.fields[r as usize]
                 .iter()
@@ -303,6 +314,41 @@ impl Types {
     pub fn is_record_lit(&self, t: Type) -> bool {
         matches!(self.term(t), Term::RecordLit(_))
     }
+    /// The type of its own over `repr` with this name, empty while no `;`
+    /// has bound it.
+    pub fn own(&mut self, name: &str, repr: Type) -> Type {
+        let n = match self.name_index.get(name) {
+            Some(&n) => n,
+            None => {
+                let n = self.names.len() as u32;
+                self.names.push(name.into());
+                self.name_index.insert(name.into(), n);
+                n
+            }
+        };
+        self.intern(Term::Own(n, repr))
+    }
+    /// A type of its own's name and its representation.
+    pub fn own_parts(&self, t: Type) -> Option<(Rc<str>, Type)> {
+        match self.term(t) {
+            Term::Own(n, r) => Some((self.names[n as usize].clone(), r)),
+            _ => None,
+        }
+    }
+    /// Whether a type is, or holds, a type of its own no `;` has named.
+    pub fn unnamed(&self, t: Type) -> bool {
+        match self.term(t) {
+            Term::Own(n, r) => self.names[n as usize].is_empty() || self.unnamed(r),
+            Term::Ary(e) => self.unnamed(e),
+            Term::Vec(_, e) => self.unnamed(e),
+            Term::Map(k, v) | Term::Or(k, v) => self.unnamed(k) || self.unnamed(v),
+            Term::Tuple(r) => self.rows[r as usize].iter().any(|&e| self.unnamed(e)),
+            Term::Record(r) | Term::RecordLit(r) => self.fields[r as usize]
+                .iter()
+                .any(|&(_, e)| self.unnamed(e)),
+            _ => false,
+        }
+    }
     /// The union of two types: their members together, sorted, without
     /// repeats. A union of one member is that type.
     pub fn union(&mut self, a: Type, b: Type) -> Type {
@@ -349,7 +395,7 @@ impl Types {
                 let (a, b) = (self.subst(a, env), self.subst(b, env));
                 self.union(a, b)
             }
-            Term::Base(_) | Term::Nat(_) | Term::Trap => t,
+            Term::Base(_) | Term::Nat(_) | Term::Trap | Term::Own(..) => t,
             Term::Ary(e) => {
                 let e = self.subst(e, env);
                 self.intern(Term::Ary(e))
@@ -401,6 +447,12 @@ impl Types {
                 format!("{{ {} }}", fs.join(" "))
             }
             Term::AnyRecord => "record".into(),
+            // Its name is its path, shown as the root finds it, the core's
+            // without `core.`.
+            Term::Own(n, r) => match &*self.names[n as usize] {
+                "" => format!("{} own", self.name(r)),
+                n => n.strip_prefix("core.").unwrap_or(n).to_string(),
+            },
             Term::Trap => "k trap".into(),
         }
     }

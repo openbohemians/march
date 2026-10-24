@@ -49,12 +49,14 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   into places where a word that takes it is applied, for named inputs,
   `{ term: 72 rate: 0.2 } payment` (SYMBOLIC-FORTH.md 6.31); equality of
   records; and a known array of map literals left undecided.
-- **Types of their own** (TYPES.md 2.11, decided 2026-10-22), each a
-  subset of its representation that forgets itself where the
-  representation's word is applied, a clause of its own keeping it, made
-  by `own` and named by `;`, `celsius: f64 own ;`. Still open: the
-  warning where two types of their own are forgotten together. Kinds
-  wait on it.
+- **The rest of types of their own** (TYPES.md 2.11). Built 2026-10-24:
+  `own`, named by `;`, a subset of its representation forgotten where the
+  representation's word is applied, a clause of its own keeping it. To
+  come: `!` of an array of the representation, `( 1.0 2.0 ) < 2 celsius
+  vec > !`; the warning where two types of their own are forgotten
+  together; a type made of itself, `tree: { left: < tree > ; … } ;`, an
+  error for now; and how a clause added to a core family, `core.+:`,
+  names the program's types, its body being expanded in `core`.
 - **Kinds as types,** made where defined, `err.file.notfound: { error#:
   "file not found" } trap ;`, named by `;`, a handler taking its kind
   and every kind beneath it, the core's under `err`, the compiler's and the

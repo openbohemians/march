@@ -512,7 +512,18 @@ by `;` of anything but a type; a record opened into places; equality of
 records; and a known array of map literals undecided, which settle into
 maps where a clause could want records.
 
-Not built: `own` and kinds. march8's `money`, exact cents in an i64, is a
+Built in march8 (2026-10-24), types of their own as above: `own`, named
+by `;`, an alias when named already, an error unnamed; forgotten where
+the representation's word is applied, kept by a generic word and by a
+clause of its own, `price 3 +` taking that; given by `!` of the
+representation or a literal of it, over a record too. Not yet: `!` of an
+array of the representation, `( 1.0 2.0 ) < 2 celsius vec > !`, which
+`[ celsius ! ] map` does; the warning proposed above; and a type made of
+itself, `tree: { left: < tree > ; … } ;`, an error for now. A clause
+added to a core family by its path, `core.+:`, is expanded in `core`, so
+it names the program's types only once they are the core's.
+
+Not built: kinds. march8's `money`, exact cents in an i64, is a
 placeholder for a type of its own over a precise number, which March does
 not have yet (LAZY-NUMBERS.md).
 

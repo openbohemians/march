@@ -5,11 +5,11 @@
 -- capitalized names as symbols by a rule whose capture is the name itself,
 -- and whose code is none (doc/design/SYMBOLIC-FORTH.md 25, 27).
 
-/([A-Z][A-Za-z0-9]*)/: [ ] ;
+/([A-Z][A-Za-z0-9]*)/: ;
 
-is: < Socrates Human > [ drop drop true ] ;
-is: < Plato Human > [ drop drop true ] ;
-is: < x Mortal > [ drop Human is ] ;
-is: < x y > [ drop drop false ] ;
+is: < Socrates Human >. drop drop true ;
+is: < Plato Human >. drop drop true ;
+is: < x Mortal >. drop Human is ;
+is: < x y >. drop drop false ;
 
 Socrates Mortal is Zeus Mortal is Plato Human is

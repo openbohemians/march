@@ -7,10 +7,10 @@
 Closed: Closed' ;  Opened: Opened' ;  Locked: Locked' ;
 Open: Open' ;  Close: Close' ;  Lock: Lock' ;  Unlock: Unlock' ;
 
-door: < Closed Open > [ drop drop Opened ] ;
-door: < Opened Close > [ drop drop Closed ] ;
-door: < Closed Lock > [ drop drop Locked ] ;
-door: < Locked Unlock > [ drop drop Closed ] ;
+door: < Closed Open >. drop drop Opened ;
+door: < Opened Close >. drop drop Closed ;
+door: < Closed Lock >. drop drop Locked ;
+door: < Locked Unlock >. drop drop Closed ;
 
 Closed Open door Close door Lock door
 

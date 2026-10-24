@@ -6,7 +6,7 @@
 //! does.
 use march8::{Kind, Session};
 
-const CAPS: &str = "/([A-Z][A-Za-z0-9]*)/: [ ] ;";
+const CAPS: &str = "/([A-Z][A-Za-z0-9]*)/: ;";
 
 fn show(src: &str) -> String {
     let mut s = Session::new();
@@ -22,8 +22,8 @@ fn fails(src: &str) -> march8::Error {
 }
 
 const DOOR: &str = "
-door: < Closed Open > [ drop drop Opened ] ;
-door: < Opened Close > [ drop drop Closed ] ;
+door: < Closed Open >. drop drop Opened ;
+door: < Opened Close >. drop drop Closed ;
 ";
 
 #[test]
@@ -32,7 +32,7 @@ fn a_symbol_is_left_on_the_stack() {
     // Shown as it reads back: a name with a prime, and text that is no
     // name quoted, as a string made a symbol is.
     assert_eq!(
-        show("x' +' fib: \"two words\" sym!"),
+        show("x' +' fib' \"two words\" sym!"),
         "<4> x' < sym > +' < sym > fib' < sym > 'two words' < sym >"
     );
     assert_eq!(show("( Open Close )"), "<1> ( Open' Close' ) < 2 sym vec >");
@@ -86,9 +86,9 @@ fn a_family_chooses_by_symbols_at_run_time() {
 #[test]
 fn a_family_applies_itself_to_symbols() {
     let src = "
-is: < Socrates Human > [ drop drop true ] ;
-is: < x Mortal > [ drop Human is ] ;
-is: < x y > [ drop drop false ] ;
+is: < Socrates Human >. drop drop true ;
+is: < x Mortal >. drop Human is ;
+is: < x y >. drop drop false ;
 Socrates Mortal is Zeus Mortal is";
     assert_eq!(show(src), "<2> true < bool > false < bool >");
 }
@@ -109,8 +109,8 @@ fn a_symbol_applies_while_compiling() {
 #[test]
 fn a_clause_on_symbols_written_again_replaces_itself() {
     let src = "
-door: < Closed Open > [ drop drop Opened ] ;
-  door: < Closed Open > [ drop drop Ajar ] ;
+door: < Closed Open >. drop drop Opened ;
+  door: < Closed Open >. drop drop Ajar ;
 Closed Open door";
     assert_eq!(show(src), "<1> Ajar' < sym >");
 }
@@ -124,7 +124,7 @@ fn a_capital_marks_nothing() {
         s.eval(src).unwrap_or_else(|e| panic!("{src}: {e}"));
         s.show()
     };
-    assert_eq!(plain("Twice: [ 2 * ] ; 3 Twice"), "<1> 6");
+    assert_eq!(plain("Twice: 2 * ; 3 Twice"), "<1> 6");
     let e = Session::new().eval("3 Dup").unwrap_err();
     assert_eq!(e.kind, Kind::NoWord);
     assert!(e.msg.contains("no word `Dup`; the word is `dup`"), "{e}");
@@ -136,7 +136,7 @@ fn a_capital_marks_nothing() {
         "<1> Human'"
     );
     // In a signature the word is applied, so it leaves the symbol to match.
-    let door = "Shut: Shut' ; Open: Open' ; door: < Shut Open > [ drop drop 1 ] ;";
+    let door = "Shut: Shut' ; Open: Open' ; door: < Shut Open >. drop drop 1 ;";
     assert_eq!(plain(&format!("{door} Shut Open door")), "<1> 1");
     // The old rule is a pattern word, for a program of symbols.
     assert_eq!(
@@ -161,13 +161,13 @@ fn a_symbol_taken_as_text_is_a_string() {
     // A symbol and a string compare as strings.
     assert_eq!(show("x' \"x\" eq"), "<1> true < bool >");
     // The exact clause comes first.
-    let sz = "size: < sym > [ drop 1 ] ; size: < string > [ drop 2 ] ;";
+    let sz = "size: < sym >. drop 1 ; size: < string >. drop 2 ;";
     assert_eq!(
         show(&format!("{sz} x' size \"x\" size")),
         "<2> 1 < i64 > 2 < i64 >"
     );
     // One way: a string is no symbol unless made one.
-    let e = fails("sy: < sym > [ ] ; \"x\" sy");
+    let e = fails("sy: < sym >. ; \"x\" sy");
     assert_eq!(e.kind, Kind::NoWord);
     // `'…'` quotes a symbol, a quote in it doubled (6.12), and is shown so
     // when it is no name.

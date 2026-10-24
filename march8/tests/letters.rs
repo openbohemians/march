@@ -56,11 +56,11 @@ fn a_bracket_takes_to_its_deepest_letter() {
 
 #[test]
 fn a_body_takes_its_words_inputs() {
-    assert_eq!(show(&["sq: [ a a * ] ; 7 sq"]), "<1> 49");
+    assert_eq!(show(&["sq: a a * ; 7 sq"]), "<1> 49");
     // A signature's letters are types, and its body's places: two things.
-    let add = "add: < a a >< a > [ b a + ] ;";
+    let add = "add: < a a >. b a + < a >. ;";
     assert_eq!(show(&[add, "1 2 add 1.5 2.5 add"]), "<2> 3 4.0");
-    let sub = "sub: < i64 i64 > [ a b -+ ] ;";
+    let sub = "sub: < i64 i64 >. a b -+ ;";
     assert_eq!(show(&[sub, "7 3 sub"]), "<1> -4");
     assert_eq!(show(&[sub, "7 3", "sub"]), "<1> -4");
 }
@@ -75,7 +75,7 @@ fn a_letter_belongs_to_its_bracket() {
     assert_eq!(show(&["1 2 ( b a b )"]), "<1> ( 1 2 1 )");
     assert_eq!(show(&["5 \"\\[ a ] is \\[ a ]\""]), "<1> \"5 is 5\"");
     assert_eq!(
-        show(&["ff: [ \"\\[ a ] is \\[ a ]\" ] ; 5 ff"]),
+        show(&["ff: \"\\[ a ] is \\[ a ]\" ; 5 ff"]),
         "<1> \"5 is 5\""
     );
     // A power applies its code each time, and `compose` code that names

@@ -33,13 +33,10 @@ fn a_quotation_takes_its_arguments_when_applied() {
 
 #[test]
 fn a_word_body_takes_the_words_inputs() {
-    assert_eq!(show(&["ff: [ _ 1 + ] ; 5 ff"]), "<1> 6");
+    assert_eq!(show(&["ff: _ 1 + ; 5 ff"]), "<1> 6");
+    assert_eq!(show(&["gg: < i64 i64 >. 1 _ -+ _ * ; 7 3 gg"]), "<1> -18");
     assert_eq!(
-        show(&["gg: < i64 i64 > [ 1 _ -+ _ * ] ; 7 3 gg"]),
-        "<1> -18"
-    );
-    assert_eq!(
-        show(&["gg: < i64 i64 > [ 1 _ -+ _ * ] ;", "7 3", "gg"]),
+        show(&["gg: < i64 i64 >. 1 _ -+ _ * ;", "7 3", "gg"]),
         "<1> -18"
     );
 }

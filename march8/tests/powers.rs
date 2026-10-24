@@ -38,7 +38,7 @@ fn a_power_by_the_kind_of_word() {
     assert_eq!(show(&["5 +^1"]), "<1> 5");
     // A function, applied n times; a value, its copies multiplied.
     assert_eq!(show(&["16.0 sqrt^2"]), "<1> 2.0");
-    assert_eq!(show(&["three: [ 3 ] ; three^2"]), "<1> 9");
+    assert_eq!(show(&["three: 3 ; three^2"]), "<1> 9");
     // A stack word, applied n times: a permutation's power.
     assert_eq!(show(&["1 2 swap^2"]), "<2> 1 2");
     assert_eq!(show(&["1 2 3 rot^3"]), "<3> 1 2 3");
@@ -57,8 +57,8 @@ fn an_identity_takes_its_type_where_it_is_used() {
     assert_eq!(show(&["⋅^0"]), "<1> 1");
     assert_eq!(show(&["1.5 +^0 +"]), "<1> 1.5");
     assert_eq!(show(&["+^0 5 +"]), "<1> 5");
-    assert_eq!(show(&["add: [ + ] ; 7 add^0 add"]), "<1> 7");
-    assert_eq!(show(&["flip: [ swap + ] ; 7 flip^0 flip"]), "<1> 7");
+    assert_eq!(show(&["add: + ; 7 add^0 add"]), "<1> 7");
+    assert_eq!(show(&["flip: swap + ; 7 flip^0 flip"]), "<1> 7");
     assert_eq!(show(&["( 1 2 ) +^0 +"]), "<1> ( 1 2 )");
     assert_eq!(show(&["1.5 sqrt^0"]), "<1> 1.5");
     assert_eq!(show(&["true and^0 and false or^0 or"]), "<2> true false");
@@ -67,31 +67,28 @@ fn an_identity_takes_its_type_where_it_is_used() {
     assert_eq!(show(&["2.5 f64! min^0 min"]), "<1> 2.5");
     assert_eq!(show(&["\"x\" concat^0 concat"]), "<1> \"x\"");
     // A value's power is its copies multiplied, so its 0th is `⋅^0`.
-    assert_eq!(show(&["three: [ 3 ] ; three^0"]), "<1> 1");
-    assert_eq!(show(&["three: [ 3 ] ; 2.5 three^0 *"]), "<1> 2.5");
+    assert_eq!(show(&["three: 3 ; three^0"]), "<1> 1");
+    assert_eq!(show(&["three: 3 ; 2.5 three^0 *"]), "<1> 2.5");
     // Where the facts give none, there is none; a clause of the core's
     // `unit` or `power#` can, the core's, by its path.
     let (kind, msg) = fails("7 -+^0 -+");
     assert_eq!(kind, Kind::NoWord);
     assert!(msg.contains("for which `unit` gives no identity"), "{msg}");
-    assert!(
-        msg.contains("`core.unit: < int#-' > [ drop … ] ;`"),
-        "{msg}"
-    );
+    assert!(msg.contains("`core.unit: < int#-' >. drop … ;`"), "{msg}");
     let (kind, msg) = fails("5 max^0 max");
     assert_eq!(kind, Kind::NoWord);
     assert!(msg.contains("`least` gives int# none"), "{msg}");
     assert_eq!(
-        show(&["core.unit: < int#-' > [ drop 0 ] ; 7 -+^0 -+"]),
+        show(&["core.unit: < int#-' >. drop 0 ; 7 -+^0 -+"]),
         "<1> 7"
     );
     assert_eq!(
-        show(&["core.power#: < -+' 0 > [ drop drop [ 0 ] ] ; -+^0"]),
+        show(&["core.power#: < -+' 0 >. drop drop [ 0 ] ; -+^0"]),
         "<1> 0"
     );
     // The root's `power#` is the program's own, and the rule applies the
     // core's.
-    let (kind, _) = fails("power#: < -+' 0 > [ drop drop [ 0 ] ] ; -+^0");
+    let (kind, _) = fails("power#: < -+' 0 >. drop drop [ 0 ] ; -+^0");
     assert_eq!(kind, Kind::NoWord);
 }
 
@@ -102,14 +99,14 @@ fn the_search_for_an_identity_is_march() {
     assert_eq!(show(&["+' unit# ! quote ! first"]), "<1> +'");
     // A program's choice of the greater, by either test, has the least
     // value; swapping first, however often, changes nothing.
-    let mx = "mx: < i64 i64 gt? > [ drop ] ; mx: < i64 i64 > [ swap drop ] ;";
+    let mx = "mx: < i64 i64 gt? >. drop ; mx: < i64 i64 >. swap drop ;";
     assert_eq!(show(&[&format!("{mx} 3 mx^0 mx")]), "<1> 3");
-    let mx = "mx: < a a lt? > [ swap drop ] ; mx: < a a > [ drop ] ;";
+    let mx = "mx: < a a lt? >. swap drop ; mx: < a a >. drop ;";
     assert_eq!(show(&[&format!("{mx} mx^0")]), "<1> -9223372036854775808");
-    assert_eq!(show(&["ss: [ swap swap + ] ; 7 ss^0 ss"]), "<1> 7");
+    assert_eq!(show(&["ss: swap swap + ; 7 ss^0 ss"]), "<1> 7");
     // Its words end in `#`, so a program's own plain words are its own.
     assert_eq!(
-        show(&["choice: [ 42 ] ; end: [ 7 ] ; choice end max^0"]),
+        show(&["choice: 42 ; end: 7 ; choice end max^0"]),
         "<3> 42 7 -9223372036854775808"
     );
     // Where it finds none, it says what it looked at.
@@ -157,14 +154,14 @@ fn a_subscript_is_an_index() {
     // handed code, a program's as well; an operation has none, nor a word
     // that computes, nor a quotation.
     assert_eq!(
-        show(&["tuck: [ swap over ] ; 1 2 3 4 tuck_2"]),
+        show(&["tuck: swap over ; 1 2 3 4 tuck_2"]),
         "<6> 3 4 1 2 3 4"
     );
-    assert_eq!(show(&["nip: [ swap drop ] ; 1 2 3 4 nip_2"]), "<2> 3 4");
+    assert_eq!(show(&["nip: swap drop ; 1 2 3 4 nip_2"]), "<2> 3 4");
     let (kind, msg) = fails("1 2 3 4 +_2");
     assert_eq!(kind, Kind::NoWord);
     assert!(msg.contains("a subscript is an index"), "{msg}");
-    let (kind, _) = fails("dbl: [ dup + ] ; 1 2 dbl_2");
+    let (kind, _) = fails("dbl: dup + ; 1 2 dbl_2");
     assert_eq!(kind, Kind::NoWord);
     let (kind, _) = fails("5 log_2");
     assert_eq!(kind, Kind::NoWord);
@@ -172,8 +169,8 @@ fn a_subscript_is_an_index() {
     assert_eq!(kind, Kind::Syntax);
     // A subscript is part of a name, as x₁ is, and its family is what
     // defines it: a program's `log_2`, or a word of its own.
-    assert_eq!(show(&["x_1: [ 5 ] ; x₁"]), "<1> 5");
-    assert_eq!(show(&["log_2: [ 1 ] ; log_2"]), "<1> 1");
+    assert_eq!(show(&["x_1: 5 ; x₁"]), "<1> 5");
+    assert_eq!(show(&["log_2: 1 ; log_2"]), "<1> 1");
     // The width first, then the power: `dup_2` cubed.
     assert_eq!(show(&["1 2 dup_2^3"]), "<8> 1 2 1 2 1 2 1 2");
 }
@@ -182,29 +179,23 @@ fn a_subscript_is_an_index() {
 fn a_power_is_found_where_it_is_applied() {
     // As `dbl` is, in the namespace whose word applies it, and a width of
     // the core in any.
-    let ns = "ns.dbl: [ dup + ] ;";
+    let ns = "ns.dbl: dup + ;";
+    assert_eq!(show(&[&format!("{ns} ns.ff: 1 dbl^2 ; ns.ff")]), "<1> 4");
     assert_eq!(
-        show(&[&format!("{ns} ns.ff: [ 1 dbl^2 ] ; ns.ff")]),
+        show(&[&format!("{ns} ns.ff: 1 [ dbl ]^2 . ; ns.ff")]),
         "<1> 4"
     );
     assert_eq!(
-        show(&[&format!("{ns} ns.ff: [ 1 [ dbl ]^2 . ] ; ns.ff")]),
-        "<1> 4"
-    );
-    assert_eq!(
-        show(&[&format!("{ns} ns.ff: [ 1 2 dup_2 ] ; ns.ff")]),
+        show(&[&format!("{ns} ns.ff: 1 2 dup_2 ; ns.ff")]),
         "<4> 1 2 1 2"
     );
     assert_eq!(show(&[&format!("{ns} 1 ns.dbl^2")]), "<1> 4");
     assert_eq!(
-        show(&[&format!("{ns} ns.ff: [ 1 2 dup_2^3 ] ; ns.ff")]),
+        show(&[&format!("{ns} ns.ff: 1 2 dup_2^3 ; ns.ff")]),
         "<8> 1 2 1 2 1 2 1 2"
     );
     // A namespace's `dup_2`, or a rule of its own, comes before the core's.
-    assert_eq!(
-        show(&["ns.dup_2: [ 7 ] ; ns.ff: [ dup_2 ] ; ns.ff"]),
-        "<1> 7"
-    );
+    assert_eq!(show(&["ns.dup_2: 7 ; ns.ff: dup_2 ; ns.ff"]), "<1> 7");
 }
 
 #[test]
@@ -220,7 +211,7 @@ fn a_width_moves_values_at_run_time_as_the_stack_words_do() {
 
 #[test]
 fn no_word_is_named_by_a_power() {
-    let (kind, msg) = fails("sq^2: [ 1 ] ;");
+    let (kind, msg) = fails("sq^2: 1 ;");
     assert_eq!(kind, Kind::Syntax);
     assert!(
         msg.contains("`sq^2` is a spelling, `sq` to the power 2"),

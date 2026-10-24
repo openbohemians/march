@@ -22,9 +22,9 @@ fn code(pieces: &[&str], src: &str) -> Vec<Op> {
     s.compile(src).unwrap().0
 }
 
-const FACT: &str = "zero: [ 0 eq? ] ;
-    fact: < i64 zero? > [ drop 1 ] ;
-    fact: < i64 > [ dup 1 -+ fact * ] ;";
+const FACT: &str = "zero: 0 eq? ;
+    fact: < i64 zero? >. drop 1 ;
+    fact: < i64 >. dup 1 -+ fact * ;";
 
 #[test]
 fn families_recurse_through_their_instances() {
@@ -35,7 +35,7 @@ fn families_recurse_through_their_instances() {
     // From a value known only at run time.
     assert_eq!(cells(&[FACT, "6", "fact"]).unwrap(), [720]);
     // Inside another word.
-    assert_eq!(cells(&[FACT, "ff: [ 5 fact ] ; ff"]).unwrap(), [120]);
+    assert_eq!(cells(&[FACT, "ff: 5 fact ; ff"]).unwrap(), [120]);
     // `fact` is called as its i64 instance, last, so as a tail call; at 0
     // its guard is decided now, and it folds.
     let c = code(&[FACT], "5 fact");
@@ -44,14 +44,14 @@ fn families_recurse_through_their_instances() {
         "{c:?}"
     );
     assert_eq!(code(&[FACT], "0 fact"), code(&[], "1"));
-    let fib = "zero: [ 0 eq? ] ; one: [ 1 eq? ] ;
-        fib: < i64 zero? > [ ] ;
-        fib: < i64 one? > [ ] ;
-        fib: < i64 > [ dup 1 -+ fib swap 2 -+ fib + ] ;";
+    let fib = "zero: 0 eq? ; one: 1 eq? ;
+        fib: < i64 zero? >. ;
+        fib: < i64 one? >. ;
+        fib: < i64 >. dup 1 -+ fib swap 2 -+ fib + ;";
     assert_eq!(cells(&[fib, "15 fib"]).unwrap(), [610]);
     // With value patterns, no helper words: 0 and 1 are their own results.
-    let fib = "fib: < 0 > [ ] ; fib: < 1 > [ ] ;
-        fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;";
+    let fib = "fib: < 0 >. ; fib: < 1 >. ;
+        fib: < n >. dup 1 -+ fib swap 2 -+ fib + ;";
     assert_eq!(cells(&[fib, "15 fib", "20", "fib"]).unwrap(), [610, 6765]);
     let s = session(&[fib, "10.0 fib"]).unwrap();
     assert_eq!(s.show(), "<1> 55.0");
@@ -60,7 +60,7 @@ fn families_recurse_through_their_instances() {
 #[test]
 fn instances_are_compiled_once_and_shared() {
     // Two words applying `fact` to an i64 call one instance.
-    let words = "aa: [ fact ] ; bb: [ 1 + fact ] ;";
+    let words = "aa: fact ; bb: 1 + fact ;";
     let a = code(&[FACT, words, "7"], "aa");
     let b = code(&[FACT, words, "7"], "1 -+ bb");
     assert_eq!(a.last(), Some(&Op::Return));
@@ -79,18 +79,18 @@ fn the_ghost_takes_the_type_of_what_it_meets() {
 fn a_recursive_clause_may_come_before_the_base() {
     // The step is guarded and tested first, but the base, with no guard,
     // finishes first while compiling, and types the recursion.
-    let down = "positive: [ 0 gt? ] ;
-        down: < i64 > [ ] ;
-        down: < i64 positive? > [ 1 -+ down ] ;";
+    let down = "positive: 0 gt? ;
+        down: < i64 >. ;
+        down: < i64 positive? >. 1 -+ down ;";
     assert_eq!(cells(&[down, "5 down", "3", "down"]).unwrap(), [0, 0]);
 }
 
 #[test]
 fn tail_calls_run_in_constant_space() {
     // A million levels would exhaust the machine's 16384 return frames.
-    let sumto = "zero: [ 0 eq? ] ;
-        sumto: < i64 i64 zero? > [ drop ] ;
-        sumto: < i64 i64 > [ swap over + swap 1 -+ sumto ] ;";
+    let sumto = "zero: 0 eq? ;
+        sumto: < i64 i64 zero? >. drop ;
+        sumto: < i64 i64 >. swap over + swap 1 -+ sumto ;";
     let mut s = session(&[sumto]).unwrap();
     s.fuel = 50_000_000;
     s.eval("0 1000000 sumto").unwrap();
@@ -101,10 +101,10 @@ fn tail_calls_run_in_constant_space() {
 fn recursion_needs_a_case_that_finishes() {
     // No clause finishes without applying itself, so its results have no
     // types, an error where it is defined.
-    assert_eq!(cells(&["loop: < i64 > [ loop ] ;"]), Err(Kind::Mismatch));
+    assert_eq!(cells(&["loop: < i64 >. loop ;"]), Err(Kind::Mismatch));
     // Unless its signature promises them: then it is a loop, which runs
     // until the step budget is spent, in constant space.
-    let mut s = session(&["loop: < i64 >< i64 > [ 1 + loop ] ;"]).unwrap();
+    let mut s = session(&["loop: < i64 >. 1 + loop < i64 >. ;"]).unwrap();
     s.fuel = 100_000;
     assert_eq!(
         s.eval("1 loop").unwrap_err().kind,

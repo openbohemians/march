@@ -18,13 +18,13 @@ fn error(src: &str) -> (Kind, String) {
     (e.kind, e.msg.clone())
 }
 
-const MATH: &str = "math.pi: [ 3 ] ; math.sq: [ dup * ] ; math.area: [ sq pi * ] ;";
+const MATH: &str = "math.pi: 3 ; math.sq: dup * ; math.area: sq pi * ;";
 
 #[test]
 fn a_path_names_a_word_in_its_namespace() {
     assert_eq!(show(&format!("{MATH} 2 math.area math.pi")), "<2> 12 3");
     // `;` at a path makes the namespace on the way.
-    assert_eq!(show("a.b.cc: [ 7 ] ; a.b.cc"), "<1> 7");
+    assert_eq!(show("a.b.cc: 7 ; a.b.cc"), "<1> 7");
     let (kind, msg) = error(&format!("{MATH} math.tau"));
     assert_eq!(kind, Kind::NoWord);
     assert_eq!(msg, "no word `tau` in `math`");
@@ -34,32 +34,29 @@ fn a_path_names_a_word_in_its_namespace() {
 fn a_word_looks_up_names_in_its_namespace_where_written() {
     // `sq` in a quotation that `map` runs is still `math.sq`, and `+'` the
     // core's.
-    let src = format!("{MATH} math.sum-sq: [ [ sq ] map 0 +' fold ] ; ( 1 2 3 ) math.sum-sq");
+    let src = format!("{MATH} math.sum-sq: [ sq ] map 0 +' fold ; ( 1 2 3 ) math.sum-sq");
     assert_eq!(show(&src), "<1> 14");
     // A word defined later is found when applied.
-    assert_eq!(show("ns.ff: [ gg ] ; ns.gg: [ 5 ] ; ns.ff"), "<1> 5");
+    assert_eq!(show("ns.ff: gg ; ns.gg: 5 ; ns.ff"), "<1> 5");
     // So by a typed word, whose check, made as it is defined, waits for it.
-    assert_eq!(show("ff: < i64 > [ gg + ] ; gg: [ 7 ] ; 1 ff"), "<1> 8");
-    assert_eq!(
-        show("ns.ff: < i64 > [ gg + ] ; ns.gg: [ 7 ] ; 1 ns.ff"),
-        "<1> 8"
-    );
-    let (kind, msg) = error("ff: < i64 > [ gg ] ; 1 ff gg: [ 7 ] ;");
+    assert_eq!(show("ff: < i64 >. gg + ; gg: 7 ; 1 ff"), "<1> 8");
+    assert_eq!(show("ns.ff: < i64 >. gg + ; ns.gg: 7 ; 1 ns.ff"), "<1> 8");
+    let (kind, msg) = error("ff: < i64 >. gg ; 1 ff gg: 7 ;");
     assert_eq!(kind, Kind::NoWord);
     assert!(msg.contains("no word `gg` yet"), "{msg}");
     // A word of the program's root is not the core: it is imported.
-    let (_, msg) = error("helper: [ 1 ] ; ns.ff: [ helper ] ; ns.ff");
+    let (_, msg) = error("helper: 1 ; ns.ff: helper ; ns.ff");
     assert!(
         msg.contains("no word `helper` in `ns`, its import, or the core"),
         "{msg}"
     );
     assert_eq!(
-        show("helper: [ 1 ] ; ns.import#: [| helper |] ; ns.ff: [ helper ] ; ns.ff"),
+        show("helper: 1 ; ns.import#: [| helper |] ; ns.ff: helper ; ns.ff"),
         "<1> 1"
     );
     // A namespace's own word counts wherever its source defines it, before
     // the core's.
-    assert_eq!(show("ns.ff: [ + ] ; ns.+: [ * ] ; 2 3 ns.ff"), "<1> 6");
+    assert_eq!(show("ns.ff: + ; ns.+: * ; 2 3 ns.ff"), "<1> 6");
 }
 
 #[test]
@@ -67,27 +64,27 @@ fn a_symbol_is_global_text() {
     // Symbols are global (Thomas, 2026-10-20): `dbl'` is `dbl'` wherever it
     // is written, so handed to `map`, it is the root's `dbl`. The
     // namespace's is its path, or a quotation's, expanded where written.
-    let (kind, msg) = error("ns.dbl: [ dup + ] ; ns.ff: [ ( 1 2 ) dbl' map ] ; ns.ff");
+    let (kind, msg) = error("ns.dbl: dup + ; ns.ff: ( 1 2 ) dbl' map ; ns.ff");
     assert_eq!(kind, Kind::NoWord);
     assert!(msg.contains("no word `dbl`"), "{msg}");
     assert_eq!(
-        show("ns.dbl: [ dup + ] ; ns.ff: [ ( 1 2 ) ns.dbl' map ] ; ns.ff"),
+        show("ns.dbl: dup + ; ns.ff: ( 1 2 ) ns.dbl' map ; ns.ff"),
         "<1> ( 2 4 )"
     );
     assert_eq!(
-        show("ns.dbl: [ dup + ] ; ns.ff: [ ( 1 2 ) [ dbl ] map ] ; ns.ff"),
+        show("ns.dbl: dup + ; ns.ff: ( 1 2 ) [ dbl ] map ; ns.ff"),
         "<1> ( 2 4 )"
     );
     assert_eq!(
-        show("ns.+: [ * ] ; ns.ff: [ ( 2 3 4 ) +' reduce ] ; ns.ff"),
+        show("ns.+: * ; ns.ff: ( 2 3 4 ) +' reduce ; ns.ff"),
         "<1> 9"
     );
     assert_eq!(
-        show("ns.+: [ * ] ; ns.ff: [ ( 2 3 4 ) [ + ] reduce ] ; ns.ff"),
+        show("ns.+: * ; ns.ff: ( 2 3 4 ) [ + ] reduce ; ns.ff"),
         "<1> 24"
     );
     // It compares as text wherever written.
-    assert_eq!(show("ns.ff: [ Open' ] ; ns.ff Open' eq?"), "<1> true");
+    assert_eq!(show("ns.ff: Open' ; ns.ff Open' eq?"), "<1> true");
 }
 
 #[test]
@@ -95,7 +92,7 @@ fn a_meta_op_is_no_name() {
     // The reader knows the meta-ops and nothing looks them up, so nothing
     // defines them (doc/design/SYMBOLIC-FORTH.md 16).
     for src in [
-        "!: < i64 > [ drop 7 ] ;",
+        "!: < i64 >. drop 7 ;",
         "';' [ drop ] ;",
         "'.' [ drop ] ;",
         "'?' [ drop ] ;",
@@ -118,7 +115,7 @@ fn an_import_makes_names_local() {
         "<1> 3"
     );
     // A namespace's own import, for its words.
-    let app = "io.get: [ 7 ] ; app.import#: [| io.get |] ; app.main: [ get 1 + ] ;";
+    let app = "io.get: 7 ; app.import#: [| io.get |] ; app.main: get 1 + ;";
     assert_eq!(show(&format!("{app} app.main")), "<1> 8");
     // An import holds for all of its namespace, wherever it is written.
     assert_eq!(
@@ -129,20 +126,20 @@ fn an_import_makes_names_local() {
 
 #[test]
 fn a_name_found_twice_is_an_error() {
-    let (kind, msg) = error("a.ff: [ 1 ] ; b.ff: [ 2 ] ; import#: [| a.* b.* |] ; ff");
+    let (kind, msg) = error("a.ff: 1 ; b.ff: 2 ; import#: [| a.* b.* |] ; ff");
     assert_eq!(kind, Kind::NoWord);
     assert!(
         msg.contains("`ff` names both `a.ff`, imported, and `b.ff`, imported"),
         "{msg}"
     );
-    let (_, msg) = error("math.pi: [ 3 ] ; pi: [ 4 ] ; import#: [| math.pi |] ; pi");
+    let (_, msg) = error("math.pi: 3 ; pi: 4 ; import#: [| math.pi |] ; pi");
     assert!(
         msg.contains("`pi`, defined here, and `math.pi`, imported"),
         "{msg}"
     );
     // A path says which.
     assert_eq!(
-        show("math.pi: [ 3 ] ; pi: [ 4 ] ; import#: [| math.pi |] ; math.pi"),
+        show("math.pi: 3 ; pi: 4 ; import#: [| math.pi |] ; math.pi"),
         "<1> 3"
     );
 }
@@ -156,7 +153,7 @@ fn a_namespace_has_one_import() {
 
 #[test]
 fn reaching_what_is_not_exported_is_a_severe_warning() {
-    let math = "math.pi: [ 3 ] ; math.ee: [ 2 ] ; math.export#: [| pi |] ;";
+    let math = "math.pi: 3 ; math.ee: 2 ; math.export#: [| pi |] ;";
     let mut s = Session::new();
     s.eval(&format!("{math} import#: [| math.* |] ; pi math.ee"))
         .unwrap();
@@ -175,7 +172,7 @@ fn reaching_what_is_not_exported_is_a_severe_warning() {
     assert_eq!(kind, Kind::NoWord);
     // A namespace's children see its unexported words.
     let mut s = Session::new();
-    s.eval(&format!("{math} math.test.tt: [ math.ee ] ; math.test.tt"))
+    s.eval(&format!("{math} math.test.tt: math.ee ; math.test.tt"))
         .unwrap();
     assert!(s.take_warnings().is_empty());
 }
@@ -196,7 +193,7 @@ fn the_core_names_its_words_by_namespace() {
     );
     // Imported, a style is its last name, and anyone may add one.
     assert_eq!(
-        show("case.shout: [ upper \"!\" concat ] ; import#: [| case.* |] ; \"hi\" snake shout"),
+        show("case.shout: upper \"!\" concat ; import#: [| case.* |] ; \"hi\" snake shout"),
         "<1> \"HI!\""
     );
     // One alone, too.
@@ -212,15 +209,15 @@ fn the_core_is_a_namespace_found_last() {
     // The core is `core`, which every namespace finds last, as though it
     // imported `core.*`: a word of the program's of the same name is its
     // own, and `core.dup` is still the core's.
-    assert_eq!(show("dup: [ 7 ] ; 1 dup 1 core.dup"), "<4> 1 7 1 1");
-    assert_eq!(show("m.dup: [ 9 ] ; m.ff: [ dup ] ; 1 m.ff"), "<2> 1 9");
+    assert_eq!(show("dup: 7 ; 1 dup 1 core.dup"), "<4> 1 7 1 1");
+    assert_eq!(show("m.dup: 9 ; m.ff: dup ; 1 m.ff"), "<2> 1 9");
     // The core's words mean what they mean in the core, and a symbol
     // applied from the stack is found from the root.
-    assert_eq!(show("dup: [ 7 ] ; 1 2 over"), "<3> 1 2 1");
-    assert_eq!(show("dup: [ 7 ] ; 1 dup' ."), "<2> 1 7");
+    assert_eq!(show("dup: 7 ; 1 2 over"), "<3> 1 2 1");
+    assert_eq!(show("dup: 7 ; 1 dup' ."), "<2> 1 7");
     // So a program adds to a core family by its path; a clause of its own
     // name is a family of its own.
-    let bools = "< bool > [ drop 1 ] ; true length \"abc\" length";
+    let bools = "< bool >. drop 1 ; true length \"abc\" length";
     assert_eq!(show(&format!("core.length: {bools}")), "<2> 1 3");
     let (kind, msg) = error(&format!("length: {bools}"));
     assert_eq!(kind, Kind::NoWord);
@@ -229,7 +226,7 @@ fn the_core_is_a_namespace_found_last() {
     let (kind, msg) = error("\"a\" 1 +");
     assert_eq!(kind, Kind::NoWord);
     assert!(msg.starts_with("no word `+` for"), "{msg}");
-    let (_, msg) = error("+: [ 7 ] ; \"a\" 1 core.+");
+    let (_, msg) = error("+: 7 ; \"a\" 1 core.+");
     assert!(msg.starts_with("no word `core.+` for"), "{msg}");
     let (_, msg) = error("core.foo");
     assert_eq!(msg, "no word `foo` in `core`");

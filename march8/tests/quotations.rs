@@ -67,7 +67,7 @@ fn put_back_its_meta_ops_act() {
 fn its_names_are_paths() {
     // Its names were expanded where it was written, so taken out, a name is
     // its path, and put together, each piece means what it meant.
-    let math = "math.dbl: [ dup + ] ; math.q: [ [ dbl ] ] ; math.s: [ dbl' ] ; dbl: [ 0 ] ;";
+    let math = "math.dbl: dup + ; math.q: [ dbl ] ; math.s: dbl' ; dbl: 0 ;";
     assert_eq!(show(&format!("{math} math.q first")), "<1> math.dbl'");
     assert_eq!(show(&format!("{math} 3 math.q [ 1 + ] concat .")), "<1> 7");
     assert_eq!(
@@ -85,20 +85,20 @@ fn its_names_are_paths() {
 fn a_word_walks_one_by_recursion() {
     // Its values known only while compiling, a family applied to one again
     // unfolds, its guards decided by the values.
-    let dots = "none: [ length 0 eq? ] ; \
-                tally: < '.' > [ drop 1 ] ; tally: < sym > [ drop 0 ] ; \
-                tally: < quote > [ drop 0 ] ; \
-                dots: < quote none? >< i64 > [ drop 0 ] ; \
-                dots: < quote >< i64 > [ dup rest dots swap first tally + ] ;";
+    let dots = "none: length 0 eq? ; \
+                tally: < '.' >. drop 1 ; tally: < sym >. drop 0 ; \
+                tally: < quote >. drop 0 ; \
+                dots: < quote none? >. drop 0 < i64 >. ; \
+                dots: < quote >. dup rest dots swap first tally + < i64 >. ;";
     assert_eq!(show(&format!("{dots} [ swap + ] dots")), "<1> 2");
     assert_eq!(show(&format!("{dots} [ [ dup ] dip swap ] dots")), "<1> 2");
     assert_eq!(show(&format!("{dots} [ ] dots")), "<1> 0");
     assert_eq!(
-        show(&format!("{dots} ff: [ [ 1 2 + 3 * ] dots ] ; ff")),
+        show(&format!("{dots} ff: [ 1 2 + 3 * ] dots ; ff")),
         "<1> 2"
     );
     // One that never finishes is stopped.
-    let (kind, _) = error("loop: < quote > [ loop ] ; [ 1 ] loop");
+    let (kind, _) = error("loop: < quote >. loop ; [ 1 ] loop");
     assert_eq!(kind, Kind::Limit);
 }
 

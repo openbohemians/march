@@ -128,14 +128,14 @@ fn an_array_is_wanted_so_positions_are_forgotten() {
 
 #[test]
 fn tuple_types_in_brackets() {
-    let p = "pp: < ( i64 string ) > [ drop 1 ] ; pp: < ( a b ) > [ drop 2 ] ;";
+    let p = "pp: < ( i64 string ) >. drop 1 ; pp: < ( a b ) >. drop 2 ;";
     // A vec is a tuple whose types are one, so `( a b )` takes `( 1 2 )`.
     assert_eq!(
         show(&[p, "( 1 \"a\" ) pp ( 1 2 ) pp ( \"x\" 2.0 ) pp"]),
         "<3> 1 2 2"
     );
     assert_eq!(
-        show(&["mk: < >< ( i64 string ) > [ ( 1 \"a\" ) ] ; mk 2 at"]),
+        show(&["mk: < >. ( 1 \"a\" ) < ( i64 string ) >. ; mk 2 at"]),
         "<1> \"a\""
     );
     assert_eq!(show(&["( 1 \"a\" ) < ( i64 string ) > ! length"]), "<1> 2");
@@ -155,9 +155,9 @@ fn a_symbol_beside_a_string_is_a_tuple() {
         typed(&["( \"can't read it\" no-file' )"]),
         "<1> ( \"can't read it\" no-file' ) < ( string sym ) >"
     );
-    let ff = "ff: < string ary > [ ] ; ff: < ( string sym ) > [ 2 at ] ;";
+    let ff = "ff: < string ary >. ; ff: < ( string sym ) >. 2 at ;";
     assert_eq!(show(&[ff, "( \"a\" b' ) ff"]), "<1> b'");
-    let gg = "gg: < string ary >< string > [ 2 at ] ;";
+    let gg = "gg: < string ary >. 2 at < string >. ;";
     assert_eq!(typed(&[gg, "( \"a\" b' ) gg"]), "<1> \"b\" < string >");
     // Known only as the program runs, too.
     assert_eq!(

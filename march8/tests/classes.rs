@@ -17,18 +17,18 @@ fn show(pieces: &[&str]) -> String {
     }
 }
 
-const SQ: &str = "sq: < num > [ dup ⋅ ] ;";
+const SQ: &str = "sq: < num >. dup ⋅ ;";
 
 #[test]
 fn a_union_matches_any_of_its_types() {
     assert_eq!(show(&[SQ, "3 sq 2.5 sq 3 i64! sq"]), "<3> 9 6.25 9");
     assert_eq!(show(&[SQ, "4.0 f64!", "sq"]), "<1> 16.0");
     assert_eq!(session(&[SQ, "\"a\" sq"]).err(), Some(Kind::NoWord));
-    let f = "ff: < i64 string or > [ drop 1 ] ;";
+    let f = "ff: < i64 string or >. drop 1 ;";
     assert_eq!(show(&[f, "\"x\" ff 4 i64! ff"]), "<2> 1 1");
     assert_eq!(session(&[f, "2.5 f64! ff"]).err(), Some(Kind::NoWord));
     // Inside a constructor.
-    let n = "nn: < num ary > [ length ] ;";
+    let n = "nn: < num ary >. length ;";
     assert_eq!(show(&[n, "( 1 2 ) nn ( 1.5 ) nn"]), "<2> 2 1");
     assert_eq!(session(&[n, "( \"a\" ) nn"]).err(), Some(Kind::NoWord));
 }
@@ -36,10 +36,10 @@ fn a_union_matches_any_of_its_types() {
 #[test]
 fn one_type_beats_a_union_beats_atom_beats_a_variable() {
     let k = [
-        "kk: < num > [ drop 1 ] ;",
-        "kk: < i64 > [ drop 2 ] ;",
-        "kk: < atom > [ drop 3 ] ;",
-        "kk: < a > [ drop 4 ] ;",
+        "kk: < num >. drop 1 ;",
+        "kk: < i64 >. drop 2 ;",
+        "kk: < atom >. drop 3 ;",
+        "kk: < a >. drop 4 ;",
     ];
     // A literal integer is a `num` itself, since `int#` is one of its types.
     assert_eq!(
@@ -56,13 +56,13 @@ fn equal_unions_are_one_type() {
     // In any order, so the second clause replaces the first.
     assert_eq!(
         show(&[
-            "gg: < f64 i64 or > [ drop 1 ] ; gg: < i64 f64 or > [ drop 2 ] ;",
+            "gg: < f64 i64 or >. drop 1 ; gg: < i64 f64 or >. drop 2 ;",
             "3 i64! gg"
         ]),
         "<1> 2"
     );
     assert_eq!(
-        show(&["hh: < i64 i64 or f64 or > [ drop 1 ] ; 3 i64! hh 3.0 f64! hh"]),
+        show(&["hh: < i64 i64 or f64 or >. drop 1 ; 3 i64! hh 3.0 f64! hh"]),
         "<2> 1 1"
     );
 }
@@ -72,11 +72,11 @@ fn a_class_checks_and_keeps_the_type() {
     // Applied, or as an output, a class checks the value, which keeps its
     // own type.
     assert_eq!(show(&["3 < num > ! 4 + 7 num!"]), "<2> 7 7");
-    let inc = "inc: < num >< num > [ 1 + ] ;";
+    let inc = "inc: < num >. 1 + < num >. ;";
     assert_eq!(show(&[inc, "3 inc 2.5 inc"]), "<2> 4 3.5");
     assert_eq!(session(&["\"x\" num!"]).err(), Some(Kind::Mismatch));
     assert_eq!(
-        session(&["bad: < num >< num > [ drop \"no\" ] ; 3 bad"]).err(),
+        session(&["bad: < num >. drop \"no\" < num >. ; 3 bad"]).err(),
         Some(Kind::Mismatch)
     );
     // Messages name the class.
@@ -90,10 +90,10 @@ fn a_class_checks_and_keeps_the_type() {
 
 #[test]
 fn def_names_a_type() {
-    let config = "config: < string i64 map > ; ks: < config > [ keys ] ;";
+    let config = "config: < string i64 map > ; ks: < config >. keys ;";
     assert_eq!(show(&[config, "{ \"a\" 1 } ks"]), "<1> ( \"a\" )");
     assert_eq!(
-        show(&["whole: < i64 f64 or > ; ww: < whole > [ drop 1 ] ; 2.0 f64! ww"]),
+        show(&["whole: < i64 f64 or > ; ww: < whole >. drop 1 ; 2.0 f64! ww"]),
         "<1> 1"
     );
     // A name that is a type already; and `or` on what is not a type is
@@ -109,7 +109,7 @@ fn def_names_a_type() {
         Some(Kind::NoWord)
     );
     assert_eq!(
-        show(&["i64: < core.i64 f64 or > ; one: < i64 > [ drop 1 ] ; 2.0 f64! one"]),
+        show(&["i64: < core.i64 f64 or > ; one: < i64 >. drop 1 ; 2.0 f64! one"]),
         "<1> 1"
     );
     assert_eq!(show(&["0 1 or"]), "<1> true");
@@ -128,7 +128,7 @@ fn a_word_that_builds_types_is_chosen_by_what_it_takes() {
     assert_eq!(session(&["i64 true or"]).err(), Some(Kind::NoWord));
     assert_eq!(session(&["true i64 or"]).err(), Some(Kind::NoWord));
     // `nil` stands for its type where a type is wanted, in any family.
-    let kv = "kv: < type type >< type > [ drop ] ;";
+    let kv = "kv: < type type >. drop < type >. ;";
     assert_eq!(show(&[kv, "\"ab\" string nil kv !"]), "<1> \"ab\"");
 }
 

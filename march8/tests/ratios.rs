@@ -21,7 +21,7 @@ fn a_ratio_is_a_number() {
     assert_eq!(show("1:2 -1:3 2:4"), "<3> 0.5 -0.3333333333333333 0.5");
     // A literal takes its type from what takes it, as `2.5` does.
     assert_eq!(
-        show("half: < f64 >< f64 > [ 2.0 /* ] ; 1:4 half"),
+        show("half: < f64 >. 2.0 /* < f64 >. ; 1:4 half"),
         "<1> 0.125"
     );
     assert_eq!(show("1:4 money!"), "<1> 0.25");

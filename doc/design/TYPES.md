@@ -145,9 +145,11 @@ bullet below).
   gives the values below their types, `x y < i64 f64 > !`. A quotation is
   a guard only tested, `< i64 [ 2 mod zero ] ? >`, each role having its
   mark (SYMBOLIC-FORTH.md 2; a bare one was a guard until 2026-10-20).
-  Inputs and outputs are two brackets, touching, `< i64 >< i64 >`, so `--`
-  is a comment inside a bracket too (SYMBOLIC-FORTH.md 6.8, 2026-10-20;
-  `--` divided them until then).
+  A clause's inputs and outputs are checks, a bracket applied where it
+  holds, the first in its body and the last, `sq: < i64 >. dup * < i64 >.
+  ;` (SYMBOLIC-FORTH.md 6.32, 2026-10-24; two brackets touching before the
+  body, `< i64 >< i64 >`, from 2026-10-20, and `--` dividing one until
+  then), so `--` is a comment inside a bracket too.
 - **Compile stages evaluate the type part and erase it.** When the type
   stage meets `+ .` with two i64s, it picks integer addition and leaves a
   plain call behind. After lowering, `.` is an ordinary call instruction
@@ -261,9 +263,9 @@ an error.
 - **Clauses are signature patterns:**
 
   ```
-  < i64 i64 >< i64 >    integer add
-  < f64 f64 >< f64 >    float add
-  < a ary a >< a ary >    lift: add to each element ("a" is a type variable)
+  +: < i64 i64 >. i64+ < i64 >. ;     integer add
+  +: < f64 f64 >. f64+ < f64 >. ;     float add
+  +: < a ary a >. … < a ary >. ;       lift: add to each element ("a" is a type variable)
   ```
 
   Lifting stops being a special case of the checker and becomes a clause.
@@ -344,7 +346,12 @@ any family.
   allowed, and undecided like a number: a clause that wants a tuple, a vec
   or an `i64 ary` makes it one, and with nothing to take it, it settles by
   its contents, a vec when its elements are alike, a tuple when not.
-  `{ … }` is `[ … ] map# !`, a map literal, undecided the same way.
+  `{ … }` is `[ … ] map# !`, a map literal, undecided the same way, a map
+  when its values are alike, a record when not (2.11). Its keys are
+  unique and unordered, so it is no sequence of pairs, which is a
+  sequence of tuples, `( ( a' 1 ) ( a' 2 ) )`, and a key written again
+  replaces, `{ a: 1 a: 2 }` being `{ a' 2 }` (Thomas, 2026-10-23;
+  SYMBOLIC-FORTH.md 6.32).
   Built in march8 (2026-10-21): an array literal of known elements is
   held as them while compiling, settled by its contents, and a clause
   that wants another type takes its elements as it would each alone, so
@@ -365,12 +372,16 @@ Decided 2026-10-22 (Thomas: "clearly we need to be able to define new
 types"), from what a trap's kind needs (SYMBOLIC-FORTH.md 6.29). A type is
 a structure, data made of types, and a type of its own is a structure that
 holds its name. This replaces what this section first said, that Money was
-a "newtype" never mixed with plain numbers. There are four cases:
+a "newtype" never mixed with plain numbers. A body is bare since
+2026-10-24 (SYMBOLIC-FORTH.md 6.32), so a type left by a body is named by
+`;`, computed while compiling; march8 names a body that is one type, a
+type's name or a bracket, and the rest waits on records and `own`. There
+are four cases:
 
-- **An alias** is another name for a type, and the same type: `temp: [ f64
-  ] ;`, so `< temp >` is `< f64 >` and mixes with it freely. Built in
+- **An alias** is another name for a type, and the same type: `temp: f64
+  ;`, so `< temp >` is `< f64 >` and mixes with it freely. Built in
   march8, since a word that leaves a type serves in a bracket. A word that
-  makes a type of another, `maybe: [ nil or ] ;`, so `i64 maybe`, is a
+  makes a type of another, `maybe: nil or ;`, so `i64 maybe`, is a
   word as `ary` and `or` are, not a type of its own (Thomas: "it's not
   really a type of it's own").
 - **A record** is a map of types, as a tuple is a sequence of them (2.5),
@@ -379,20 +390,66 @@ a "newtype" never mixed with plain numbers. There are four cases:
   complete sense to me"):
 
   ```
-  point: [ { x: < f64 > ; y: < f64 > ; } ] ;
+  point: { x: < f64 > ; y: < f64 > ; } ;
   ```
 
   A record is known by its content, as a tuple is, so two with the same
   fields are one type, and a name given it by a definition is an alias.
+  A record value is written as a map is, `{ a: 1 b: "x" }`, with no form
+  of its own (Thomas, 2026-10-23: "that seems spot on to me"): `{ … }` is
+  to a record what `( … )` is to a tuple. It is a `map#` literal,
+  undecided (2.10): a clause that wants a record makes it one, a clause
+  that wants a map a map, and with nothing to take it, it settles by its
+  contents, a map when its values are alike, a record when they are not.
+  So `{ a: 1 b: 2 }` is a map and `{ a: 1 b: "x" }` a record, `{ a: < i64
+  > ; b: < str > ; }`, where march8 now says `1 (int#) cannot become
+  string`. A record shows as a map does, as a tuple shows as a vec does;
+  its type tells them apart. Its keys are known while compiling, as a
+  literal's always are, so a map made as the program runs is a map.
+  A field is read by `at`, `p x' at`, and a path is short for it, as
+  `math.pi .` names `math . pi at . .` (SYMBOLIC-FORTH.md 6.16; Thomas,
+  2026-10-23: "yes"). In a bracket that names `p`, `p.x` is `p x' at`:
+  a path's head is found as any name is, and a bracket's name hides a
+  word, so one walk by `at` serves a namespace and a record, both maps.
+  A path gives the field, as a name gives its input, so a field holding
+  a quotation runs by `p.f .`. A key known while compiling gives the
+  field's own type, with no lookup at run time; one known only as the
+  program runs makes the record forget into a map (2.5), and `at` gives
+  the union. A field the record lacks is an error while compiling, as a
+  misspelled label is.
   A record is also how a caller names a word's inputs (SYMBOLIC-FORTH.md
   6.31; Thomas, 2026-10-23: "Passing records -- of course"): `{ term: 72
   rate: 0.2 principal: 50000 } payment`, a misspelled label an error, and
   the record's type known where `payment` is applied, so the stage can
-  open it into places at no cost.
+  open it into places at no cost. `payment` takes the literal, so it never
+  settles: the stage holds it as its fields, as it holds a known array as
+  its elements, and each field is decided where it is used, `term` an
+  integer. Alone, `{ term: 72 rate: 0.2 }` still shows 72.0, as `( 72 0.2
+  )` does.
 - **A type of its own** has a representation and a name, the path where
-  it is defined, which `ns#` gives as a symbol (SYMBOLIC-FORTH.md 6.29),
-  so no other type is the same: Money over a decimal, Celsius over f64. It
-  costs nothing at run time, its values being its representation's. It is
+  it is defined, so no other type is the same: Money over a decimal,
+  Celsius over f64. `own` makes one of a representation, and `;` names it
+  with the path it defines (Thomas, 2026-10-23):
+
+  ```
+  celsius: f64 own ;
+  fahrenheit: f64 own ;
+  ```
+
+  The type is the two together, a structure holding its name, so it is
+  known by its content as every type is, and `celsius` and `fahrenheit`,
+  both f64s, are two. The name is always the one being defined (Thomas:
+  "Would anyone ever use anything but `ns#` there?"), and `;` is what
+  knows it. `own` cannot know which definition it is in, and `ns#` gives
+  the namespace where it is written, so in `own`'s body, or in a helper's,
+  it would name every type after the core or the helper; with `;` naming
+  it, `meter: measure ;`, where `measure` leaves `f64 own`, is `meter`. A
+  type of its own that no `;` binds is an error, "a type of its own is
+  named where it is defined: `celsius: f64 own ;`", and binding one
+  already named is an alias, `temp: celsius ;`. A name meant to outlast
+  moving the code, for data stored by type, waits for a need. `own` gives
+  the type, `!` from its representation, which checks nothing, and its
+  place wherever the representation is. It costs nothing at run time, its values being its representation's. It is
   a subset of its representation, as `bool` is of i64 (2.16), so it is
   accepted wherever the representation is, matched less well than a
   clause of its own (Thomas: "if decimal can't accept money, it seems
@@ -404,8 +461,8 @@ a "newtype" never mixed with plain numbers. There are four cases:
   should:
 
   ```
-  +: < money money >< money > [ < dec dec > ! + money ! ] ;
-  *: < money dec >< money > [ < dec dec > ! * money ! ] ;
+  +: < money money >. < dec dec > ! + money ! < money >. ;
+  *: < money dec >. < dec dec > ! * money ! < money >. ;
   ```
 
   The rule is the one `bool` follows already, `true true +` being 2, an
@@ -425,16 +482,19 @@ a "newtype" never mixed with plain numbers. There are four cases:
   and a namespace both, holding the kinds beneath it: like an enum
   (Thomas: "The Kind reminds me a bit of enums"), but open, since a
   program may define a kind beneath any, and nested, since a kind takes
-  the kinds beneath it. What it holds is a record, known while compiling
-  (SYMBOLIC-FORTH.md 6.29):
+  the kinds beneath it. `trap` makes one of a map holding its message,
+  and `;` names it, as it names a type of its own. What it holds is a
+  record, known while compiling (SYMBOLIC-FORTH.md 6.29):
 
   ```
   { error: < sym > ; message: < str > ; subspace: < sym trap map > ; }
   ```
 
-The word that makes a type of its own from a representation and a name is
-still to name; `trap` is that word for kinds. Not built: records, types of
-their own and kinds. march8's `money`, exact cents in an i64, is a
+  An idea to weigh when kinds are built (2026-10-23): a kind as a type of
+  its own over the kind above it, so that a handler takes the kinds
+  beneath its own by the rule that lets money go where a decimal goes.
+
+Not built: records, `own` and kinds. march8's `money`, exact cents in an i64, is a
 placeholder for a type of its own over a precise number, which March does
 not have yet (LAZY-NUMBERS.md).
 
@@ -513,6 +573,10 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   f64 or > def`. Code computed where it stands, with no bracket to mark
   where it starts, is refused: a word that takes a symbol could take the
   name below it. Until then the name came last, `[ 1 + . ] inc def .`.
+  Revised 2026-10-24: the label's colon marks where the body starts, as
+  FORTH's does, so the body is bare, `inc: 1 + ;`, and a bracket in it is
+  a value, `[ ]` a quotation left as `( )` leaves a tuple
+  (SYMBOLIC-FORTH.md 6.32).
 - **A heading sets a mode** for the definitions after it, as a stack
   machine's state: `## < i64 >< i64 >` makes them clauses for those types,
   until the next heading. A heading always starts a section, even an empty
@@ -543,7 +607,10 @@ Decided 2026-10-08, with march7/docs/SURFACE.md ("Contexts").
   text:
   macros by staging, as Crystal's `read_file` or Rust's `include_str!`, a
   YAML file read into values, even types, with no macro language. The text
-  is data in the code, so the code's identity follows the file.
+  is data in the code, so the code's identity follows the file. Asked,
+  since 2026-10-24, by `!` with a quotation on top, which runs it while
+  compiling, `[ "notes.txt" io.file.read ] !`, and `file-embed` gives way
+  to it (SYMBOLIC-FORTH.md 6.32).
 - **No match is no word.** When no clause matches, by types at compile time
   or by guards at run time, it is the same error as an undefined word. The
   name is a word's outermost context; types and guards narrow it.
@@ -590,10 +657,11 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
    March data, so that type equality is identity?), and how compiled code
    and the display reach them.
 3. **Records** in detail. A record's type is a map of types (2.11,
-   2026-10-22); open still are a record value's surface and how a field is
-   read, by `at` or by a path, whether a record is a namespace, a value of
-   it defining what its type declares, and how a record is laid out at run
-   time; and the surface syntax for tuples, value patterns and guards.
+   2026-10-22), and a record value is written as a map is and its field
+   read by `at` or a path (2.11, 2026-10-23); open still are whether a
+   record type may declare words that a namespace, as a value of it,
+   defines, and how a record is laid out at run time; and the surface
+   syntax for tuples, value patterns and guards.
 4. **Literal type names.** Settled (Thomas, 2026-10-19): `int#`, `dec#`,
    `ratio#`, `seq#` and `map#`, as written, and `str#` for text, which
    strings' encodings make undecided too (SYMBOLIC-FORTH.md 6.15): `str#`

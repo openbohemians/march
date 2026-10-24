@@ -40,13 +40,13 @@ const EXAMPLES: [&str; 4] = [
 #[test]
 fn every_application_is_a_dot() {
     assert_eq!(
-        lowered("fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;"),
-        "fib [ n var# . ] sig# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;"
+        lowered("fib: < n >. dup 1 -+ fib swap 2 -+ fib + ;"),
+        "fib [ [ n var# . ] sig# ! . dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;"
     );
     // A bracket is a quotation made data where it closes (7, step 3): a
     // sequence, a map, or a signature, its code run over types.
     assert_eq!(
-        lowered("( 1 2 ) { a: 1 } < ( i64 string ) >< i64 >"),
+        lowered("( 1 2 ) { a: 1 } < ( i64 string ) > < i64 >"),
         "[ 1 int# ! 2 int# ! ] seq# ! [ a 1 int# ! ] map# ! \
          [ [ i64 . string . ] seq# ! ] sig# ! [ i64 . ] sig# !"
     );
@@ -226,17 +226,17 @@ fn a_letter_is_a_variable_and_its_symbol_a_value() {
     // matching, and a bare letter in Low Stack is a symbol, a value to match,
     // as `a'` is in High Stack (SYMBOLIC-FORTH.md 7, step 2).
     assert_eq!(
-        lowered("ff: < a' a >< a > [ drop ] ;"),
-        "ff [ a a var# . ] sig# ! [ a var# . ] sig# ! [ drop . ] ;"
+        lowered("ff: < a' a >. drop < a >. ;"),
+        "ff [ [ a a var# . ] sig# ! . drop . [ a var# . ] sig# ! . ] ;"
     );
-    let high = "ff: < a' > [ drop 1 ] ; ff: < a > [ drop 2 ] ; 7 ff a' ff";
+    let high = "ff: < a' >. drop 1 ; ff: < a >. drop 2 ; 7 ff a' ff";
     let mut s = Session::new();
     s.eval(high).unwrap();
     assert_eq!(s.show(), "<2> 2 1");
     let mut s = Session::new();
     s.symbolic = true;
     s.eval(
-        "ff [ a ] sig# ! [ drop . 1 int# ! ] ; ff [ a var# . ] sig# ! [ drop . 2 int# ! ] ; \
+        "ff [ [ a ] sig# ! . drop . 1 int# ! ] ; ff [ [ a var# . ] sig# ! . drop . 2 int# ! ] ; \
          7 int# ! ff . a ff .",
     )
     .unwrap();

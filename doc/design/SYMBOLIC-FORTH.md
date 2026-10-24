@@ -52,7 +52,15 @@ made where it is defined, `err.file.notfound`, which waits on defining
 types (6.29). Revised 2026-10-23: a bracket names its inputs,
 `[ rate term | … ]`, read as the letters of their places, seen by a
 string or a literal inside it and not by a quotation, and a caller names
-a word's inputs by passing a record (6.31). Built, but for records.
+a word's inputs by passing a record (6.31). Built, but for records. And
+a kind is named by `;`, as a type of its own is, with no `ns#` (6.29).
+Revised 2026-10-24: a body is bare, between the label's colon and `;`,
+as FORTH's is, so a bracket in it is always a value; a signature is a
+check applied, `< i64 >.`, the first a body's inputs and the last what it
+leaves, so `><` retires; and `[ … ] !` runs a quotation while compiling
+(6.32). Built in march8 (2026-10-24), but `[ … ] !`. And a superscript, as a subscript, is a
+convention, its meaning the word's family's, the core giving defaults by
+kind where they are useful (6.21, 22).
 
 ## 1. What it is
 
@@ -82,7 +90,8 @@ Everything in Symbolic Forth is a symbol, a quotation, or a meta-op
   must leave one bool, `x 0 int# ! lt ?`, and in a signature is a guard
   (section 3); **`!` structures** the value below by the type on top, a
   number symbol into a concrete i64, `2 i64 !`, or a quotation into a
-  sequence, `[ … ] seq# !`; and **`;` defines**, binding the name below
+  sequence, `[ … ] seq# !`, and a quotation on top it runs while
+  compiling, `[ … ] !` (6.32); and **`;` defines**, binding the name below
   to the value on top, `sq [ dup . * . ] ;`. `.` is the store's one read,
   and `;` its one write.
 
@@ -201,9 +210,10 @@ which become spellings above it (decided 2026-10-14, not built):
   1), undecided, and taking from below, in the same way (Thomas,
   2026-10-14).
 - **`< … >`** is code run while compiling, whose values are a type or a
-  signature, `< string i64 map k >`. A clause's signature is two of
-  them, inputs then outputs, written touching, `< a a gt? >< a >`
-  (6.8), before its body. It needs no kind of its own: code run where it
+  signature, `< string i64 map k >`. Applied, `< a a gt? >.`, it checks
+  the values on top where it is applied, and a clause's signature is the
+  check its body begins with, its outputs the one it ends with, `max: <
+  a a gt? >. drop < a >. ;` (6.32). It needs no kind of its own: code run where it
   stands whose values are gathered is a sequence, so `< … >` is
   `[ … ] seq# !`, a sequence of types.
 - **`"…"`** is a string, with holes of code: `"\_ apples"`. In the lowest
@@ -226,33 +236,33 @@ which become spellings above it (decided 2026-10-14, not built):
   Elm and Elixir. A map form, `{| … |}` perhaps, is to come. Built in
   march8 (2026-10-15), as `[| … |]` on 2026-10-19, closed by `|]` alone.
 
-A signature in the lowest form is two, inputs then outputs, and needs no
-divider (Thomas, 2026-10-14): `< a* >< b* >` is `[ a* ] [ b* ]`, each a
-quotation made a signature, `[ a* ] sig# ! [ b* ] sig# !` (6.8). One
-gives the inputs alone, and the stage finds the outputs; `[ n var# . ]
-sig# ! [ ] sig# !` declares that there are none. `;` takes a clause's
-signature before its body, so no bracket is read by where it stands:
+A signature in the lowest form is a check in the body, a quotation made a
+signature and applied, `[ a* ] sig# ! .`, and needs no divider (6.32):
+`;` takes a name and a body, and the body's first check is the clause's
+inputs, and its last, after that, its outputs. One gives the inputs
+alone, and the stage finds the outputs; `[ n var# . ] sig# ! . … [ ]
+sig# ! .` declares that there are none:
 
 ```
-sq [ dup . * . ] ;                         -- name, body
-fib [ n var# . ] sig# ! [ … ] ;             -- name, inputs, body
-sq [ i64 . ] sig# ! [ i64 . ] sig# !
-   [ dup . * . ] ;                         -- name, inputs, outputs, body
+sq [ dup . * . ] ;                                   -- name, body
+fib [ [ n var# . ] sig# ! . … ] ;                    -- inputs, body
+sq [ [ i64 . ] sig# ! . dup . * . [ i64 . ] sig# ! . ] ;   -- inputs, body, outputs
 ```
 
-`;` tells these apart by type, since a name is a symbol and a
-signature is not. And with no divider, `--` begins a comment everywhere,
-inside a quotation and a bracket as well; High Stack writes the two
-brackets touching, `< i64 >< i64 >` (6.8, 6.9).
+With no divider, `--` begins a comment everywhere, inside a quotation
+and a bracket as well (6.9).
 
-The whole signature stays before the body (Thomas, 2026-10-20: "I like
-the full signature up front"). Written in the body, `foo: [ < i64 i64 >
-… < i64 > ] ;`, a clause would be one quotation and `;` would take only a
-name and a value, but a bracket would be read by where it stands, and in
-Low Stack, where a bracket is three elements, `[ … ] seq# !`, `;` would
-have to find that shape at both ends of the body. `foo: < i64 i64 > [ … ]
-< i64 > ;` reads no bracket by place, `;` telling the outputs from the
-inputs by order and type, but splits the signature around the body.
+Until 2026-10-24 the whole signature came before the body, two brackets,
+`[ a* ] sig# ! [ b* ] sig# ! [ … ] ;`, which High Stack wrote touching,
+`< i64 >< i64 > [ … ]`, `;` telling them apart by type (Thomas,
+2026-10-20: "I like the full signature up front"). Written in the body,
+`foo: [ < i64 i64 > … < i64 > ] ;`, was set aside then: a bracket would
+be read by where it stands, and in Low Stack `;` would have to find that
+shape at both ends of the body; and `foo: < i64 i64 > [ … ] < i64 > ;`
+split the signature around the body. Both are so now, by Thomas's
+reading of a signature as a check, which holds where it is applied, and
+the outputs could not be checked at the start (6.32): `;` finds a check
+at each end, a bracket made by `sig#` and applied.
 
 A signature has two kinds of hole. Values its code takes from below must
 be known while compiling, since a type depends on no value known only at
@@ -276,13 +286,14 @@ rules live here, not below:
 | `Snake` | `Snake .` | a capital marks nothing (6.27) |
 | `+'` | `+` | a prime marks a word passed |
 | `fib:` | `fib` | a label is a symbol |
+| `sq: dup * ;` | `sq [ dup . * . ] ;` | a label's body runs to its `;`, a quotation (6.32) |
 | `a` | `a var# .` | one lowercase letter is a variable |
 | `[ 2 + ]` | `[ 2 int# ! + . ]` | a quotation |
 | `[ 2 + ].` | `[ 2 int# ! + . ] .` | a dot at a word's end applies once more |
 | `2 i64!` | `2 i64 . !` | `!` structures by a type |
 | `positive?` | `positive ?` | `?` tests |
 | `10`, `1.5`, `1:2` | `10 int# !`, `1.5 dec# !`, `1:2 ratio# !` | a number's spelling gives its kind |
-| `< i64 >< i64 >` | `[ i64 . ] sig# ! [ i64 . ] sig# !` | a signature is two, each a quotation made one |
+| `< i64 >.` | `[ i64 . ] sig# ! .` | a signature applied is a check (6.32) |
 | `[\| sq math.pi \|]` | `[ sq math.pi ]` | the lowest form inline |
 | `( 1 2 )` | `[ 1 int# ! 2 int# ! ] seq# !` | a sequence literal |
 | `{ a: 1 }` | `[ a 1 int# ! ] map# !` | a map literal |
@@ -293,16 +304,15 @@ rules live here, not below:
 | `[ dup + ]^3` | `[ dup . + . ] 3 int# ! power# .` | a quotation's power, a quotation |
 
 A capital marks nothing (6.27): `Snake` is a name and applies, so
-`Foo: [ 1 2 + ] ; Foo` runs to 3, and a symbol is quoted, `Snake'`.
+`Foo: 1 2 + ; Foo` runs to 3, and a symbol is quoted, `Snake'`.
 
 ```
-fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;
-fib [ n var# . ] seq# ! [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;
+fib: < n >. dup 1 -+ fib swap 2 -+ fib + ;
+fib [ [ n var# . ] sig# ! . dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ . fib . + . ] ;
 ```
 
-March8 reads it so (2026-10-15), and, until signatures are sequences,
-lowers it to `fib < n > [ dup . 1 int# ! -+ . fib . swap . 2 int# ! -+ .
-fib . + . ] ;`.
+March8 reads it so (2026-10-24), as it read `fib: < n > [ … ] ;` from
+2026-10-15.
 
 A surface may come above the intermediate form, as SURFACE.md's headings
 were to be. How many stages there are is still to be discovered; Symbolic
@@ -445,7 +455,11 @@ Settled (Thomas, 2026-10-14), not built:
    and needs no meaning of its own (Thomas, 2026-10-20, from the bowtie
    `⋈`, which it looks like; the glyph stays out of source). An empty
    bracket gives no inputs, `< >< i64 >`. Built in march8 (2026-10-20),
-   the core and every test moved to it. A bracket still stands apart,
+   the core and every test moved to it. Since 2026-10-24 a signature is a
+   check applied, `< i64 >.`, a body's first its inputs and its last what
+   it leaves, `sq: < i64 >. dup * < i64 >. ;`, so `><` retires (32),
+   which march8 says where it is written; built that day, the core and
+   every test moved to it. A bracket still stands apart,
    `< string >`, not `<string>`: a word is what is between spaces
    (Thomas, 2026-10-20: "let's just stick with spacing", to revisit).
    Brackets that touch words were weighed and set aside: lined-up cases
@@ -595,7 +609,7 @@ Settled (Thomas, 2026-10-14), not built:
     would be a sequence written into the string. Letters belong to the innermost bracket they are written in, as
     `_`s do, so a bracket means the same wherever it is pasted, and
     nothing is captured. In a signature a letter is still a type variable,
-    filled by matching (section 2), so in `at: < a ary i64 >< a > [ … ]`
+    filled by matching (section 2), so in `at: < a ary i64 >. … < a >. ;`
     the signature's `a` and the body's are two variables. In Low Stack a
     body's letter is `b var# .` (section 7).
 
@@ -758,7 +772,7 @@ Settled (Thomas, 2026-10-14), not built:
     namespace reaches by importing it by its path, a decision written
     where it is made, as Go's `unsafe` is a package imported by name. So
     `+` is `core.+`, a path like any other, and a program's word of a
-    core name is its own: `dup: [ 7 ] ;` at the root is the program's
+    core name is its own: `dup: 7 ;` at the root is the program's
     `dup`, the core's own words still meaning the core's, `over` among
     them, and `core.dup` reaching the core's. A program adds a clause to a
     family of the core's by its path, then, `core.unit: < int#-' > … ;`,
@@ -837,16 +851,20 @@ Settled (Thomas, 2026-10-14), not built:
 18. **`;` defines**, a meta-op (Thomas). Through all of the above one
     word stayed constant, `def`, applied in every program, so it is named
     for what it is, FORTH's `;`: `sq: [ dup * ] ;` is `: sq dup * ;`
-    turned postfix, the label's colon opening and `;` closing. It binds the
+    turned postfix, the label's colon opening and `;` closing, and since
+    2026-10-24 `sq: dup * ;` is, the colon opening the body as FORTH's
+    does (32). It binds the
     name below to the value on top, with a signature between them if
     there is one, code and data alike, and adds a clause to the word of
-    that name, as `def` did. So a second `;` on a constant's name adds a
-    clause rather than replacing the value: replacing an entry is the
-    global store's write, for the store's design. Built in march8
+    that name, as `def` did. A second `;` with a new signature adds a
+    clause, and one with the same signature replaces it, as march8 does,
+    so a name's entry is one, its family (32); writing an entry as the
+    program runs is the global store's write, for the store's design. Built in march8
     (2026-10-15), with the signature before the body, its inputs, then its
     outputs if it gives them, each a bracket (8; one bracket divided by
-    `--` until 2026-10-20); a body that begins with a signature is
-    refused, saying where it goes (section 3).
+    `--` until 2026-10-20); since 2026-10-24 the signature is in the
+    body, its first check, and its outputs its last (32), and a signature
+    before the body is refused, saying where it goes (section 3).
 
 19. **Symbols applied at run time** (Thomas). `.` applies a symbol known
     while compiling, or one its type bounds: a union of symbols, compiled
@@ -895,12 +913,20 @@ Settled (Thomas, 2026-10-15):
 
 21. **Powers.** `w^n`, written `wⁿ`, is the word's n-th power as
     mathematics takes it for that kind of thing: n copies of something,
-    joined by an operation. The word's stack effect gives the kind:
+    joined by an operation. A superscript is a convention, as a subscript
+    is (22), and not one transform for every word (Thomas, 2026-10-24:
+    "general conventions, and not strict mathmatical transforms", since
+    a power does not apply usefully in the same way to every word): what
+    `w^n` means is w's family's, and these are the core's, by kind, for a
+    word that gives none. A family gives its own by a clause of the core's
+    `power#` (24), for its word and any count, as a combinator's count of
+    quotations would be, `cleave^3` for Factor's `tri` (COMBINATORS.md).
+    The word's stack effect gives the kind:
 
     | kind | effect | `w^n` | so |
     |---|---|---|---|
     | value | `-- a` | n copies, multiplied | `pi^2` is π², `pi pi ⋅` |
-    | function | `< a >< a >` | n applications, composed | `sqrt^2` is `sqrt sqrt`, a fourth root |
+    | function | `a -- a` | n applications, composed | `sqrt^2` is `sqrt sqrt`, a fourth root |
     | operation | k values, one left | n operands, joined by it | `+^4` is `+ + +` |
 
     An operation is counted by its operands, as x³ is three x's and two
@@ -935,10 +961,10 @@ Settled (Thomas, 2026-10-15):
     `string-concat`'s the empty string; and `least` and `greatest` give an
     order's ends, `i64' least` the smallest i64, `f64' greatest` ∞ and
     `bool' greatest` true. A type converts a `unit#` to itself as it does
-    a literal, `i64: < unit# >< i64 > [ [ i64 i64 ] identity# ] ;`, and
+    a literal, `i64: < unit# >. [ i64 i64 ] identity# < i64 >. ;`, and
     `identity#` finds which fact holds: it follows the operation at that type to the
     primitive it applies there, through a word that applies one operation,
-    `add: [ + ] ;`, or flips it, `[ swap + ]`, and a family's clause for
+    `add: + ;`, or flips it, `[ swap + ]`, and a family's clause for
     that type; or to a choice of the greater of two, by `gt` or `lt`, whose
     identity is the type's least value, the lesser's its greatest. So `max`
     at i64 has the smallest i64, `min` at f64 ∞, and `and`, `min` at bool,
@@ -963,7 +989,7 @@ Settled (Thomas, 2026-10-15):
     and `effect#` (6): `u ins identity#`, u the identity, whose operation
     `quote !` gives as code, `+' unit# !` being `[ + ]`, and ins the types
     it is for, `[ i64 i64 ]`, which is how a type converts one, `i64: <
-    unit# >< i64 > [ [ i64 i64 ] identity# ] ;`. A word has the fact
+    unit# >. [ i64 i64 ] identity# < i64 >. ;`. A word has the fact
     `unit` states for it, if one does; else its one clause for those
     types, followed; else two that pick one of two values by `gt` or `lt`,
     only moving them, which it shows by applying each to two symbols,
@@ -1002,9 +1028,14 @@ Settled (Thomas, 2026-10-15):
 22. **A subscript is an index** (Thomas, 2026-10-20). In mathematics a
     subscript picks a member of a family, log_b, x_i, a_n, and the family
     says what its index means. So in March `w_n`, written `wₙ`, is a name,
-    and what it means is its family's. A superscript is unlike it: fⁿ is f
-    iterated, whatever f is, so a power has one rule for every word (21),
-    and a subscript has none. A program gives `log_2` a meaning by a
+    and what it means is its family's. A superscript is the same, a
+    convention whose meaning is the family's, the core giving defaults by
+    kind (21; Thomas, 2026-10-24). Until then it was held to be unlike a
+    subscript, fⁿ being f iterated whatever f is, one rule for every word;
+    but that rule was four meanings by kind already, and mathematics' own
+    superscript is a convention: sin²x squares the value, f² in dynamics
+    composes, f⁻¹ inverts and sin⁻¹ is arcsin, ℝ³ is a product and f⁽ⁿ⁾
+    a derivative. A program gives `log_2` a meaning by a
     rule, its base (25), or `x_1` one by defining it, as any name.
 
     Where no family gives a subscript a meaning, the core gives one, by a
@@ -1021,7 +1052,7 @@ Settled (Thomas, 2026-10-15):
     through the scratch stack, `dup_2` being `over over`. The width comes
     before the power, `dup_2^3` being `dup_2` cubed. So `==` and `~~` go.
     A program's word made of them has one too, by what it does, not by a
-    list: `tuck: [ swap over ] ;` gives `tuck_2` (Thomas, 2026-10-20: "if
+    list: `tuck: swap over ;` gives `tuck_2` (Thomas, 2026-10-20: "if
     it is general then maybe we make it general after all").
 
     A word that computes has no width: `+_2` and `cube_2` are no words,
@@ -1057,7 +1088,7 @@ Settled (Thomas, 2026-10-15):
     over its numbers. An identity the primitives do not give is one (21):
 
     ```
-    core.power#: < -+' 0 > [ drop drop [ 0 ] ] ;    -- -+^0 is 0
+    core.power#: < -+' 0 >. drop drop [ 0 ] ;    -- -+^0 is 0
     ```
 
     `power#` matches a quoted word as a value, as it does a number or a
@@ -1087,7 +1118,7 @@ Settled (Thomas, 2026-10-15):
     each a symbol, in the order written, then the rule's code:
 
     ```
-    logs./log_([0-9]+)/: [ i64 ! log-base ] ;
+    logs./log_([0-9]+)/: i64 ! log-base ;
     import#: [| logs.* |] ;
     1024 log_2                       -- 1024 '2' i64 ! log-base
     ```
@@ -1095,13 +1126,13 @@ Settled (Thomas, 2026-10-15):
     A rule is a spelling, not a word, so it has no signature and one
     meaning: a second definition of a pattern is an error, and so is a
     signature. Its effect is the rewrite's, found where the name is
-    applied, so to its user `log_2` is `< f64 >< f64 >`. More meanings
+    applied, so to its user `log_2` is `< f64 >. … < f64 >.`. More meanings
     are a family's, which the rule's code applies:
 
     ```
-    times: < i64 sym >< i64 > [ int# ! * ] ;
-    times: < f64 sym >< f64 > [ f64 ! * ] ;
-    /times([0-9]+)/: [ times ] ;     -- 5 times3 is 15, 2.5 times2 5.0
+    times: < i64 sym >. int# ! * < i64 >. ;
+    times: < f64 sym >. f64 ! * < f64 >. ;
+    /times([0-9]+)/: times ;         -- 5 times3 is 15, 2.5 times2 5.0
     ```
 
     Each part means what it means where it was written (16). A capture is
@@ -1113,7 +1144,7 @@ Settled (Thomas, 2026-10-15):
     `times3`, has no need of it. Clojure's macros read a symbol so, with
     `resolve`, while they expand. The rule's own
     names are found where the rule was defined, as a word's are, so `sq7`,
-    in a namespace that imports `ops./sq([0-9]+)/: [ int# ! sq ] ;`,
+    in a namespace that imports `ops./sq([0-9]+)/: int# ! sq ;`,
     squares by `ops.sq`: hygiene, as Scheme's macros keep it. The captures
     go on the stack, not into marks, `$1`, since a mark would want a
     spelling in Low Stack, and `dup` serves a capture used twice; and they
@@ -1132,8 +1163,8 @@ Settled (Thomas, 2026-10-15):
     rules too, which come last, as the core's names are found last:
 
     ```
-    /(.+)\^([0-9]+)/: [ int# ! power# . ] ;
-    /(.+)_([0-9]+)/: [ int# ! width# ] ;
+    /(.+)\^([0-9]+)/: int# ! power# . ;
+    /(.+)_([0-9]+)/: int# ! width# ;
     ```
 
     So `.` applying a name looks first for a rule of its namespace or of
@@ -1216,7 +1247,7 @@ Settled (Thomas, 2026-10-15):
     `Snake: Snake' ;`, as a Lisp keyword evaluates to itself. A namespace
     of symbols, a state machine or facts and rules, imports the old rule
     as a rule (25) whose capture is the name itself and whose code is
-    none, `/([A-Z][A-Za-z0-9]*)/: [ ] ;`, and there
+    none, `/([A-Z][A-Za-z0-9]*)/: ;`, and there
     `Socrates Is Human fact` reads without marks as before; a capitalized
     word defined in it clashes with the pattern, as among facts it should.
     In a signature a bare `Open` is applied and means what it leaves, its
@@ -1278,9 +1309,9 @@ Settled (Thomas, 2026-10-15):
     checked while compiling.
 
     ```
-    size: < string >< i64 > [ io.file.read length ] ;
-    size: < string k trap >< i64 > [ drop drop 0 ] ;
-    size: < string no-file' trap >< i64 > [ drop drop 0 ] ;
+    size: < string >.                io.file.read length < i64 >. ;
+    size: < string k trap >.         drop drop 0 < i64 >. ;
+    size: < string no-file' trap >.  drop drop 0 < i64 >. ;
     ```
 
     A trap's kind is in its type (Thomas, 2026-10-22, and revised the same
@@ -1319,26 +1350,29 @@ Settled (Thomas, 2026-10-15):
     was done before the failure stands.
 
     **A kind is a type, made where it is defined** (Thomas, 2026-10-22).
-    `trap` takes a map, whose `error#` holds the kind's message and its
-    path, and makes it a type, so a signature names a kind as it names any
-    type, with no `trap` written there, and `or` joins kinds as it joins
-    types. `ns#` gives the namespace where it is applied, as a symbol, so
-    a kind knows its own name (Thomas: "Just need a primative the returns
-    the current namespace as a symbol"), and two kinds with one message
-    are two. A kind's name is a word and a namespace both, the kinds
+    `trap` takes a map, whose `error#` holds the kind's message, and makes
+    it a type, so a signature names a kind as it names any type, with no
+    `trap` written there, and `or` joins kinds as it joins types. `;`
+    names it with the path it defines, as it names a type of its own
+    (TYPES.md 2.11), so a kind knows its own name, and two kinds with one
+    message are two. Thomas first asked for `ns#` to give it, "a primative
+    the returns the current namespace as a symbol", written in the map;
+    but the name wanted is always the one being defined, which `;` knows
+    (Thomas, 2026-10-23), and `ns#` would give where it is written, the
+    core's namespace or a helper's in a word that makes kinds. A kind's name is a word and a namespace both, the kinds
     beneath it in it, as march8 already lets a word and a namespace share
     a name; the hierarchy is the namespaces', not a symbol's spelling
     (Thomas: "that would make just longer symbol `err.file'` that's not a
     namespace. it has to be a word"). The core's kinds are under `err`:
 
     ```
-    err.file:          { error#: ( "file error" ns# ) } trap ;
-    err.file.notfound: { error#: ( "file not found" ns# ) } trap ;
-    err.file.denied:   { error#: ( "permission denied" ns# ) } trap ;
+    err.file:          { error#: "file error" } trap ;
+    err.file.notfound: { error#: "file not found" } trap ;
+    err.file.denied:   { error#: "permission denied" } trap ;
 
-    size: < string err.file.notfound >< i64 > [ drop drop 0 ] ;
-    size: < string err.file >< i64 > [ drop drop -1 ] ;      -- any file error
-    size: < string err.file err.arith or >< i64 > [ … ] ;
+    size: < string err.file.notfound >.          drop drop 0 < i64 >. ;
+    size: < string err.file >.                   drop drop -1 < i64 >. ;   -- any file error
+    size: < string err.file err.arith or >.      … < i64 >. ;
     ```
 
     A kind takes the kinds beneath it, and the most particular is chosen,
@@ -1419,7 +1453,7 @@ Settled (Thomas, 2026-10-15):
     of `arithmetic'` and `io'`; a missing file is `io'`, finer kinds to
     come when a handler needs one. A clause that takes a trap last is a
     handler only where its word's other clauses take the inputs;
-    elsewhere it is a word applied to a trap, as `log: < k trap > [ … ]`
+    elsewhere it is a word applied to a trap, as `log: < k trap >. … ;`
     is in a handler. Not built: kinds as types (above), and where a
     trap happened.
 
@@ -1458,7 +1492,8 @@ Settled (Thomas, 2026-10-15):
     them, a word's body being one and every bracket made from one, and
     FORTH added `[: … :]` to be rid of naming every piece. What stands:
     `seq# !` is `.` with what it leaves kept together, so a literal's code
-    reaches what `.`'s does (14).
+    reaches what `.`'s does (14). And `[ … ] !` runs a quotation while
+    compiling, staging too, its values left known (32).
 31. **A bracket names its inputs** (Thomas, 2026-10-23: "stack-base
     programming is not easy for humans or LLMs … The mind just does not
     think well in terms of a stack past a few postions", and "am I wasting
@@ -1474,10 +1509,11 @@ Settled (Thomas, 2026-10-15):
     order, the deepest first:
 
     ```
-    growth:  < f64 f64 >< f64 >     [ rate term | rate 1 + term ^ ] ;
-    annuity: < f64 f64 f64 >< f64 > [ p r g | p r ⋅ g ⋅  g 1 -+  div ] ;
-    payment: < f64 f64 f64 >< f64 >
-      [ principal rate term | principal rate  rate term growth  annuity ] ;
+    growth:  < f64 f64 >.     [ rate term | rate 1 + term ^ ] .  < f64 >. ;
+    annuity: < f64 f64 f64 >. [ p r g | p r ⋅ g ⋅  g 1 -+  div ] .  < f64 >. ;
+    payment: < f64 f64 f64 >.
+      [ principal rate term | principal rate  rate term growth  annuity ] .
+      < f64 >. ;
     ```
 
     The names are the bracket's inputs: it takes as many as it names, and
@@ -1564,6 +1600,136 @@ Settled (Thomas, 2026-10-15):
     code, word for word.
     A `|` is a bar only where High Stack reads it, so in Low Stack it is a
     symbol, as any name is.
+32. **A body is bare** (Thomas, 2026-10-24: "It appears we have made a
+    subtle faux pas"). Between the label's colon and `;` is the body, as
+    between FORTH's `:` and `;`, and applying the name runs it: `sq: dup
+    * ;` is `: sq dup * ;`. A bracket in a body is a value, whichever
+    bracket it is, so each of these leaves what it holds:
+
+    ```
+    foo: ( 1 2 ) ;      -- the tuple
+    bar: { a: 1 } ;     -- the map
+    baz: [ dup * ] ;    -- the quotation
+    sq: dup * ;         -- runs dup *
+    ```
+
+    Until then a body was a quotation, `sq: [ dup * ] ;`, and `;` treated
+    it apart from every other value: a tuple was left where the name was
+    applied and a quotation run, so a word leaving a tuple would have been
+    `foo: [ ( … ) ] ;` (Thomas), and code with no bracket, `qux: … ;`, was
+    to be computed while compiling, where it could take nothing from below.
+    The brackets came up from Low Stack, where `;`, being postfix, takes
+    the body as a value. In High Stack the label's colon opens it already,
+    so `name: … ;` lowers to `name [ … ] ;`, and Low Stack does not change.
+    What it settles, and what follows from it:
+
+    - **A constant of several values** is a word that leaves them, `fbb:
+      "FOO" "BAR" "BAZ" ;`, the colon marking where the body starts.
+    - **A type is named as before.** A type is known only while compiling
+      (TYPES.md 2.4), so a body that takes nothing and leaves a type is
+      computed then, and `;` names what it leaves: `celsius: f64 own ;`,
+      `meter: measure ;`, an alias, `temp: f64 ;`, a kind made by `trap`
+      (29), and a record type, `point: { x: < f64 > ; y: < f64 > ; } ;`.
+    - **A signature is a check, applied** (Thomas). A type bracket is a
+      value as any bracket is, and `.` applied to it checks that the top
+      of the stack holds those types where it is applied, a law of the
+      code there; `< i64 >.` is `< i64 > .`, as `[ 2 + ].` is `[ 2 + ] .`.
+      At a word's start that is what the word expects, so `;` takes the
+      check a body begins with as the clause's inputs, which dispatch
+      matches, a clause whose check fails passed over, and the check it
+      ends with as what it leaves; elsewhere a check that fails is an
+      error. Outputs cannot be checked at the start, which is why FORTH's
+      `( n -- n )` was a comment, so the outputs' bracket touching the
+      inputs', `><` (8), retires, and `><` is free again (TODO.md):
+
+      ```
+      sq:    < i64 >. dup * < i64 >. ;
+      floor: < i64 >. ;
+      max:   < a a gt? >. drop ;
+      num:   < i64 f64 or money or int# or dec# or ratio# or > ;
+      ```
+
+      `floor`'s outputs are worked out, as a clause's are where it gives
+      none, so its check at the end is left off; `num`'s bracket is not
+      applied, so the body leaves the type, and `;` names it, as a record
+      type's field is `x: < f64 > ;`. A check says only what it says
+      (Thomas): `ff: < i64 >. + ;` takes two, as `ff: + ;` does, the top
+      an `i64` and the value below typed where `ff` is applied, as a
+      word's inputs are where it has no check. A letter is one type
+      variable through a definition, `abs: < a >. … < a >. ;`. A check
+      costs nothing where the types are known while compiling; where they
+      are not, a `num`'s, it is tested as the program runs and fails as
+      `fail` does (29), as dispatch tests a clause's first check now.
+      `clauses#` gives a clause's checks as its inputs and outputs, as
+      before (6). Weighed first and set aside the same day: the bracket a
+      body begins with as its signature, with the outputs' if it touched,
+      unless they were all of the body, which kept the aliases, nine, but
+      lost the identity clauses, twenty-seven, `floor: < i64 >< i64 > [ ]
+      ;` read as two types.
+    - **A bracket names its inputs** as before, applied where it stands
+      (Thomas): `growth: < f64 f64 >. [ rate term | rate 1 + term ^ ] .
+      ;`. Names on the definition itself would say the same twice, so
+      there are none (Thomas, 2026-10-24: "every definition with more
+      than one argument is going to turn into that form"), a concern
+      that holds for the bracket's names too, which COMBINATORS.md
+      weighs.
+    - **Code runs while compiling only when asked,** by `!` with a
+      quotation on top, which until now it refused (section 7). `[ … ] !`
+      runs the quotation once, while compiling, and leaves its values
+      known:
+
+      ```
+      my-schema: [ "schemas/my.json" io.file.read ] ! ;
+      validate:  [ "schemas/my.json" io.file.read ] ! check ;
+      ```
+
+      `!` makes data of what a quotation's code leaves (30): with a kind
+      on top, data of that kind, `[ … ] seq# !`, and with the quotation
+      itself on top, its values, made while compiling. So `!` faces `.`:
+      `[ … ] .` runs the code where it is applied, each time, and
+      `[ … ] !` runs it while compiling. The quotation takes nothing from
+      below, since what is below is known only as the program runs, so
+      `2 [ 1 + ] !` is refused; its effects run, a file read as Rust's
+      `include_str!` reads one, the code's identity following what it
+      read (TYPES.md 2.15); and each quotation runs once, kept by its
+      identity. `io.file.embed` gives way to it, `[ "notes.txt"
+      io.file.read ] !`. It is FORTH's `[ … ] LITERAL`, Factor's
+      `<< … >>` and Zig's `comptime`, and macros come of it with no
+      macro language: a quotation it leaves, applied, `[ … ] ! .`, is
+      code made while compiling. Weighed first and set aside: `[[ … ]]`,
+      as some FORTHs write it, for its doubled brackets (Thomas), which
+      would have been two tokens of their own as well (8). It would read
+      the reverse of FORTH's, in which `[ … ]` runs now and Gforth's
+      `]] … [[` postpones code: March's `[ … ]` is the later, a
+      quotation, as in Joy and Factor, and needs no `POSTPONE`.
+    - **`;` defines within its scope** (Thomas): it makes an entry where
+      it stands, and a scope gathers its entries, a namespace's or a
+      map's braces, so a record type keeps its `;`s, `{ x: < f64 > ; y:
+      < f64 > ; }`. A map's keys are unique and unordered, as a
+      namespace's are, a name's entry being its family: a second `;` with
+      a new signature adds a clause and one with the same signature
+      replaces it (18), as `{ a: 1 a: 2 }` is `{ a' 2 }`. A map is not a
+      sequence of pairs (Thomas): pairs in order, repeats allowed, are a
+      sequence of tuples, `( ( a' 1 ) ( a' 2 ) )`.
+
+    Built in march8 (2026-10-24), the core, the examples and every test
+    moved to it, but `[ … ] !`, which march8 still refuses. A label's body
+    runs to the `;` that closes the label in its own bracket, so a label
+    whose bracket closes first is a key, `{ a: 1 }`, and the reader
+    writes the body as a quotation; input that ends inside a body is
+    unfinished, so the REPL waits for its `;`. `;` takes a body's first
+    check and its last as the clause's signature, and a body that is one
+    type as that type; a definition that names its inputs is refused,
+    saying a bracket does. A type applied anywhere else checks the values
+    on top while compiling, settling a literal, `3 < f64 >.` being 3.0.
+    A primitive's signature is written so too, `< i64 i64 >. < i64 >.`.
+    Not yet: a body reaching below its first check, `ff: < i64 >. + ;`
+    being refused as before, since dispatch counts a clause's inputs by
+    its signature; a check tested as the program runs, of a value whose
+    type is known only then; and a guard in a check other than a body's
+    first. To settle: `;` in braces defines into the namespace in
+    march8, not the map, and it refuses a one-letter name, a letter being
+    a place, where a field reached by a path, `p.x`, could take one.
 
 Open: for rules (25), what a group that may not match leaves,
 refused for now, and how an import names one alone; and the symbol for
@@ -1592,13 +1758,16 @@ so spelling counts in lookup alone.
 word it names, a quotation, run. `?` applies it as a test, which leaves
 one bool, and in a signature is a guard (6.20). `!` structures the value
 below by the type on top, and a symbol on top names its type by its
-word, `2 i64 !` being `2 i64 . !` (section 2). Anything else on top is
-refused, a quotation among them (Thomas, 2026-10-21: `[ 1 2 + ] !`
-"doesn't mean anything"). Its code is not run to find a type, so
-`5 [ i64 ] !` is not `5 i64 !`: a bracket's kind is said where it is
+word, `2 i64 !` being `2 i64 . !` (section 2). A quotation on top it
+runs while compiling, once, leaving its values known, `[ 1 2 + ] !`
+being 3 (6.32, decided 2026-10-24, not built), where it was refused
+(Thomas, 2026-10-21: `[ 1 2 + ] !` "doesn't mean anything"). Anything
+else on top is refused. What the quotation leaves is not taken as a
+type for the value below, so `5 [ i64 ] !` is 5 and the symbol `i64`, not `5 i64 !`:
+a bracket's kind is said where it is
 made (6.6), and `[ i64 ] sig# !` makes a signature, which `!` takes, here
 the type alone. In `[ … ] seq# !` the quotation is the value below, and
-`seq#` the type on top. March8 refuses it so. `;` binds the name below to
+`seq#` the type on top. March8 refuses a quotation on top still. `;` binds the name below to
 the value on top, with a signature between them if there is one, inputs
 then outputs, each made by `sig# !` (section 3, 6.8, 6.18); the name is a symbol, a
 path among them, or a pattern, which `;` tells from a symbol by its type.
@@ -1633,7 +1802,7 @@ Types are words (section 2).
   by `int# !`, and `;` takes it where it takes a name (6.25):
 
   ```
-  /log_([0-9]+)/: [ i64 ! log-base ] ;
+  /log_([0-9]+)/: i64 ! log-base ;
   log_([0-9]+) pattern# ! [ i64 . ! log-base . ] ;
   ```
 

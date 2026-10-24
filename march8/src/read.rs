@@ -93,9 +93,10 @@ fn read_form(src: &str, symbols: &Symbols, symbolic: bool) -> Result<Vec<Token>>
         symbolic,
         args: Vec::new(),
         bars: Vec::new(),
+        bodies: Vec::new(),
     };
     let toks = tokens(&mut r, symbols, None)?;
-    places(names(toks, &r.bars, &r.args)?, &r.args)
+    places(names(toks, &r.bars, &r.args, &r.bodies)?, &r.args)
 }
 
 /// A name used in code at `i`, and how many tokens spell it: `rate .`, or a
@@ -169,7 +170,7 @@ enum Part {
 /// passed in on the stack just before it and taken there by a letter, as
 /// one would write it, so `[ x | ( x ) ]` is `[ x | x ( a ) ]`; a quotation
 /// inside it does not see them.
-fn names(toks: Vec<Token>, bars: &[Pos], args: &[Pos]) -> Result<Vec<Token>> {
+fn names(toks: Vec<Token>, bars: &[Pos], args: &[Pos], bodies: &[Pos]) -> Result<Vec<Token>> {
     if bars.is_empty() {
         return Ok(toks);
     }
@@ -187,6 +188,7 @@ fn names(toks: Vec<Token>, bars: &[Pos], args: &[Pos]) -> Result<Vec<Token>> {
         close,
         bars,
         args,
+        bodies,
     };
     let at = toks.first().map_or(Pos { line: 1, col: 1 }, |t| t.pos);
     Ok(n.code(0, toks.len(), Made::Top, at, &[], false)?.0)
@@ -198,6 +200,7 @@ struct Names<'a> {
     close: Vec<usize>,
     bars: &'a [Pos],
     args: &'a [Pos],
+    bodies: &'a [Pos],
 }
 
 impl Names<'_> {
@@ -289,6 +292,25 @@ impl Names<'_> {
         let syntax = |at: Pos, msg: String| Error::new(Kind::Syntax, Some(at), msg);
         let (own, start) = if made == Made::Top {
             (Vec::new(), from)
+        } else if self.bodies.contains(&at) {
+            // A definition names nothing: a bracket in its body does
+            // (doc/design/SYMBOLIC-FORTH.md 6.32).
+            let mut j = from;
+            while j < to && !self.bar(j) {
+                j = match toks[j].tok {
+                    Tok::Open(_) => self.close[j] + 1,
+                    _ => j + 1,
+                };
+            }
+            if j < to {
+                return Err(syntax(
+                    toks[j].pos,
+                    "a definition names no inputs, a bracket in its body does: \
+                     `growth: < f64 f64 >. [ rate term | rate 1 + term ^ ] . ;`"
+                        .into(),
+                ));
+            }
+            (Vec::new(), from)
         } else {
             self.head(from, to)?
         };
@@ -296,7 +318,7 @@ impl Names<'_> {
             return Err(syntax(
                 at,
                 if made == Made::Types {
-                    "a signature names no inputs, its letters being types, `< a a >< a >`; \
+                    "a signature names no inputs, its letters being types, `< a a >.`; \
                      the names are its body's, `[ x y | … ]`"
                 } else {
                     "a string names no inputs, its text coming first; give it them on the \
@@ -528,7 +550,7 @@ fn places(toks: Vec<Token>, args: &[Pos]) -> Result<Vec<Token>> {
                         Kind::Syntax,
                         at,
                         "`_` is an input of a bracket of code, and a signature's letters are \
-                         types, `< a a >< a >`",
+                         types, `< a a >.`",
                     ));
                 }
                 if let Some(p) = named {
@@ -600,7 +622,12 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
     let mut lowest: Vec<bool> = Vec::new();
     // A `<` a comment began in.
     let mut dashed = None;
+    // Each label `;` has not closed: the depth of its bracket, where its
+    // name ends in `out`, and where it was written.
+    let mut labels: Vec<(usize, usize, Pos)> = Vec::new();
     loop {
+        // A label its bracket closes first is a key, `{ a: 1 b: 2 }`.
+        labels.retain(|&(d, ..)| d <= open.len());
         r.skip_space();
         let Some(c) = r.peek() else {
             if let Some(p) = hole {
@@ -676,29 +703,16 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             });
             continue;
         }
-        // A signature's two brackets touch, inputs then outputs, `< a a gt? ><
-        // a >` (doc/design/SYMBOLIC-FORTH.md 6.8): `><` is `>` then `<`.
+        // Until 2026-10-24 a signature's two brackets touched, inputs then
+        // outputs, `< a a gt? >< a >`; now each is a check, applied where it
+        // holds (doc/design/SYMBOLIC-FORTH.md 6.32).
         if word == "><" && !r.symbolic {
-            let next = Pos {
-                col: pos.col + 1,
-                ..pos
-            };
-            for (b, at) in [(">", pos), ("<", next)] {
-                piece(
-                    b,
-                    false,
-                    false,
-                    &[],
-                    "",
-                    at,
-                    at,
-                    true,
-                    symbols,
-                    &mut open,
-                    &mut out,
-                )?;
-            }
-            continue;
+            return Err(Error::new(
+                Kind::Syntax,
+                Some(pos),
+                "a signature is a check, applied where it holds, its inputs first in a body \
+                 and its outputs last: `sq: < i64 >. dup * < i64 >. ;`",
+            ));
         }
         if word.starts_with("--") {
             if let Some(&(b'<', p)) = open.last() {
@@ -729,6 +743,11 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         // A letter is a variable, `a var# .` (doc/design/SYMBOLIC-FORTH.md 7):
         // by spelling alone, the bracket it is written in filling it.
         let variable = named && !r.symbolic && is_variable(stem);
+        let label = named
+            && !r.symbolic
+            && marks.is_empty()
+            && stem.chars().count() > 1
+            && stem.ends_with(':');
         let (stem, applies) = if named && !r.symbolic {
             let (stem, applies) = spelled(stem);
             (stem, applies && !marks.starts_with('?'))
@@ -782,6 +801,31 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
         } else {
             (stem, applies)
         };
+        // A body is bare (doc/design/SYMBOLIC-FORTH.md 6.32): a label opens
+        // it, `sq: dup * ;`, and the `;` that closes the label in its
+        // bracket makes it a quotation, `sq [ dup * ] ;`, as Low Stack
+        // writes it, so a bracket in a body is a value. Its signature is
+        // in it, a check, `sq: < i64 >. dup * ;`, which `;` reads.
+        if !r.symbolic
+            && word == ";"
+            && let Some(k) = labels.iter().rposition(|&(d, ..)| d == open.len())
+        {
+            let (_, body, at) = labels[k];
+            labels.truncate(k);
+            // The body's bracket is where its label is, so `names` knows it.
+            r.bodies.push(at);
+            out.insert(
+                body,
+                Token {
+                    tok: Tok::Open(b'['),
+                    pos: at,
+                },
+            );
+            out.push(Token {
+                tok: Tok::Close(b']'),
+                pos,
+            });
+        }
         piece(
             stem,
             applies,
@@ -796,6 +840,19 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
             &mut out,
         )?;
         fold(&mut out)?;
+        if label {
+            labels.push((open.len(), out.len(), pos));
+        }
+    }
+    if let Some(&(_, _, p)) = labels.first()
+        && hole.is_none()
+        && open.is_empty()
+    {
+        return Err(Error::new(
+            Kind::Unfinished,
+            Some(p),
+            "a definition is never closed: its body ends at its `;`, `sq: dup * ;`",
+        ));
     }
     if let Some((o, p)) = open.pop() {
         // Until 2026-10-20 `--` divided a bracket's inputs from its outputs.
@@ -804,7 +861,7 @@ fn tokens(r: &mut Reader, symbols: &Symbols, hole: Option<Pos>) -> Result<Vec<To
                 Kind::Syntax,
                 Some(p),
                 "`<` is never closed, a `--` in it beginning a comment: a signature's outputs \
-                 are a bracket of their own, `< i64 >< i64 >`",
+                 are a check of their own, last in the body, `sq: < i64 >. dup * < i64 >. ;`",
             ));
         }
         return Err(Error::new(
@@ -1115,6 +1172,9 @@ struct Reader<'a> {
     /// Where High Stack's `|`s were read, each after a bracket's names,
     /// which `names` writes as letters.
     bars: Vec<Pos>,
+    /// Where each definition's body opens, at its label, a bracket that
+    /// names no inputs.
+    bodies: Vec<Pos>,
 }
 
 impl<'a> Reader<'a> {
@@ -1469,7 +1529,7 @@ mod tests {
             n("Snake_2"),
             a,
         ];
-        assert_eq!(toks("dup₂ dup\\_2 +⁴ dup₂³ log₂' [ q ]³ x₁: Snake₂"), want);
+        assert_eq!(toks("dup₂ dup\\_2 +⁴ dup₂³ log₂' [ q ]³ x₁' Snake₂"), want);
         let e = read("[ q ]₂", &Symbols::standard()).unwrap_err();
         assert_eq!(e.kind, Kind::Syntax);
     }
@@ -1502,7 +1562,7 @@ mod tests {
     fn words_numbers_and_brackets() {
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("1 -2 1.10 + [ xs ] < i64 >< i64 > -- a comment\n\\times"),
+            toks("1 -2 1.10 + [ xs ] < i64 >. < i64 > -- a comment\n\\times"),
             [
                 Tok::Int(1),
                 Tok::Int(-2),
@@ -1519,6 +1579,7 @@ mod tests {
                 Tok::Close(b']'),
                 n("sig#"),
                 n("!"),
+                Tok::Apply,
                 Tok::Apply,
                 Tok::Open(b'['),
                 n("i64"),
@@ -1560,10 +1621,11 @@ mod tests {
         // A name applies, in a bracket too, a capitalized one as any
         // (doc/design/SYMBOLIC-FORTH.md 27); `name:`, a label, and `name'`
         // are symbols; one lowercase letter is a variable, `a var# .`; and
-        // `name?` is tested, not applied.
+        // `name?` is tested, not applied. A label's body runs to its `;`, a
+        // bracket (6.32).
         let n = |s: &str| Tok::Name(s.into());
         assert_eq!(
-            toks("dup Snake Snake' fib: +' < string Camel' a ary odd? > σ'"),
+            toks("dup Snake Snake' fib: +' < string Camel' a ary odd? > σ' ;"),
             [
                 n("dup"),
                 Tok::Apply,
@@ -1571,6 +1633,7 @@ mod tests {
                 Tok::Apply,
                 n("Snake"),
                 n("fib"),
+                Tok::Open(b'['),
                 n("+"),
                 Tok::Open(b'['),
                 n("string"),
@@ -1588,6 +1651,9 @@ mod tests {
                 n("!"),
                 Tok::Apply,
                 n("σ"),
+                Tok::Close(b']'),
+                n(";"),
+                Tok::Apply,
             ]
         );
     }

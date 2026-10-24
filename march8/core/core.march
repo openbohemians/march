@@ -23,51 +23,51 @@
 -- conversion: `!` by the type, `2 i64!`, converts a literal, and a clause
 -- that wants the type converts a literal it is given (TYPES.md 2.10).
 
-i64: < int# >< i64 > [ int#>i64 ] ;
-f64: < int# >< f64 > [ int#>f64 ] ;
-f64: < dec# >< f64 > [ dec#>f64 ] ;
-money: < int# >< money > [ int#>money ] ;
-money: < dec# >< money > [ dec#>money ] ;
-dec#: < int# >< dec# > [ int#>dec# ] ;
-bool: < int# >< bool > [ int#>bool ] ;
+i64: < int# >. int#>i64 < i64 >. ;
+f64: < int# >. int#>f64 < f64 >. ;
+f64: < dec# >. dec#>f64 < f64 >. ;
+money: < int# >. int#>money < money >. ;
+money: < dec# >. dec#>money < money >. ;
+dec#: < int# >. int#>dec# < dec# >. ;
+bool: < int# >. int#>bool < bool >. ;
 
 -- A ratio, `1:2`, is exact while it is a literal, and becomes an f64 rounded
 -- once, or money if it is a whole number of cents. Its terms are kept as
 -- written, so `12:30` is not `2:5`; computed, a ratio is in lowest terms. A
 -- number is a ratio of two terms, the second not zero.
 
-f64: < ratio# >< f64 > [ ratio#>f64 ] ;
-money: < ratio# >< money > [ ratio#>money ] ;
-ratio#: < int# >< ratio# > [ int#>ratio# ] ;
-ratio#: < dec# >< ratio# > [ dec#>ratio# ] ;
+f64: < ratio# >. ratio#>f64 < f64 >. ;
+money: < ratio# >. ratio#>money < money >. ;
+ratio#: < int# >. int#>ratio# < ratio# >. ;
+ratio#: < dec# >. dec#>ratio# < ratio# >. ;
 
 -- A string converts to the number it writes, or to nil where it writes
 -- none: parsing is converting (Thomas, 2026-10-13). `"42" i64!` is 42, and
 -- `"x" i64!` nil, so the value is an `i64 nil or`.
 
-i64: < string >< i64 nil or > [ string>i64 ] ;
-f64: < string >< f64 nil or > [ string>f64 ] ;
+i64: < string >. string>i64 < i64 nil or >. ;
+f64: < string >. string>f64 < f64 nil or >. ;
 
 -- An i64 converts to the f64 nearest it, `12 i64! f64!`. An f64 has no
 -- conversion to i64: narrowing says how it rounds, `floor`, `round`.
 
-f64: < i64 >< f64 > [ i64>f64 ] ;
+f64: < i64 >. i64>f64 < f64 >. ;
 
 -- A symbol is a value at run time too: its name, which a string converts
 -- to and back. `"Open" sym!` is Open, and `Open string!` is "Open".
 
-sym: < string >< sym > [ string>sym ] ;
-string: < sym >< string > [ sym>string ] ;
+sym: < string >. string>sym < sym >. ;
+string: < sym >. sym>string < string >. ;
 
 -- Truth (Thomas, 2026-10-09): `bool` is 0 and 1, Iverson's brackets, and so
 -- an i64 too: `mask +' reduce` counts. Comparisons leave one, and guards
 -- take one. `not`, `and` and `or` are 1 - x, the minimum and the maximum,
 -- which on values from 0 to 1 are also Zadeh's fuzzy connectives.
 
-true: [ 1 bool! ] ;
-false: [ 0 bool! ] ;
-⊤: [ true ] ;
-⊥: [ false ] ;
+true: 1 bool! ;
+false: 0 bool! ;
+⊤: true ;
+⊥: false ;
 
 -- Classes: a union in a pattern matches any of its types, a little less
 -- well than one of them alone (TYPES.md 3.6). `;` on a type names it.
@@ -78,37 +78,37 @@ num: < i64 f64 or money or int# or dec# or ratio# or > ;
 -- literals; a literal beside a number takes its type. Money is added and
 -- subtracted, not multiplied.
 
-+: < int# int# >< int# > [ int#+ ] ;
-+: < dec# dec# >< dec# > [ dec#+ ] ;
-+: < ratio# ratio# >< ratio# > [ ratio#+ ] ;
-+: < i64 i64 >< i64 > [ i64+ ] ;
-+: < f64 f64 >< f64 > [ f64+ ] ;
-+: < money money >< money > [ money+ ] ;
++: < int# int# >. int#+ < int# >. ;
++: < dec# dec# >. dec#+ < dec# >. ;
++: < ratio# ratio# >. ratio#+ < ratio# >. ;
++: < i64 i64 >. i64+ < i64 >. ;
++: < f64 f64 >. f64+ < f64 >. ;
++: < money money >. money+ < money >. ;
 
 -- `-` is one value's negative, and `-+` subtracts, negating and adding in
 -- one word until the compiler fuses the two (Thomas, 2026-10-09): `a b -+`
 -- is a + (-b). So `-` has one meaning, as in APL.
 
--+: < int# int# >< int# > [ int#- ] ;
--+: < dec# dec# >< dec# > [ dec#- ] ;
--+: < ratio# ratio# >< ratio# > [ ratio#- ] ;
--+: < i64 i64 >< i64 > [ i64- ] ;
--+: < f64 f64 >< f64 > [ f64- ] ;
--+: < money money >< money > [ money- ] ;
+-+: < int# int# >. int#- < int# >. ;
+-+: < dec# dec# >. dec#- < dec# >. ;
+-+: < ratio# ratio# >. ratio#- < ratio# >. ;
+-+: < i64 i64 >. i64- < i64 >. ;
+-+: < f64 f64 >. f64- < f64 >. ;
+-+: < money money >. money- < money >. ;
 
--: < int# >< int# > [ 0 swap -+ ] ;
--: < dec# >< dec# > [ 0 swap -+ ] ;
--: < ratio# >< ratio# > [ 0 swap -+ ] ;
--: < i64 >< i64 > [ 0 swap -+ ] ;
--: < f64 >< f64 > [ -1.0 f64* ] ;
--: < money >< money > [ 0 swap -+ ] ;
--: < a ary > [ [ - ] map ] ;
+-: < int# >. 0 swap -+ < int# >. ;
+-: < dec# >. 0 swap -+ < dec# >. ;
+-: < ratio# >. 0 swap -+ < ratio# >. ;
+-: < i64 >. 0 swap -+ < i64 >. ;
+-: < f64 >. -1.0 f64* < f64 >. ;
+-: < money >. 0 swap -+ < money >. ;
+-: < a ary >. [ - ] map ;
 
-*: < int# int# >< int# > [ int#* ] ;
-*: < dec# dec# >< dec# > [ dec#* ] ;
-*: < ratio# ratio# >< ratio# > [ ratio#* ] ;
-*: < i64 i64 >< i64 > [ i64* ] ;
-*: < f64 f64 >< f64 > [ f64* ] ;
+*: < int# int# >. int#* < int# >. ;
+*: < dec# dec# >. dec#* < dec# >. ;
+*: < ratio# ratio# >. ratio#* < ratio# >. ;
+*: < i64 i64 >. i64* < i64 >. ;
+*: < f64 f64 >. f64* < f64 >. ;
 
 -- Arithmetic lifts over arrays: a tensor and an atom, a number, at any
 -- rank, or a tensor and a row one rank lower, element by element along the
@@ -117,60 +117,60 @@ num: < i64 f64 or money or int# or dec# or ratio# or > ;
 -- `atom` matches any type that is not a container. The other value is read
 -- below each element; a literal takes the elements' type.
 
-+: < a ary atom > [ swap [ over + ] map swap drop ] ;
-+: < atom a ary > [ [ over + ] map swap drop ] ;
-+: < a ary a > [ swap [ over + ] map swap drop ] ;
-+: < a a ary > [ [ over + ] map swap drop ] ;
++: < a ary atom >. swap [ over + ] map swap drop ;
++: < atom a ary >. [ over + ] map swap drop ;
++: < a ary a >. swap [ over + ] map swap drop ;
++: < a a ary >. [ over + ] map swap drop ;
 
--+: < a ary atom > [ swap [ over -+ ] map swap drop ] ;
--+: < atom a ary > [ [ over swap -+ ] map swap drop ] ;
--+: < a ary a > [ swap [ over -+ ] map swap drop ] ;
--+: < a a ary > [ [ over swap -+ ] map swap drop ] ;
+-+: < a ary atom >. swap [ over -+ ] map swap drop ;
+-+: < atom a ary >. [ over swap -+ ] map swap drop ;
+-+: < a ary a >. swap [ over -+ ] map swap drop ;
+-+: < a a ary >. [ over swap -+ ] map swap drop ;
 
-*: < a ary atom > [ swap [ over * ] map swap drop ] ;
-*: < atom a ary > [ [ over * ] map swap drop ] ;
-*: < a ary a > [ swap [ over * ] map swap drop ] ;
-*: < a a ary > [ [ over * ] map swap drop ] ;
+*: < a ary atom >. swap [ over * ] map swap drop ;
+*: < atom a ary >. [ over * ] map swap drop ;
+*: < a ary a >. swap [ over * ] map swap drop ;
+*: < a a ary >. [ over * ] map swap drop ;
 
-div: < a ary atom > [ swap [ over div ] map swap drop ] ;
-div: < atom a ary > [ [ over swap div ] map swap drop ] ;
-div: < a ary a > [ swap [ over div ] map swap drop ] ;
-div: < a a ary > [ [ over swap div ] map swap drop ] ;
+div: < a ary atom >. swap [ over div ] map swap drop ;
+div: < atom a ary >. [ over swap div ] map swap drop ;
+div: < a ary a >. swap [ over div ] map swap drop ;
+div: < a a ary >. [ over swap div ] map swap drop ;
 
-/*: < a ary atom > [ swap [ over /* ] map swap drop ] ;
-/*: < atom a ary > [ [ over swap /* ] map swap drop ] ;
-/*: < a ary a > [ swap [ over /* ] map swap drop ] ;
-/*: < a a ary > [ [ over swap /* ] map swap drop ] ;
+/*: < a ary atom >. swap [ over /* ] map swap drop ;
+/*: < atom a ary >. [ over swap /* ] map swap drop ;
+/*: < a ary a >. swap [ over /* ] map swap drop ;
+/*: < a a ary >. [ over swap /* ] map swap drop ;
 
 -- Two arrays, element by element (Thomas, 2026-10-09: as everything else
 -- is), as long as each other: checked at compile time when both lengths are
 -- known. `zip` pairs elements for any word.
 
-+: < a ary a ary > [ [ + ] zip ] ;
--+: < a ary a ary > [ [ -+ ] zip ] ;
-*: < a ary a ary > [ [ * ] zip ] ;
++: < a ary a ary >. [ + ] zip ;
+-+: < a ary a ary >. [ -+ ] zip ;
+*: < a ary a ary >. [ * ] zip ;
 
 -- `xs ys q table`: q on every pair, a row for each element of xs. `×` is the
 -- outer product, the tensor product: each element of A times all of B, so
 -- ranks add.
 
-×: < atom b > [ * ] ;
-×: < a ary b > [ swap [ over × ] map swap drop ] ;
+×: < atom b >. * ;
+×: < a ary b >. swap [ over × ] map swap drop ;
 
 -- `dot` contracts A's last index with B's first: vector · vector is a
 -- number, matrix · vector a vector, matrix · matrix the matrix product.
 -- `zip` checks that the contracted lengths agree, at compile time when both
 -- are known. `transpose` swaps a matrix's two indices.
 
-dot: < a ary b ary > [ [ * ] zip +' reduce ] ;
-dot: < a ary ary b ary > [ swap [ over dot ] map swap drop ] ;
-transpose: < a ary ary > [ dup 1 at length range [ over [ over at ] map swap drop ] map swap drop ] ;
+dot: < a ary b ary >. [ * ] zip +' reduce ;
+dot: < a ary ary b ary >. swap [ over dot ] map swap drop ;
+transpose: < a ary ary >. dup 1 at length range [ over [ over at ] map swap drop ] map swap drop ;
 
 -- Multiplying is written `*`, which is typed; `⋅`, the dot operator, is its
 -- glyph, as in algebra, and `×` is kept for the outer product (Thomas,
 -- 2026-10-09: mathematics first, but `\cdot` at every product is too much).
 
-⋅: [ * ] ;
+⋅: * ;
 
 -- Division. `/` is one over a value, its reciprocal, and `/*` divides, the
 -- reciprocal and the product in one word until the compiler fuses the two
@@ -182,53 +182,53 @@ transpose: < a ary ary > [ dup 1 at length range [ over [ over at ] map swap dro
 -- agree; `div` of floats is their quotient. Two literals divide exactly:
 -- `1 3 /*` is the ratio 1:3, and `2 /` is 1:2.
 
-divmod: < int# int# >< int# int# > [ int#-divmod ] ;
-divmod: < i64 i64 >< i64 i64 > [ i64-divmod ] ;
-div: < int# int# >< int# > [ divmod drop ] ;
-div: < i64 i64 >< i64 > [ divmod drop ] ;
-div: < f64 f64 >< f64 > [ f64/ ] ;
-mod: < int# int# >< int# > [ divmod swap drop ] ;
-mod: < i64 i64 >< i64 > [ divmod swap drop ] ;
-div: < a ary a ary > [ [ div ] zip ] ;
+divmod: < int# int# >. int#-divmod < int# int# >. ;
+divmod: < i64 i64 >. i64-divmod < i64 i64 >. ;
+div: < int# int# >. divmod drop < int# >. ;
+div: < i64 i64 >. divmod drop < i64 >. ;
+div: < f64 f64 >. f64/ < f64 >. ;
+mod: < int# int# >. divmod swap drop < int# >. ;
+mod: < i64 i64 >. divmod swap drop < i64 >. ;
+div: < a ary a ary >. [ div ] zip ;
 
-/: < ratio# >< ratio# > [ 1 swap /* ] ;
-/: < f64 >< f64 > [ 1.0 swap f64/ ] ;
-/: < a ary > [ [ / ] map ] ;
-/*: < ratio# ratio# >< ratio# > [ ratio#/ ] ;
-/*: < f64 f64 >< f64 > [ f64/ ] ;
-/*: < a ary a ary > [ [ /* ] zip ] ;
-÷: [ / ] ;
+/: < ratio# >. 1 swap /* < ratio# >. ;
+/: < f64 >. 1.0 swap f64/ < f64 >. ;
+/: < a ary >. [ / ] map ;
+/*: < ratio# ratio# >. ratio#/ < ratio# >. ;
+/*: < f64 f64 >. f64/ < f64 >. ;
+/*: < a ary a ary >. [ /* ] zip ;
+÷: / ;
 
 -- Comparisons leave a bool.
 
-lt: < i64 i64 >< bool > [ i64lt? ] ;
-lt: < f64 f64 >< bool > [ f64lt? ] ;
-lt: < money money >< bool > [ money-lt? ] ;
-gt: < i64 i64 >< bool > [ swap i64lt? ] ;
-gt: < f64 f64 >< bool > [ swap f64lt? ] ;
-gt: < money money >< bool > [ swap money-lt? ] ;
-eq: < i64 i64 >< bool > [ i64eq? ] ;
-eq: < f64 f64 >< bool > [ f64eq? ] ;
-eq: < money money >< bool > [ money-eq? ] ;
-eq: < string string >< bool > [ string-eq? ] ;
-eq: < sym sym >< bool > [ sym-eq? ] ;
+lt: < i64 i64 >. i64lt? < bool >. ;
+lt: < f64 f64 >. f64lt? < bool >. ;
+lt: < money money >. money-lt? < bool >. ;
+gt: < i64 i64 >. swap i64lt? < bool >. ;
+gt: < f64 f64 >. swap f64lt? < bool >. ;
+gt: < money money >. swap money-lt? < bool >. ;
+eq: < i64 i64 >. i64eq? < bool >. ;
+eq: < f64 f64 >. f64eq? < bool >. ;
+eq: < money money >. money-eq? < bool >. ;
+eq: < string string >. string-eq? < bool >. ;
+eq: < sym sym >. sym-eq? < bool >. ;
 
 -- At most, at least, not equal: `≤`, `≥` and `≠`. "Less, or equal" rather
 -- than "not greater", so that a float that is no number, NaN, is at most
 -- nothing and at least nothing, but not equal to anything, itself included.
 
-le: < a a > [ over over lt? rot rot eq? or ] ;
-ge: < a a > [ over over gt? rot rot eq? or ] ;
-neq: [ eq? not ] ;
-≤: [ le? ] ;
-≥: [ ge? ] ;
-≠: [ neq? ] ;
+le: < a a >. over over lt? rot rot eq? or ;
+ge: < a a >. over over gt? rot rot eq? or ;
+neq: eq? not ;
+≤: le? ;
+≥: ge? ;
+≠: neq? ;
 
 -- Stack words. `=` is `dup` and `~` is `swap` (march7/docs/SURFACE.md,
 -- on trial since 2026-10-03), and two wide, `=_2` and `~_2`.
 
-=: [ dup ] ;
-~: [ swap ] ;
+=: dup ;
+~: swap ;
 
 -- `x q dip`, written `<>`, applies q with x set aside, and puts x back on
 -- top: Joy's and Factor's `dip`, FORTH's `>r q r>` (Thomas, 2026-10-15).
@@ -236,11 +236,11 @@ neq: [ eq? not ] ;
 -- x; `bi` applies two quotations to one value: `3 [ dup * ] [ 1 + ] bi` is
 -- 9 4.
 
-<>: [ dip ] ;
-over: < a b >< a b a > [ [ dup ] dip swap ] ;
-rot: < a b c >< b c a > [ [ swap ] dip swap ] ;
-keep: [ over [ . ] dip ] ;
-bi: [ [ keep ] dip . ] ;
+<>: dip ;
+over: < a b >. [ dup ] dip swap < a b a >. ;
+rot: < a b c >. [ swap ] dip swap < b c a >. ;
+keep: over [ . ] dip ;
+bi: [ keep ] dip . ;
 
 -- A power and a subscript are rules of the core
 -- (doc/design/SYMBOLIC-FORTH.md 21, 22, 24, 25), tried where nothing else
@@ -261,103 +261,103 @@ bi: [ [ keep ] dip . ] ;
 -- `width#` applies the word its symbol names, at that width; `+_2` is no
 -- word, `+` neither moving values nor being handed code.
 
-power#: < a b > [ quote-power ] ;
+power#: < a b >. quote-power ;
 
-/(.+)\^([0-9]+)/: [ [ name# ] dip int# ! power# . ] ;
-/(.+)_([0-9]+)/: [ [ name# ] dip int# ! width# ] ;
+/(.+)\^([0-9]+)/: [ name# ] dip int# ! power# . ;
+/(.+)_([0-9]+)/: [ name# ] dip int# ! width# ;
 
 -- Signs, as guards, and what they choose between. These clauses have no
 -- `if`: a guard picks the clause (doc/design/TYPES.md 2.12).
 
-zero: [ 0 eq? ] ;
-positive: [ 0 gt? ] ;
-negative: [ 0 lt? ] ;
+zero: 0 eq? ;
+positive: 0 gt? ;
+negative: 0 lt? ;
 
-abs: < a negative? >< a > [ - ] ;
-abs: < a >< a > [ ] ;
-min: < a a lt? >< a > [ drop ] ;
-min: < a a >< a > [ swap drop ] ;
-max: < a a gt? >< a > [ drop ] ;
-max: < a a >< a > [ swap drop ] ;
+abs: < a negative? >. - < a >. ;
+abs: < a >. < a >. ;
+min: < a a lt? >. drop < a >. ;
+min: < a a >. swap drop < a >. ;
+max: < a a gt? >. drop < a >. ;
+max: < a a >. swap drop < a >. ;
 
-not: < bool >< bool > [ false eq? ] ;
-and: < bool bool >< bool > [ min ] ;
-or: < bool bool >< bool > [ max ] ;
+not: < bool >. false eq? < bool >. ;
+and: < bool bool >. min < bool >. ;
+or: < bool bool >. max < bool >. ;
 
 -- Narrowing: a float to an integer, saying how it rounds: down, up, half
 -- away from zero, or toward zero. A float with no i64 is an error. On an
 -- integer they change nothing, and on a decimal or a ratio literal they are
 -- exact.
 
-floor: < dec# >< int# > [ dec#-floor ] ;
-floor: < ratio# >< int# > [ ratio#-floor ] ;
-floor: < int# >< int# > [ ] ;
-floor: < i64 >< i64 > [ ] ;
-floor: < f64 >< i64 > [ f64-floor ] ;
-ceil: < dec# >< int# > [ dec#-ceil ] ;
-ceil: < ratio# >< int# > [ ratio#-ceil ] ;
-ceil: < int# >< int# > [ ] ;
-ceil: < i64 >< i64 > [ ] ;
-ceil: < f64 >< i64 > [ f64-ceil ] ;
-round: < dec# >< int# > [ dec#-round ] ;
-round: < ratio# >< int# > [ ratio#-round ] ;
-round: < int# >< int# > [ ] ;
-round: < i64 >< i64 > [ ] ;
-round: < f64 >< i64 > [ f64-round ] ;
-trunc: < dec# >< int# > [ dec#-trunc ] ;
-trunc: < ratio# >< int# > [ ratio#-trunc ] ;
-trunc: < int# >< int# > [ ] ;
-trunc: < i64 >< i64 > [ ] ;
-trunc: < f64 >< i64 > [ f64-trunc ] ;
+floor: < dec# >. dec#-floor < int# >. ;
+floor: < ratio# >. ratio#-floor < int# >. ;
+floor: < int# >. < int# >. ;
+floor: < i64 >. < i64 >. ;
+floor: < f64 >. f64-floor < i64 >. ;
+ceil: < dec# >. dec#-ceil < int# >. ;
+ceil: < ratio# >. ratio#-ceil < int# >. ;
+ceil: < int# >. < int# >. ;
+ceil: < i64 >. < i64 >. ;
+ceil: < f64 >. f64-ceil < i64 >. ;
+round: < dec# >. dec#-round < int# >. ;
+round: < ratio# >. ratio#-round < int# >. ;
+round: < int# >. < int# >. ;
+round: < i64 >. < i64 >. ;
+round: < f64 >. f64-round < i64 >. ;
+trunc: < dec# >. dec#-trunc < int# >. ;
+trunc: < ratio# >. ratio#-trunc < int# >. ;
+trunc: < int# >. < int# >. ;
+trunc: < i64 >. < i64 >. ;
+trunc: < f64 >. f64-trunc < i64 >. ;
 
 -- Roots and powers. `pow` is x to the y, written `^` as LaTeX writes it
 -- (Thomas, 2026-10-09); `exp`, e to the x, is kept for that. Two literals
 -- stay an exact literal.
 
-sqrt: < f64 >< f64 > [ f64-sqrt ] ;
-pow: < int# int# >< int# > [ int#-pow ] ;
-pow: < i64 i64 >< i64 > [ i64-pow ] ;
-pow: < f64 f64 >< f64 > [ f64-pow ] ;
-^: [ pow ] ;
+sqrt: < f64 >. f64-sqrt < f64 >. ;
+pow: < int# int# >. int#-pow < int# >. ;
+pow: < i64 i64 >. i64-pow < i64 >. ;
+pow: < f64 f64 >. f64-pow < f64 >. ;
+^: pow ;
 
 -- Containers, typed by their structure. A vec knows its length at compile
 -- time, so its length is a constant.
 
-length: < string >< i64 > [ string-length ] ;
-length: < a ary >< i64 > [ ary-length ] ;
-length: < n a vec >< i64 > [ vec-length ] ;
-length: < tuple >< i64 > [ tuple-length ] ;
-length: < k v map >< i64 > [ map-length ] ;
+length: < string >. string-length < i64 >. ;
+length: < a ary >. ary-length < i64 >. ;
+length: < n a vec >. vec-length < i64 >. ;
+length: < tuple >. tuple-length < i64 >. ;
+length: < k v map >. map-length < i64 >. ;
 
-at: < string i64 >< i64 > [ string-at ] ;
-at: < a ary i64 >< a > [ ary-at ] ;
-at: < n a vec i64 >< a > [ vec-at ] ;
-at: < k v map k >< v > [ map-at ] ;
-at: < tuple i64 > [ tuple-at ] ;
+at: < string i64 >. string-at < i64 >. ;
+at: < a ary i64 >. ary-at < a >. ;
+at: < n a vec i64 >. vec-at < a >. ;
+at: < k v map k >. map-at < v >. ;
+at: < tuple i64 >. tuple-at ;
 -- At an array of positions, an array: the element at each, as APL indexes.
-at: < a ary i64 ary > [ [ over swap at ] map swap drop ] ;
+at: < a ary i64 ary >. [ over swap at ] map swap drop ;
 
 -- A map's value at a key, or nil where it has none: `v nil or`, decided at
 -- run time unless the map and key are known (TYPES.md 3.6). Its outputs
 -- name the union, so it is meant and not warned of.
-get: < k v map k map-has? >< v nil or > [ map-at ] ;
-get: < k v map k >< v nil or > [ drop drop nil ] ;
+get: < k v map k map-has? >. map-at < v nil or >. ;
+get: < k v map k >. drop drop nil < v nil or >. ;
 
 -- A map with a key set to a value: a new version, the old one unchanged.
-put: < k v map k v >< k v map > [ map-put ] ;
+put: < k v map k v >. map-put < k v map >. ;
 
-concat: < string string >< string > [ string-concat ] ;
-concat: < a ary a ary >< a ary > [ ary-concat ] ;
-concat: < n a vec m a vec > [ vec-concat ] ;
+concat: < string string >. string-concat < string >. ;
+concat: < a ary a ary >. ary-concat < a ary >. ;
+concat: < n a vec m a vec >. vec-concat ;
 
-keys: < k v map >< k ary > [ map-keys ] ;
-values: < k v map >< v ary > [ map-values ] ;
+keys: < k v map >. map-keys < k ary >. ;
+values: < k v map >. map-values < v ary >. ;
 
 -- `sort`: an array in order, numbers by value and strings by text.
-sort: < i64 ary >< i64 ary > [ i64-sort ] ;
-sort: < f64 ary >< f64 ary > [ f64-sort ] ;
-sort: < money ary >< money ary > [ money-sort ] ;
-sort: < string ary >< string ary > [ string-sort ] ;
+sort: < i64 ary >. i64-sort < i64 ary >. ;
+sort: < f64 ary >. f64-sort < f64 ary >. ;
+sort: < money ary >. money-sort < money ary >. ;
+sort: < string ary >. string-sort < string ary >. ;
 
 -- `order`, `<#`: the positions that would put an array in order, APL's
 -- grade up `⍋` and R's `order` (Thomas, 2026-10-09: not "grade", too near
@@ -368,38 +368,38 @@ sort: < string ary >< string ary > [ string-sort ] ;
 -- descending order, as APL's `⍒`, also stable, which `order reverse` is not:
 -- that would turn equal elements around. The point of `<#` and `#>` is the
 -- end where the smallest go.
-order: < i64 ary >< i64 ary > [ i64-order ] ;
-order: < f64 ary >< i64 ary > [ f64-order ] ;
-order: < money ary >< i64 ary > [ money-order ] ;
-order: < string ary >< i64 ary > [ string-order ] ;
-<#: [ order ] ;
-sort-by: [ over swap map order at ] ;
+order: < i64 ary >. i64-order < i64 ary >. ;
+order: < f64 ary >. f64-order < i64 ary >. ;
+order: < money ary >. money-order < i64 ary >. ;
+order: < string ary >. string-order < i64 ary >. ;
+<#: order ;
+sort-by: over swap map order at ;
 
-dorder: < i64 ary >< i64 ary > [ i64-dorder ] ;
-dorder: < f64 ary >< i64 ary > [ f64-dorder ] ;
-dorder: < money ary >< i64 ary > [ money-dorder ] ;
-dorder: < string ary >< i64 ary > [ string-dorder ] ;
-#>: [ dorder ] ;
+dorder: < i64 ary >. i64-dorder < i64 ary >. ;
+dorder: < f64 ary >. f64-dorder < i64 ary >. ;
+dorder: < money ary >. money-dorder < i64 ary >. ;
+dorder: < string ary >. string-dorder < i64 ary >. ;
+#>: dorder ;
 
 -- `take`: an array's or a string's first n elements, or its last n when n is
 -- negative; all of them, if it has fewer (from SYMBOL's `↑`).
-take: < a ary string or i64 negative? > [ - over length min over length dup rot -+ 1 + swap slice ] ;
-take: < a ary string or i64 > [ over length min 1 swap slice ] ;
+take: < a ary string or i64 negative? >. - over length min over length dup rot -+ 1 + swap slice ;
+take: < a ary string or i64 >. over length min 1 swap slice ;
 
 -- `skip`: all but an array's or a string's first n elements, or all but its
 -- last n when n is negative; none, if it has fewer (SYMBOL's `↓`; `drop` is
 -- the stack's).
-skip: < a ary string or i64 negative? > [ - over length min over length swap -+ 1 swap slice ] ;
-skip: < a ary string or i64 > [ over length min 1 + over length slice ] ;
+skip: < a ary string or i64 negative? >. - over length min over length swap -+ 1 swap slice ;
+skip: < a ary string or i64 >. over length min 1 + over length slice ;
 
 -- Failing (doc/design/SYMBOLIC-FORTH.md 29). A handler is a clause of the
 -- word it handles, for its inputs and a trap on top, `k trap` of any kind
 -- and `no-file' trap` of one. `kind` is a trap's kind, `why` its message,
 -- or with none, its kind's name, and `fail` passes it on as it is.
 
-kind: < k trap >< sym > [ trap-kind ] ;
-why: < k trap [ trap-why "" eq? ] ? >< string > [ trap-kind ] ;
-why: < k trap >< string > [ trap-why ] ;
+kind: < k trap >. trap-kind < sym >. ;
+why: < k trap [ trap-why "" eq? ] ? >. trap-kind < string >. ;
+why: < k trap >. trap-why < string >. ;
 
 -- Reading, in the core's first namespaces (TYPES.md 3.12): `io.stdin.read`
 -- is standard input's text, and `"data.csv" io.file.read` a file's, when
@@ -407,67 +407,67 @@ why: < k trap >< string > [ trap-why ] ;
 -- while compiling, so that what follows can fold on it, as a macro would.
 -- Paths are from where march8 runs.
 
-io.stdin.read: < >< string > [ stdin-read ] ;
-io.file.read: < string >< string > [ file-read ] ;
-io.file.embed: < string >< string > [ file-embed ] ;
+io.stdin.read: < >. stdin-read < string >. ;
+io.file.read: < string >. file-read < string >. ;
+io.file.embed: < string >. file-embed < string >. ;
 
 -- Text: `split` at each separator (between characters, for ""), `lines`,
 -- and `words` at runs of white space, as Haskell's are.
-split: < string string >< string ary > [ string-split ] ;
-lines: < string >< string ary > [ string-lines ] ;
-words: < string >< string ary > [ string-words ] ;
+split: < string string >. string-split < string ary >. ;
+lines: < string >. string-lines < string ary >. ;
+words: < string >. string-words < string ary >. ;
 
 -- `case`: a string in a case style (Thomas, 2026-10-09), each a word of
 -- the namespace, so anyone may add one: `"Hello World" case.snake` is
 -- "hello_world", and imported, `case.*` or `case.snake` alone, it is
 -- `snake`. `lower` and `upper` go element by element over an array of
 -- strings too.
-case.lower: < string >< string > [ string-lower ] ;
-case.upper: < string >< string > [ string-upper ] ;
-case.lower: < string ary > [ [ lower ] map ] ;
-case.upper: < string ary > [ [ upper ] map ] ;
-case.snake: < string >< string > [ string-snake ] ;
-case.kebab: < string >< string > [ string-kebab ] ;
-case.camel: < string >< string > [ string-camel ] ;
-case.pascal: < string >< string > [ string-pascal ] ;
+case.lower: < string >. string-lower < string >. ;
+case.upper: < string >. string-upper < string >. ;
+case.lower: < string ary >. [ lower ] map ;
+case.upper: < string ary >. [ upper ] map ;
+case.snake: < string >. string-snake < string >. ;
+case.kebab: < string >. string-kebab < string >. ;
+case.camel: < string >. string-camel < string >. ;
+case.pascal: < string >. string-pascal < string >. ;
 
 -- `thru`: the integers from a to b, both included, counting down when a is
 -- the larger (SYMBOL's `..`); `‥`, two dots as one character, is its glyph.
-thru: < i64 i64 gt? > [ over swap -+ 1 + range - swap 1 + + ] ;
-thru: < i64 i64 > [ over -+ 1 + range swap 1 -+ + ] ;
-‥: [ thru ] ;
+thru: < i64 i64 gt? >. over swap -+ 1 + range - swap 1 + + ;
+thru: < i64 i64 >. over -+ 1 + range swap 1 -+ + ;
+‥: thru ;
 
 -- Sums and products: `∑` and `∏` (`\sum`, `\prod`), the mathematical
 -- operators, not the Greek letters (SURFACE.md). An empty array's sum is 0
 -- and its product 1; a mask's sum counts its truths.
-sum: [ 0 [ + ] fold ] ;
-prod: [ 1 [ * ] fold ] ;
-∑: [ sum ] ;
-∏: [ prod ] ;
+sum: 0 [ + ] fold ;
+prod: 1 [ * ] fold ;
+∑: sum ;
+∏: prod ;
 
 -- `keep`: the elements whose mask is true, APL's compress.
-keep: < a ary bool ary >< a ary > [ ary-keep ] ;
+keep: < a ary bool ary >. ary-keep < a ary >. ;
 
 -- `count` is `length`, for now (Thomas, 2026-10-08: `#` may come later).
-count: [ length ] ;
+count: length ;
 
-slice: < string i64 i64 >< string > [ string-slice ] ;
-slice: < a ary i64 i64 >< a ary > [ ary-slice ] ;
+slice: < string i64 i64 >. string-slice < string >. ;
+slice: < a ary i64 i64 >. ary-slice < a ary >. ;
 
 -- Elements count from 1, and from -1 at the end; gaps between them count
 -- from 0, before the first, each gap after its element, so -1 is after the
 -- last (Thomas, 2026-10-09). `slice` includes both its ends.
 
-first: < a ary >< a > [ 1 at ] ;
-last: < a ary >< a > [ -1 at ] ;
-rest: < a ary >< a ary > [ 2 -1 slice ] ;
-most: < a ary >< a ary > [ 1 -2 slice ] ;
+first: < a ary >. 1 at < a >. ;
+last: < a ary >. -1 at < a >. ;
+rest: < a ary >. 2 -1 slice < a ary >. ;
+most: < a ary >. 1 -2 slice < a ary >. ;
 
 -- `xs v k insert` puts v in the gap after element k: 0 prepends and -1
 -- appends. `xs k remove` takes element k out.
 
-insert: [ ary-insert ] ;
-remove: [ ary-remove ] ;
+insert: ary-insert ;
+remove: ary-remove ;
 
 -- A quotation is a sequence too, while compiling (SYMBOLIC-FORTH.md 6):
 -- its elements are what Low Stack holds, each a symbol or a quotation, so
@@ -477,20 +477,20 @@ remove: [ ary-remove ] ;
 -- back, acts. Its names were expanded where it was written, so a name
 -- taken out is its path, `math.dbl'`.
 
-length: < quote >< i64 > [ quote-length ] ;
-at: < quote i64 > [ quote-at ] ;
-slice: < quote i64 i64 >< quote > [ quote-slice ] ;
-concat: < quote quote >< quote > [ quote-concat ] ;
-insert: < quote b i64 >< quote > [ quote-insert ] ;
-first: < quote > [ 1 at ] ;
-last: < quote > [ -1 at ] ;
-rest: < quote >< quote > [ 2 -1 slice ] ;
-most: < quote >< quote > [ 1 -2 slice ] ;
+length: < quote >. quote-length < i64 >. ;
+at: < quote i64 >. quote-at ;
+slice: < quote i64 i64 >. quote-slice < quote >. ;
+concat: < quote quote >. quote-concat < quote >. ;
+insert: < quote b i64 >. quote-insert < quote >. ;
+first: < quote >. 1 at ;
+last: < quote >. -1 at ;
+rest: < quote >. 2 -1 slice < quote >. ;
+most: < quote >. 1 -2 slice < quote >. ;
 
 -- A symbol is never a quotation, so the elements of code compare.
 
-eq: < sym quote >< bool > [ drop drop false ] ;
-eq: < quote sym >< bool > [ drop drop false ] ;
+eq: < sym quote >. drop drop false < bool >. ;
+eq: < quote sym >. drop drop false < bool >. ;
 
 -- Identities (doc/design/SYMBOLIC-FORTH.md 21). x⁰ is the identity of x's
 -- operation, the value that leaves the other operand as it is: `+^0` is
@@ -498,41 +498,41 @@ eq: < quote sym >< bool > [ drop drop false ] ;
 -- does, and a value's `three^0` is `*' unit# !`, its power being its
 -- copies multiplied. The facts are `unit`'s, the identity of each
 -- primitive operation, and `least`'s and `greatest`'s, the ends of each
--- type's order. A program adds one by its path, `core.unit: < int#-' > [
--- drop 0 ] ;`.
+-- type's order. A program adds one by its path, `core.unit: < int#-' >.
+-- drop 0 ;`.
 
-unit: < int#+' > [ drop 0 ] ;
-unit: < dec#+' > [ drop 0 dec#! ] ;
-unit: < ratio#+' > [ drop 0 ratio#! ] ;
-unit: < i64+' > [ drop 0 i64! ] ;
-unit: < f64+' > [ drop 0 f64! ] ;
-unit: < money+' > [ drop 0 money! ] ;
-unit: < int#*' > [ drop 1 ] ;
-unit: < dec#*' > [ drop 1 dec#! ] ;
-unit: < ratio#*' > [ drop 1 ratio#! ] ;
-unit: < i64*' > [ drop 1 i64! ] ;
-unit: < f64*' > [ drop 1 f64! ] ;
-unit: < string-concat' > [ drop "" ] ;
+unit: < int#+' >. drop 0 ;
+unit: < dec#+' >. drop 0 dec#! ;
+unit: < ratio#+' >. drop 0 ratio#! ;
+unit: < i64+' >. drop 0 i64! ;
+unit: < f64+' >. drop 0 f64! ;
+unit: < money+' >. drop 0 money! ;
+unit: < int#*' >. drop 1 ;
+unit: < dec#*' >. drop 1 dec#! ;
+unit: < ratio#*' >. drop 1 ratio#! ;
+unit: < i64*' >. drop 1 i64! ;
+unit: < f64*' >. drop 1 f64! ;
+unit: < string-concat' >. drop "" ;
 
-least: < i64' > [ drop -9223372036854775808 i64! ] ;
-greatest: < i64' > [ drop 9223372036854775807 i64! ] ;
-least: < f64' > [ drop -1.0 0.0 f64/ ] ;
-greatest: < f64' > [ drop 1.0 0.0 f64/ ] ;
-least: < bool' > [ drop false ] ;
-greatest: < bool' > [ drop true ] ;
+least: < i64' >. drop -9223372036854775808 i64! ;
+greatest: < i64' >. drop 9223372036854775807 i64! ;
+least: < f64' >. drop -1.0 0.0 f64/ ;
+greatest: < f64' >. drop 1.0 0.0 f64/ ;
+least: < bool' >. drop false ;
+greatest: < bool' >. drop true ;
 
 -- `x f stated#`: whether the fact f states one for x, `i64+' unit'
 -- stated#` being true.
 
-stated#: [ swap [ ] swap 0 insert clauses# length 0 eq? not ] ;
+stated#: swap [ ] swap 0 insert clauses# length 0 eq? not ;
 
 -- Whether code only moves values, by `dup`, `drop` and `swap`, and
 -- whether it so picks one of two, `[ swap drop ]`.
 
-shuffles#: < quote [ length 0 eq? ] ? >< bool > [ drop true ] ;
-shuffles#: < quote >< bool > [ dup first dup dup' eq? over drop' eq? or over swap' eq? or swap '.' eq? or swap rest shuffles# and ] ;
-picks#: < quote [ shuffles# not ] ? >< bool > [ drop false ] ;
-picks#: < quote >< bool > [ effect# over -+ -1 eq? swap 3 lt? and ] ;
+shuffles#: < quote [ length 0 eq? ] ? >. drop true < bool >. ;
+shuffles#: < quote >. dup first dup dup' eq? over drop' eq? or over swap' eq? or swap '.' eq? or swap rest shuffles# and < bool >. ;
+picks#: < quote [ shuffles# not ] ? >. drop false < bool >. ;
+picks#: < quote >. effect# over -+ -1 eq? swap 3 lt? and < bool >. ;
 
 -- `cs choice#`: what a word's two clauses choose between two values,
 -- `least'` if the greater, the first testing which is by `gt` or `lt`, as
@@ -540,32 +540,32 @@ picks#: < quote >< bool > [ effect# over -+ -1 eq? swap 3 lt? and ] ;
 -- neither. Each clause must pick one of the two, which applying it to two
 -- symbols shows.
 
-chosen#: < gt' left' right' >< sym > [ drop drop drop least' ] ;
-chosen#: < gt' right' left' >< sym > [ drop drop drop greatest' ] ;
-chosen#: < lt' left' right' >< sym > [ drop drop drop greatest' ] ;
-chosen#: < lt' right' left' >< sym > [ drop drop drop least' ] ;
-chosen#: < a b c >< sym > [ drop drop drop none' ] ;
+chosen#: < gt' left' right' >. drop drop drop least' < sym >. ;
+chosen#: < gt' right' left' >. drop drop drop greatest' < sym >. ;
+chosen#: < lt' left' right' >. drop drop drop greatest' < sym >. ;
+chosen#: < lt' right' left' >. drop drop drop least' < sym >. ;
+chosen#: < a b c >. drop drop drop none' < sym >. ;
 
-choice#: < quote [ length 2 eq? not ] ? >< sym > [ drop none' ] ;
-choice#: < quote [ dup first first last '?' eq? swap last first last '?' eq? not and not ] ? >< sym > [ drop none' ] ;
-choice#: < quote [ dup first last picks# swap last last picks# and not ] ? >< sym > [ drop none' ] ;
-choice#: < quote >< sym > [ dup first first -2 at swap dup first last left' right' rot . swap last last left' right' rot . chosen# ] ;
+choice#: < quote [ length 2 eq? not ] ? >. drop none' < sym >. ;
+choice#: < quote [ dup first first last '?' eq? swap last first last '?' eq? not and not ] ? >. drop none' < sym >. ;
+choice#: < quote [ dup first last picks# swap last last picks# and not ] ? >. drop none' < sym >. ;
+choice#: < quote >. dup first first -2 at swap dup first last left' right' rot . swap last last left' right' rot . chosen# < sym >. ;
 
 -- `w ins f end#`: the end of the type's order that the choice w makes
 -- has, f being `least'` or `greatest'`.
 
-end#: < sym quote least' [ swap first swap stated# swap drop ] ? > [ drop swap drop first least ] ;
-end#: < sym quote greatest' [ swap first swap stated# swap drop ] ? > [ drop swap drop first greatest ] ;
-end#: < sym quote least' > [ drop first dup dup "`\_` at \_ keeps the greater of two, and `least` gives \_ none: a clause of `least` would, `core.least: < \_' > [ drop … ] ;`" ( _ no-word' ) fail ] ;
-end#: < sym quote greatest' > [ drop first dup dup "`\_` at \_ keeps the lesser of two, and `greatest` gives \_ none: a clause of `greatest` would, `core.greatest: < \_' > [ drop … ] ;`" ( _ no-word' ) fail ] ;
+end#: < sym quote least' [ swap first swap stated# swap drop ] ? >. drop swap drop first least ;
+end#: < sym quote greatest' [ swap first swap stated# swap drop ] ? >. drop swap drop first greatest ;
+end#: < sym quote least' >. drop first dup dup "`\_` at \_ keeps the greater of two, and `least` gives \_ none: a clause of `least` would, `core.least: < \_' >. drop … ;`" ( _ no-word' ) fail ;
+end#: < sym quote greatest' >. drop first dup dup "`\_` at \_ keeps the lesser of two, and `greatest` gives \_ none: a clause of `greatest` would, `core.greatest: < \_' >. drop … ;`" ( _ no-word' ) fail ;
 
 -- How to name what has an identity: a word by its name, `"`max`"`, and
 -- other code as a quotation.
 
-named#: < sym >< string > [ "`\_`" ] ;
-named#: < quote >< string > [ drop "the quotation" ] ;
+named#: < sym >. "`\_`" < string >. ;
+named#: < quote >. drop "the quotation" < string >. ;
 
-no-identity#: < string quote > [ first dup "\_ has no identity at \_ that its primitives give: at \_ it applies no one operation whose primitive `unit` knows, and chooses no greater or lesser" ( _ no-word' ) fail ] ;
+no-identity#: < string quote >. first dup "\_ has no identity at \_ that its primitives give: at \_ it applies no one operation whose primitive `unit` knows, and chooses no greater or lesser" ( _ no-word' ) fail ;
 
 -- `u ins identity#`, reading the words as data (6): `u` is an identity,
 -- its operation as code, `[ + ]`, and `ins` the types it is for, `[ i64
@@ -580,30 +580,30 @@ no-identity#: < string quote > [ first dup "\_ has no identity at \_ that its pr
 -- with how to name it. The search's words end in `#`, being March's own
 -- (17), so a program keeps the plain names.
 
-identity#: < unit# quote > [ [ quote ! ] dip identity# ] ;
-identity#: < quote quote [ drop dup length 2 eq? swap last '.' eq? and ] ? > [ over first named# swap identity# ] ;
-identity#: < quote quote > [ "the quotation" swap identity# ] ;
-identity#: < quote string quote [ drop drop dup length 2 eq? swap last '.' eq? and ] ? > [ [ [ first ] dip ] dip identity# ] ;
-identity#: < quote string quote [ drop drop length 3 lt? ] ? > [ rot drop no-identity# ] ;
-identity#: < quote string quote [ drop drop dup first swap' eq? swap 2 at '.' eq? and ] ? > [ [ [ 3 -1 slice ] dip ] dip identity# ] ;
-identity#: < quote string quote > [ rot drop no-identity# ] ;
-identity#: < sym string quote [ drop drop unit' stated# ] ? > [ drop drop unit ] ;
-identity#: < sym string quote [ swap drop clauses# length 0 eq? ] ? > [ first rot dup "\_ at \_ applies `\_`, for which `unit` gives no identity: a clause of `unit` would, `core.unit: < \_' > [ drop … ] ;`" ( _ no-word' ) fail ] ;
-identity#: < sym string quote [ swap drop clauses# length 1 eq? ] ? > [ swap drop over over clauses# first last rot named# rot identity# ] ;
-identity#: < sym string quote [ swap drop clauses# choice# none' eq? not ] ? > [ swap drop over over clauses# choice# end# ] ;
-identity#: < sym string quote > [ swap drop swap named# swap no-identity# ] ;
+identity#: < unit# quote >. [ quote ! ] dip identity# ;
+identity#: < quote quote [ drop dup length 2 eq? swap last '.' eq? and ] ? >. over first named# swap identity# ;
+identity#: < quote quote >. "the quotation" swap identity# ;
+identity#: < quote string quote [ drop drop dup length 2 eq? swap last '.' eq? and ] ? >. [ [ first ] dip ] dip identity# ;
+identity#: < quote string quote [ drop drop length 3 lt? ] ? >. rot drop no-identity# ;
+identity#: < quote string quote [ drop drop dup first swap' eq? swap 2 at '.' eq? and ] ? >. [ [ 3 -1 slice ] dip ] dip identity# ;
+identity#: < quote string quote >. rot drop no-identity# ;
+identity#: < sym string quote [ drop drop unit' stated# ] ? >. drop drop unit ;
+identity#: < sym string quote [ swap drop clauses# length 0 eq? ] ? >. first rot dup "\_ at \_ applies `\_`, for which `unit` gives no identity: a clause of `unit` would, `core.unit: < \_' >. drop … ;`" ( _ no-word' ) fail ;
+identity#: < sym string quote [ swap drop clauses# length 1 eq? ] ? >. swap drop over over clauses# first last rot named# rot identity# ;
+identity#: < sym string quote [ swap drop clauses# choice# none' eq? not ] ? >. swap drop over over clauses# choice# end# ;
+identity#: < sym string quote >. swap drop swap named# swap no-identity# ;
 
 -- A type converts an identity to itself by the fact that holds for two
 -- values of it, which `identity#` finds.
 
-i64: < unit# >< i64 > [ [ i64 i64 ] identity# ] ;
-f64: < unit# >< f64 > [ [ f64 f64 ] identity# ] ;
-money: < unit# >< money > [ [ money money ] identity# ] ;
-string: < unit# >< string > [ [ string string ] identity# ] ;
-bool: < unit# >< bool > [ [ bool bool ] identity# ] ;
-int#: < unit# >< int# > [ [ int# int# ] identity# ] ;
-dec#: < unit# >< dec# > [ [ dec# dec# ] identity# ] ;
-ratio#: < unit# >< ratio# > [ [ ratio# ratio# ] identity# ] ;
+i64: < unit# >. [ i64 i64 ] identity# < i64 >. ;
+f64: < unit# >. [ f64 f64 ] identity# < f64 >. ;
+money: < unit# >. [ money money ] identity# < money >. ;
+string: < unit# >. [ string string ] identity# < string >. ;
+bool: < unit# >. [ bool bool ] identity# < bool >. ;
+int#: < unit# >. [ int# int# ] identity# < int# >. ;
+dec#: < unit# >. [ dec# dec# ] identity# < dec# >. ;
+ratio#: < unit# >. [ ratio# ratio# ] identity# < ratio# >. ;
 
 -- Loops. `each` applies a quotation to each element, from the first, and
 -- `each-right` from the last; the quotation takes its element and keeps the
@@ -612,55 +612,55 @@ ratio#: < unit# >< ratio# > [ [ ratio# ratio# ] identity# ] ;
 -- e0 (e1 (e2 x)), its quotation taking an element under the accumulator.
 -- A reduction starts from the first element, or the last.
 
-fold: [ rot swap each ] ;
-fold-right: [ rot swap [ swap ] swap compose each-right ] ;
-reduce: [ swap dup rest swap first rot fold ] ;
-reduce-right: [ swap dup most swap last rot fold-right ] ;
+fold: rot swap each ;
+fold-right: rot swap [ swap ] swap compose each-right ;
+reduce: swap dup rest swap first rot fold ;
+reduce-right: swap dup most swap last rot fold-right ;
 
 -- `xs q scan`: the running reductions, from the left, as `reduce` gives
 -- the last of them: `( 1 2 3 ) +' scan` is ( 1 3 6 ). A comprehension: each
 -- turn reads the last value collected.
 
-scan: [ ( _ dup first swap rest [ over swap ] _ compose each ) ] ;
+scan: ( _ dup first swap rest [ over swap ] _ compose each ) ;
 
 -- `xs q within`: q run with the array's last elements as its stack, as many
 -- as it takes, and what it leaves put in their place: `( 1 2 3 ) [ ~ ]
 -- within` is `( 1 3 2 )`. `spread` puts an array's elements on the stack:
 -- a vec's each a value, and any array's, inside an array literal, a run.
 
-spread: < n a vec > [ vec-spread ] ;
-spread: < tuple > [ tuple-spread ] ;
-spread: < a ary > [ [ ] each ] ;
+spread: < n a vec >. vec-spread ;
+spread: < tuple >. tuple-spread ;
+spread: < a ary >. [ ] each ;
 
 -- `n q repeat` runs q n times.
 
-repeat: [ swap range swap [ drop ] swap compose each ] ;
+repeat: swap range swap [ drop ] swap compose each ;
 
 -- Values as text. `show` writes a value as the display does, so it reads
 -- back: a string quoted, an array in parentheses. `>string` is a string's
 -- own text, and any other value shown; a string's holes write values in
 -- with it (march7/docs/STRINGS.md).
 
-show: < string >< string > [ string-show ] ;
-show: < i64 >< string > [ i64>text ] ;
-show: < f64 >< string > [ f64>text ] ;
-show: < money >< string > [ money>text ] ;
-show: < nil >< string > [ drop "nil" ] ;
-show: < 1 bool! >< string > [ drop "true" ] ;
-show: < bool >< string > [ drop "false" ] ;
-show: < sym >< string > [ sym-show ] ;
-show: < tuple >< string > [ [ show ] map "(" swap [ " " swap concat concat ] each " )" concat ] ;
-show: < a ary >< string > [ "(" swap [ show " " swap concat concat ] each " )" concat ] ;
-show: < k v map >< string > [
+show: < string >. string-show < string >. ;
+show: < i64 >. i64>text < string >. ;
+show: < f64 >. f64>text < string >. ;
+show: < money >. money>text < string >. ;
+show: < nil >. drop "nil" < string >. ;
+show: < 1 bool! >. drop "true" < string >. ;
+show: < bool >. drop "false" < string >. ;
+show: < sym >. sym-show < string >. ;
+show: < tuple >. [ show ] map "(" swap [ " " swap concat concat ] each " )" concat < string >. ;
+show: < a ary >. "(" swap [ show " " swap concat concat ] each " )" concat < string >. ;
+show: < k v map >.
   "{" swap dup keys sort
   [ over over at show swap show " " swap concat " " concat swap concat
     rot swap concat swap ] each
-  drop " }" concat ] ;
+  drop " }" concat < string >. ;
 
->string: < string >< string > [ ] ;
->string: < a >< string > [ show ] ;
+>string: < string >. < string >. ;
+>string: < a >. show < string >. ;
 
 -- Writing.
 
-print: < string > [ write ] ;
-print: < a > [ >string write ] ;
+print: < string >. write ;
+print: < a >. >string write ;

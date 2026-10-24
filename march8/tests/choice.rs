@@ -29,16 +29,16 @@ fn code(defs: &str, src: &str) -> Vec<Op> {
     s.compile(src).unwrap().0
 }
 
-const SIGN: &str = "positive: [ 0 gt? ] ;
-    sign: < i64 positive? > [ drop 1 ] ;
-    sign: < i64 > [ drop 0 ] ;";
+const SIGN: &str = "positive: 0 gt? ;
+    sign: < i64 positive? >. drop 1 ;
+    sign: < i64 >. drop 0 ;";
 
 #[test]
 fn guards_choose_at_run_time() {
     // The values are known only at run time, so the guard is tested there.
     assert_eq!(cells(&[SIGN, "5 -3", "sign swap sign"]).unwrap(), [0, 1]);
     // No clause whose guard holds is no word, at run time.
-    let only = "positive: [ 0 gt? ] ; only: < i64 positive? > [ drop 7 ] ;";
+    let only = "positive: 0 gt? ; only: < i64 positive? >. drop 7 ;";
     assert_eq!(cells(&[only, "5", "only"]).unwrap(), [7]);
     assert_eq!(
         cells(&[only, "-1", "only"]),
@@ -48,7 +48,7 @@ fn guards_choose_at_run_time() {
         )))
     );
     // A guard over two inputs: the smaller of two, with no `if`.
-    let min = "mn: < i64 i64 lt? > [ drop ] ; mn: < i64 i64 > [ swap drop ] ;";
+    let min = "mn: < i64 i64 lt? >. drop ; mn: < i64 i64 >. swap drop ;";
     assert_eq!(cells(&[min, "3 5 9 2", "mn rot rot mn"]).unwrap(), [2, 3]);
     // One input known, one at run time.
     assert_eq!(cells(&[min, "3", "5 mn"]).unwrap(), [3]);
@@ -60,7 +60,7 @@ fn guards_on_known_values_are_decided_now() {
     // `5 sign` tests its guard at compile time: the code is the literal 1.
     assert_eq!(code(SIGN, "5 sign -3 sign"), code("", "1 0"));
     // A guard that fails now drops its clause; with none left, no word.
-    let only = "positive: [ 0 gt? ] ; only: < i64 positive? > [ drop 7 ] ;";
+    let only = "positive: 0 gt? ; only: < i64 positive? >. drop 7 ;";
     assert_eq!(cells(&[only, "-1 only"]), Err(Kind::NoWord));
 }
 
@@ -68,9 +68,9 @@ fn guards_on_known_values_are_decided_now() {
 fn clauses_chosen_at_run_time_join_their_types() {
     // Different types make a union, with an informative warning
     // (doc/design/TYPES.md 2.9, 3.6).
-    let two = "positive: [ 0 gt? ] ;
-        bb: < i64 positive? > [ drop \"yes\" ] ;
-        bb: < i64 > [ drop 1 i64! ] ;";
+    let two = "positive: 0 gt? ;
+        bb: < i64 positive? >. drop \"yes\" ;
+        bb: < i64 >. drop 1 i64! ;";
     let mut s = session(&[two, "3 -3"]).unwrap();
     s.eval("bb swap bb").unwrap();
     assert_eq!(
@@ -84,14 +84,14 @@ fn clauses_chosen_at_run_time_join_their_types() {
             .contains("informative: this leaves a value of `i64 string or`")
     );
     // A literal that cannot become the others' type takes its default.
-    let lit = "positive: [ 0 gt? ] ;
-        bb: < i64 positive? > [ drop \"yes\" ] ;
-        bb: < i64 > [ drop 1 ] ;";
+    let lit = "positive: 0 gt? ;
+        bb: < i64 positive? >. drop \"yes\" ;
+        bb: < i64 >. drop 1 ;";
     assert_eq!(show(&[lit, "3", "bb"]), "<1> \"yes\"");
     // Literals take the type the alternatives share, as in an array literal.
-    let lit = "positive: [ 0 gt? ] ;
-        bb: < i64 positive? > [ drop 1.5 ] ;
-        bb: < i64 > [ drop 1 ] ;";
+    let lit = "positive: 0 gt? ;
+        bb: < i64 positive? >. drop 1.5 ;
+        bb: < i64 >. drop 1 ;";
     assert_eq!(show(&[lit, "3 -3", "bb swap bb"]), "<2> 1.0 1.5");
 }
 
@@ -99,26 +99,26 @@ fn clauses_chosen_at_run_time_join_their_types() {
 fn guards_are_words() {
     // A guard's arity comes from its definition: `lt?` looks at two inputs,
     // `positive?` at one.
-    let s = "positive: [ 0 gt? ] ;
-        ff: < i64 positive? i64 > [ drop drop 1 ] ;
-        ff: < i64 i64 > [ drop drop 0 ] ;";
+    let s = "positive: 0 gt? ;
+        ff: < i64 positive? i64 >. drop drop 1 ;
+        ff: < i64 i64 >. drop drop 0 ;";
     // `f` takes -5 and 1, and its guard looks at -5; then 5 and -1.
     assert_eq!(cells(&[s, "5 -1 -5 1", "ff rot rot ff"]).unwrap(), [0, 1]);
     // A word that does not leave one flag cannot be a guard.
     assert_eq!(
-        cells(&["two: [ dup ] ; ff: < i64 two? > [ ] ;"]),
+        cells(&["two: dup ; ff: < i64 two? >. ;"]),
         Err(Kind::Mismatch)
     );
     // A guard is applied to the types it sees: `gt?` has no clause for strings.
     assert_eq!(
-        cells(&["positive: [ 0 gt? ] ; ff: < string positive? > [ ] ;"]),
+        cells(&["positive: 0 gt? ; ff: < string positive? >. ;"]),
         Err(Kind::NoWord)
     );
     // Clauses with the same types and different guards are two clauses.
-    let two = "positive: [ 0 gt? ] ; negative: [ 0 lt? ] ;
-        gg: < i64 positive? > [ drop 1 ] ;
-        gg: < i64 negative? > [ drop -1 ] ;
-        gg: < i64 > [ drop 0 ] ;";
+    let two = "positive: 0 gt? ; negative: 0 lt? ;
+        gg: < i64 positive? >. drop 1 ;
+        gg: < i64 negative? >. drop -1 ;
+        gg: < i64 >. drop 0 ;";
     assert_eq!(
         cells(&[two, "5 -5 0", "gg rot gg rot gg"]).unwrap(),
         [0, 1, -1i64 as u64]
@@ -153,11 +153,11 @@ fn map_applies_a_quotation_to_each_element() {
 #[test]
 fn arithmetic_lifts_over_arrays() {
     assert_eq!(
-        show(&["ll: < i64 ary > [ 1 + ] ; ( 1 2 3 ) ll"]),
+        show(&["ll: < i64 ary >. 1 + ; ( 1 2 3 ) ll"]),
         "<1> ( 2 3 4 )"
     );
     assert_eq!(
-        show(&["ll: < f64 ary > [ 2 * ] ; ( 1.5 2.5 ) ll"]),
+        show(&["ll: < f64 ary >. 2 * ; ( 1.5 2.5 ) ll"]),
         "<1> ( 3.0 5.0 )"
     );
     assert_eq!(show(&["( 1 2 ) 10 *"]), "<1> ( 10 20 )");
@@ -166,12 +166,12 @@ fn arithmetic_lifts_over_arrays() {
         "<2> ( 9 8 7 ) ( 0 1 2 )"
     );
     // Money is not multiplied, lifted or not.
-    assert_eq!(cells(&["ll: < money ary > [ 2 * ] ;"]), Err(Kind::NoWord));
+    assert_eq!(cells(&["ll: < money ary >. 2 * ;"]), Err(Kind::NoWord));
     // No promotion: a decimal does not become an i64.
     assert_eq!(cells(&["( 1 2 ) 1.5 +"]), Err(Kind::NoWord));
     // The prototype's original bug: with the map's type known, `1 +` on what
     // `at` gives is an array plus a number, so it lifts.
-    let h = "hh: < string i64 ary map > [ \"k\" at 1 + ] ;";
+    let h = "hh: < string i64 ary map >. \"k\" at 1 + ;";
     assert_eq!(show(&[h, "{ \"k\" ( 1 2 ) } hh"]), "<1> ( 2 3 )");
     // At run time too.
     assert_eq!(show(&["( 4 5 )", "1 +"]), "<1> ( 5 6 )");
@@ -182,20 +182,20 @@ fn guards_must_not_write() {
     // A guard may only look: one that writes is refused where its clause is
     // defined, or, for a clause whose inputs are not all typed, where it is
     // applied, even when its values are known and it would be decided now.
-    let noisy = "noisy: [ dup i64>text write 0 gt? ] ;";
+    let noisy = "noisy: dup i64>text write 0 gt? ;";
     assert_eq!(
-        cells(&[noisy, "ff: < i64 noisy? > [ drop 1 ] ;"]),
+        cells(&[noisy, "ff: < i64 noisy? >. drop 1 ;"]),
         Err(Kind::Effect)
     );
-    let generic = "ff: < a noisy? > [ drop 1 ] ; ff: < a > [ drop 0 ] ;";
+    let generic = "ff: < a noisy? >. drop 1 ; ff: < a >. drop 0 ;";
     assert_eq!(cells(&[noisy, generic, "-5 ff"]), Err(Kind::Effect));
     // Writes are found through the words a guard applies, instances
     // included: `cd` writes as it counts down.
-    let cd = "zero: [ 0 eq? ] ;
-        cd: < i64 zero? > [ ] ;
-        cd: < i64 > [ dup print 1 -+ cd ] ;
-        done: [ cd 0 eq? ] ;";
-    assert_eq!(cells(&[cd, "gg: < i64 done? > [ ] ;"]), Err(Kind::Effect));
+    let cd = "zero: 0 eq? ;
+        cd: < i64 zero? >. ;
+        cd: < i64 >. dup print 1 -+ cd ;
+        done: cd 0 eq? ;";
+    assert_eq!(cells(&[cd, "gg: < i64 done? >. ;"]), Err(Kind::Effect));
     // Writing in a clause's body is fine.
     let mut s = session(&[cd, "3 cd"]).unwrap();
     assert_eq!(String::from_utf8(s.take_output()).unwrap(), "321");
@@ -205,7 +205,7 @@ fn guards_must_not_write() {
 fn value_patterns_choose_by_equality() {
     // A value left in a signature is a value pattern: the input must equal
     // it. Tested in the order defined, like a guard, by `eq?`.
-    let cmd = "cmd: < \"quit\" > [ drop 0 ] ; cmd: < string > [ length ] ;";
+    let cmd = "cmd: < \"quit\" >. drop 0 ; cmd: < string >. length ;";
     assert_eq!(cells(&[cmd, "\"quit\" cmd \"hello\" cmd"]).unwrap(), [0, 5]);
     assert_eq!(
         cells(&[cmd, "\"quit\" \"hello\"", "cmd swap cmd"]).unwrap(),
@@ -215,16 +215,16 @@ fn value_patterns_choose_by_equality() {
     assert_eq!(code(cmd, "\"quit\" cmd"), code("", "0"));
     // An untyped number matches a value of any type it becomes, compared in
     // that type; `.` gives it a type of its own.
-    let h = "hh: < 0.5 > [ drop 1 ] ; hh: < f64 > [ drop 0 ] ;";
+    let h = "hh: < 0.5 >. drop 1 ; hh: < f64 >. drop 0 ;";
     assert_eq!(cells(&[h, "0.5 0.25", "hh swap hh"]).unwrap(), [0, 1]);
-    let z = "zz: < 0 i64! > [ drop \"zero\" ] ; zz: < i64 > [ drop \"other\" ] ;";
+    let z = "zz: < 0 i64! >. drop \"zero\" ; zz: < i64 >. drop \"other\" ;";
     assert_eq!(show(&[z, "0 3", "zz swap zz"]), "<2> \"other\" \"zero\"");
     assert_eq!(cells(&[z, "0.0 zz"]), Err(Kind::NoWord));
-    assert_eq!(cells(&["bb: < 1.5 i64! > [ ] ;"]), Err(Kind::Literal));
+    assert_eq!(cells(&["bb: < 1.5 i64! >. ;"]), Err(Kind::Literal));
     // Inside its clause the input is known to equal the value, so code
     // there folds on it: `1 +` on the 0 is the constant 1, its cell
     // dropped. Passed through, it costs nothing.
-    let g = "gg: < 0 > [ 1 + ] ; gg: < i64 > [ 2 * ] ;";
+    let g = "gg: < 0 >. 1 + ; gg: < i64 >. 2 * ;";
     assert_eq!(cells(&[g, "0 5", "gg swap gg"]).unwrap(), [10, 1]);
     let c = code(&format!("{g} 5"), "gg");
     assert!(
@@ -235,12 +235,12 @@ fn value_patterns_choose_by_equality() {
             ]),
         "{c:?}"
     );
-    let bye = "cmd: < \"quit\" > [ \"bye: \" swap concat ] ; cmd: < string > [ ] ;";
+    let bye = "cmd: < \"quit\" >. \"bye: \" swap concat ; cmd: < string >. ;";
     assert_eq!(
         show(&[bye, "\"quit\" \"hi\"", "cmd swap cmd"]),
         "<2> \"hi\" \"bye: quit\""
     );
     // Patterns belong in signatures, and a value is not an output.
     assert_eq!(cells(&["1 < 1 > !"]), Err(Kind::Syntax));
-    assert_eq!(cells(&["bb: < i64 >< 0 > [ ] ;"]), Err(Kind::Mismatch));
+    assert_eq!(cells(&["bb: < i64 >. < 0 >. ;"]), Err(Kind::Mismatch));
 }

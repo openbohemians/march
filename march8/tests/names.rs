@@ -39,10 +39,9 @@ fn a_name_is_an_input() {
     assert_eq!(show(&["7 3 [ a b | a b -+ ] ."]), "<1> 4");
     assert_eq!(show(&["7 3 [ drop dup | drop dup -+ ] ."]), "<1> 4");
     // A word's body is a bracket.
-    let growth = "growth: < f64 f64 >< f64 > [ rate term | rate 1.0 + term ^ ] ;";
-    let annuity = "annuity: < f64 f64 f64 >< f64 > [ p r g | p r ⋅ g ⋅  g 1.0 -+  div ] ;";
-    let payment = "payment: < f64 f64 f64 >< f64 >
-        [ principal rate term | principal rate  rate term growth  annuity ] ;";
+    let growth = "growth: < f64 f64 >. [ rate term | rate 1.0 + term ^ ] . < f64 >. ;";
+    let annuity = "annuity: < f64 f64 f64 >. [ p r g | p r ⋅ g ⋅  g 1.0 -+  div ] . < f64 >. ;";
+    let payment = "payment: < f64 f64 f64 >. [ principal rate term | principal rate  rate term growth  annuity ] . < f64 >. ;";
     assert_eq!(
         show(&[growth, annuity, payment, "50000.0 0.005 360.0 payment"]),
         "<1> 299.77526257637845"

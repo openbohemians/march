@@ -69,16 +69,16 @@ fn a_bool_is_an_i64() {
         "<3> ( 5 0 ) < 2 i64 vec > 3 < i64 > true < bool >"
     );
     // A clause for bool is more specific than one for i64.
-    let k = "kk: < i64 > [ drop 1 ] ; kk: < bool > [ drop 2 ] ;";
+    let k = "kk: < i64 >. drop 1 ; kk: < bool >. drop 2 ;";
     assert_eq!(show(&[k, "5 kk true kk"]), "<2> 1 2");
 }
 
 #[test]
 fn guards_take_a_bool() {
     // A count is not a truth: FORTH's flag that was a number is caught.
-    let odd = "odd: [ 2 mod ] ; ff: < i64 odd? > [ drop 1 ] ;";
+    let odd = "odd: 2 mod ; ff: < i64 odd? >. drop 1 ;";
     assert_eq!(session(&[odd]).err(), Some(Kind::Mismatch));
-    let odd = "odd: [ 2 mod 1 eq? ] ; ff: < i64 odd? > [ drop 1 ] ; \
-               ff: < i64 > [ drop 0 ] ;";
+    let odd = "odd: 2 mod 1 eq? ; ff: < i64 odd? >. drop 1 ; \
+               ff: < i64 >. drop 0 ;";
     assert_eq!(show(&[odd, "3 4", "ff swap ff"]), "<2> 0 1");
 }

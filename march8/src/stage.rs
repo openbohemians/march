@@ -915,6 +915,42 @@ fn made_at(toks: &[Token], j: usize) -> Option<&str> {
     }
 }
 
+/// A body's checks (doc/design/SYMBOLIC-FORTH.md 6.32), each a bracket made
+/// a signature and applied, `[ i64 . ] sig# ! .`: the one it begins with,
+/// its inputs, and, if it has that, the one it ends with, what it leaves,
+/// each as the code that makes it; and the body between them.
+type Checks = (
+    Option<std::ops::Range<usize>>,
+    Option<std::ops::Range<usize>>,
+    std::ops::Range<usize>,
+);
+
+fn checks(q: &[Token]) -> Checks {
+    // Where a check that begins at `i` ends.
+    let check = |i: usize| -> Option<usize> {
+        let Tok::Open(_) = q.get(i)?.tok else {
+            return None;
+        };
+        let j = matching(q, i);
+        let applied = q.get(j + 4).is_some_and(|t| t.tok == Tok::Apply);
+        (made_at(q, j + 1) == Some("sig#") && applied).then_some(j + 5)
+    };
+    let Some(start) = check(0) else {
+        return (None, None, 0..q.len());
+    };
+    let mut i = start;
+    while i < q.len() {
+        if let Tok::Open(_) = q[i].tok {
+            if check(i) == Some(q.len()) {
+                return (Some(0..start - 1), Some(i..q.len() - 1), start..i);
+            }
+            i = matching(q, i);
+        }
+        i += 1;
+    }
+    (Some(0..start - 1), None, start..q.len())
+}
+
 /// Where a definition that starts at `i` ends, at its `;`: a name, then
 /// its signature and body, brackets, or one value, then `;`.
 fn definition(toks: &[Token], i: usize) -> Option<usize> {
@@ -1082,13 +1118,13 @@ impl Stage {
         let none = crate::symbols::Symbols::parse("").expect("an empty table");
         for p in PRIMS {
             let toks = crate::read::read(p.sig, &none).expect("a primitive's signature reads");
-            // Its inputs, and its outputs in a second bracket, each
-            // `[ … ] sig# !`.
+            // Its inputs, and its outputs, each a check, `[ … ] sig# ! .`
+            // (doc/design/SYMBOLIC-FORTH.md 6.32).
             let end = matching(&toks, 0);
             let mut sig = s
                 .bracket(&toks[1..end])
                 .expect("a primitive's signature is well formed");
-            let outs = end + 4;
+            let outs = end + 5;
             if outs < toks.len() {
                 sig.outs = Some(
                     s.outputs(&toks[outs + 1..matching(&toks, outs)])
@@ -1257,20 +1293,18 @@ impl Stage {
                 self.pos = at;
                 self.apply_name(&n, at)
             }
-            // A type is data, and is not called (Thomas, 2026-10-13): `!`
-            // structures by it.
-            Val::Type(_) => Err(self.err(
-                Kind::Mismatch,
-                format!(
-                    "{} is not called: `!` structures by it, `2 i64!`",
-                    self.describe(&f)
-                ),
-            )),
-            Val::Quote(q) if signature(&q) => Err(self.err(
-                Kind::Mismatch,
-                "a signature is not called: `!` gives the values below its types, \
-                 `x y < i64 f64 > !`",
-            )),
+            // A type applied checks that the values on top have it, where it
+            // is applied (doc/design/SYMBOLIC-FORTH.md 6.32): `< i64 >.`, a
+            // body's first check being its signature.
+            Val::Type(t) => self.annotate_top(&Sig {
+                ins: vec![t],
+                guards: Vec::new(),
+                outs: None,
+            }),
+            Val::Quote(q) if signature(&q) => {
+                let sig = self.bracket(&q[1..q.len() - 1])?;
+                self.annotate_top(&sig)
+            }
             Val::Quote(q) => self.run_code(&q),
             // Which word a name applies is chosen while compiling.
             Val::Run if f.ty == SYMBOL => Err(self.err(
@@ -2021,7 +2055,7 @@ impl Stage {
 
     /// `a var# .`: a variable of a one-letter name, which its bracket fills
     /// (doc/design/SYMBOLIC-FORTH.md 7): in a signature a type, filled by
-    /// matching, `< a a >< a >`. A letter is read as one, and a letter's
+    /// matching, `< a a >.`. A letter is read as one, and a letter's
     /// symbol, `a'`, is a value to match, as any symbol is. In code a letter
     /// is an input by its place (6.14), which `run` gives where the letter
     /// is written, so here it is one made otherwise.
@@ -2147,27 +2181,59 @@ impl Stage {
     }
 
     /// `;` (doc/design/SYMBOLIC-FORTH.md 18): binds the name below to the
-    /// value on top, a clause's body or a type, with the clause's signature
-    /// between them if it has one, its inputs, then its outputs if it gives
-    /// them, each a bracket (section 3): `sq: [ dup * ] ;`, `fib: < n > [ …
-    /// ] ;`, `sq: < i64 >< i64 > [ dup * ] ;` and `num: < i64 f64 or > ;`.
+    /// value on top, a clause's body or a type. A body's first check is the
+    /// clause's signature, its inputs, and its last what it leaves (6.32):
+    /// `sq: dup * ;`, `fib: < n >. … ;`, `sq: < i64 >. dup * < i64 >. ;` and
+    /// `num: < i64 f64 or > ;`.
     fn semicolon(&mut self) -> Result<()> {
-        let usage =
-            "`;` takes a name, its signature if it has one, then a quotation, a type or a symbol";
-        let value = self.stack.pop().expect("matched");
-        let mut sigs = Vec::new();
-        let (name, named_at) = loop {
-            let Ok(j) = self.pop() else {
-                return Err(self.err(Kind::Mismatch, usage));
-            };
-            match &j.val {
-                Val::Name(n, at) => break (n.clone(), *at),
-                Val::Type(_) => sigs.push(j),
-                Val::Quote(q) if signature(q) => sigs.push(j),
-                _ => return Err(self.err(Kind::Mismatch, usage)),
+        let usage = "`;` takes a name, then a quotation, a type or a symbol";
+        let mut value = self.stack.pop().expect("matched");
+        let (name, named_at) = match self.pop() {
+            Ok(Jdg {
+                val: Val::Name(n, at),
+                ..
+            }) => (n, at),
+            // Until 2026-10-24 a signature came before its body.
+            Ok(Jdg {
+                val: Val::Type(_), ..
+            }) => {
+                return Err(self.err(
+                    Kind::Syntax,
+                    "a signature is a check, first in its body: `sq: < i64 >. dup * ;`, \
+                     `sq [ [ i64 . ] sig# ! . dup . * . ] ;`",
+                ));
             }
+            Ok(Jdg {
+                val: Val::Quote(q), ..
+            }) if signature(&q) => {
+                return Err(self.err(
+                    Kind::Syntax,
+                    "a signature is a check, first in its body: `sq: < i64 >. dup * ;`, \
+                     `sq [ [ i64 . ] sig# ! . dup . * . ] ;`",
+                ));
+            }
+            _ => return Err(self.err(Kind::Mismatch, usage)),
         };
-        sigs.reverse();
+        // A body's first check is the clause's signature, its inputs, and its
+        // last, after that, what it leaves (doc/design/SYMBOLIC-FORTH.md
+        // 6.32), each made here; a body that is one type is that type, which
+        // `;` names, `num: < i64 f64 or … > ;`.
+        let mut sigs = Vec::new();
+        if let Val::Quote(q) = &value.val
+            && !signature(q)
+        {
+            let q = q.clone();
+            let (ins, outs, body) = checks(&q);
+            for r in [ins, outs].into_iter().flatten() {
+                self.run(&q[r])?;
+                sigs.push(self.pop()?);
+            }
+            if !sigs.is_empty() {
+                value.val = Val::Quote(q[body].into());
+            } else if let Some(t) = self.type_body(&q)? {
+                value = t;
+            }
+        }
         // The meta-ops are not names: the reader knows them, nothing looks
         // them up, and so nothing defines them (doc/design/SYMBOLIC-FORTH.md
         // 16).
@@ -2185,6 +2251,15 @@ impl Stage {
         let space: Rc<str> = space.into();
         if matches!(key, "import#" | "export#") {
             return match &value.val {
+                // A body of one bracket lists the names, `import#: [| math.*
+                // |] ;`, as `import# [ … ] ;` does.
+                Val::Quote(q)
+                    if sigs.is_empty()
+                        && matches!(q.first().map(|t| &t.tok), Some(Tok::Open(_)))
+                        && matching(q, 0) + 1 == q.len() =>
+                {
+                    self.set_names(&space, key, &q[1..q.len() - 1])
+                }
                 Val::Quote(q) if sigs.is_empty() => self.set_names(&space, key, q),
                 _ => Err(self.err(
                     Kind::Syntax,
@@ -2203,7 +2278,7 @@ impl Stage {
                     Kind::Syntax,
                     format!(
                         "`{key}` is a rule, code put where a name it matches stands, and has \
-                         no signature: `{key}: [ … ] ;`"
+                         no signature: `{key}: … ;`"
                     ),
                 ));
             }
@@ -2249,14 +2324,6 @@ impl Stage {
             }]),
             _ => return Err(self.err(Kind::Mismatch, usage)),
         };
-        if let Some(Tok::Open(_)) = q.first().map(|t| &t.tok)
-            && made_at(&q, matching(&q, 0) + 1) == Some("sig#")
-        {
-            return Err(self.err(
-                Kind::Syntax,
-                format!("a clause's signature comes before its body: `{name}: < … > [ … ] ;`"),
-            ));
-        }
         let at = named_at;
         let sig = match &sigs[..] {
             [] => None,
@@ -2273,12 +2340,7 @@ impl Stage {
                     ..ins
                 })
             }
-            _ => {
-                return Err(self.err(
-                    Kind::Syntax,
-                    "a clause has at most two signatures, its inputs and its outputs",
-                ));
-            }
+            _ => unreachable!("a body's first check and its last"),
         };
         let core = self.core;
         self.define(
@@ -2291,6 +2353,43 @@ impl Stage {
                 core,
             },
         )
+    }
+
+    /// A body that is one type, a type's name, `temp: f64 ;`, or a bracket
+    /// of one, `num: < i64 f64 or … > ;`: that type, made as the code before
+    /// `;` made it until bodies were bare (doc/design/SYMBOLIC-FORTH.md
+    /// 6.32), for `;` to name.
+    fn type_body(&mut self, q: &[Token]) -> Result<Option<Jdg>> {
+        match q {
+            [
+                Token {
+                    tok: Tok::Name(n), ..
+                },
+                Token {
+                    tok: Tok::Apply, ..
+                },
+            ] if self
+                .words
+                .get(&self.resolve_quiet("", n))
+                .is_some_and(|w| w.ty.is_some()) =>
+            {
+                self.run(q)?;
+                self.pop().map(Some)
+            }
+            [
+                Token {
+                    tok: Tok::Open(_), ..
+                },
+                ..,
+            ] if made_at(q, matching(q, 0) + 1) == Some("sig#")
+                && matching(q, 0) + 4 == q.len() =>
+            {
+                self.run(q)?;
+                let j = self.pop()?;
+                Ok(matches!(j.val, Val::Type(_)).then_some(j))
+            }
+            _ => Ok(None),
+        }
     }
 
     /// A signature from its value: a type, its one input, or a bracket.
@@ -2594,7 +2693,8 @@ impl Stage {
         if !sig.guards.is_empty() {
             return Err(self.err(
                 Kind::Syntax,
-                "guards and value patterns belong in a signature, first in a quotation",
+                "guards and value patterns belong in a signature, a body's first check, \
+                 `max: < a a gt? >. drop ;`",
             ));
         }
         self.need(sig.ins.len())?;
@@ -3785,7 +3885,7 @@ impl Stage {
                                 Some(at),
                                 format!(
                                     "the results of `{name}` on {names} do not settle: \
-                                     give its signature its outputs, a second bracket, `< i64 >< i64 >`"
+                                     give it its outputs, a check last in its body, `< i64 >.`"
                                 ),
                             ));
                         }
@@ -3803,7 +3903,7 @@ impl Stage {
                         format!(
                             "`{name}` applies itself on {names}, and none of its clauses for \
                              them finishes without doing so, so its results have no types: \
-                             give its signature its outputs, a second bracket, `< i64 >< i64 >`"
+                             give it its outputs, a check last in its body, `< i64 >.`"
                         ),
                     ));
                 }
@@ -4920,8 +5020,8 @@ impl Stage {
     /// signature, by what each value is: a type, inputs of that type; a
     /// value, a literal, a symbol, `true`, inputs equal to it; a test, a
     /// guard, which tests the inputs before it.
-    /// A clause's outputs are a second bracket, `< i64 >< i64 >` (section
-    /// 3), which `outputs` reads.
+    /// A clause's outputs are a check last in its body, `< i64 >.` (6.32),
+    /// which `outputs` reads.
     pub fn bracket(&mut self, toks: &[Token]) -> Result<Sig> {
         let mut ins = Vec::new();
         let mut equals = Vec::new();
@@ -5098,7 +5198,7 @@ impl Stage {
 
     /// Applies a constructor: `100 i64 vec` is a type.
     /// Whether the values on top are what a constructor takes, as its
-    /// signature says: `< type type >< type >` for `map` and `or`, `nil`
+    /// signature says: `< type type >. < type >.` for `map` and `or`, `nil`
     /// standing for its type.
     fn constructs(&mut self, c: Con) -> bool {
         let ins = match c {

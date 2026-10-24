@@ -21,7 +21,7 @@ fn error(src: &str) -> (Kind, String) {
 
 #[test]
 fn a_clause_is_its_signature_and_its_body() {
-    // `max: < a a gt? >< a > [ drop ] ;`: what `;` takes after the name,
+    // `max: < a a gt? >. drop < a >. ;`: what `;` takes after the name,
     // each bracket as its code, `a var# . a var# . gt ?` and `a var# .`, a
     // letter being a variable, then the body, `drop .`.
     let first = "max' < i64 i64 > clauses# first";
@@ -43,20 +43,18 @@ fn a_clause_is_its_signature_and_its_body() {
     // A type given alone is written by its name.
     assert_eq!(
         show(
-            "inc: < i64 >< i64 > [ 1 + ] ; inc' i64 clauses# first dup length swap first dup length swap first"
+            "inc: < i64 >. 1 + < i64 >. ; inc' i64 clauses# first dup length swap first dup length swap first"
         ),
         "<3> 3 2 i64'"
     );
     // A clause with no signature is its body alone, and a guard's
     // quotation is one element.
     assert_eq!(
-        show("add: [ + ] ; add' < i64 i64 > clauses# first dup length swap first first"),
+        show("add: + ; add' < i64 i64 > clauses# first dup length swap first first"),
         "<2> 1 +'"
     );
     assert_eq!(
-        show(
-            "even: < i64 [ 2 mod zero ] ? > [ drop 1 ] ; even' i64 clauses# first first 3 at length"
-        ),
+        show("even: < i64 [ 2 mod zero ] ? >. drop 1 ; even' i64 clauses# first first 3 at length"),
         "<1> 7"
     );
 }
@@ -66,7 +64,7 @@ fn they_are_the_clauses_dispatch_would_choose() {
     // Those with guards first, as defined, then the best without.
     assert_eq!(show("max' [ i64 i64 ] clauses# length"), "<1> 2");
     assert_eq!(show("max' [ i64 i64 ] clauses# last first length"), "<1> 6");
-    let fib = "fib: < 0 > [ 0 ] ; fib: < 1 > [ 1 ] ; fib: < i64 > [ 2 ] ; fib: < f64 > [ 3 ] ;";
+    let fib = "fib: < 0 >. 0 ; fib: < 1 >. 1 ; fib: < i64 >. 2 ; fib: < f64 >. 3 ;";
     assert_eq!(show(&format!("{fib} fib' i64 clauses# length")), "<1> 3");
     // A value pattern, `0`, matches a value of any type its literal becomes.
     assert_eq!(
@@ -92,7 +90,7 @@ fn they_are_the_clauses_dispatch_would_choose() {
     // A body taken out runs as written, its names paths where it was.
     assert_eq!(show("3 4 max' [ i64 i64 ] clauses# last last ."), "<1> 4");
     assert_eq!(
-        show("m.ff: < i64 > [ gg ] ; m.gg: [ 7 ] ; gg: [ 0 ] ; m.ff' i64 clauses# first last ."),
+        show("m.ff: < i64 >. gg ; m.gg: 7 ; gg: 0 ; m.ff' i64 clauses# first last ."),
         "<1> 7"
     );
 }

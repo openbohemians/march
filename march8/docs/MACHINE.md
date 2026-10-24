@@ -12,20 +12,20 @@ time, `map`, and arithmetic lifted over arrays; slice 3 adds recursion,
 instances and tail calls.
 
 ```
-fee: < money >< money > [ 1.10 + ] ;
+fee: < money >. 1.10 + < money >. ;
 19.99 fee                          → 21.09, exactly: 2109 cents
-sq: [ dup * ] ;
+sq: dup * ;
 3 sq                               → 9, compiled as the literal 9
 { "k" ( 41 2 ) } "k" at 0 at 1 +        → 42
-positive: [ 0 gt? ] ;
-sign: < i64 positive? > [ drop 1 ] ;
-sign: < i64 > [ drop 0 ] ;
+positive: 0 gt? ;
+sign: < i64 positive? >. drop 1 ;
+sign: < i64 >. drop 0 ;
 x sign                             → 1 or 0, chosen at run time
 5 sign                             → the literal 1, chosen now
 ( 1 2 3 ) 10 *                     → ( 10 20 30 ): it lifts
-zero: [ 0 eq? ] ;
-fact: < i64 zero? > [ drop 1 ] ;
-fact: < i64 > [ dup 1 -+ fact * ] ;
+zero: 0 eq? ;
+fact: < i64 zero? >. drop 1 ;
+fact: < i64 >. dup 1 -+ fact * ;
 10 fact                            → 3628800, by fact's i64 instance
 ```
 
@@ -98,7 +98,7 @@ marks nothing (Thomas): words are case-sensitive, so a module defines the
 symbols it needs as words that leave them, and they resolve as words do,
 by namespace and import. A program made of symbols, a logic program's
 atoms, reads its capitals as symbols by a rule whose capture is the name
-and whose code is none, `/([A-Z][A-Za-z0-9]*)/: [ ] ;`, as
+and whose code is none, `/([A-Z][A-Za-z0-9]*)/: ;`, as
 examples/syllogism.march does.
 
 A symbol is text until a type structures it, so a word that takes a string
@@ -110,7 +110,7 @@ symbol only by `sym!`.
 
 `map` and `or` are families (Thomas, 2026-10-16): each builds a type
 from types, its constructor the clause whose signature is
-`< type type >< type >`, chosen as any clause is, by what it takes, and
+`< type type >. < type >.`, chosen as any clause is, by what it takes, and
 otherwise maps over an array or joins truths. No value is both a type and
 an array or a truth, so `i64 true or` is no word. `nil` stands for its type
 where a type is wanted, in any family: it matches `type`, so `i64 nil or`
@@ -135,13 +135,14 @@ called (Thomas, 2026-10-13); **`!` converts** by it:
 leaves is the signature, by what each value is:
 
 ```
-case: < string Camel > [ … ] ;        a string, and the symbol Camel
-at: < a ary i64 >< a > [ … ] ;        one letter is a type variable
-ff: < a' > [ … ] ;                    its symbol is a value: the symbol a
-sign: < i64 positive? > [ … ] ;       a word tested, by ?: a guard
-even: < i64 [ 2 mod zero ] ? > [ … ] ;    a quotation tested is one too
-fib: < 0 > [ … ] ;    < 0 i64! >    < true >    a value left: equal to it
-pair: < ( i64 string ) > [ … ] ;      an array of types: a tuple type
+case: < string Camel >. … ;            a string, and the symbol Camel
+at: < a ary i64 >. … < a >. ;          one letter is a type variable
+ff: < a' >. … ;                        its symbol is a value: the symbol a
+sign: < i64 positive? >. … ;           a word tested, by ?: a guard
+even: < i64 [ 2 mod zero ] ? >. … ;    a quotation tested is one too
+fib: < 0 >. … ;                        a value left: equal to it, as in
+                                       `< 0 i64! >.` and `< true >.`
+pair: < ( i64 string ) >. … ;          an array of types: a tuple type
 ```
 
 `?` applies a test, which leaves one bool, and the compiler holds it to
@@ -161,7 +162,7 @@ context. Anywhere else it is a value, so `[ < f64 > ! ] map` converts each
 element, as `[ f64! ] map` does.
 
 **Namespaces** (doc/design/SYMBOLIC-FORTH.md 16, 17): a dot inside a name
-divides a path, and `;` defines at one, `math.sq: [ dup * ] ;`. Each
+divides a path, and `;` defines at one, `math.sq: dup * ;`. Each
 source is **expanded** once it is read (2026-10-20): each name it applies
 becomes its path where it was written, looked up in its namespace, then
 among the namespace's import, then in the core, and a name found nowhere
@@ -176,9 +177,9 @@ global text and is never expanded: `sq' map` in `math` applies the root's
 an error. A word of the program's root is reached from a namespace by
 importing it. **The core is the namespace `core`**, found last, as though
 every namespace imported `core.*`: `+` is `core.+`, and a program's word
-of a core name is its own, `dup: [ 7 ] ;` leaving the core's words, `over`
+of a core name is its own, `dup: 7 ;` leaving the core's words, `over`
 among them, the core's `dup`. So a clause added to a core family is
-written by its path, `core.unit: < int#-' > [ drop 0 ] ;`. While
+written by its path, `core.unit: < int#-' >. drop 0 ;`. While
 core.march is read, a bare name defined is the core's. Expanded code
 keeps its paths; a message, a name taken out of a quotation, and
 `name#`'s symbol show the shortest name the root finds the word by, `dup`
@@ -193,12 +194,12 @@ two places is an error that a path settles.
 
 **Recognizers** (doc/design/SYMBOLIC-FORTH.md 25) are rewrite rules: a
 pattern, a regular expression between slashes that matches a whole name,
-and code, `units./([0-9]+)kg/: [ int# ! 1000 * ] ;`. Where a name the
+and code, `units./([0-9]+)kg/: int# ! 1000 * ;`. Where a name the
 pattern matches is applied, the rule puts in its place its captures, each
 a symbol, in order, then its code: `12kg` is `'12' int# ! 1000 *`. A rule
 has no signature and one definition; its effect is the rewrite's, so to
-its user `log_2` of `/log_([0-9]+)/: [ i64 ! log-base ] ;` is
-`< f64 >< f64 >`, and more meanings are a family's, which its code
+its user `log_2` of `/log_([0-9]+)/: i64 ! log-base ;` is
+`< f64 >. … < f64 >.`, and more meanings are a family's, which its code
 applies. A capture is a symbol, global text, which the rule's code reads
 as a name where the name was applied with `name#`; the rule's own names
 mean what they mean where the rule was defined. A name a rule matches is
@@ -207,8 +208,8 @@ where: its namespace is the longest part before a dot that is one. When
 `.` applies a name, the stage looks for a rule of that namespace, or of
 one it imports by `*` that exports the rule by its pattern, then for the
 name, then for a rule of the core: the power,
-`/(.+)\^([0-9]+)/: [ [ name# ] dip int# ! power# . ] ;`, and the width,
-`/(.+)_([0-9]+)/: [ [ name# ] dip int# ! width# ] ;`, which `width#` gives a word that
+`/(.+)\^([0-9]+)/: [ name# ] dip int# ! power# . ;`, and the width,
+`/(.+)_([0-9]+)/: [ name# ] dip int# ! width# ;`, which `width#` gives a word that
 moves values or is handed code, `tuck_2` of a program's `tuck` too. A rule holds for
 all of its namespace, and a name it matches before its code is defined is
 an error. Each group must capture in every match, so the effect is fixed.
@@ -218,31 +219,35 @@ applies, so Symbolic Forth matches as March does, and the syllogism runs
 lowered. A symbol becomes a number where it is known, so a family's
 clause typed `sym` is checked where it is applied.
 
-**A definition is data:** a name, what it names, and `;` (Thomas,
-2026-10-12; doc/design/SYMBOLIC-FORTH.md 18), FORTH's `: inc 1 + ;` turned
-postfix: `inc: < i64 >< i64 > [ 1 + ] ;`. The name comes first, and
-the bracket after it says what kind of thing it names:
+**A definition is data:** a name, its body, and `;` (Thomas,
+2026-10-12; doc/design/SYMBOLIC-FORTH.md 18), FORTH's `: inc 1 + ;` with
+its name a label, `inc: 1 + ;`. The body runs from the label to its `;`,
+as FORTH's runs from `:` (6.32), and the reader writes it as a quotation,
+`inc [ 1 + ] ;`, so a bracket in it is a value:
 
 ```
-fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;     code
+fib: < n >. dup 1 -+ fib swap 2 -+ fib + ;     code
+primes: ( 2 3 5 7 ) ;                          a constant, the tuple
 num: < i64 f64 or money or int# or dec# or ratio# or > ;    a type
 ```
 
-A bracket before the body is the clause's signature, its context (TYPES.md
-2.15): the types of its inputs, then, in a second bracket, the outputs it
-promises, the two written touching, `sq: < i64 >< i64 > [ dup * ] ;`, as
-`><` is `>` then `<` (doc/design/SYMBOLIC-FORTH.md 6.8). `--` begins a
-comment everywhere, inside a bracket too; one that leaves a bracket never
-closed is taken for the divider it was until 2026-10-20, and the error
-says where the outputs go. Clauses of one name are a family. No name ends in `?`, which tests, or
-in a power, `^` and digits, which the core's rule rewrites where the name
-is applied; a subscript, `_` and digits, is part of a name, an index, as
-in x₁. A type is named, `config: <
-string i64 map > ;`, the bracket only saying that it is one, and a named
-class is called by its name in messages. `;` takes nothing else: a value
-computed where it stands, with no bracket to mark where it starts, could
-take the name below it. Constants are quotations, `primes: [ ( 2 3 5 7 ) ]
-;`, folding where they are used.
+A type bracket applied checks the values on top where it is applied, and
+the check a body begins with is the clause's signature, its context
+(TYPES.md 2.15), the types of its inputs; the one it ends with, after
+that, the outputs it promises, `sq: < i64 >. dup * < i64 >. ;`
+(doc/design/SYMBOLIC-FORTH.md 6.32). Until 2026-10-24 the two came before
+the body, touching, `< i64 >< i64 > [ dup * ]`, which march8 now refuses,
+saying where they go. `--` begins a comment everywhere, inside a bracket
+too; one that leaves a bracket never closed is taken for the divider it
+was until 2026-10-20, and the error says where the outputs go. Clauses of
+one name are a family. No name ends in `?`, which tests, or in a power,
+`^` and digits, which the core's rule rewrites where the name is applied;
+a subscript, `_` and digits, is part of a name, an index, as in x₁. A body
+that is one type, a type's name or a bracket, names it, `config: < string
+i64 map > ;`, and a named class is called by its name in messages. A
+definition names no inputs, a bracket in it does, `[ rate term | … ] .`;
+and a label is closed by its `;`, so input that ends inside a body is
+unfinished, and the REPL waits for the rest.
 
 ## Judgments
 
@@ -360,8 +365,8 @@ A family's clauses need not take as many values as each other (Thomas,
 TYPES.md 3.13):
 
 ```
-step: < Up' > [ drop 1 ] ;
-step: < i64 Down' > [ drop drop 2 ] ;
+step: < Up' >. drop 1 ;
+step: < i64 Down' >. drop drop 2 ;
 
 5 Up' step                         5 1: the shorter takes one value
 5 Down' step                       2
@@ -443,9 +448,9 @@ A value left in a signature, not taken as a `vec`'s length, is a **value
 pattern**: the input must equal it (TYPES.md 2.12).
 
 ```
-fib: < 0 > [ ] ;
-fib: < 1 > [ ] ;
-fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;
+fib: < 0 >. ;
+fib: < 1 >. ;
+fib: < n >. dup 1 -+ fib swap 2 -+ fib + ;
 ```
 
 - **It is a guard,** testing the input `eq?` the value, so it is chosen in
@@ -464,7 +469,7 @@ fib: < n > [ dup 1 -+ fib swap 2 -+ fib + ] ;
   *pinned*, a value known at compile time whose cell is still on the
   machine's stack. Passed through, it costs nothing, so `fib`'s `< 0 > ;` is
   no code; copied, the copy is the known value; folded, its cell is dropped
-  and the result is a constant, so `g: < 0 > [ 1 + ] ;` compiles that
+  and the result is a constant, so `g: < 0 >. 1 + ;` compiles that
   clause to `drop 1`, and `< "quit" > "bye: " swap concat` to a drop and a
   constant string.
 - Value patterns belong in signatures, among the inputs: one in a bracket
@@ -510,7 +515,7 @@ Lifting is clauses in `core.march`, an array and a number in either
 order for `+`, `-+`, `*` and `/*` ("Arrays as tensors"):
 
 ```
-+: < a ary a >< a ary > [ swap [ over + ] map swap drop ] ;
++: < a ary a >. swap [ over + ] map swap drop < a ary >. ;
 ```
 
 So `( 1 2 3 ) 1 +` is `( 2 3 4 )`, a literal taking the elements' type, and
@@ -521,15 +526,15 @@ the prototype's original bug, `{ "k" ( 1 2 ) } "k" at 1 +`, lifts.
 A clause defined under a type's name says how a literal becomes that type:
 
 ```
-i64: < int# >< i64 > [ int#>i64 ] ;
-money: < dec# >< money > [ dec#>money ] ;
+i64: < int# >. int#>i64 < i64 >. ;
+money: < dec# >. dec#>money < money >. ;
 ```
 
 Converting a literal by the type, `2 i64!`, runs this clause, and so does
 a clause that wants the type and is given the literal. Applying the name
 gives the type itself; its clauses are only its conversions. So literal handling is
 an open family, as Thomas framed it ("just another type signature"). Two
-literals fold by clauses on the literal types, `< int# int# >< int# >`,
+literals fold by clauses on the literal types, `< int# int# >. … < int# >.`,
 exactly, and stay literals, so `1 2 + 3.5 +` is the decimal 6.5. A
 literal takes its default type, i64 or f64, only when it must be a value at
 run time. Until then it prefers to become another literal kind, which keeps
@@ -691,7 +696,7 @@ is, `5 "\[ a ] is \[ a ]"` being "5 is 5":
 ```
 "1 + 2 = \[ 1 2 + ]"           "1 + 2 = 3", a constant
 1 2 "\_ and \_"                 "1 and 2": the first input is the deepest
-f: [ "<\[ _ 1 + ]>" ] ;     5 f is "<6>", 1.5 f is "<2.5>"
+ff: "<\[ _ 1 + ]>" ;    5 ff is "<6>", 1.5 ff is "<2.5>"
 "H\_2;O"                        "H₂O": a subscript's name and `;` follow
 ```
 
@@ -787,8 +792,8 @@ means nothing is there.
 ```
 { "a" 1 } "a" get               1, of i64 nil or
 { "a" 1 } "z" get               nil, of i64 nil or
-port: < i64 > [ 10 * ] ;
-port: < nil > [ drop 80 ] ;
+port: < i64 >. 10 * ;
+port: < nil >. drop 80 ;
 m "z" get port                 80, by the clause the tag chooses
 m "a" get 1 +                  no word `+` for nil: each type needs a clause
 ```
@@ -858,7 +863,7 @@ and makes it a call to an **instance**:
 - Recursion through other words is found the same way. Only recursion
   needs an instance; every other word is inlined, so folding is unchanged.
 - Its inputs are values at run time, symbols among them: a rule that asks
-  its own family again, `is: < x Mortal > [ drop Human is ] ;`, is a
+  its own family again, `is: < x Mortal >. drop Human is ;`, is a
   word testing symbols as it runs. Known inputs do not unfold through
   recursion, numbers or symbols: `10 fact` calls the instance (TYPES.md
   3.16).
@@ -875,9 +880,9 @@ have finished, their results type the recursion and it is compiled again.
 So the base case need not come first:
 
 ```
-positive: [ 0 gt? ] ;
-down: < i64 > [ ] ;                       the base, with no guard
-down: < i64 positive? > [ 1 -+ down ] ;  tested first, compiled after
+positive: 0 gt? ;
+down: < i64 >. ;                        the base, with no guard
+down: < i64 positive? >. 1 -+ down ;    tested first, compiled after
 ```
 
 A literal result, as `fact`'s 1, takes the type of an input it can become,
@@ -885,7 +890,7 @@ so `fact` on an f64 multiplies floats; if the instance then leaves other
 types than the ghost said, it is compiled again with the types it found. A
 family that applies itself with no clause finishing without doing so has no
 types for its results, an error where it is defined, unless its signature
-promises outputs, a second bracket, `< i64 >< i64 >`: then it is a loop.
+promises outputs, a check last in its body, `< i64 >.`: then it is a loop.
 
 **Tail calls.** A call followed only by a return, perhaps after branches,
 is a tail call, and a call to itself one in its own frame, so recursion that
@@ -975,7 +980,7 @@ case.snake` is "hello_world", with `case.kebab`, `case.camel` and
 `case.pascal`; imported, all of them or one alone, they are `lower`,
 `snake` and the rest, and anyone may add one.
 The primitives are in `src/prims.rs`: a name, a signature and the machine
-operations, such as `i64+ < i64 i64 >< i64 >`, which is checked addition.
+operations, such as `i64+ "< i64 i64 >. < i64 >."`, which is checked addition.
 The literal primitives (`int#+`, `dec#>money`, `ratio#/`) exist only at
 compile time.
 A primitive applied to values all known folds, unless it has an effect
@@ -1064,7 +1069,7 @@ stack are always known, and the display writes every value by its type:
 `{ "k" ( 1 2 ) } ( "a" "b" )` shows as written, which march7 could not.
 
 ```sh
-cargo run --offline -- --eval 'fee: < money > [ 1.10 + ] ; 19.99 fee'
+cargo run --offline -- --eval 'fee: < money >. 1.10 + ; 19.99 fee'
 # <1> 21.09
 cargo run --offline -- --types --eval '{ "a" ( 1.5 ) } 2'
 # <2> { "a" ( 1.5 ) } < string 1 f64 vec map > 2 < i64 >
@@ -1111,7 +1116,7 @@ a position written in the code would make a word's identity depend on
 where its source is laid out, so it wants a table beside the code.
 
 **A trap is handled** by clauses of the word that take its inputs and a
-trap on top, `size: < string io' trap >< i64 > [ drop drop 0 ]`, the
+trap on top, `size: < string io' trap >. drop drop 0 < i64 >. ;`, the
 trap's kind in its type, or any kind, `k trap` (SYMBOLIC-FORTH.md 29,
 2026-10-22). Where such a word is applied, the machine's `handle` keeps
 the inputs that are values at run time, and `unhandle` lets them go when
@@ -1228,10 +1233,19 @@ different lengths both may match (above).
 Bugs, what is next, and what is still to think on are in TODO.md, at the
 repo's root.
 
+- **The rest of bare bodies** (doc/design/SYMBOLIC-FORTH.md 6.32). Built
+  2026-10-24: a body bare, `sq: dup * ;`, a bracket in it a value, and a
+  signature a check applied, `sq: < i64 >. dup * < i64 >. ;`. Not yet: a
+  body reaching below its first check, `ff: < i64 >. + ;`, since a check
+  says only what it says; a check tested at run time, where a value's
+  type is not known while compiling; a guard in a check that is not a
+  body's first; and `[ … ] !` running a quotation while compiling, which
+  `io.file.embed` gives way to.
+
 - **More of traps** (doc/design/SYMBOLIC-FORTH.md 29). Handlers are built
   (above, "Errors"); not yet are kinds as types, decided 2026-10-22,
-  made where defined by `trap` from a map holding a message and its path,
-  `ns#`, `err.file.notfound` under `err.file`, a handler taking its kind
+  made where defined by `trap` from a map holding a message, named by `;`,
+  `err.file.notfound` under `err.file`, a handler taking its kind
   and every kind beneath it, the core's kinds under `err` and the
   machine's failures among them, which waits on defining types; and where
   a trap happened. A kind is a symbol here still. A trap may not be stored; with no global

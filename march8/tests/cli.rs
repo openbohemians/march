@@ -86,7 +86,7 @@ fn lower_writes_symbolic_forth() {
     // Every application a dot, `!` converting (doc/design/TYPES.md 2.2), and
     // a number a symbol given its kind (doc/design/SYMBOLIC-FORTH.md 6.7).
     assert_eq!(
-        march8(&["lower"], "sq: [ dup * ] ;\n3 sq 2 f64!\n"),
+        march8(&["lower"], "sq: dup * ;\n3 sq 2 f64!\n"),
         "sq [ dup . * . ] ;\n3 int# ! sq . 2 int# ! f64 . !\n"
     );
     // And `--symbolic` runs it.

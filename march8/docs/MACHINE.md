@@ -1329,11 +1329,11 @@ repo's root.
 
 - **The rest of bare bodies** (doc/design/SYMBOLIC-FORTH.md 6.32). Built
   2026-10-24: a body bare, `sq: dup * ;`, a bracket in it a value, a
-  signature a check applied, `sq: < i64 >. dup * < i64 >. ;`, and `[ … ]
-  !` running a quotation while compiling. Not yet: a body reaching below
-  its first check, `ff: < i64 >. + ;`, since a check says only what it
-  says; a check tested at run time, where a value's type is not known
-  while compiling; a guard in a check that is not a body's first; and a
+  signature a check applied, `sq: < i64 >. dup * < i64 >. ;`, `[ … ] !`
+  running a quotation while compiling, and a body reaching below its
+  first check taking those values too, `ff: < i64 >. + ;` taking two, a
+  letter each, where its effect is sure. Not yet: a check tested at run
+  time, where a value's type is not known while compiling; a guard in a check that is not a body's first; and a
   map left by `[ … ] !`, read back.
 
 - **More of traps** (doc/design/SYMBOLIC-FORTH.md 29). Handlers are built

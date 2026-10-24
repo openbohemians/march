@@ -145,6 +145,20 @@ fn a_bracket_is_a_value() {
 }
 
 #[test]
+fn a_check_says_only_what_it_says() {
+    // A body reaching below its first check takes those values too, typed
+    // where the word is applied (doc/design/SYMBOLIC-FORTH.md 6.32).
+    assert_eq!(typed(&["ff: < i64 >. + ;", "1 2 ff"]), "<1> 3 < i64 >");
+    assert_eq!(
+        session(&["ff: < i64 >. + ;", "1.0 2.0 ff"]).err(),
+        Some(Kind::NoWord)
+    );
+    // A guard tests the values it did, the one below added beneath them.
+    let ff = "ff: < i64 i64 gt? >. + + ; ff: < i64 i64 >. drop drop drop 0 ;";
+    assert_eq!(show(&[ff, "1 5 2 ff 1 2 5 ff"]), "<2> 8 0");
+}
+
+#[test]
 fn messages_name_symbols() {
     let door = "door: < Closed' Open' >. drop drop Opened' ;";
     let e = error(&format!("{door} Locked' Open' door"));

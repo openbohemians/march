@@ -827,6 +827,9 @@ pub struct Stage {
     /// What each quotation `[ … ] !` ran left, by its code's identity, so
     /// each runs once.
     ran: HashMap<Cid, Rc<[Jdg]>>,
+    /// Whether an effect is wanted only as far as it is sure: a family of
+    /// clauses of different lengths reaches as far as the one chosen.
+    sure: std::cell::Cell<bool>,
     /// What code run while compiling wrote, for the session to show.
     pub output: Vec<u8>,
     /// Set while a word is applied wide (doc/design/SYMBOLIC-FORTH.md 22).
@@ -1129,6 +1132,7 @@ impl Stage {
             catches: Vec::new(),
             machine: None,
             ran: HashMap::new(),
+            sure: std::cell::Cell::new(false),
             output: Vec::new(),
             wide: None,
             applied_in: "".into(),
@@ -2421,6 +2425,7 @@ impl Stage {
             }
             _ => unreachable!("a body's first check and its last"),
         };
+        let sig = sig.map(|s| self.reaching(s, &q));
         let core = self.core;
         self.define(
             &name,
@@ -2432,6 +2437,40 @@ impl Stage {
                 core,
             },
         )
+    }
+
+    /// A check says only what it says (doc/design/SYMBOLIC-FORTH.md 6.32): a
+    /// body that reaches below its first check takes those values too, each
+    /// typed where the word is applied, as a word's inputs are where it has
+    /// no check, so `ff: < i64 >. + ;` takes two. Each is a letter the
+    /// signature does not use.
+    fn reaching(&mut self, mut sig: Sig, body: &[Token]) -> Sig {
+        self.sure.set(true);
+        let e = self.effect(body, &mut Vec::new());
+        self.sure.set(false);
+        let Some((k, _)) = e else {
+            return sig;
+        };
+        let Some(extra) = k.checked_sub(sig.ins.len()).filter(|&n| n > 0) else {
+            return sig;
+        };
+        let mut fresh = Vec::new();
+        for v in (0..26).rev() {
+            let t = self.types.intern(Term::Var(v));
+            let used = sig.ins.iter().chain(sig.outs.iter().flatten());
+            if fresh.len() < extra && !used.clone().any(|&u| self.types.holds(u, t)) {
+                fresh.push(t);
+            }
+        }
+        if fresh.len() < extra {
+            return sig;
+        }
+        fresh.reverse();
+        for g in &mut sig.guards {
+            g.slot += extra;
+        }
+        sig.ins.splice(0..0, fresh);
+        sig
     }
 
     /// `;` in braces: an entry of the map literal around it, its key the
@@ -4846,7 +4885,11 @@ impl Stage {
                 Prim::Range | Prim::Reverse => (1, 1),
                 Prim::Def => return None,
                 Prim::Convert => (2, 1),
-                _ => (sig.ins.len(), sig.outs.as_ref().map_or(0, Vec::len)),
+                Prim::Empty => (1, 1),
+                Prim::TupleAt | Prim::RecordAt => (2, 1),
+                // What the stage works out, with no check to say, is not
+                // known here.
+                _ => (sig.ins.len(), sig.outs.as_ref()?.len()),
             });
         }
         // `nil` applied is its value, and another type's name the type.
@@ -4879,7 +4922,9 @@ impl Stage {
                 .collect();
             let net = |e: &(usize, usize)| e.1 as isize - e.0 as isize;
             match effects.split_first() {
-                Some((first, rest)) if rest.iter().all(|e| net(e) == net(first)) => {
+                Some((first, rest))
+                    if !self.sure.get() && rest.iter().all(|e| net(e) == net(first)) =>
+                {
                     let ins = effects.iter().map(|e| e.0).max().expect("one");
                     Some((ins, (ins as isize + net(first)) as usize))
                 }

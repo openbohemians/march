@@ -27,10 +27,11 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   a value, a signature a check applied, `sq: < i64 >. dup * < i64 >. ;`,
   the first a clause's inputs and the last what it leaves, `><`
   retired, the core, the examples, the tests and the docs moved to it,
-  and `[ … ] !` running a quotation while compiling, `io.file.embed` gone.
-  To come: a body reaching below its first check, `ff: < i64 >. + ;`,
-  since a check says only what it says, where march8 says 1 is in reach;
-  a check tested at run time, where a value's type is not known while
+  `[ … ] !` running a quotation while compiling, `io.file.embed` gone,
+  and a body reaching below its first check, `ff: < i64 >. + ;`, where
+  its effect is sure. To come: such a body whose effect is not sure, a
+  family of clauses of different lengths in it, still refused where it
+  is applied; a check tested at run time, where a value's type is not known while
   compiling; a guard in a check that is not a body's first; and a map
   left by `[ … ] !`, read back, for data read while compiling.
 - **Where a trap happened,** reported from a table beside the code, since

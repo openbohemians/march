@@ -1730,10 +1730,13 @@ Settled (Thomas, 2026-10-15):
     compiled stays as it is, a quotation or a type too, so `[ … ] ! .`
     works; each runs once, kept by its code's identity, what it writes
     shown before what the program writes; and `io.file.embed` and
-    `file-embed` are gone. Not yet: a map it leaves, read back; and a
-    body reaching below its first check, `ff: < i64 >. + ;`
-    being refused as before, since dispatch counts a clause's inputs by
-    its signature; a check tested as the program runs, of a value whose
+    `file-embed` are gone. A body reaching below its first check takes
+    those values too, `ff: < i64 >. + ;` two, since dispatch counts a
+    clause's inputs by its signature: `;` gives the signature a letter
+    for each, one it does not use, where the body's effect is sure, and
+    where it is not, a family of clauses of different lengths in it, the
+    body is refused where it is applied, as before. Not yet: a map it
+    leaves, read back; a check tested as the program runs, of a value whose
     type is known only then; and a guard in a check other than a body's
     first. `;` in braces makes an entry of the map around it, as a
     one-letter key may be, `{ x: < f64 > ; }`, a record type's field

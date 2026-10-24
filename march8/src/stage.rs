@@ -285,16 +285,17 @@ fn string_text(toks: &[Token]) -> String {
 
 impl Guard {
     /// The guard as a message names it.
-    fn name(&self) -> String {
+    fn name(&self, types: &Types) -> String {
         match &self.test {
             Test::Quote(q) => format!("the guard `{}`", source_text(q)),
-            Test::Equals(j) => format!("the value pattern {}", value_text(j)),
+            Test::Equals(j) => format!("the value pattern {}", value_text(j, types)),
         }
     }
 }
 
-/// A value as it is written.
-fn value_text(j: &Jdg) -> String {
+/// A value as it is written, a type by its name, in a bracket if it is
+/// more than one word.
+fn value_text(j: &Jdg, types: &Types) -> String {
     match &j.val {
         Val::Int(n) if j.ty == MONEY => prims::show_dec(*n, 2),
         Val::Int(_) if j.ty == NIL => "nil".into(),
@@ -311,9 +312,13 @@ fn value_text(j: &Jdg) -> String {
             out
         }
         Val::Seq(es) => {
-            let es: Vec<String> = es.iter().map(value_text).collect();
+            let es: Vec<String> = es.iter().map(|e| value_text(e, types)).collect();
             format!("( {} )", es.join(" "))
         }
+        Val::Type(t) => match types.name(*t) {
+            n if n.contains(' ') => format!("< {n} >"),
+            n => n,
+        },
         _ => "a value".into(),
     }
 }
@@ -2711,7 +2716,7 @@ impl Stage {
             Val::Type(t) => format!("the type `{}`", self.types.name(*t)),
             Val::Name(n, ..) => format!("the symbol `{n}`"),
             Val::Quote(_) => "a quotation".into(),
-            Val::Seq(_) => format!("{} ({})", value_text(j), self.types.name(j.ty)),
+            Val::Seq(_) => format!("{} ({})", value_text(j, &self.types), self.types.name(j.ty)),
             Val::Many => format!("a run of {}", self.types.name(j.ty)),
             Val::Pinned(v) => self.describe(&Jdg {
                 ty: j.ty,
@@ -4725,13 +4730,16 @@ impl Stage {
                     Kind::Effect,
                     format!(
                         "{} {}, and a guard must not write",
-                        g.name(),
+                        g.name(&self.types),
                         prims::describe_effects(found)
                     ),
                 ));
             }
             if self.stack.len() != depth + 1 {
-                return Err(self.err(Kind::Mismatch, format!("{} must leave one flag", g.name())));
+                return Err(self.err(
+                    Kind::Mismatch,
+                    format!("{} must leave one flag", g.name(&self.types)),
+                ));
             }
             // A guard leaves a bool (Thomas, 2026-10-09), or a literal 0 or 1:
             // a count is not a truth.
@@ -4747,7 +4755,11 @@ impl Stage {
                 _ => {
                     return Err(self.err(
                         Kind::Mismatch,
-                        format!("{} leaves {}, not a bool", g.name(), self.describe(&flag)),
+                        format!(
+                            "{} leaves {}, not a bool",
+                            g.name(&self.types),
+                            self.describe(&flag)
+                        ),
                     ));
                 }
             }
@@ -5353,7 +5365,7 @@ impl Stage {
             .iter()
             .enumerate()
             .map(|(k, &t)| match sig.pattern(k) {
-                Some(j) => value_text(j),
+                Some(j) => value_text(j, &self.types),
                 None => self.types.name(t),
             })
             .collect();
@@ -6137,7 +6149,8 @@ impl Stage {
                 // Where it is handled, it fails as the program runs.
                 Err(e) if self.handled > 0 && e.trap().is_some() => return Ok(false),
                 Err(e) => {
-                    let ins: Vec<String> = args.iter().map(value_text).collect();
+                    let ins: Vec<String> =
+                        args.iter().map(|a| value_text(a, &self.types)).collect();
                     let outs: Vec<String> = outs.iter().map(|&t| self.types.name(t)).collect();
                     let kind = match e {
                         machine::Error::Arithmetic => Kind::Arithmetic,

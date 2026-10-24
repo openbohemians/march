@@ -6,10 +6,7 @@ march8/docs/MACHINE.md, "Not yet".
 
 ## Bugs
 
-- **A known array of types shows as values in messages.**
-  `max' ( i64 i64 ) clauses#` says `( a value a value ) (2 type vec)`:
-  `value_text` (march8/src/stage.rs) has no type names to show.
-  (2026-10-21)
+None known.
 
 ## Next
 

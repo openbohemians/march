@@ -121,6 +121,12 @@ fn what_they_take_is_checked() {
     );
     let (_, msg) = error("max' 3 clauses#");
     assert!(msg.contains("and 3 (int#) is neither"), "{msg}");
+    // A known array of types shows them, by name.
+    let (_, msg) = error("max' ( i64 < 2 f64 vec > ) clauses#");
+    assert!(
+        msg.contains("and ( i64 < 2 f64 vec > ) (2 type vec) is neither"),
+        "{msg}"
+    );
     let (_, msg) = error("3 effect#");
     assert!(msg.contains("a word's symbol or a quotation"), "{msg}");
     assert_eq!(error("foo' effect#").1, "no word `foo`");

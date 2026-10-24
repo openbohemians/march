@@ -10,9 +10,6 @@ march8/docs/MACHINE.md, "Not yet".
   `max' ( i64 i64 ) clauses#` says `( a value a value ) (2 type vec)`:
   `value_text` (march8/src/stage.rs) has no type names to show.
   (2026-10-21)
-- **A missing key fails as a memory fault.** `{ a: 1 b: 2 } c' at` says
-  `Error: Memory`, where it should trap, so a handler can catch it.
-  (2026-10-23)
 
 ## Next
 

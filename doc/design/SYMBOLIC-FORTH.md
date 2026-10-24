@@ -1431,7 +1431,8 @@ Settled (Thomas, 2026-10-15):
     returns. Code sure to fail fails while compiling, so where its kind is
     known only as the program runs, it is an error that says so. The
     machine's own traps carry their kinds too: no clause's guard holding
-    is `no-word'`, arrays not as long `mismatch'`, as they are while
+    is `no-word'`, arrays not as long `mismatch'`, and since 2026-10-24
+    an element or a key not there `mismatch'` too, as they are while
     compiling. Where a trap happened is not reported yet: written into the
     code, a position would make a word's identity depend on how its source
     is laid out, so it wants a table beside the code.

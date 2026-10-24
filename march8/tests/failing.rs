@@ -134,6 +134,28 @@ fn what_is_sure_to_fail_fails_while_compiling() {
 }
 
 #[test]
+fn what_is_not_there_traps() {
+    // An element or a key not there, known only as the program runs, is a
+    // trap of `mismatch'`, as it is while compiling.
+    let mut s = Session::new();
+    assert_eq!(
+        trap(&mut s, "\"a b\" words [ ws | ws 5 at ] ."),
+        (
+            "mismatch".into(),
+            "the array of 2 has no such element".into()
+        )
+    );
+    assert_eq!(
+        trap(&mut s, "sym i64 map empty ab' 1 put ef' at"),
+        ("mismatch".into(), "the map has no such key".into())
+    );
+    let ff = "ff: < string >. words 5 at ; ff: < string k trap >. drop drop \"none\" ;";
+    s.eval(ff).unwrap();
+    s.eval("\"a b\" ff").unwrap();
+    assert_eq!(s.show(), "<1> \"none\"");
+}
+
+#[test]
 fn a_handler_is_a_clause_for_the_inputs_and_a_trap() {
     // When anything inside the word fails, its inputs come back, the trap
     // goes on top, and the word is applied again, its handler chosen

@@ -1215,7 +1215,8 @@ trap's kind in its type, or any kind, `k trap` (SYMBOLIC-FORTH.md 29,
 2026-10-22). Where such a word is applied, the machine's `handle` keeps
 the inputs that are values at run time, and `unhandle` lets them go when
 the word is done. A trap before then, `Error::Trap` or the machine's own,
-overflow (`arithmetic'`) or a file not read (`io'`), but not the fuel
+overflow (`arithmetic'`), a file not read (`io'`), or an element or a
+key not there (`mismatch'`), but not the fuel
 limit, puts the stacks back as they were, the inputs on them and the trap
 on top, and goes on into the handlers' choice, compiled where the word is
 applied; a trap none of them takes traps again, for a handler further

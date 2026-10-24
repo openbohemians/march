@@ -21,6 +21,15 @@ pub enum Error {
     /// Input or output failed, and why.
     Io(String),
 }
+/// A trap for what is not there, an element or a key.
+fn missing(why: String) -> Error {
+    Error::Trap("mismatch".into(), why)
+}
+
+fn beyond(len: usize) -> String {
+    format!("the array of {len} has no such element")
+}
+
 impl Error {
     /// A failure as a trap, its kind and its message: a program's, or the
     /// machine's, overflow or a file not read. Not the fuel limit, the
@@ -1154,16 +1163,26 @@ impl Machine {
                 };
                 self.push(n as u64)?;
             }
+            // What is not there is a trap of `mismatch'`, as it is while
+            // compiling, so a handler can take it. The index is the
+            // machine's, from 0, not the one `at` was given.
             VecAt => {
                 let i = self.pop()?;
                 let r = self.pop()?;
                 let x = if let Ok(t) = self.text(r) {
-                    u64::from(t.char_at(i).ok_or(Error::Memory)?)
+                    u64::from(
+                        t.char_at(i)
+                            .ok_or_else(|| missing("the string has no such character".into()))?,
+                    )
                 } else if let Ok(m) = self.map(r) {
-                    *m.get(&i).ok_or(Error::Memory)?
+                    *m.get(&i)
+                        .ok_or_else(|| missing("the map has no such key".into()))?
                 } else {
-                    let i = usize::try_from(i).map_err(|_| Error::Memory)?;
-                    self.array(r)?.get(i).ok_or(Error::Memory)?
+                    let a = self.array(r)?;
+                    usize::try_from(i)
+                        .ok()
+                        .and_then(|k| a.get(k))
+                        .ok_or_else(|| missing(beyond(a.len())))?
                 };
                 self.push(x)?;
             }
@@ -1184,11 +1203,10 @@ impl Machine {
                 let x = self.pop()?;
                 let i = self.pop()?;
                 let r = self.pop()?;
-                let i = usize::try_from(i).map_err(|_| Error::Memory)?;
                 let a = self.array(r)?;
-                if i >= a.len() {
-                    return Err(Error::Memory);
-                }
+                let Some(i) = usize::try_from(i).ok().filter(|&k| k < a.len()) else {
+                    return Err(missing(beyond(a.len())));
+                };
                 let v = a.whole().update(i, x);
                 let r = self.allocate_vector(v)?;
                 self.push(r)?;

@@ -3,6 +3,7 @@
 //! entry. So a type is a small number, and equal types are equal numbers.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 pub type Type = u32;
 
@@ -119,6 +120,18 @@ pub enum Term {
     Tuple(u32),
     /// In a pattern, any tuple: a class, as `atom` is.
     AnyTuple,
+    /// Fixed keys with a type each, `{ x: f64 y: string }` (TYPES.md 2.11):
+    /// a map of types, as a tuple is a sequence of them, its fields in the
+    /// order of their keys. At run time its values in that order, as a
+    /// tuple's are.
+    Record(u32),
+    /// A map literal of symbols whose values are alike, undecided as a
+    /// number is (TYPES.md 2.10, 2.11): a record where a record is wanted, a
+    /// map where a map is, and with nothing to take it, a map. Held as a
+    /// record of its values' own types until then.
+    RecordLit(u32),
+    /// In a pattern, any record: a class, as `tuple` is.
+    AnyRecord,
     /// A failure being handled, `k trap` (doc/design/SYMBOLIC-FORTH.md 29):
     /// its kind is known only when it fails, so every trap has this type,
     /// and a pattern of one kind, `no-file' trap`, is tested as the program
@@ -146,7 +159,14 @@ pub struct Types {
     /// Tuples' types by position, each row once.
     rows: Vec<Vec<Type>>,
     row_index: HashMap<Vec<Type>, u32>,
+    /// Records' fields, each a key and a type, in the order of their keys,
+    /// each set once.
+    fields: Vec<Fields>,
+    field_index: HashMap<Fields, u32>,
 }
+
+/// A record's fields: its keys, in order, each with its type.
+pub type Fields = Rc<[(Rc<str>, Type)]>;
 
 impl Default for Types {
     fn default() -> Self {
@@ -162,6 +182,8 @@ impl Types {
             classes: HashMap::new(),
             rows: Vec::new(),
             row_index: HashMap::new(),
+            fields: Vec::new(),
+            field_index: HashMap::new(),
         };
         for (b, _) in Base::ALL {
             t.intern(Term::Base(b));
@@ -192,9 +214,12 @@ impl Types {
     /// class, `atom` or a union.
     pub fn is_pattern(&self, t: Type) -> bool {
         match self.term(t) {
-            Term::Var(_) | Term::Atom | Term::Or(..) | Term::AnyTuple => true,
+            Term::Var(_) | Term::Atom | Term::Or(..) | Term::AnyTuple | Term::AnyRecord => true,
             Term::Base(_) | Term::Nat(_) | Term::Trap => false,
             Term::Tuple(r) => self.rows[r as usize].iter().any(|&e| self.is_pattern(e)),
+            Term::Record(r) | Term::RecordLit(r) => self.fields[r as usize]
+                .iter()
+                .any(|&(_, e)| self.is_pattern(e)),
             Term::Ary(e) => self.is_pattern(e),
             Term::Vec(n, e) | Term::Map(n, e) => self.is_pattern(n) || self.is_pattern(e),
         }
@@ -207,12 +232,18 @@ impl Types {
                 Term::Ary(e) | Term::Vec(_, e) => self.holds(e, x),
                 Term::Map(k, v) | Term::Or(k, v) => self.holds(k, x) || self.holds(v, x),
                 Term::Tuple(r) => self.rows[r as usize].iter().any(|&e| self.holds(e, x)),
+                Term::Record(r) | Term::RecordLit(r) => self.fields[r as usize]
+                    .iter()
+                    .any(|&(_, e)| self.holds(e, x)),
                 _ => false,
             }
     }
     /// Whether `t` is a class: it matches types without binding them.
     pub fn is_class(&self, t: Type) -> bool {
-        matches!(self.term(t), Term::Atom | Term::Or(..) | Term::AnyTuple)
+        matches!(
+            self.term(t),
+            Term::Atom | Term::Or(..) | Term::AnyTuple | Term::AnyRecord
+        )
     }
     /// The type of fixed positions of these types: a vec when they are all
     /// one type, a tuple otherwise.
@@ -241,6 +272,37 @@ impl Types {
             _ => None,
         }
     }
+    /// The record of these fields, each key once, or the map literal
+    /// undecided, `lit`: put in the order of their keys.
+    pub fn record(&mut self, mut fields: Vec<(Rc<str>, Type)>, lit: bool) -> Type {
+        fields.sort_by(|a, b| a.0.cmp(&b.0));
+        let fields: Fields = fields.into();
+        let r = match self.field_index.get(&fields) {
+            Some(&r) => r,
+            None => {
+                let r = self.fields.len() as u32;
+                self.fields.push(fields.clone());
+                self.field_index.insert(fields, r);
+                r
+            }
+        };
+        self.intern(if lit {
+            Term::RecordLit(r)
+        } else {
+            Term::Record(r)
+        })
+    }
+    /// A record's fields, or an undecided map literal's, in the order of
+    /// their keys.
+    pub fn fields(&self, t: Type) -> Option<Fields> {
+        match self.term(t) {
+            Term::Record(r) | Term::RecordLit(r) => Some(self.fields[r as usize].clone()),
+            _ => None,
+        }
+    }
+    pub fn is_record_lit(&self, t: Type) -> bool {
+        matches!(self.term(t), Term::RecordLit(_))
+    }
     /// The union of two types: their members together, sorted, without
     /// repeats. A union of one member is that type.
     pub fn union(&mut self, a: Type, b: Type) -> Type {
@@ -268,7 +330,16 @@ impl Types {
     pub fn subst(&mut self, t: Type, env: &Env) -> Type {
         match self.term(t) {
             Term::Var(v) => env.0[v as usize].unwrap_or(t),
-            Term::Atom | Term::AnyTuple => t,
+            Term::Atom | Term::AnyTuple | Term::AnyRecord => t,
+            Term::Record(r) | Term::RecordLit(r) => {
+                let lit = matches!(self.term(t), Term::RecordLit(_));
+                let fs = self.fields[r as usize].clone();
+                let fs = fs
+                    .iter()
+                    .map(|(k, e)| (k.clone(), self.subst(*e, env)))
+                    .collect();
+                self.record(fs, lit)
+            }
             Term::Tuple(r) => {
                 let es = self.rows[r as usize].clone();
                 let es = es.into_iter().map(|e| self.subst(e, env)).collect();
@@ -322,6 +393,14 @@ impl Types {
                 format!("( {} )", es.join(" "))
             }
             Term::AnyTuple => "tuple".into(),
+            Term::Record(r) | Term::RecordLit(r) => {
+                let fs: Vec<String> = self.fields[r as usize]
+                    .iter()
+                    .map(|(k, e)| format!("{k}: {}", self.name(*e)))
+                    .collect();
+                format!("{{ {} }}", fs.join(" "))
+            }
+            Term::AnyRecord => "record".into(),
             Term::Trap => "k trap".into(),
         }
     }

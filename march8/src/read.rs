@@ -410,6 +410,22 @@ impl Names<'_> {
                 i += 1;
                 continue;
             };
+            // A path from one of its names reads a field, `p.x` being `p x'
+            // at` (doc/design/TYPES.md 2.11): the name gives its input, and
+            // each part after it a field of what it gave.
+            if let Some((head, fields)) = n.split_once('.')
+                && len == 2
+                && let Some(part) = name(&head.into(), t.pos, &mut lent)?
+            {
+                parts.push(part);
+                for f in fields.split('.') {
+                    for tok in [Tok::Name(f.into()), Tok::Name("at".into()), Tok::Apply] {
+                        parts.push(Part::Tok(Token { tok, pos: t.pos }));
+                    }
+                }
+                i += len;
+                continue;
+            }
             if let Some(part) = name(n, t.pos, &mut lent)? {
                 parts.push(part);
             } else if !own.is_empty() && (is_variable(n) || &**n == "_") {

@@ -1735,9 +1735,10 @@ Settled (Thomas, 2026-10-15):
     being refused as before, since dispatch counts a clause's inputs by
     its signature; a check tested as the program runs, of a value whose
     type is known only then; and a guard in a check other than a body's
-    first. To settle: `;` in braces defines into the namespace in
-    march8, not the map, and it refuses a one-letter name, a letter being
-    a place, where a field reached by a path, `p.x`, could take one.
+    first. `;` in braces makes an entry of the map around it, as a
+    one-letter key may be, `{ x: < f64 > ; }`, a record type's field
+    (built with records, 2026-10-24, TYPES.md 2.11); an entry of anything
+    but a type is not built yet.
 
 Open: for rules (25), what a group that may not match leaves,
 refused for now, and how an import names one alone; and the symbol for

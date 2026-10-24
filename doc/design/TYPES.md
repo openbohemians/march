@@ -213,7 +213,7 @@ Runtime values in types would make inference undecidable. So:
   are precise and free while the tuple is a tuple, and every array word
   still works on it. Unlike a vec's, this forgetting costs: each element
   is tagged then, a union made, with its informative warning (3.6). Built
-  in march8 (march8/docs/MACHINE.md, "Tuples"); records are not yet.
+  in march8 (march8/docs/MACHINE.md, "Tuples"); records in part (2.11).
 - **Fixed keys make a record:** `{ port: 8080 host: "x" }`, each field
   typed, its type a map of types, `{ port: < i64 > ; host: < string > ; }`
   (2.11). A record forgets its keys' types the same way where a map is
@@ -494,7 +494,25 @@ are four cases:
   its own over the kind above it, so that a handler takes the kinds
   beneath its own by the rule that lets money go where a decimal goes.
 
-Not built: records, `own` and kinds. march8's `money`, exact cents in an i64, is a
+Built in march8 (2026-10-24), records in part. A map of types is a
+record type, `;` in braces making an entry of one, named by `;`,
+`point: { x: < f64 > ; y: < f64 > ; } ;`, or written in a bracket, `<
+{ x: f64 y: f64 } >`. A map literal of symbols settles as above,
+undecided while its values are alike: `{ x: 3 y: 4 }` is a `point`
+where one is wanted, its integers floats, and a map with nothing to take
+it. A record's values are held in the order of its keys, as a tuple's
+are by position, so a field read by `at` with its key known, or by a
+path from a bracket's name, `p.x`, costs what a tuple's does, and a
+field it lacks is an error while compiling. Named inputs come of it
+already, `{ term: 72 rate: 0.2 principal: 50000 } payment`, where
+`payment` takes the record. Not yet: a record forgetting into a map
+where one is wanted, and `at` with a key known only as the program runs;
+a path from a word, `cfg.port`, its head found as any name is; an entry
+by `;` of anything but a type; a record opened into places; equality of
+records; and a known array of map literals undecided, which settle into
+maps where a clause could want records.
+
+Not built: `own` and kinds. march8's `money`, exact cents in an i64, is a
 placeholder for a type of its own over a precise number, which March does
 not have yet (LAZY-NUMBERS.md).
 
@@ -658,10 +676,11 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
    and the display reach them.
 3. **Records** in detail. A record's type is a map of types (2.11,
    2026-10-22), and a record value is written as a map is and its field
-   read by `at` or a path (2.11, 2026-10-23); open still are whether a
-   record type may declare words that a namespace, as a value of it,
-   defines, and how a record is laid out at run time; and the surface
-   syntax for tuples, value patterns and guards.
+   read by `at` or a path (2.11, 2026-10-23); march8 lays one out as a
+   tuple of its values in the order of its keys (2026-10-24). Open still
+   are whether a record type may declare words that a namespace, as a
+   value of it, defines; and the surface syntax for tuples, value
+   patterns and guards.
 4. **Literal type names.** Settled (Thomas, 2026-10-19): `int#`, `dec#`,
    `ratio#`, `seq#` and `map#`, as written, and `str#` for text, which
    strings' encodings make undecided too (SYMBOLIC-FORTH.md 6.15): `str#`

@@ -336,6 +336,9 @@ struct Literal {
     mark: usize,
     low: usize,
     cells: usize,
+    /// How deep the stage is in words where its own code runs, so a `;`
+    /// there makes one of its entries (TYPES.md 2.11).
+    depth: u32,
 }
 
 impl Literal {
@@ -1156,6 +1159,8 @@ impl Stage {
         s.word(&core_path("atom")).ty = Some(atom);
         let tuple = s.types.intern(Term::AnyTuple);
         s.word(&core_path("tuple")).ty = Some(tuple);
+        let record = s.types.intern(Term::AnyRecord);
+        s.word(&core_path("record")).ty = Some(record);
         let none = crate::symbols::Symbols::parse("").expect("an empty table");
         for p in PRIMS {
             let toks = crate::read::read(p.sig, &none).expect("a primitive's signature reads");
@@ -1217,6 +1222,11 @@ impl Stage {
     /// their types are returned.
     pub fn finish(&mut self) -> Result<Vec<Type>> {
         for i in 0..self.stack.len() {
+            let t = self.stack[i].ty;
+            if self.types.is_record_lit(t) {
+                let m = self.lit_map(t);
+                self.annotate(i, m)?;
+            }
             self.materialize(i)?;
         }
         Ok(self.stack.iter().map(|j| j.ty).collect())
@@ -2249,6 +2259,15 @@ impl Stage {
             }
             _ => return Err(self.err(Kind::Mismatch, usage)),
         };
+        // In braces, `;` makes an entry of the map around it, so a record
+        // type's fields are its entries, `{ x: < f64 > ; }` (TYPES.md 2.11).
+        if self
+            .literals
+            .last()
+            .is_some_and(|l| l.bracket == b'{' && l.depth == self.depth)
+        {
+            return self.entry(name, named_at, value);
+        }
         // A body's first check is the clause's signature, its inputs, and its
         // last, after that, what it leaves (doc/design/SYMBOLIC-FORTH.md
         // 6.32), each made here; a body that is one type is that type, which
@@ -2390,6 +2409,25 @@ impl Stage {
         )
     }
 
+    /// `;` in braces: an entry of the map literal around it, its key the
+    /// name and its value what the body names, a type for now.
+    fn entry(&mut self, key: Rc<str>, at: Pos, value: Jdg) -> Result<()> {
+        let t = match &value.val {
+            Val::Quote(q) if !signature(q) => self.type_body(&q.clone())?,
+            _ => None,
+        };
+        let Some(t) = t else {
+            return Err(self.err(
+                Kind::Limit,
+                "`;` in braces makes an entry of a type for now, a record type's field, \
+                 `{ x: < f64 > ; }`; a value is written `{ x: 1 }`",
+            ));
+        };
+        self.push(SYMBOL, Val::Name(key, at));
+        self.stack.push(t);
+        Ok(())
+    }
+
     /// A body that is one type, a type's name, `temp: f64 ;`, or a bracket
     /// of one, `num: < i64 f64 or … > ;`: that type, made as the code before
     /// `;` made it until bodies were bare (doc/design/SYMBOLIC-FORTH.md
@@ -2422,6 +2460,41 @@ impl Stage {
                 self.run(q)?;
                 let j = self.pop()?;
                 Ok(matches!(j.val, Val::Type(_)).then_some(j))
+            }
+            // A map of types is a record type, `point: { x: < f64 > ; y: <
+            // f64 > ; } ;` (TYPES.md 2.11): made now, and if it is none, a
+            // map of values, the body is code.
+            [
+                Token {
+                    tok: Tok::Open(_), ..
+                },
+                ..,
+            ] if made_at(q, matching(q, 0) + 1) == Some("map#")
+                && matching(q, 0) + 4 == q.len() =>
+            {
+                let saved = (
+                    self.stack.clone(),
+                    self.code.len(),
+                    self.literals.len(),
+                    self.floor,
+                    self.inputs.len(),
+                    self.effects,
+                );
+                let r = self.run(q);
+                if r.is_ok()
+                    && self.stack.len() == saved.0.len() + 1
+                    && self.code.len() == saved.1
+                    && matches!(self.stack.last().map(|j| &j.val), Some(Val::Type(_)))
+                {
+                    return self.pop().map(Some);
+                }
+                self.stack = saved.0;
+                self.code.truncate(saved.1);
+                self.literals.truncate(saved.2);
+                self.floor = saved.3;
+                self.inputs.truncate(saved.4);
+                self.effects = saved.5;
+                Ok(None)
             }
             _ => Ok(None),
         }
@@ -2643,6 +2716,9 @@ impl Stage {
         let fits = |s: &mut Self| s.match_slot(t, have, &mut Env::default()).is_some();
         if have == t || (self.types.is_class(t) && fits(self)) {
             return Ok(());
+        }
+        if self.types.is_record_lit(have) && !self.types.is_pattern(t) {
+            return self.annotate_record(i, t);
         }
         if self.annotate_seq(i, t)? {
             return Ok(());
@@ -2945,6 +3021,36 @@ impl Stage {
             }
             (Term::Map(k, v), Term::Map(k2, v2)) => {
                 Some(8 + self.unify(k, k2, env)? + self.unify(v, v2, env)?)
+            }
+            (Term::Record(_), Term::Record(_)) => {
+                let (ps, hs) = (self.types.fields(p)?, self.types.fields(have)?);
+                if ps.len() != hs.len() || ps.iter().zip(hs.iter()).any(|(a, b)| a.0 != b.0) {
+                    return None;
+                }
+                let mut s = 8;
+                for (a, b) in ps.iter().zip(hs.iter()) {
+                    s += self.unify(a.1, b.1, env)?;
+                }
+                Some(s)
+            }
+            // A map literal undecided is the record of its keys it can be,
+            // field by field, a literal as it would be alone (TYPES.md 2.11).
+            (Term::Record(_), Term::RecordLit(_)) => {
+                let (ps, hs) = (self.types.fields(p)?, self.types.fields(have)?);
+                if ps.len() != hs.len() || ps.iter().zip(hs.iter()).any(|(a, b)| a.0 != b.0) {
+                    return None;
+                }
+                let mut s = 4;
+                for (a, b) in ps.iter().zip(hs.iter()) {
+                    s += self.match_slot(a.1, b.1, env)?;
+                }
+                Some(s)
+            }
+            (Term::AnyRecord, Term::Record(_) | Term::RecordLit(_)) => Some(4),
+            // And the map it is with nothing to take it, matched less well.
+            (Term::Map(..), Term::RecordLit(_)) => {
+                let m = self.lit_map(have);
+                self.unify(p, m, env).map(|_| 2)
             }
             _ => None,
         }
@@ -3322,7 +3428,8 @@ impl Stage {
         let base = self.stack.len() - sig.ins.len();
         for (k, &p) in sig.ins.iter().enumerate() {
             let t = self.types.subst(p, env);
-            if self.types.is_literal(self.stack[base + k].ty)
+            let have = self.stack[base + k].ty;
+            if (self.types.is_literal(have) || self.types.is_record_lit(have))
                 && !self.types.is_pattern(t)
                 && !(sig.value(k) && self.types.is_literal(t))
             {
@@ -3797,6 +3904,10 @@ impl Stage {
         for i in base..self.stack.len() {
             match self.stack[i].ty {
                 t if self.types.is_literal(t) => self.annotate(i, Self::default_of(t))?,
+                t if self.types.is_record_lit(t) => {
+                    let m = self.lit_map(t);
+                    self.annotate(i, m)?
+                }
                 t if self.types.compile_time_only(t) => {
                     return Err(self.err(
                         Kind::Mismatch,
@@ -4175,13 +4286,16 @@ impl Stage {
     /// of type `ty` there: brought to the top, if it is not there, and put
     /// back.
     fn in_place(&mut self, i: usize, ops: &[Op], ty: Type) -> Result<()> {
+        self.in_place_ins(i, ops.iter().cloned().map(Ins::Op).collect(), ty)
+    }
+
+    /// As `in_place`, with code that may hold string literals.
+    fn in_place_ins(&mut self, i: usize, ins: Vec<Ins>, ty: Type) -> Result<()> {
         self.materialize(i)?;
         let n = self.stack.len() - i;
         let up: Vec<usize> = (1..n).chain([0]).collect();
         self.permute(i, &up);
-        for op in ops {
-            self.emit(op.clone());
-        }
+        self.code.extend(ins);
         self.stack.last_mut().expect("brought up").ty = ty;
         let down: Vec<usize> = std::iter::once(n - 1).chain(0..n - 1).collect();
         self.permute(i, &down);
@@ -4230,6 +4344,122 @@ impl Stage {
             val: Val::Seq(out.into()),
         };
         Ok(true)
+    }
+
+    /// The map an undecided map literal is with nothing to take it: of its
+    /// symbols and of the type its values share.
+    fn lit_map(&mut self, t: Type) -> Type {
+        let tys: Vec<Type> = self
+            .types
+            .fields(t)
+            .expect("a record")
+            .iter()
+            .map(|f| f.1)
+            .collect();
+        let v = self.join(&tys).expect("its values are alike");
+        self.types.intern(Term::Map(SYMBOL, v))
+    }
+
+    /// An undecided map literal at `i` given a type (TYPES.md 2.11): a record
+    /// of its keys, each value converted as it would be alone; or else the
+    /// map it is, its values of the type a map wanted has, made as the
+    /// program runs from the values it holds in the order of its keys.
+    fn annotate_record(&mut self, i: usize, t: Type) -> Result<()> {
+        let have = self.stack[i].ty;
+        let fields = self.types.fields(have).expect("a record");
+        let wrong = |s: &Self| {
+            s.err(
+                Kind::Mismatch,
+                format!(
+                    "expected {}, found {}",
+                    s.types.name(t),
+                    s.describe(&s.stack[i])
+                ),
+            )
+        };
+        if let Term::Record(_) = self.types.term(t) {
+            let want = self.types.fields(t).expect("a record");
+            if want.len() != fields.len() || want.iter().zip(fields.iter()).any(|(a, b)| a.0 != b.0)
+            {
+                return Err(wrong(self));
+            }
+            let types: Vec<Type> = want.iter().map(|f| f.1).collect();
+            return self.give_fields(i, &types, t).map_err(|_| wrong(self));
+        }
+        let v = match self.types.term(t) {
+            Term::Map(_, v) => v,
+            _ => self
+                .join(&fields.iter().map(|f| f.1).collect::<Vec<_>>())
+                .expect("alike"),
+        };
+        let held: Vec<(Rc<str>, Type)> = fields.iter().map(|(k, _)| (k.clone(), v)).collect();
+        let record = self.types.record(held, false);
+        self.give_fields(i, &vec![v; fields.len()], record)
+            .map_err(|_| wrong(self))?;
+        let mut ins = vec![
+            Ins::Op(Op::Prim(P::ScratchPush)),
+            Ins::Op(Op::Prim(P::Mark)),
+        ];
+        for (k, (key, _)) in fields.iter().enumerate() {
+            ins.push(Ins::Str(key.clone()));
+            ins.extend(
+                [
+                    Op::Lit(0),
+                    Op::Prim(P::ScratchAt),
+                    Op::Lit(k as u64),
+                    Op::Prim(P::VecAt),
+                ]
+                .map(Ins::Op),
+            );
+        }
+        ins.extend(
+            [
+                Op::Prim(P::MapGather),
+                Op::Prim(P::ScratchPop),
+                Op::Prim(P::Drop),
+            ]
+            .map(Ins::Op),
+        );
+        let m = self.types.intern(Term::Map(SYMBOL, v));
+        self.in_place_ins(i, ins, m)?;
+        if m != t {
+            self.annotate(i, t)?;
+        }
+        Ok(())
+    }
+
+    /// The record at `i`, known or at run time, given fields of these types,
+    /// in order, and so the type `t`: a known value converted as it would be
+    /// alone, and one at run time only to a type it is already.
+    fn give_fields(&mut self, i: usize, types: &[Type], t: Type) -> Result<()> {
+        match self.stack[i].val.clone() {
+            Val::Seq(es) => {
+                let mut out = Vec::with_capacity(es.len());
+                for (e, &w) in es.iter().zip(types) {
+                    self.stack.push(e.clone());
+                    let r = self.annotate(self.stack.len() - 1, w);
+                    let j = self.stack.pop().expect("pushed");
+                    r?;
+                    out.push(j);
+                }
+                self.stack[i] = Jdg {
+                    ty: t,
+                    val: Val::Seq(out.into()),
+                };
+            }
+            _ => {
+                let have = self.types.fields(self.stack[i].ty).expect("a record");
+                if have
+                    .iter()
+                    .zip(types)
+                    .any(|(h, &w)| h.1 != w && !self.forgets(w, h.1))
+                {
+                    return Err(self.err(Kind::Mismatch, "fields of other types"));
+                }
+                self.stack[i].ty = t;
+            }
+        }
+        Ok(())
     }
 
     /// The union of a tuple's types.
@@ -5378,6 +5608,11 @@ impl Stage {
         if self.types.is_literal(t) {
             self.annotate(i, Self::default_of(t))?;
         }
+        // A map literal undecided is a map, with nothing to take it.
+        if self.types.is_record_lit(t) {
+            let m = self.lit_map(t);
+            return self.annotate(i, m);
+        }
         let j = self.stack[i].clone();
         let ins = self.code_of(&j)?;
         if self.stack[i + 1..].iter().any(|j| j.val == Val::Many) {
@@ -5609,6 +5844,7 @@ impl Stage {
                 self.push(I64, Val::Int(n as i128));
             }
             Prim::TupleAt => self.tuple_at(base)?,
+            Prim::RecordAt => self.record_at(base)?,
             Prim::StrToI64 => self.parse(I64, base)?,
             Prim::StrToF64 => self.parse(F64, base)?,
             // An empty array or map of a type: `string i64 map empty`.
@@ -7535,6 +7771,34 @@ impl Stage {
         self.at(Prim::AryAt, base, u, None)
     }
 
+    /// `at` on a record and a key known while compiling: the field, of its
+    /// own type, with no lookup as the program runs (TYPES.md 2.11). A field
+    /// the record lacks is an error here, as a misspelled label is.
+    fn record_at(&mut self, base: usize) -> Result<()> {
+        let t = self.stack[base].ty;
+        let fields = self.types.fields(t).expect("a record");
+        let Val::Name(key, _) = &self.stack[base + 1].val else {
+            return Err(self.err(
+                Kind::Unknown,
+                "a record's field is named while compiling, `p x' at`",
+            ));
+        };
+        let Some(i) = fields.iter().position(|(k, _)| k == key) else {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!("{} has no field `{key}`", self.types.name(t)),
+            ));
+        };
+        if self.known_at(base, i) {
+            return Ok(());
+        }
+        self.stack[base + 1] = Jdg {
+            ty: I64,
+            val: Val::Int(i as i128),
+        };
+        self.emit_ops(2, &[P::VecAt], &[fields[i].1])
+    }
+
     /// `within`: an array and a quotation, run with the array's last
     /// elements as its stack, as many as it takes, and what it leaves put in
     /// their place: Joy's `infra`, on the end of an array. `( 1 2 3 ) [ ~ ]
@@ -8298,6 +8562,15 @@ impl Stage {
     /// one element type; literals take the others' type, or their default.
     fn join(&mut self, tys: &[Type]) -> Option<Type> {
         let mut t: Option<Type> = None;
+        // A map literal undecided shares what its map would.
+        let tys: Vec<Type> = tys
+            .iter()
+            .map(|&x| match self.types.is_record_lit(x) {
+                true => self.lit_map(x),
+                false => x,
+            })
+            .collect();
+        let tys = &tys[..];
         let typed: Vec<Type> = tys
             .iter()
             .copied()
@@ -8345,6 +8618,14 @@ impl Stage {
         if b == b'}' && (n % 2 == 1 || runs) {
             return Err(self.err(Kind::Mismatch, "a map needs a value for each key"));
         }
+        // Keys that are symbols make a record, or may (TYPES.md 2.11).
+        if b == b'}'
+            && (start..self.stack.len())
+                .step_by(2)
+                .all(|i| matches!(self.stack[i].val, Val::Name(..)))
+        {
+            return self.close_record(lit, start);
+        }
         let step = if b == b')' { 1 } else { 2 };
         let mut parts = Vec::new();
         // An array's elements of different types, at fixed positions, are a
@@ -8353,6 +8634,15 @@ impl Stage {
         // is taken (doc/design/SYMBOLIC-FORTH.md 28), and nothing takes it
         // here, so `( "can't read it" no-file' )` is a string and a symbol.
         if b == b')' && !runs {
+            // A map literal undecided among them is the map it would be,
+            // which an array or a tuple holds.
+            for i in start..self.stack.len() {
+                let t = self.stack[i].ty;
+                if self.types.is_record_lit(t) {
+                    let m = self.lit_map(t);
+                    self.annotate(i, m)?;
+                }
+            }
             let tys: Vec<Type> = self.stack[start..].iter().map(|j| j.ty).collect();
             let text = tys.contains(&SYMBOL) && tys.iter().any(|&x| x != SYMBOL);
             let shared = self.join(&tys).filter(|&t| {
@@ -8432,6 +8722,122 @@ impl Stage {
         }
         self.emit(Op::Prim(op));
         self.push(ty, Val::Run);
+        Ok(())
+    }
+
+    /// Closes a map literal whose keys are symbols (TYPES.md 2.11): of
+    /// types, a record type, `{ x: < f64 > ; y: < f64 > ; }`; of values not
+    /// alike, a record; of values alike, a map literal undecided, a record
+    /// where one is wanted and else a map. A key written again replaces the
+    /// one before (2.10). Its values are kept in the order of their keys, as
+    /// a tuple's are by position.
+    fn close_record(&mut self, lit: Literal, start: usize) -> Result<()> {
+        // The last value of each key, by the place it was written, in the
+        // order of their keys.
+        let mut last: Vec<(Rc<str>, usize)> = Vec::new();
+        for k in (start..self.stack.len()).step_by(2) {
+            let Val::Name(key, _) = &self.stack[k].val else {
+                unreachable!("a symbol")
+            };
+            last.retain(|(n, _)| n != key);
+            last.push((key.clone(), k + 1));
+        }
+        last.sort_by(|a, b| a.0.cmp(&b.0));
+        self.floor = lit.floor;
+        self.inputs.pop();
+        let none = self.code.len() == lit.mark + 1;
+        let is_type = |j: &Jdg| matches!(j.val, Val::Type(_)) || (j.ty == NIL && j.known());
+        if last.iter().all(|&(_, i)| is_type(&self.stack[i])) {
+            if !none {
+                return Err(self.err(
+                    Kind::Unknown,
+                    "a record type's fields are types, known while compiling",
+                ));
+            }
+            self.code.pop();
+            let fields = last
+                .iter()
+                .map(|(k, i)| match self.stack[*i].val {
+                    Val::Type(t) => (k.clone(), t),
+                    _ => (k.clone(), NIL),
+                })
+                .collect();
+            self.stack.truncate(start);
+            let t = self.types.record(fields, false);
+            self.push(TYPE, Val::Type(t));
+            return Ok(());
+        }
+        let tys: Vec<Type> = last.iter().map(|&(_, i)| self.stack[i].ty).collect();
+        let text = tys.contains(&SYMBOL) && tys.iter().any(|&x| x != SYMBOL);
+        let joined = self.join(&tys).filter(|&t| {
+            !text
+                && tys.iter().all(|&x| {
+                    x == t || self.forgets(t, x) || (self.types.is_literal(x) && self.accepts(t, x))
+                })
+        });
+        let alike = joined.is_some();
+        // Its values all known, it is known, and an undecided one keeps its
+        // literals for what takes it.
+        if none && last.iter().all(|&(_, i)| self.stack[i].known()) {
+            self.code.pop();
+            let mut vals = Vec::with_capacity(last.len());
+            for &(_, i) in &last {
+                let t = self.stack[i].ty;
+                if !alike && self.types.is_literal(t) {
+                    self.annotate(i, Self::default_of(t))?;
+                }
+                vals.push(self.stack[i].clone());
+            }
+            let fields = last
+                .iter()
+                .zip(&vals)
+                .map(|((k, _), j)| (k.clone(), j.ty))
+                .collect();
+            self.stack.truncate(start);
+            let t = self.types.record(fields, alike);
+            self.push(t, Val::Seq(vals.into()));
+            return Ok(());
+        }
+        // Else its values at run time, in the order of their keys: the keys,
+        // known, have no cells, and a value replaced is dropped.
+        for k in (start + 1..self.stack.len()).step_by(2) {
+            let t = self.stack[k].ty;
+            if self.types.is_literal(t) {
+                self.annotate(k, joined.unwrap_or(Self::default_of(t)))?;
+            }
+            self.materialize(k)?;
+        }
+        let vals: Vec<Jdg> = self.stack.drain(start..).skip(1).step_by(2).collect();
+        let written = vals.len();
+        self.stack.extend(vals);
+        let kept: Vec<usize> = last.iter().map(|&(_, i)| (i - start - 1) / 2).collect();
+        let order: Vec<usize> = kept
+            .iter()
+            .copied()
+            .chain((0..written).filter(|w| !kept.contains(w)))
+            .collect();
+        self.permute(start, &order);
+        for _ in kept.len()..written {
+            self.emit(Op::Prim(P::Drop));
+            self.stack.pop();
+        }
+        let fields = last
+            .iter()
+            .zip(&self.stack[start..])
+            .map(|((k, _), j)| (k.clone(), j.ty))
+            .collect();
+        self.stack.truncate(start);
+        let reach = lit
+            .cells
+            .checked_sub(cells(&self.stack))
+            .expect("nothing below where a literal's code reached changes");
+        if reach > 0 {
+            self.emit(Op::Lit(reach as u64));
+            self.emit(Op::Prim(P::Reach));
+        }
+        self.emit(Op::Prim(P::Gather));
+        let t = self.types.record(fields, alike);
+        self.push(t, Val::Run);
         Ok(())
     }
 
@@ -8530,6 +8936,7 @@ impl Stage {
             mark,
             low: start,
             cells: cells(&self.stack),
+            depth: self.depth + 1,
         });
         self.enter()?;
         let r = self.run(q);
@@ -8551,6 +8958,7 @@ impl Stage {
             mark: self.code.len(),
             low: start,
             cells: 0,
+            depth: self.depth,
         });
         self.run(q)?;
         self.pos = closed;
@@ -8597,6 +9005,7 @@ impl Stage {
             mark: self.code.len(),
             low: start,
             cells: 0,
+            depth: self.depth,
         });
         let r = self.enter().and_then(|()| {
             let r = self.text_code(q, start);

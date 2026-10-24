@@ -62,6 +62,22 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
             }
             out.push_str(" )");
         }
+        // A record shows as a map does, its keys symbols (TYPES.md 2.11).
+        Term::Record(_) | Term::RecordLit(_) => {
+            let fs = types.fields(t).expect("a record");
+            let Ok(seq) = m.sequence(v) else {
+                out.push_str(&format!("<record {v}>"));
+                return;
+            };
+            out.push('{');
+            for (&x, (k, e)) in seq.iter().zip(fs.iter()) {
+                out.push(' ');
+                symbol(k, out);
+                out.push(' ');
+                value(m, types, x, *e, out);
+            }
+            out.push_str(" }");
+        }
         Term::Map(k, val) => {
             let Ok(map) = m.map(v) else {
                 out.push_str(&format!("<map {v}>"));

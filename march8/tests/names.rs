@@ -211,6 +211,12 @@ fn low_stack_has_letters() {
         lowered("[ x y | ( x y ) ]"),
         "[ b var# . a var# . [ b var# . a var# . ] seq# ! ]"
     );
+    // A path from a name reads a field (doc/design/TYPES.md 2.11), `p.x`
+    // being `p x' at`, a part at a time.
+    assert_eq!(
+        lowered("[ p | p.ab p.cd.ef ]"),
+        "[ a var# . ab at . a var# . cd at . ef at . ]"
+    );
     // In Low Stack a bar is a symbol, as any name is.
     assert_eq!(toks("[ x | x . ]", true)[2], Tok::Name("|".into()));
 }

@@ -317,6 +317,8 @@ equal types are equal numbers.
 | `bool` | truth: 0 and 1, `false` and `true`, Iverson's brackets, so an i64 too (TYPES.md 2.16) |
 | `( i64 string )` | a tuple: fixed positions, a type each. Positions of one type are a vec, so `( a b )` takes `( 1 2 )` |
 | `tuple` | in patterns, any tuple: a class, as `atom` is |
+| `{ x: f64 y: string }` | a record: fixed keys, a type each, a map of types (TYPES.md 2.11). Known by its fields, in the order of their keys |
+| `record` | in patterns, any record: a class, as `tuple` is |
 
 **An array literal is a vec:** `( 7 8 9 )` is a `3 i64 vec`, so its length
 is a constant. A symbol beside a string makes a tuple, `( "a" b' )` being a
@@ -845,6 +847,39 @@ is an array's cells; only its type differs.
   for `i64 string or ary`. A clause for `tuple` is preferred, so the
   forgetting is the last resort.
 - **In brackets,** `( i64 string )` is a tuple type, and `tuple` any tuple.
+
+### Records
+
+A map literal whose keys are symbols is a **record**, or may be one
+(TYPES.md 2.11): of values not alike, `{ ab: 1 cd: "x" }` is a `{ ab: i64
+cd: string }`, shown as a map is, its type telling them apart; of values
+alike it is undecided, a record where one is wanted, a map where a map
+is, and a map with nothing to take it, `{ ab: 1 cd: 2 }` a `sym i64 map`.
+A key written again replaces the one before. At run time a record is its
+values in the order of its keys, as a tuple's cells are by position.
+
+```
+point: { x: < f64 > ; y: < f64 > ; } ;         a record type, named
+norm: < point >. [ p | p.x dup * p.y dup * + sqrt ] . ;
+{ x: 3 y: 4 } norm                              5.0, its integers floats
+{ ab: 1 cd: "x" } cd' at                        "x", a string
+```
+
+- **A record type is a map of types:** `;` in braces makes an entry of
+  the map around it, a field, `{ x: < f64 > ; }`; in a bracket a field's
+  type is written bare, `< { x: f64 y: f64 } >`. Known by its fields, so
+  two of the same fields are one type, and a name given one is an alias.
+- **A clause that wants a record makes one** of an undecided literal,
+  each value converted as it would be alone, at run time too, its cells
+  already the record's; one of the wrong fields, missing, extra or of
+  another type, is no word. Where a map is wanted the stage makes the
+  map, `keys` or `put` taking it, from the record's cells.
+- **A field is read by `at`** with its key known while compiling, `p x'
+  at`, of its own type, as a tuple's position is; a path from a
+  bracket's name is short for it, `p.x`, and `p.ab.cd` reads one inside
+  another. A field the record lacks is an error while compiling. An array
+  of records holds them, `( { x: 1 y: "a" } { x: 2 y: "b" } ) [ y' at ]
+  map`, and an array of undecided literals holds maps.
 
 ### Recursion and instances
 
@@ -1382,8 +1417,13 @@ repo's root.
 - **More of tuples, and records.** `rest`, `most`, `slice` and `concat` on
   tuples forget their positions, where they could make tuples; `eq?` has no
   clause for them. A literal with a run among mixed elements is still an
-  error. Records, maps with fixed keys typed each, forgetting into a map of
-  a union, are not built (TYPES.md 2.5).
+  error. A record forgetting into a map where one is wanted, into a map of
+  the union of its values' types, and `at` with a key known only as the
+  program runs, which it would take (TYPES.md 2.5); a path from a word,
+  `cfg.port`, its head found as any name is, where it reads only from a
+  bracket's name; an entry by `;` in braces of anything but a type; a
+  record opened into places, for named inputs; equality of records; and
+  an array of map literals undecided, which settles into maps.
 - **More of unions.**
   A union made and taken apart at once is still tagged and untagged; the
   stage could carry each alternative on into the use instead. A recursive

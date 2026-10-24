@@ -334,6 +334,7 @@ at: < a ary i64 >. ary-at < a >. ;
 at: < n a vec i64 >. vec-at < a >. ;
 at: < k v map k >. map-at < v >. ;
 at: < tuple i64 >. tuple-at ;
+at: < record sym >. record-at ;
 -- At an array of positions, an array: the element at each, as APL indexes.
 at: < a ary i64 ary >. [ over swap at ] map swap drop ;
 

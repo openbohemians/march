@@ -39,20 +39,22 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   search now is (SYMBOLIC-FORTH.md 6.6, 22).
 - **A `fold` over a quotation,** so March walks one past about sixty
   elements, depth's bound (SYMBOLIC-FORTH.md 6.6).
-- **Defining types** (TYPES.md 2.11, decided 2026-10-22): records as maps
-  of types, and types of their own, each a subset of its representation
-  that forgets itself where the representation's word is applied, a
-  clause of its own keeping it, made by `own` and named by `;`,
-  `celsius: f64 own ;`. A record value is written as a map is, and a
-  field read by `at` or a path (decided 2026-10-23). `;` defines within
-  its scope, so a record type's fields are its entries, where march8's
-  `;` in braces defines into the namespace and refuses a one-letter name
-  such as `x`, which a field reached by `p.x` could take (6.32). Still
-  open: the warning where two types of their own are forgotten together. Kinds
-  wait on it. A record is also how a caller
-  names a word's inputs, `{ term: 72 rate: 0.2 } payment`, opened into
-  places where the word is applied (SYMBOLIC-FORTH.md 6.31, decided
-  2026-10-23).
+- **The rest of records** (TYPES.md 2.11). Built 2026-10-24: a map of
+  types a record type, `;` in braces making an entry, a map literal of
+  symbols undecided while its values are alike, a record where one is
+  wanted and a map else, fields read by `at` and by a path from a
+  bracket's name, `p.x`. To come: a record forgetting into a map, and `at`
+  with a key known only as the program runs; a path from a word,
+  `cfg.port`; an entry by `;` of anything but a type; a record opened
+  into places where a word that takes it is applied, for named inputs,
+  `{ term: 72 rate: 0.2 } payment` (SYMBOLIC-FORTH.md 6.31); equality of
+  records; and a known array of map literals left undecided.
+- **Types of their own** (TYPES.md 2.11, decided 2026-10-22), each a
+  subset of its representation that forgets itself where the
+  representation's word is applied, a clause of its own keeping it, made
+  by `own` and named by `;`, `celsius: f64 own ;`. Still open: the
+  warning where two types of their own are forgotten together. Kinds
+  wait on it.
 - **Kinds as types,** made where defined, `err.file.notfound: { error#:
   "file not found" } trap ;`, named by `;`, a handler taking its kind
   and every kind beneath it, the core's under `err`, the compiler's and the

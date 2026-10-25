@@ -30,6 +30,17 @@ fn beyond(len: usize) -> String {
     format!("the array of {len} has no such element")
 }
 
+/// What a version of a sequence adds, made from another by an edit with
+/// `seams` seams, as merkle-champ makes one: at each seam, the leaves it
+/// chunks again, a leaf being about a kilobyte, and a branch for each level
+/// above them, of about 32 children. The rest it shares. Never more than
+/// `whole`, what it would be charged on its own (Thomas, 2026-10-25).
+fn edited(seams: usize, height: usize, whole: usize) -> usize {
+    const LEAF: usize = 1024;
+    const BRANCH: usize = 32 * 8;
+    whole.min(seams.saturating_mul(LEAF + BRANCH * (height + 1)))
+}
+
 impl Error {
     /// A failure as a trap, its kind and its message: a program's, or the
     /// machine's, overflow or a file not read. Not the fuel limit, the
@@ -353,8 +364,23 @@ impl Machine {
         self.strings.insert(id, r);
         Ok(r)
     }
+    /// The handle of a string made from another by an edit with `seams`
+    /// seams, a new one charged what it adds (`edited`).
+    fn allocate_text_version(&mut self, t: Text, seams: usize) -> Result<u64, Error> {
+        let id = t.identity();
+        if let Some(&r) = self.strings.get(&id) {
+            return Ok(r);
+        }
+        let size = edited(seams, t.height(), t.len());
+        let r = self.allocate_text_charged(t, size)?;
+        self.strings.insert(id, r);
+        Ok(r)
+    }
     fn allocate_new_text(&mut self, t: Text) -> Result<u64, Error> {
         let size = t.len();
+        self.allocate_text_charged(t, size)
+    }
+    fn allocate_text_charged(&mut self, t: Text, size: usize) -> Result<u64, Error> {
         if size > MAX_BYTES || self.live_bytes.checked_add(size).ok_or(Error::Limit)? > MAX_BYTES {
             return Err(Error::Limit);
         }
@@ -487,6 +513,22 @@ impl Machine {
     /// A new region holding a map, charged 16 bytes per entry.
     fn allocate_map(&mut self, m: Map) -> Result<u64, Error> {
         let size = m.len().checked_mul(16).ok_or(Error::Limit)?;
+        self.allocate_map_charged(m, size)
+    }
+    /// A new version of a map, a key set or removed, charged what it adds:
+    /// the nodes on the key's path, one for each level, each of at most 32
+    /// entries; the rest it shares.
+    fn allocate_map_version(&mut self, m: Map) -> Result<u64, Error> {
+        let mut levels = 1;
+        let mut n = m.len();
+        while n > 32 {
+            n /= 32;
+            levels += 1;
+        }
+        let size = m.len().saturating_mul(16).min(levels * 32 * 16);
+        self.allocate_map_charged(m, size)
+    }
+    fn allocate_map_charged(&mut self, m: Map, size: usize) -> Result<u64, Error> {
         if size > MAX_BYTES || self.live_bytes.checked_add(size).ok_or(Error::Limit)? > MAX_BYTES {
             return Err(Error::Limit);
         }
@@ -507,6 +549,23 @@ impl Machine {
     /// A new region holding an array, charged 8 bytes per element.
     fn allocate_vector(&mut self, v: merkle_champ::Sequence<u64>) -> Result<u64, Error> {
         let size = v.len().checked_mul(8).ok_or(Error::Limit)?;
+        self.allocate_array(v, size)
+    }
+    /// A new version of an array, made from another by an edit with `seams`
+    /// seams, charged what it adds (`edited`).
+    fn allocate_version(
+        &mut self,
+        v: merkle_champ::Sequence<u64>,
+        seams: usize,
+    ) -> Result<u64, Error> {
+        let size = edited(seams, v.height(), v.len().saturating_mul(8));
+        self.allocate_array(v, size)
+    }
+    fn allocate_array(
+        &mut self,
+        v: merkle_champ::Sequence<u64>,
+        size: usize,
+    ) -> Result<u64, Error> {
         if size > MAX_BYTES || self.live_bytes.checked_add(size).ok_or(Error::Limit)? > MAX_BYTES {
             return Err(Error::Limit);
         }
@@ -1208,7 +1267,7 @@ impl Machine {
                     return Err(missing(beyond(a.len())));
                 };
                 let v = a.whole().update(i, x);
-                let r = self.allocate_vector(v)?;
+                let r = self.allocate_version(v, 1)?;
                 self.push(r)?;
             }
             Text => {
@@ -1238,11 +1297,11 @@ impl Machine {
                 let r = match (self.text(a), self.text(b)) {
                     (Ok(x), Ok(y)) => {
                         let t = x.concat(y);
-                        self.allocate_text(t)?
+                        self.allocate_text_version(t, 1)?
                     }
                     _ => {
                         let v = self.array(a)?.whole().concat(&self.array(b)?.whole());
-                        self.allocate_vector(v)?
+                        self.allocate_version(v, 1)?
                     }
                 };
                 self.push(r)?;
@@ -1257,7 +1316,7 @@ impl Machine {
                 let r = match self.text(a) {
                     Ok(t) => {
                         let t = t.char_slice(i..j).ok_or(Error::Memory)?;
-                        self.allocate_text(t)?
+                        self.allocate_text_version(t, 2)?
                     }
                     Err(_) => {
                         let whole = self.array(a)?.whole();
@@ -1265,7 +1324,7 @@ impl Machine {
                         if j > whole.len() {
                             return Err(Error::Memory);
                         }
-                        self.allocate_vector(whole.slice(i..j))?
+                        self.allocate_version(whole.slice(i..j), 2)?
                     }
                 };
                 self.push(r)?;
@@ -1295,7 +1354,7 @@ impl Machine {
                 let m = self.pop()?;
                 let r = if let Ok(map) = self.map(m) {
                     let map = map.update(k, v);
-                    self.allocate_map(map)?
+                    self.allocate_map_version(map)?
                 } else {
                     let a = self.array(m)?;
                     let i = usize::try_from(k).map_err(|_| Error::Memory)?;
@@ -1303,7 +1362,7 @@ impl Machine {
                         return Err(Error::Memory);
                     }
                     let s = a.whole().update(i, v);
-                    self.allocate_vector(s)?
+                    self.allocate_version(s, 1)?
                 };
                 self.push(r)?;
             }
@@ -1317,7 +1376,7 @@ impl Machine {
                 let k = self.pop()?;
                 let m = self.pop()?;
                 let map = self.map(m)?.without(&k);
-                let r = self.allocate_map(map)?;
+                let r = self.allocate_map_version(map)?;
                 self.push(r)?;
             }
             Keys | Values => {
@@ -1508,12 +1567,7 @@ impl Machine {
                         whole.len()
                     )));
                 };
-                let one: merkle_champ::Sequence<u64> = std::iter::once(x).collect();
-                let v = whole
-                    .slice(0..g)
-                    .concat(&one)
-                    .concat(&whole.slice(g..whole.len()));
-                let r = self.allocate_vector(v)?;
+                let r = self.allocate_version(whole.insert(g, x), 1)?;
                 self.push(r)?;
             }
             VecRemove => {
@@ -1523,8 +1577,7 @@ impl Machine {
                 let Some(i) = usize::try_from(i).ok().filter(|&i| i < whole.len()) else {
                     return Err(missing(beyond(whole.len())));
                 };
-                let v = whole.slice(0..i).concat(&whole.slice(i + 1..whole.len()));
-                let r = self.allocate_vector(v)?;
+                let r = self.allocate_version(whole.remove(i), 1)?;
                 self.push(r)?;
             }
             GradeInts | GradeFloats | GradeTexts | GradeDownInts | GradeDownFloats

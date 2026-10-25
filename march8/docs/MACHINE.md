@@ -1338,6 +1338,14 @@ different lengths both may match (above).
       20,000 words pass the 16 MB limit. With the limit raised they take
       0.3 s and agree with Python. Charging what a version adds, or freeing
       a version nothing else holds, is the memory work deferred to 2.0.
+      Since 2026-10-25 a version is charged what it adds (Thomas): an
+      array's, a string's or a map's made by an edit, `insert`, `remove`,
+      `put`, `concat` or `slice`, is charged the nodes it does not share,
+      about a kilobyte for the leaves at each seam and a branch for each
+      level above them, and never more than it would be on its own, so
+      5,000 appends are charged about 9 MB, not 100 MB. `insert` and
+      `remove` are one splice. Freeing is still 2.0: about 8,000 versions
+      kept fill the 16 MB.
     - **Still wanted:** a way to read input, so the text is not a literal;
       and a word applied without its `.` is the easiest mistake to
       make, though the error names it. Wanted then and since built:

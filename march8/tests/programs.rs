@@ -92,3 +92,27 @@ fn a_literal_in_a_loop_is_made_once() {
         bytes("1000 range 0 [ \"abcdefghijklmnopqrstuvwxyz\" swap 26 mod 1 + at + ] fold");
     assert!(literal - plain < 26 * 10, "{plain} and {literal} bytes");
 }
+
+#[test]
+fn a_version_is_charged_what_it_adds() {
+    // Each version shares all but its edit with the one before, so five
+    // thousand of them, all kept, since nothing is freed yet, are charged
+    // a few megabytes. Each charged whole, as it was, the array came to 100
+    // MB, the map to 200 MB and the string to 25 MB, past the 16 MB limit.
+    let bytes = |src: &str| {
+        let mut s = Session::new();
+        if let Err(e) = s.eval(src) {
+            panic!("{src}: {e}");
+        }
+        assert_eq!(s.show_typed(), "<1> 5000 < i64 >", "{src}");
+        s.machine.stats.allocated_bytes
+    };
+    for src in [
+        "5000 range < i64 ary > empty [ -1 insert ] fold length",
+        "5000 range < i64 i64 map > empty [ = put ] fold length",
+        "5000 range \"\" [ drop \"a\" concat ] fold length",
+    ] {
+        let n = bytes(src);
+        assert!(n < 12 * 1024 * 1024, "{src}: {n} bytes");
+    }
+}

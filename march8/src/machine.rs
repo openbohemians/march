@@ -1498,13 +1498,16 @@ impl Machine {
                 self.push(r)?;
             }
             VecInsert => {
-                let g = usize::try_from(self.pop()?).map_err(|_| Error::Memory)?;
+                let g = self.pop()?;
                 let x = self.pop()?;
                 let a = self.pop()?;
                 let whole = self.array(a)?.whole();
-                if g > whole.len() {
-                    return Err(Error::Memory);
-                }
+                let Some(g) = usize::try_from(g).ok().filter(|&g| g <= whole.len()) else {
+                    return Err(missing(format!(
+                        "the array of {} has no such gap",
+                        whole.len()
+                    )));
+                };
                 let one: merkle_champ::Sequence<u64> = std::iter::once(x).collect();
                 let v = whole
                     .slice(0..g)
@@ -1514,12 +1517,12 @@ impl Machine {
                 self.push(r)?;
             }
             VecRemove => {
-                let i = usize::try_from(self.pop()?).map_err(|_| Error::Memory)?;
+                let i = self.pop()?;
                 let a = self.pop()?;
                 let whole = self.array(a)?.whole();
-                if i >= whole.len() {
-                    return Err(Error::Memory);
-                }
+                let Some(i) = usize::try_from(i).ok().filter(|&i| i < whole.len()) else {
+                    return Err(missing(beyond(whole.len())));
+                };
                 let v = whole.slice(0..i).concat(&whole.slice(i + 1..whole.len()));
                 let r = self.allocate_vector(v)?;
                 self.push(r)?;

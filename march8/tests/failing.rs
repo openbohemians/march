@@ -149,6 +149,17 @@ fn what_is_not_there_traps() {
         trap(&mut s, "sym i64 map empty ab' 1 put ef' at"),
         ("mismatch".into(), "the map has no such key".into())
     );
+    assert_eq!(
+        trap(&mut s, "\"a b\" words \"c\" 5 insert"),
+        ("mismatch".into(), "the array of 2 has no such gap".into())
+    );
+    assert_eq!(
+        trap(&mut s, "\"a b\" words 5 remove"),
+        (
+            "mismatch".into(),
+            "the array of 2 has no such element".into()
+        )
+    );
     let ff = "ff: < string >. words 5 at ; ff: < string k trap >. drop drop \"none\" ;";
     s.eval(ff).unwrap();
     s.eval("\"a b\" ff").unwrap();

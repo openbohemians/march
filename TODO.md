@@ -82,6 +82,12 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
 
 ## To think on
 
+- **Representations and sources** (doc/design/REPRESENTATIONS.md,
+  2026-10-25). A value held the simplest way first, `vec#`, and moved
+  where what is done to it needs another, `tree#` or `list#` (Thomas);
+  sharing decides most of it, the analysis freeing needs too. And what is
+  undecided comes in only through channels in the state, traced to the
+  guards, splits, loops, traps and sizes where it acts (Thomas).
 - **List edits by arrows,** from SYMBOL (Thomas, 2026-10-09). Its ASCII
   pairs point the way the elements move: `+>` and `<+` add an element at
   the front and the end, `->` and `<-` remove a suffix and a prefix if

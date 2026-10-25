@@ -56,6 +56,20 @@ fn a_record_type_is_a_map_of_types() {
 }
 
 #[test]
+fn a_field_is_no_word() {
+    // A field named as a word is, `last`, is a key of its record type, so
+    // the source defines no `last` of its own, and the core's is applied,
+    // before the record type and after.
+    assert_eq!(
+        typed(
+            "ff: < i64 ary >. last ; ww: { last: < i64 > ; } ; \
+             ( 1 2 ) < i64 ary >. ff ( 3 4 ) < i64 ary >. last { last: 5 } < ww >. last' at"
+        ),
+        "<3> 2 < i64 > 4 < i64 > 5 < i64 >"
+    );
+}
+
+#[test]
 fn a_clause_that_wants_a_record_makes_one() {
     // A map literal taken as the record of its keys, each value converted
     // as it would be alone, here integers to floats.

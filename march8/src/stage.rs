@@ -996,12 +996,28 @@ fn definition(toks: &[Token], i: usize) -> Option<usize> {
     semicolon.then_some(j)
 }
 
-/// The words a source defines, by their names.
+/// The words a source defines, by their names. A map's entries, `{ n: 0 ;
+/// }`, a record type's fields among them, are its keys, not words.
 fn definitions(toks: &[Token]) -> impl Iterator<Item = Rc<str>> + '_ {
+    let mut keys = vec![false; toks.len()];
+    let mut i = 0;
+    while i < toks.len() {
+        if let Tok::Open(_) = toks[i].tok {
+            let end = matching(toks, i);
+            if made_at(toks, end + 1) == Some("map#") {
+                keys[i..end].fill(true);
+                i = end;
+            }
+        }
+        i += 1;
+    }
     (0..toks.len()).filter_map(move |i| {
         let Tok::Name(n) = &toks[i].tok else {
             return None;
         };
+        if keys[i] {
+            return None;
+        }
         let applied = toks
             .get(i + 1)
             .is_some_and(|t| matches!(t.tok, Tok::Apply | Tok::Test));

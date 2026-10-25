@@ -91,6 +91,92 @@ on the stack) and where it is last used. That is what freeing needs too
 (memory management, 2.0): this is where representation and memory meet,
 and the one analysis serves both.
 
+### Freeing by counting
+
+Thomas (2026-10-25): "if immutable is anything really shared? each can
+present it has it's own copy. and we have to know if it is in order to
+know whnen to free it -- we need to know all refs are done with it. … I was
+thinking a drop unlinks a link in a list or a tree, thus removing itself
+from the path of oweneship. which is exactly deletion for the store.
+freeing memory."
+
+In meaning nothing is shared: a value cannot change, so no holder can
+tell a shared value from a copy. Freeing is where sharing shows, since a
+value may go only when its last holder is done with it. A holder is a
+link: a place on the stack, a bracket's letter, an element of an array, a
+field of a record, a path in the store, a literal in code. A `drop`
+removes one, and a value with none left is deleted, its own links going
+with it. Only their number need be kept, a count of holders. A value
+holds only values made before it, so links never make a loop, and a
+count that reaches nothing is always right: nothing need ever search for
+what can no longer be reached.
+
+Thomas: "We were trying to do compile time counting. Comptime analysis
+should make some of it obvious. Perhaps it is the ones never dupped."
+
+A value never copied has one holder all its life, and the compiler sees
+where it ends, at its `drop` or the word that uses it up. It is freed
+there, and nothing is counted as the program runs. More widely, the
+compiler can count copies as it carries types, wherever the count at a
+point is the same on every path to it:
+
+| A value | Its count |
+|---|---|
+| never copied | known: freed at its `drop`, or where it is used up |
+| copied, the copy only read and gone, `dup length` | known: one holder still |
+| copied among places on the stack and letters, each dropped | known: freed at the last |
+| held by a record's field, its key known while compiling | known, as the record's is: a field is a place too |
+| read out of an array at a position known only as it runs | kept as it runs |
+| copied a number of times a loop decides | kept as it runs |
+| kept by one clause a guard chooses and not by another | kept as it runs, unless each clause frees its own |
+| under a path in the store | kept as it runs: it lives until the path is set again |
+
+This was March 4's design (docs/design/MEMORY-MANAGEMENT.md, on the
+branch archive/march4/preserved/docs-2026-09-23): the stack of types
+while compiling as the holders, a value freed where it leaves the last
+of them. It stalled on the C compiler's shared state, not on the idea.
+march6 added two corrections: a place in a loop makes a new value on
+every pass, so a value is named by its pass, not only by where it is
+made; and each word needs, for each input, what it does to it, uses it
+up, keeps it in what it leaves, or only reads it. That is section 5's
+need too.
+
+**Measured, 2026-10-25.** `lower` lowering itself, the machine counting
+every value's holders exactly, the stack's and scratch stack's places,
+array elements, map entries and literals in code, by an instrument since
+removed. Records are arrays as the program runs, so a field is an
+element.
+
+| Values | Objects | Bytes charged |
+|---|---|---|
+| never copied | 40,599 (36%) | 605 KB (4%) |
+| copied among places on the stack only, by `over`, `pick`, `dup` | 34,696 (30%) | 2.1 MB (12%) |
+| read out of a record while it holds them | 25,478 (22%) | 12.6 MB (75%) |
+| held by a version and the one it was made from, by `put` or `insert` | 12,346 (11%) | 1.4 MB (9%) |
+| read out of a larger array, or a string equal to one a structure holds | 953 (1%) | 37 KB (0.2%) |
+| literals in code | 150 | 2 KB |
+
+The rule alone, the ones never copied, frees a third of the values but
+only 4% of the bytes. With copies among the stack's places, two thirds
+and 16%. Three quarters of the bytes are one pattern, the one above: the
+token array read out of the state record while the record still holds
+it. Its key is known while compiling, so it is counted while compiling
+too, if a record's fields count as places. Then all but 0.2% of the bytes
+are counted while compiling, in this program. What is left is what an
+index read at run time reaches, and strings, which are one handle for
+each text.
+
+Freed exactly, the run's peak would be 258 KB, not 16.8 MB, 65 times
+less, and 1.9 KB would be left at the end. The instrument counted as the
+program ran, so whether a count is known while compiling is the first
+table's reading of each case, not measured; a guard or a loop can make a
+stack copy's count depend on the run.
+
+The record read is also where changing in place turns. A field taken
+out, the record giving it up, rather than read, and the token array is
+never shared: freed by its count, and changed in place by the rule
+above.
+
 ## 5. Two ways
 
 Thomas: "Of couse there are two ways to handle that and they can
@@ -204,7 +290,9 @@ read. It would give:
 
 1. Each word's effect on its inputs: what it does to each, read, append,
    insert, change, keep a copy, beside the effect rows' domains.
-2. Copies and last uses, while compiling (section 4).
+2. Copies and last uses, while compiling, a record's fields counted as
+   places (section 4): freeing where a count is known, and a count kept
+   as the program runs only where it is not.
 3. `vec#` the default, moved to `tree#` where used, loops joining
    (section 5, the second way).
 4. Sources traced: `Run` split by channel (section 7).

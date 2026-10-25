@@ -74,18 +74,36 @@ fn a_csv_summary() {
 #[test]
 fn lower_in_march_lowers_as_march8_does() {
     // The first compiler in March, compiler/lower.march, writes High Stack
-    // as Low Stack as `march8 lower` does, to the byte: the core, and a
-    // bracket's names and `_`s as letters.
+    // as Low Stack as `march8 lower` does, to the byte: the core, a
+    // bracket's names and `_`s as letters, the examples, and itself.
     let lower = format!("{}/compiler/lower.march", env!("CARGO_MANIFEST_DIR"));
     let names = "f1: [ rate term | rate 1 + term ^ ] . ;\n\
                  f2: [ x | x? ] . ;\nf3: [ p | p.x p.y.z ] . ;\nf4: [ x y | y ] . ;\n\
                  f5: [ x y | ( x ) [ dup ] y ] . ;\nf6: [ x | ( _ x ) ] . ;\n\
                  f7: [ x | \"\\_ and \\_\" ] . ;\nf8: [ x | [ y | y ] . ] . ;\n\
                  f9: < a [ x | x 1 gt ] ? >. ;\nhalf: _ 2 / ;\n";
-    for src in [include_str!("../core/core.march"), names] {
+    let itself = include_str!("../compiler/lower.march");
+    for src in [
+        include_str!("../core/core.march"),
+        names,
+        include_str!("../examples/door.march"),
+        include_str!("../examples/summary.march"),
+        include_str!("../examples/syllogism.march"),
+        include_str!("../examples/wordfreq.march"),
+        itself,
+    ] {
         let want = run(&["lower"], src) + "<0>\n";
         assert_eq!(run(&["--fuel", "100000000000", &lower], src), want);
     }
+    // A fixed point: lowered, it lowers itself to itself.
+    let low = run(&["lower"], itself);
+    assert_eq!(
+        run(
+            &["--fuel", "100000000000", "--symbolic", "--eval", &low],
+            itself
+        ),
+        low + "<0>\n"
+    );
 }
 
 #[test]
@@ -120,7 +138,7 @@ fn a_version_is_charged_what_it_adds() {
     // Each version shares all but its edit with the one before, so five
     // thousand of them, all kept, since nothing is freed yet, are charged
     // a few megabytes. Each charged whole, as it was, the array came to 100
-    // MB, the map to 200 MB and the string to 25 MB, past the 16 MB limit.
+    // MB, the map to 200 MB and the string to 25 MB.
     let bytes = |src: &str| {
         let mut s = Session::new();
         if let Err(e) = s.eval(src) {

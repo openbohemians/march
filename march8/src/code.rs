@@ -2,8 +2,11 @@ use crate::machine::Error;
 use sha2::{Digest, Sha256};
 
 pub type Cid = [u8; 32];
-pub const MAX_BYTES: usize = 16 * 1024 * 1024;
-pub const MAX_OBJECTS: usize = 100_000;
+/// What a machine may hold, nothing being freed yet: 64 MB and a million
+/// objects, raised from 16 MB and 100,000 so that `lower` lowers itself
+/// (Thomas, 2026-10-25).
+pub const MAX_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_OBJECTS: usize = 1_000_000;
 pub const MAX_WORD_OPS: usize = 65_536;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

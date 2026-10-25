@@ -85,11 +85,12 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   march8/compiler/lower.march: the reader's first pass, its words,
   strings, comments, brackets, numbers, names, labels and bodies, and
   then a bracket's names and its `_`s as letters, which lowers the whole
-  core in 0.6 s as `march8 lower` does, to the byte. On itself it agrees
-  too, but needs 16.8 MB and 114,000 objects, past the machine's limits,
-  16 MB and 100,000, since nothing is freed. To come: a string's holes,
-  `[| … |]`, a quotation's power, the symbol table's escapes, and the
-  examples.
+  core in 0.6 s as `march8 lower` does, to the byte, the examples too,
+  and itself, a fixed point: lowered, it lowers itself to itself. For that
+  the machine's limits were raised to 64 MB and a million objects, since
+  nothing is freed. To come, though no program here uses them yet: a
+  string's holes, `[| … |]`, a quotation's power and the symbol table's
+  escapes.
 
 ## To think on
 

@@ -1345,7 +1345,8 @@ different lengths both may match (above).
       level above them, and never more than it would be on its own, so
       5,000 appends are charged about 9 MB, not 100 MB. `insert` and
       `remove` are one splice. Freeing is still 2.0: about 8,000 versions
-      kept fill the 16 MB.
+      kept filled the 16 MB. The limits are 64 MB and a million objects
+      since 2026-10-25, so that `lower` lowers itself (Thomas).
     - **Still wanted:** a way to read input, so the text is not a literal;
       and a word applied without its `.` is the easiest mistake to
       make, though the error names it. Wanted then and since built:

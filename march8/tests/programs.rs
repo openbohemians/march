@@ -6,8 +6,13 @@ use std::process::{Command, Stdio};
 /// What an example prints, given its input.
 fn example(name: &str, input: &str) -> String {
     let path = format!("{}/examples/{name}", env!("CARGO_MANIFEST_DIR"));
+    run(&[&path], input)
+}
+
+/// What march8 prints, given its arguments and its input.
+fn run(args: &[&str], input: &str) -> String {
     let mut child = Command::new(env!("CARGO_BIN_EXE_march8"))
-        .arg(path)
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -64,6 +69,23 @@ fn a_csv_summary() {
         "qty: total 9.0, average 3.0\n\
          price: total 3.25, average 1.0833333333333333\n<0>\n"
     );
+}
+
+#[test]
+fn lower_in_march_lowers_as_march8_does() {
+    // The first compiler in March, compiler/lower.march, writes High Stack
+    // as Low Stack as `march8 lower` does, to the byte: the core, and a
+    // bracket's names and `_`s as letters.
+    let lower = format!("{}/compiler/lower.march", env!("CARGO_MANIFEST_DIR"));
+    let names = "f1: [ rate term | rate 1 + term ^ ] . ;\n\
+                 f2: [ x | x? ] . ;\nf3: [ p | p.x p.y.z ] . ;\nf4: [ x y | y ] . ;\n\
+                 f5: [ x y | ( x ) [ dup ] y ] . ;\nf6: [ x | ( _ x ) ] . ;\n\
+                 f7: [ x | \"\\_ and \\_\" ] . ;\nf8: [ x | [ y | y ] . ] . ;\n\
+                 f9: < a [ x | x 1 gt ] ? >. ;\nhalf: _ 2 / ;\n";
+    for src in [include_str!("../core/core.march"), names] {
+        let want = run(&["lower"], src) + "<0>\n";
+        assert_eq!(run(&["--fuel", "100000000000", &lower], src), want);
+    }
 }
 
 #[test]

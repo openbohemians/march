@@ -382,7 +382,9 @@ impl Names<'_> {
             if let Tok::Open(_) = t.tok {
                 let made = self.made(i);
                 let end = self.close[i];
-                let types = types || made == Made::Types;
+                // A guard in a signature is code, `< a a [ x y | x y gt ] ? >.`,
+                // its names names.
+                let types = made == Made::Types || types && made != Made::Code;
                 let (code, wants) = self.code(i + 1, end, made, t.pos, &inner(made), types)?;
                 for (n, pos) in &wants {
                     parts.push(name(n, *pos, &mut lent)?.expect("seen here"));

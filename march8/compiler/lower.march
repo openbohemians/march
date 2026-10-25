@@ -1,0 +1,627 @@
+-- The reader in March (TODO.md, "The first compiler in March"): High
+-- Stack in, read as `march8 lower` reads it, and Low Stack out, written as
+-- it writes it (doc/design/SYMBOLIC-FORTH.md 7), so the two can be
+-- compared:
+--
+--   march8 compiler/lower.march < core/core.march
+--
+-- So far: words, strings, comments, brackets, numbers, names and their
+-- marks, bodies, and a bracket's names and `_`s written as letters. Not
+-- yet: a string's holes, `[| … |]`, a quotation's power, and escapes by
+-- the symbol table.
+
+-- ---- Text ----
+
+-- A string's characters from the k-th to the j-th, none if j is before k; from
+-- the k-th on, none past its end; its first k.
+part: < string i64 i64 [ text lo hi | lo hi gt ] ? >. drop drop drop "" ;
+part: < string i64 i64 >. slice ;
+from: < string i64 >. over length part ;
+upto: < string i64 >. 1 swap part ;
+
+-- A string's first k characters and the rest.
+split-at: < string i64 >. [ text idx | text idx upto text idx 1 + from ] . ;
+
+-- The code of the character at k, or 0 past the end.
+char-at: < string i64 [ text idx | idx text length gt ] ? >. drop drop 0 ;
+char-at: < string i64 >. at ;
+
+-- Whether a string begins or ends with another, or holds it.
+starts: < string string [ text pre | text length pre length ge ] ? >.
+  [ text pre | text pre length upto pre eq ] . ;
+starts: < string string >. drop drop false ;
+ends: < string string [ text post | text length post length ge ] ? >.
+  [ text post | text text length post length -+ 1 + from post eq ] . ;
+ends: < string string >. drop drop false ;
+holds: < string string >. split length 1 gt ;
+
+-- Where, from the k-th character on, the first outside lo to hi is, or
+-- one past the end: `line pos 0 32 span` skips white space.
+span: < string i64 i64 i64 [ text idx lo hi | idx text length gt ] ? >.
+  drop drop swap drop ;
+span: < string i64 i64 i64 [ text idx lo hi | text idx at lo ge text idx at hi le and not ] ? >.
+  drop drop swap drop ;
+span: < string i64 i64 i64 >. [ text idx lo hi | text idx 1 + lo hi span ] . < i64 >. ;
+
+-- Where, from the k-th character on, the first of two is, or one past
+-- the end.
+seek: < string i64 i64 i64 [ text idx want also | idx text length gt ] ? >.
+  drop drop swap drop ;
+seek: < string i64 i64 i64 [ text idx want also | text idx at want eq text idx at also eq or ] ? >.
+  drop drop swap drop ;
+seek: < string i64 i64 i64 >. [ text idx want also | text idx 1 + want also seek ] . < i64 >. ;
+
+-- Whether a string is all of a range of characters, and not empty.
+all: < string i64 i64 [ text lo hi | text length 0 eq ] ? >. drop drop drop false ;
+all: < string i64 i64 >. [ text lo hi | text 1 lo hi span text length 1 + eq ] . ;
+digits: < string >. 48 57 all ;
+
+-- Strings joined, a separator between each two.
+join: < string ary string [ parts sep | parts length 0 eq ] ? >. drop drop "" ;
+join: < string ary string [ parts sep | parts length 1 eq ] ? >. drop first ;
+join: < string ary string >. [ parts sep | parts first sep concat parts rest sep join concat ] .
+  < string >. ;
+
+-- Whether a word is one of those between spaces.
+among: < string string >. swap " " swap concat " " concat holds ;
+
+-- ---- Numbers ----
+
+-- A number as Low Stack writes it, `10 int# !`, or none, `""`: digits
+-- with an optional `-`, a decimal's point with digits on both sides, or
+-- a ratio's terms between colons (src/read.rs, `number`).
+unsigned: < string [ "-" starts ] ? >. 2 from ;
+unsigned: < string >. ;
+negative: < string >. "-" starts ;
+numeric: < string [ unsigned "" eq ] ? >. drop false ;
+numeric: < string >. unsigned 1 at [ ch | ch 48 ge ch 57 le and ] . ;
+
+-- A whole number's digits as an i64 writes them, `007` as `7`.
+shown: < i64 >. show ;
+shown: < nil >. drop "" ;
+whole: < string >. i64! shown ;
+
+-- A decimal's point, the digits before it and after.
+point: < string >. 1 46 46 seek ;
+before: < string >. [ text | text text point 1 -+ upto ] . ;
+after: < string >. [ text | text text point 1 + from ] . ;
+
+-- What a number is, its sign aside.
+integral: < string >. unsigned digits ;
+decimal-form: < string >. unsigned [ text | text point text length le
+  text before digits and text after digits and ] . ;
+
+-- A ratio's terms as written, each a whole number, the sign on the first.
+negated: < string [ "0" eq ] ? >. ;
+negated: < string >. "-" swap concat ;
+sign-first: < string ary bool [ swap drop ] ? >. drop [ parts | parts rest parts first negated
+  0 insert ] . ;
+sign-first: < string ary bool >. drop ;
+ratio-text: < string >. [ text | text unsigned ":" split [ whole ] map text negative
+  sign-first ":" join ] . " ratio# !" concat ;
+
+-- A decimal as march8 writes it: its digits one whole number, the point
+-- before as many as followed it, and its sign unless it is zero.
+pad: < string i64 [ text width | text length width ge ] ? >. drop ;
+pad: < string i64 >. [ text width | "0" text concat width pad ] . < string >. ;
+dotted: < string i64 >. [ figures places | figures places 1 + pad = length places -+ split-at
+  "." swap concat concat ] . ;
+decimal-shown: < string i64 bool [ figures places neg | figures "0" eq not neg and ] ? >.
+  drop dotted "-" swap concat ;
+decimal-shown: < string i64 bool >. drop dotted ;
+decimal-text: < string >. [ text | text unsigned before text unsigned after concat whole
+  text unsigned after length text negative decimal-shown ] . " dec# !" concat ;
+
+numeral: < string [ numeric not ] ? >. drop "" ;
+numeral: < string [ ":" holds ] ? >. ratio-text ;
+numeral: < string integral? >. whole " int# !" concat ;
+numeral: < string decimal-form? >. decimal-text ;
+numeral: < string >. drop "" ;
+
+-- ---- Names ----
+
+bracket: < string >. " [ ] ( ) { } < > [| |] " among ;
+opener: < string >. " [ ( { < " among ;
+closer: < string >. " ] ) } > " among ;
+
+-- A name as Low Stack writes it: as it is, or quoted where it would read
+-- as something else, `'two words'`, a quote in it doubled.
+quoted-form: < string [ "" eq ] ? >. drop true ;
+quoted-form: < string >. [ text | text " " holds text "\n;" holds or text "\t;" holds or
+  text "\r;" holds or text "'" holds or text "\"" starts or text "--" starts or
+  text bracket or text ";" eq or text "·" eq or text "∙" eq or
+  text "." ends or text "!" ends or text "?" ends or ] . ;
+named: < string quoted-form? >. "'" split "''" join "'" swap concat "'" concat ;
+named: < string >. ;
+
+-- Whether a name is a letter, a variable: one of `a` to `z`.
+letter: < string [ length 1 eq ] ? >. 1 at [ ch | ch 97 ge ch 122 le and ] . ;
+letter: < string >. drop false ;
+
+-- A name and a mark after it, `:` or `'`, and the name without it.
+marked: < string string >. [ text end | text length 1 gt text end ends and ] . ;
+unmarked: < string >. = length 1 -+ upto ;
+
+-- A name as Low Stack spells it, and whether it applies (src/read.rs,
+-- `spelled`): `name:` labels and `name'` is a symbol, neither applied,
+-- and a letter is a variable.
+spelled: < string [ ":" marked ] ? >. unmarked false ;
+spelled: < string [ "'" marked ] ? >. unmarked false ;
+spelled: < string >. = letter not ;
+
+-- A middle dot or a bullet, alone, is the dot operator.
+dot-op: < string [ "·" eq ] ? >. drop "⋅" ;
+dot-op: < string [ "∙" eq ] ? >. drop "⋅" ;
+dot-op: < string >. ;
+
+-- (name applies variable): `x var# .`, `;`, `dup .` or `x`.
+applied: < string bool bool [ swap drop swap drop ] ? >. drop drop named " var# ." concat ;
+applied: < string bool bool [ drop swap ";" eq and ] ? >. drop drop drop ";" ;
+applied: < string bool bool [ drop swap drop ] ? >. drop drop named " ." concat ;
+applied: < string bool bool >. drop drop named ;
+
+-- Each mark after a word, a space before it: `.`, `!` or `?`.
+marked-text: < string [ "" eq ] ? >. ;
+marked-text: < string >. [ marks | " " marks 1 1 part concat marks 2 from marked-text concat ] .
+  < string >. ;
+
+-- A name and its marks: `ff?` tests, so it is not applied as well.
+name-text: < string string >. [ stem marks | stem spelled marks "?" starts not and
+  swap dot-op swap stem letter applied marks marked-text concat ] . ;
+
+-- ---- Reading ----
+
+-- A token, its spelling in Low Stack, its line, and its kind: a bracket
+-- opened, what it is, `code`, `data`, `text`, `sig` or `body`, one closed,
+-- `close`, or any other, `tok`, and the names pass's own parts with their
+-- number. A label not yet closed: the depth of its bracket, where its body
+-- would open, and its line.
+tok: { spelling: < string > ; line: < i64 > ; kind: < sym > ; n: < i64 > ; } ;
+lab: { depth: < i64 > ; index: < i64 > ; line: < i64 > ; } ;
+
+-- What reading holds: the tokens so far, the brackets open, the labels
+-- not closed, the line and where in it, whether in a block comment or a
+-- string, and the string's text so far and the line it began on.
+st: { toks: < tok ary > ; opens: < string ary > ; labels: < lab ary > ;
+  line: < i64 > ; pos: < i64 > ; block: < bool > ; instr: < bool > ;
+  acc: < string > ; began: < i64 > ; } ;
+
+start: { toks: < tok ary > empty opens: < string ary > empty labels: < lab ary > empty
+  line: 0 pos: 1 block: false instr: false acc: "" began: 0 } < st >. ;
+
+push: < a ary a >. -1 insert ;
+
+-- A token of a kind on a line given, or on the line being read.
+emit-as: < st string sym i64 >. [ state text made row |
+  state toks' state.toks { spelling: text line: row kind: made n: 0 } push put ] . ;
+emit-at: < st string i64 >. [ state text row | state text tok' row emit-as ] . ;
+emit-kind: < st string sym >. [ state text made | state text made state.line emit-as ] . ;
+emit: < st string >. [ state text | state text state.line emit-at ] . ;
+
+-- A line of three `-` or more, alone, opens a block comment, and one of
+-- them and a period, `---.`, closes it.
+one-dashes: < string ary [ length 1 eq ] ? >. first [ text | text 45 45 all text length 3 ge and ] . ;
+one-dashes: < string ary >. drop false ;
+opens-block: < string >. words one-dashes ;
+one-closer: < string ary [ length 1 eq ] ? >. first [ text | text "." ends
+  text text length 1 -+ upto 45 45 all and text length 4 ge and ] . ;
+one-closer: < string ary >. drop false ;
+closes-block: < string >. words one-closer ;
+block-line: < st string [ state text | text closes-block ] ? >. drop block' false put ;
+block-line: < st string >. drop ;
+
+-- Labels whose bracket has closed were keys, `{ a: 1 }`, not bodies.
+retained: < st [ state | state.labels length 0 eq ] ? >. ;
+retained: < st [ state | state.labels last depth' at state.opens length gt ] ? >.
+  [ state | state labels' state.labels -1 remove put ] . retained < st >. ;
+retained: < st >. ;
+
+-- ---- A word ----
+
+-- Where a word's stem ends, the marks after it, `.`, `!` and `?`, aside.
+mark: < i64 >. [ ch | ch 46 eq ch 33 eq or ch 63 eq or ] . ;
+stem-end: < string i64 [ text idx | idx 0 eq ] ? >. swap drop ;
+stem-end: < string i64 [ text idx | text idx at mark not ] ? >. swap drop ;
+stem-end: < string i64 >. 1 -+ stem-end < i64 >. ;
+
+-- A bracket opened, and one closed, the kind of the one it closes after it.
+open: < st string >. [ state stem | state opens' state.opens stem push put ] . ;
+paired: < string string >. concat " [] () {} <> " among ;
+made-of: < string [ " ( { " among ] ? >. drop data' ;
+made-of: < string [ "<" eq ] ? >. drop sig' ;
+made-of: < string >. drop code' ;
+kind-of: < string [ "(" eq ] ? >. drop " seq# !" ;
+kind-of: < string [ "{" eq ] ? >. drop " map# !" ;
+kind-of: < string [ "<" eq ] ? >. drop " sig# !" ;
+kind-of: < string >. drop "" ;
+close: < st string [ state stem | state.opens length 0 eq ] ? >.
+  [ state stem | ( "`" stem concat "` closes nothing" concat syntax' ) fail ] . ;
+close: < st string [ state stem | state.opens last stem paired not ] ? >.
+  [ state stem | ( "`" stem concat "` closes the `" concat state.opens last concat "`" concat
+    syntax' ) fail ] . ;
+close: < st string >. [ state stem | state opens' state.opens -1 remove put
+  "]" state.opens last kind-of concat ] . ;
+
+-- A label, `sq:`, at the depth of its bracket, its body opening after it.
+labelled: < st string string [ state stem marks | marks "" eq stem ":" marked and ] ? >.
+  drop drop [ state | state labels' state.labels
+    { depth: state.opens length index: state.toks length line: state.line } < lab >. push put ] . ;
+labelled: < st string string >. drop drop ;
+
+-- A `;` closes a body whose label is in its bracket: `sq: dup * ;` is
+-- `sq [ dup * ] ;`.
+closes-body: < st [ state | state.labels length 0 eq ] ? >. drop false ;
+closes-body: < st >. [ state | state.labels last depth' at state.opens length eq ] . ;
+opened: < st lab >. [ state label |
+  state toks' state.toks { spelling: "[" line: label.line kind: body' n: 0 } label.index insert put
+  labels' state.labels -1 remove put ] . ;
+body: < st >. [ state | state state.labels last opened ] . "]" close' emit-kind ;
+
+-- (state word stem marks): a body's `;`, a bracket, marks alone, a
+-- number or a name.
+lower-stem: < st string string string [ state item stem marks | item ";" eq state closes-body and ] ? >.
+  drop drop drop body ";" emit ;
+lower-stem: < st string string string [ state item stem marks | stem opener ] ? >.
+  [ state item stem marks | state stem open "[" marks marked-text concat stem made-of emit-kind ] . ;
+lower-stem: < st string string string [ state item stem marks | stem closer ] ? >.
+  [ state item stem marks | state stem close marks marked-text concat close' emit-kind ] . ;
+lower-stem: < st string string string [ state item stem marks | stem "" eq ] ? >.
+  [ state item stem marks | state marks marked-text 2 from emit ] . ;
+lower-stem: < st string string string [ state item stem marks | stem numeral "" eq not ] ? >.
+  [ state item stem marks | state stem numeral marks marked-text concat emit ] . ;
+lower-stem: < st string string string >. [ state item stem marks |
+  state stem marks name-text emit stem marks labelled ] . ;
+
+-- A word, its stem and its marks.
+lower-word: < st string >. [ state item | state item item item item length stem-end split-at ] .
+  lower-stem ;
+
+-- A comment runs to the end of its line.
+the-word: < st string [ state item | item "--" starts ] ? >. drop pos' 1000000000 put ;
+the-word: < st string >. swap retained swap lower-word ;
+
+-- The word from one character to before another, the state past it.
+cut-word: < st string i64 i64 >. [ state text begin past |
+  state pos' past put text begin past 1 -+ part the-word text ] . ;
+
+-- ---- Strings and quoted symbols ----
+
+-- The text so far, a symbol on the line it began on.
+flush: < st [ state | state.acc "" eq ] ? >. ;
+flush: < st >. [ state | state state.acc named state.began emit-at acc' "" put ] . ;
+
+-- Text taken into the string, and the characters it took.
+took: < st string string i64 >. [ state text add step |
+  state acc' state.acc add concat put pos' state.pos step + put text ] . ;
+
+-- A string, `"…"`, is `[ … ] str# !`, each run of its text a symbol and
+-- each `\_` an input, `_ .`.
+open-string: < st string >. [ state text | state "[" text' emit-kind acc' "" put began' state.line put
+  instr' true put pos' state.pos 1 + put text ] . ;
+
+-- An escape, its `\` where the state is: `\\`, `\"`, `\_`, or a name and
+-- `;`, `\n;`.
+escape-text: < string [ "n" eq ] ? >. drop "\n;" ;
+escape-text: < string [ "t" eq ] ? >. drop "\t;" ;
+escape-text: < string [ "r" eq ] ? >. drop "\r;" ;
+escape-text: < string >. [ esc | ( "`\\" esc concat ";` is not an escape read yet" concat
+  syntax' ) fail ] . ;
+named-escape: < st string i64 >. [ state text semi | state text text state.pos 1 + semi 1 -+ part
+  escape-text semi state.pos -+ 1 + took ] . ;
+escaped: < st string i64 [ state text ch | ch 92 eq ] ? >. drop "\\" 2 took ;
+escaped: < st string i64 [ state text ch | ch 34 eq ] ? >. drop "\"" 2 took ;
+escaped: < st string i64 [ state text ch | ch 95 eq ] ? >. drop [ state text | state flush "_ ." emit
+  began' state.line put pos' state.pos 2 + put text ] . ;
+escaped: < st string i64 [ state text ch | ch 91 eq ] ? >.
+  drop ( "a string's hole is not read yet" syntax' ) fail ;
+escaped: < st string i64 >. drop [ state text | state text text state.pos 1 + 59 59 seek ] .
+  named-escape ;
+escape: < st string >. [ state text | state text text state.pos 1 + char-at ] . escaped ;
+
+-- A string's text from where the state is: to the end of the line, its
+-- `"`, or an escape, and on.
+str-chars: < st string [ state text | state.pos text length gt ] ? >. ;
+str-chars: < st string [ state text | text state.pos at 34 eq ] ? >. [ state text |
+  state flush "] str# !" close' emit-kind instr' false put pos' state.pos 1 + put text ] . ;
+str-chars: < st string [ state text | text state.pos at 92 eq ] ? >. escape str-chars
+  < st string >. ;
+str-chars: < st string >. [ state text | state text text state.pos text state.pos 34 92 seek
+  [ lo hi | lo hi 1 -+ part ] . 1 took ] . [ state text |
+    state pos' text state.pos 34 92 seek put text ] . str-chars < st string >. ;
+
+-- A quoted symbol, `'…'`, to the next `'` not doubled: (state line text
+-- so far, where its next run begins).
+quote-run: < st string string i64 [ state text acc begin | text begin 39 39 seek text length gt ] ? >.
+  drop drop drop drop ( "a quoted symbol over lines is not read yet" syntax' ) fail
+  < st string >. ;
+quote-run: < st string string i64 [ state text acc begin | text text begin 39 39 seek 1 + char-at 39 eq ] ? >.
+  [ state text acc begin | state text acc text begin text begin 39 39 seek 1 -+ part concat
+    "'" concat text begin 39 39 seek 2 + ] . quote-run < st string >. ;
+quote-run: < st string string i64 >. [ state text acc begin |
+  state acc text begin text begin 39 39 seek 1 -+ part concat named emit
+  pos' text begin 39 39 seek 1 + put text ] . ;
+quoted: < st string >. [ state text | state text "" state.pos 1 + ] . quote-run ;
+
+-- ---- Lines ----
+
+-- A token: a string, a quoted symbol or a word.
+token: < st string [ state text | text state.pos at 34 eq ] ? >. open-string str-chars ;
+token: < st string [ state text | text state.pos at 39 eq ] ? >. quoted ;
+token: < st string >. [ state text | state text state.pos text state.pos 33 1114111 span ] . cut-word ;
+
+-- The rest of a line, a token at a time, white space skipped.
+skip-space: < st string >. [ state text | state pos' text state.pos 0 32 span put text ] . ;
+scan-line: < st string [ state text | state.pos text length gt ] ? >. drop ;
+scan-line: < st string >. token skip-space scan-line < st >. ;
+
+-- A line: in a block comment, the rest of a string, or tokens.
+read-line: < st string [ state text | state.block ] ? >. block-line ;
+read-line: < st string [ state text | state.instr ] ? >.
+  [ state text | state acc' state.acc "\n;" concat put text ] . str-chars skip-space scan-line ;
+read-line: < st string [ state text | text opens-block ] ? >. drop block' true put ;
+read-line: < st string >. skip-space scan-line ;
+
+-- The source, a line at a time.
+next-line: < st string >. [ state text | state line' state.line 1 + put pos' 1 put text ] .
+  read-line ;
+lowered: < string >. lines start [ next-line ] fold ;
+
+-- ---- Letters ----
+
+-- High Stack's names written as letters (doc/design/SYMBOLIC-FORTH.md
+-- 6.31 and 14). A bracket's names come before its `|`, the deepest first,
+-- and each is written as the letter of its place, so `[ rate term | rate 1
+-- + term ^ ]` is `[ b 1 + a ^ ]`; its `_`s are too, the first written the
+-- deepest, so `[ _ _ / ]` is `[ b a / ]`. A bracket takes all it names:
+-- the deepest, if its code does not use it, is written once and dropped
+-- after the letters its code begins with. A string or a literal inside it
+-- sees its names, each passed in on the stack just before it and taken
+-- there by a letter, so `[ x | ( x ) ]` is `[ x | x ( a ) ]`; a quotation
+-- inside it sees none of them. A bracket names its inputs by `_`s or by
+-- letters, never both, and a signature's letters are types.
+
+-- The letter of the k-th place, `a` the first, and of a letter's place,
+-- `x`, `y` and `z` the first three, as math names them.
+place-letter: < i64 [ k | k 23 le ] ? >. [ k | "abcdefghijklmnopqrstuvw" k k part ] . ;
+place-letter: < i64 >. drop ( "a bracket takes at most 23 inputs by its letters, `a` to `w`, those passed in among them" limit' ) fail ;
+letter-place: < i64 [ ch | ch 120 ge ] ? >. 119 -+ ;
+letter-place: < i64 >. 96 -+ ;
+
+-- A token's name, how it is used, tested, `rate ?`, 1, applied, `rate .`,
+-- 2, a letter, `x var# .`, 3, or not at all, 0, and what follows its use.
+use-len: < string string [ stem tail | tail " var# ." starts stem letter and ] ? >. drop drop 3 ;
+use-len: < string string [ stem tail | tail " ." starts ] ? >. drop drop 2 ;
+use-len: < string string [ stem tail | tail " ?" starts ] ? >. drop drop 1 ;
+use-len: < string string >. drop drop 0 ;
+use-tail: < string i64 [ tail len | len 3 eq ] ? >. drop 8 from ;
+use-tail: < string i64 [ tail len | len 2 eq ] ? >. drop 3 from ;
+use-tail: < string i64 >. drop ;
+use-of: < string >. [ text | text text 1 32 32 seek 1 -+ split-at ] .
+  [ stem tail | stem stem tail use-len dup tail swap use-tail ] . ;
+rest-of: < string >. use-of swap drop swap drop ;
+
+-- Where a string is in an array, from the first, or 0.
+index-of: < string ary string i64 [ xs nm idx | idx 0 eq ] ? >. drop drop drop 0 ;
+index-of: < string ary string i64 [ xs nm idx | xs idx at nm eq ] ? >. swap drop swap drop ;
+index-of: < string ary string i64 >. 1 -+ index-of < i64 >. ;
+position: < string ary string >. over length index-of ;
+
+-- A token made: a spelling, a line, a kind and a number.
+tok-of: < string i64 sym i64 >. [ text row made idx |
+  { spelling: text line: row kind: made n: idx } < tok >. ] . ;
+-- A letter of a place, as a token, what followed the name after it.
+letter-at: < i64 string i64 >. [ place tail row |
+  place place-letter " var# ." concat tail concat row tok' 0 tok-of ] . ;
+
+-- A bracket being read: its opening, its names, whether its deepest is
+-- used, what it holds so far, the names around it that it is lent and the
+-- line each is first used on, the line of a letter in it, how many `_`s,
+-- whether it is in a signature, and whether past its `|`.
+frame: { open: < tok > ; names: < string ary > ; deep: < bool > ; parts: < tok ary > ;
+  wants: < string ary > ; firsts: < i64 ary > ; lettered: < i64 > ; unders: < i64 > ;
+  types: < bool > ; barred: < bool > ; } ;
+naming: { cur: < frame > ; up: < frame ary > ; } ;
+fresh: < tok bool >. [ item types | { open: item names: < string ary > empty deep: false
+  parts: < tok ary > empty wants: < string ary > empty firsts: < i64 ary > empty
+  lettered: 0 unders: 0 types: types barred: false } < frame >. ] . ;
+
+-- Whether a bracket sees the names around it, a literal or a string, and
+-- whether one is code.
+sees: < sym >. [ made | made data' eq made text' eq or ] . ;
+code-like: < sym >. [ made | made code' eq made body' eq or ] . ;
+
+-- Whether a frame from the k-th down names a name, and whether the
+-- bracket being read or one around it does.
+named-in: < frame ary string i64 [ fs nm idx | idx 0 eq ] ? >. drop drop drop false ;
+named-in: < frame ary string i64 [ fs nm idx | fs idx at names' at nm position 0 gt ] ? >.
+  drop drop drop true ;
+named-in: < frame ary string i64 >. 1 -+ named-in < bool >. ;
+known: < naming string >. [ acc nm |
+  acc.cur.names nm position 0 gt acc.up nm acc.up length named-in or ] . ;
+
+-- A frame with a part added, and the bracket being read with one.
+held: < frame tok >. [ fr item | fr parts' fr.parts item push put ] . ;
+add: < naming tok >. [ acc item | acc cur' acc.cur item held put ] . ;
+
+-- A name used in a frame, as it is spelled, on a line: one of its own, or
+-- one it is lent, the first time added to those it is lent.
+lend: < frame string i64 [ fr nm row | fr.wants nm position 0 gt ] ? >. drop drop ;
+lend: < frame string i64 >. [ fr nm row |
+  fr wants' fr.wants nm push put firsts' fr.firsts row push put ] . ;
+taken: < frame string string i64 [ fr nm spelled row | fr.names nm position 0 gt ] ? >.
+  [ fr nm spelled row | fr deep' fr.deep fr.names nm position 1 eq or put
+    spelled row own' fr.names nm position tok-of held ] . ;
+taken: < frame string string i64 >. [ fr nm spelled row | fr nm row lend nm spelled row ] .
+  [ fr nm spelled row | fr spelled row lent' fr.wants nm position tok-of held ] . ;
+
+-- A path from a name, `p.x`, its name and its fields read, `x at .`.
+has-dot: < string >. [ text | text 1 46 46 seek text length le ] . ;
+path-head: < string >. [ text | text text 1 46 46 seek 1 -+ upto ] . ;
+path-fields: < string >. [ text | text text 1 46 46 seek 1 + from "." split " at . " join
+  " at ." concat ] . ;
+
+-- The names before a bracket's `|`, from its parts so far.
+name-ok: < string [ " _ ! ; " among ] ? >. drop "" ;
+name-ok: < string [ has-dot ] ? >. drop "" ;
+name-ok: < string >. ;
+-- A name before a `|`, or "" if it is none: one applied or a letter, and
+-- nothing after it, not `_`, `!` or `;`, nor a path.
+name-if: < string bool [ stem ok | ok ] ? >. drop name-ok ;
+name-if: < string bool >. drop drop "" ;
+head-name: < string >. use-of [ stem len tail | stem len 1 gt tail "" eq and ] . name-if ;
+head-names: < tok ary string ary i64 [ parts nms idx | idx parts length gt ] ? >. drop swap drop ;
+head-names: < tok ary string ary i64 [ parts nms idx | parts idx at spelling' at head-name "" eq ] ? >.
+  ( "only names come before a bracket's `|`, the names of its inputs: `[ rate term | rate 1 + term ^ ]`"
+    syntax' ) fail ;
+head-names: < tok ary string ary i64 [ parts nms idx |
+  nms parts idx at spelling' at head-name position 0 gt ] ? >. [ parts nms idx |
+  ( "`" parts idx at spelling' at head-name concat "` names two of the bracket's inputs" concat
+    syntax' ) fail ] . ;
+head-names: < tok ary string ary i64 >. [ parts nms idx |
+  parts nms parts idx at spelling' at head-name push idx 1 + ] . head-names < string ary >. ;
+headed: < frame [ fr | fr.names length 0 eq ] ? >.
+  ( "a bracket's `|` comes after the names of its inputs, and this one names none: `[ rate term | rate 1 + term ^ ]`"
+    syntax' ) fail ;
+headed: < frame [ fr | fr.names length 23 gt ] ? >.
+  ( "a bracket names at most 23 inputs, as many as its letters" limit' ) fail ;
+headed: < frame >. ;
+head: < frame >. [ fr | fr names' fr.parts < string ary > empty 1 head-names put
+  barred' true put parts' < tok ary > empty put wants' < string ary > empty put
+  firsts' < i64 ary > empty put lettered' 0 put unders' 0 put ] . headed ;
+
+-- A bracket's `|`.
+barred-at: < naming tok [ acc item | acc.up length 0 eq ] ? >.
+  ( "a `|` comes after the names of a bracket's inputs, and this one is in no bracket" syntax' ) fail ;
+barred-at: < naming tok [ acc item | acc.cur.barred ] ? >.
+  ( "a bracket has one `|`, after the names of its inputs" syntax' ) fail ;
+barred-at: < naming tok [ acc item | acc.cur.open.kind body' eq ] ? >.
+  ( "a definition names no inputs, a bracket in its body does: `growth: < f64 f64 >. [ rate term | rate 1 + term ^ ] . ;`"
+    syntax' ) fail ;
+barred-at: < naming tok [ acc item | acc.cur.open.kind sig' eq ] ? >.
+  ( "a signature names no inputs, its letters being types, `< a a >.`; the names are its body's, `[ x y | … ]`"
+    syntax' ) fail ;
+barred-at: < naming tok >. drop [ acc | acc cur' acc.cur head put ] . ;
+
+-- A use of a name (state, token, name, how it is used, what follows): a
+-- path from a name of the bracket or one around it, its own or one around
+-- it, a letter or a `_` where it names its own, a letter, a `_`, or none.
+use-step: < naming tok string i64 string [ acc item stem len tail | len 0 eq ] ? >.
+  drop drop drop add ;
+use-step: < naming tok string i64 string [ acc item stem len tail |
+  len 2 eq stem has-dot and acc stem path-head known and ] ? >. [ acc item stem len tail |
+  acc cur' acc.cur stem path-head stem path-head " ." concat item.line taken
+  stem path-fields tail concat item.line tok' 0 tok-of held put ] . ;
+use-step: < naming tok string i64 string [ acc item stem len tail | acc stem known ] ? >.
+  [ acc item stem len tail | acc cur' acc.cur stem item.spelling item.line taken put ] . ;
+use-step: < naming tok string i64 string [ acc item stem len tail |
+  acc.cur.names length 0 gt stem "_" eq and ] ? >.
+  ( "the bracket names its inputs, so it has no `_`" syntax' ) fail ;
+use-step: < naming tok string i64 string [ acc item stem len tail |
+  acc.cur.names length 0 gt len 3 eq and ] ? >. [ acc item stem len tail |
+  ( "the bracket names its inputs, so it uses no other letter, and `" stem concat
+    "` is none of its names" concat syntax' ) fail ] . ;
+use-step: < naming tok string i64 string [ acc item stem len tail | len 3 eq ] ? >.
+  [ acc item stem len tail | acc cur' acc.cur
+    item.spelling item.line letter' stem 1 at letter-place tok-of held
+    lettered' item.line put put ] . ;
+use-step: < naming tok string i64 string [ acc item stem len tail |
+  stem "_" eq len 2 eq and acc.up length 0 eq and ] ? >.
+  ( "`_` is an input of the bracket it is written in, and this one is in none" syntax' ) fail ;
+use-step: < naming tok string i64 string [ acc item stem len tail | stem "_" eq len 2 eq and ] ? >.
+  [ acc item stem len tail | acc cur' acc.cur
+    item.spelling item.line under' acc.cur.unders tok-of held
+    unders' acc.cur.unders 1 + put put ] . ;
+use-step: < naming tok string i64 string >. drop drop drop add ;
+
+-- A part written (part, how many lent, its own, its `_`s): one of its
+-- own, one lent it, a letter or a `_`, as the letter of its place, or as
+-- it is.
+write-part: < tok i64 i64 i64 [ item nlent nown nund | item.kind own' eq ] ? >.
+  [ item nlent nown nund | nlent nown + item.n -+ 1 + item.spelling rest-of item.line letter-at ] . ;
+write-part: < tok i64 i64 i64 [ item nlent nown nund | item.kind lent' eq ] ? >.
+  [ item nlent nown nund | nlent item.n -+ 1 + item.spelling rest-of item.line letter-at ] . ;
+write-part: < tok i64 i64 i64 [ item nlent nown nund | item.kind letter' eq nlent 0 gt and ] ? >.
+  [ item nlent nown nund | item.n nlent + item.spelling rest-of item.line letter-at ] . ;
+write-part: < tok i64 i64 i64 [ item nlent nown nund | item.kind letter' eq ] ? >.
+  drop drop drop kind' tok' put ;
+write-part: < tok i64 i64 i64 [ item nlent nown nund | item.kind under' eq ] ? >.
+  [ item nlent nown nund | nlent nund + item.n -+ item.spelling rest-of item.line letter-at ] . ;
+write-part: < tok i64 i64 i64 >. drop drop drop ;
+writing-parts: < tok ary tok ary i64 i64 i64 i64 [ parts out idx nlent nown nund |
+  idx parts length gt ] ? >. drop drop drop drop swap drop ;
+writing-parts: < tok ary tok ary i64 i64 i64 i64 >. [ parts out idx nlent nown nund |
+  parts out parts idx at nlent nown nund write-part push idx 1 + nlent nown nund ] .
+  writing-parts < tok ary >. ;
+
+-- How many of the first tokens are letters, `a var# .`, from the k-th.
+bare-letter: < string >. [ text | text length 8 eq text " var# ." ends and ] . ;
+leading: < tok ary i64 [ out idx | idx out length gt ] ? >. swap drop 1 -+ ;
+leading: < tok ary i64 [ out idx | out idx at spelling' at bare-letter ] ? >. 1 + leading < i64 >. ;
+leading: < tok ary i64 >. swap drop 1 -+ ;
+
+-- The deepest name, if the code does not use it, written once and
+-- dropped after the letters it begins with.
+dropped: < tok ary frame i64 [ out fr nlent | fr.names length 0 eq fr.deep or ] ? >. drop drop ;
+dropped: < tok ary frame i64 >. [ out fr nlent |
+  out nlent fr.names length + place-letter " var# . drop ." concat fr.open.line tok' 0 tok-of
+  out 1 leading insert ] . ;
+
+-- A bracket's parts as written.
+written-frame: < frame [ fr | fr.wants length fr.names length + fr.unders + fr.lettered + 0 eq ] ? >.
+  parts' at ;
+written-frame: < frame >. [ fr | fr.parts < tok ary > empty 1 fr.wants length fr.names length
+  fr.unders writing-parts fr fr.wants length dropped ] . ;
+
+-- Each name a bracket is lent, from the k-th on, taken from the one around it.
+passed: < frame string ary i64 ary i64 [ fr ws ls idx | idx ws length gt ] ? >. drop drop drop ;
+passed: < frame string ary i64 ary i64 >. [ fr ws ls idx |
+  fr ws idx at ws idx at " ." concat ls idx at taken ws ls idx 1 + ] . passed < frame >. ;
+
+-- A bracket closed: in the one around it, what it is lent, then it,
+-- written.
+joined: < frame tok ary tok >. [ fr inside item | fr parts' fr.parts inside concat put item held ] . ;
+merged: < frame frame tok >. [ outer inner item | outer inner.wants inner.firsts 1 passed
+  inner.open held inner written-frame item ] . joined ;
+closed-at: < naming tok [ acc item | acc.cur.wants length 0 gt acc.cur.open.kind sees not and ] ? >.
+  [ acc item | ( "`" acc.cur.wants first concat
+    "` is a name of a bracket around this one, and a quotation sees no names but its own: give it the value on the stack"
+    concat syntax' ) fail ] . ;
+closed-at: < naming tok [ acc item | acc.cur.unders 0 gt acc.cur.lettered 0 gt and ] ? >.
+  [ acc item | ( "a bracket names its inputs by `_`s or by letters, not both, and this one has a letter on line "
+    acc.cur.lettered show concat ": `[ _ _ / ]` is `[ b a / ]`" concat syntax' ) fail ] . ;
+closed-at: < naming tok >. [ acc item |
+  { cur: acc.up last acc.cur item merged up: acc.up -1 remove } < naming >. ] . ;
+
+-- A bracket opened: one in a signature is in it too, but for a guard.
+opened-at: < naming tok >. [ acc item | { cur: item acc.cur.types item.kind code-like not and
+  item.kind sig' eq or fresh up: acc.up acc.cur push } < naming >. ] . ;
+
+-- A token as the names are read: a bracket opened, closed, its `|`, or in
+-- a signature, where nothing is a name, or a use of a name.
+naming-step: < naming tok [ acc item | item.kind tok' eq not item.kind close' eq not and ] ? >.
+  opened-at ;
+naming-step: < naming tok [ acc item | item.kind close' eq ] ? >. closed-at ;
+naming-step: < naming tok [ acc item | item.spelling "| ." eq ] ? >. barred-at ;
+naming-step: < naming tok [ acc item | acc.cur.types item.spelling "_ ." eq and ] ? >.
+  ( "`_` is an input of a bracket of code, and a signature's letters are types, `< a a >.`"
+    syntax' ) fail ;
+naming-step: < naming tok [ acc item | acc.cur.types ] ? >. add ;
+naming-step: < naming tok >. [ acc item | acc item item.spelling use-of ] . use-step ;
+
+letters: < tok ary >.
+  { cur: { spelling: "" line: 0 kind: top' n: 0 } < tok >. false fresh up: < frame ary > empty }
+  < naming >. [ naming-step ] fold cur' at parts' at ;
+
+-- ---- Writing ----
+
+-- The tokens as Low Stack writes them, each on its line, a blank line
+-- for any blank lines between.
+gap: < i64 i64 [ now last | now last 1 + gt ] ? >. drop drop "\n;\n;" ;
+gap: < i64 i64 [ now last | now last gt ] ? >. drop drop "\n;" ;
+gap: < i64 i64 >. drop drop " " ;
+written: < i64 tok >. [ last item | item.line last gap write item.spelling write
+  item.line last max ] . ;
+render: < tok ary >. [ items | items first spelling' at write
+  items rest items first line' at [ written ] fold drop "\n;" write ] . ;
+
+io.stdin.read lowered toks' at letters render

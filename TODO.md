@@ -43,7 +43,10 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   `cfg.port`; an entry by `;` of anything but a type; a record opened
   into places where a word that takes it is applied, for named inputs,
   `{ term: 72 rate: 0.2 } payment` (SYMBOLIC-FORTH.md 6.31); equality of
-  records; and a known array of map literals left undecided.
+  records; a known array of map literals left undecided; and a map
+  literal of alike values settled as the record a variable stands for,
+  `labels { depth: 1 index: 2 line: 3 } push`, now refused unless
+  checked, `< lab >.`.
 - **The rest of types of their own** (TYPES.md 2.11). Built 2026-10-24:
   `own`, named by `;`, a subset of its representation forgotten where the
   representation's word is applied, a clause of its own keeping it. To
@@ -78,7 +81,15 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   and the examples, a fixed point as system.march's was. It needs no
   bytes, no file written and no code handed to the machine; its tables
   are a record handed along, as a fold hands its value, until the store
-  holds them under the paths that name its words.
+  holds them under the paths that name its words. Begun 2026-10-25,
+  march8/compiler/lower.march: the reader's first pass, its words,
+  strings, comments, brackets, numbers, names, labels and bodies, and
+  then a bracket's names and its `_`s as letters, which lowers the whole
+  core in 0.6 s as `march8 lower` does, to the byte. On itself it agrees
+  too, but needs 16.8 MB and 114,000 objects, past the machine's limits,
+  16 MB and 100,000, since nothing is freed. To come: a string's holes,
+  `[| … |]`, a quotation's power, the symbol table's escapes, and the
+  examples.
 
 ## To think on
 

@@ -763,34 +763,65 @@ Settled (Thomas, 2026-10-14), not built:
     namespace leaves code already expanded as it was. Built in march8
     (2026-10-20).
 
-    **The core is a namespace, `core`** (Thomas, 2026-10-20: "ultimately
-    certain core words won't be directly available. To get them the coder
-    would have to import them, making that potentially 'unsafe' decision
-    where they can muck about in the deeper internals"). Every namespace
-    finds the core last, as though it imported `core.*`, which makes local
-    what the core exports; what it does not export, its internals, a
-    namespace reaches by importing it by its path, a decision written
-    where it is made, as Go's `unsafe` is a package imported by name. So
-    `+` is `core.+`, a path like any other, and a program's word of a
-    core name is its own: `dup: 7 ;` at the root is the program's
-    `dup`, the core's own words still meaning the core's, `over` among
-    them, and `core.dup` reaching the core's. A program adds a clause to a
-    family of the core's by its path, then, `core.unit: < int#-' > … ;`,
-    as to any namespace's. A source applies its own word wherever it is
-    written, its own definition included, so `i64: < i64 f64 or > ;` is
-    an error that names `core.i64`. Expanded code keeps its paths, and
-    what shows a name shows the shortest one the root finds the word by,
-    `dup` for `core.dup`: a message, a name taken out of a quotation,
-    `[ swap + ] first` being `swap'`, and a capture `name#` reads (25),
-    so `-+^0` still meets `< -+' 0 >`. Built in march8 (2026-10-20), the
-    core exporting all of its words. Not yet: which words the core
-    exports and how importing the rest is marked, which Thomas does not
-    know yet. The typed primitives, `i64+`, `ary-at`, `quote-at`,
-    `string-concat`, are the natural internals; the words lowered code
-    applies, `int#`, `power#`, `name#`, stay exported, since lowered code
-    names no import. Nor yet showing expanded code by its shortest names,
-    which nothing shows yet, `lower` and `fmt` writing source as it was
-    typed.
+    **The core is a namespace, `core`, which every namespace imports**
+    (Thomas, 2026-10-20: "ultimately certain core words won't be directly
+    available. To get them the coder would have to import them, making
+    that potentially 'unsafe' decision where they can muck about in the
+    deeper internals"; 2026-10-24: "core is just the auto imported module,
+    importeted into all other namespaces"). A program is written into the
+    root, not into the core, and the root begins, in essence, as
+
+    ```
+    { import#: [| core.* |] ; }
+    ```
+
+    an import being a sequence, since imports are ordered (Thomas: "imports
+    are ordered so it has to be a sequence of pairs, not a map"), and
+    `core.*` making local, each by its last part, what the core exports
+    (17); what it does not export, its
+    internals, a namespace reaches by importing it by its path, a decision
+    written where it is made, as Go's `unsafe` is a package imported by
+    name. So `+` is `core.+`, a path like any other. **A name's clauses
+    are one family**, wherever they are found: the namespace's own, then
+    its imports' in their order, the core's last (Thomas: "imported
+    modules are looked up after the local definitions"). The clause that
+    fits best is chosen, as in any family (TYPES.md 2.8), and where two fit
+    as well, the one found first, Thomas: "you can't match by just name,
+    the types are necessary". So a program's `+: < celsius celsius >. …
+    ;` takes two celsius, `2 3 +` is the core's, a literal's own kind
+    fitting it best, and the clause's own `+` of two f64s is the core's
+    too. A program overrides a core clause at the same signature, which it
+    is found first for; a clause of its own that fits less well, `+: < a a
+    >.` or one with no signature, does not hide the core's. Thomas
+    (2026-10-24): "My only concern is that this might be hard to reason
+    about. But let's go with it, we can always revisit if it proves too
+    problematic." Order alone was weighed, the first word with a clause
+    that fits, and left: `1 2 +` would be celsius in a program with a
+    celsius `+`, and where an import stands would change what a literal
+    means. Nothing is added to the core, since a program does not write the
+    core's words (Thomas: "one should not write core methods"): the core's
+    own words still mean the core's, `sum` a sum by `core.+`, so a sum of
+    celsius forgets into f64 unless the program's `sum` has a clause of
+    its own. `dup: 7 ;` at the root is the program's `dup`, taking fewer
+    values, which wins (TYPES.md 3.13), `over` still meaning the core's
+    and `core.dup` reaching it. A source applies its own word wherever it is written, its own
+    definition included, so `i64: < i64 f64 or > ;` is an error that
+    names `core.i64`. Expanded code keeps its paths, and what shows a name
+    shows the shortest one the root finds the word by, `dup` for
+    `core.dup`: a message, a name taken out of a quotation, `[ swap + ]
+    first` being `swap'`, and a capture `name#` reads (25), so `-+^0`
+    still meets `< -+' 0 >`. Built in march8 (2026-10-20), the core
+    exporting all of its words, and a name's clauses one family since
+    2026-10-24, chosen by march8's scores until 2.8's rule is built, a
+    name expanded to the first word found. Not yet: which words the core
+    exports and how importing the rest is marked, the core a subset in
+    time, the words of the system imported by hand, and how namespaces are
+    organized, all to be worked out (Thomas). The typed primitives,
+    `i64+`, `ary-at`, `quote-at`, `string-concat`, are the natural
+    internals; the words lowered code applies, `int#`, `power#`, `name#`,
+    stay exported, since lowered code names no import. Nor yet showing
+    expanded code by its shortest names, which nothing shows yet, `lower`
+    and `fmt` writing source as it was typed.
 
 17. **Import and export** (Thomas): a namespace's map has two keys of
     March's own, `import#` and `export#`, named so as not to take words a
@@ -799,17 +830,18 @@ Settled (Thomas, 2026-10-14), not built:
 
     ```
     import#: [| math.* io.file.read |] ;     -- each local by its last part
-    import#: [| circle math.pi |] map#! ;    -- or named, as pairs
     export#: [| pi e sin cos |] ;
     ```
 
-    `import#` makes names local, each by its last part or by the name
-    paired with it, and `math.*` makes local all that `math` exports. A
-    bare name is looked up locally, then among the imports, then in the
-    core, the namespace `core`, as though each namespace imported
-    `core.*` last (16). A path is absolute, so it means the same anywhere. An import
-    that meets a local name or another import is an error, settled by
-    naming it. A namespace has one import, which holds for all of it
+    `import#` makes names local, each by its last part or by a name
+    paired with it, `circle` for `math.pi`, and `math.*` makes local all
+    that `math` exports. Imports are ordered, so they are a sequence, of
+    pairs where they name (Thomas, 2026-10-24), how a pair is written in
+    it to be settled. A bare name is looked up locally, then among the
+    imports in their order, the core's last, which every namespace imports
+    (16), and the clauses it finds are one family, the clause that fits
+    best chosen, the one found first where two fit as well (Thomas,
+    2026-10-24). A path is absolute, so it means the same anywhere. A namespace has one import, which holds for all of it
     wherever it is written, as if first, and is written first by
     convention, not by rule (Thomas, 2026-10-15); a second is an error. A
     word's body is compiled when it is applied, not where it is written,
@@ -831,8 +863,9 @@ Settled (Thomas, 2026-10-14), not built:
     Built in march8 (2026-10-15): imports and exports by lists, `[| … |]`,
     a source's imports run first, two finds of a name are an error, and
     reaching an unexported word from outside its namespace warns as
-    severe. Not yet: the pairs that name an import, which wait for
-    `map#`, and interfaces by hash, which wait for the store.
+    severe; and since 2026-10-24, the imports in their order, a name's
+    clauses one family. Not yet: the pairs that name an import; and
+    interfaces by hash, which wait for the store.
 
     **What `#` means** (Thomas, 2026-10-19): nothing to the reader. It is
     part of the name, as any character is, and a habit of naming, not a
@@ -1406,7 +1439,10 @@ Settled (Thomas, 2026-10-15):
     its handlers take once a kind can say what its failures carry, which
     is still to design. The compiler's and the machine's own kinds move
     under `err`, overflow and division by zero apart once the machine says
-    which, their names to be chosen. A kind is a type a program defines,
+    which, named as they are now (2026-10-24, Thomas: "I agree"):
+    `err.syntax`, `err.no-word`, `err.mismatch`, `err.literal`,
+    `err.unknown`, `err.arithmetic`, `err.limit`, `err.effect` and
+    `err.io`, and the symbol kinds, `no-file'`, retire. A kind is a type a program defines,
     so it waits on defining types, records among them (Thomas: "clearly we
     need to be able to define new types"). Decided, not built: march8's
     kinds are still symbols, `no-file' fail`, and `trap` is written in a

@@ -56,6 +56,16 @@ fn guards_choose_at_run_time() {
 }
 
 #[test]
+fn the_core_is_chosen_from_where_no_guard_holds() {
+    // A name's clauses are one family, the program's and the core's, so
+    // where none of the program's guards holds, the core's clause is
+    // chosen, at run time and while compiling (Thomas, 2026-10-24).
+    let abs = "abs: < i64 [ 100 gt ] ? >. drop 0 ;";
+    assert_eq!(cells(&[abs, "-5 500", "abs swap abs"]).unwrap(), [0, 5]);
+    assert_eq!(show(&[abs, "-5 abs 500 abs"]), "<2> 5 0");
+}
+
+#[test]
 fn guards_on_known_values_are_decided_now() {
     // `5 sign` tests its guard at compile time: the code is the literal 1.
     assert_eq!(code(SIGN, "5 sign -3 sign"), code("", "1 0"));

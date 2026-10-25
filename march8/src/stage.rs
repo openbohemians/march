@@ -1056,6 +1056,12 @@ fn values(n: usize) -> String {
     }
 }
 
+/// Whether a word is a family of clauses, not a primitive, a type or a
+/// constructor.
+fn is_family(w: &Word) -> bool {
+    w.prim.is_none() && w.ty.is_none() && w.con.is_none() && !w.clauses.is_empty()
+}
+
 /// A core word's path, `core.dup`.
 fn core_path(name: &str) -> Rc<str> {
     format!("{CORE}.{name}").into()
@@ -1448,6 +1454,14 @@ impl Stage {
     }
 
     fn apply_word(&mut self, name: &Rc<str>) -> Result<()> {
+        let name = &self.fitting(name)?;
+        if !self.words.contains_key(name)
+            && !self.pending.contains(name)
+            && !self.after(name).is_empty()
+        {
+            // A namespace's own path for a name two of its imports define.
+            return self.family(name);
+        }
         let Some(w) = self.words.get(name) else {
             // The source's own word, which it applies wherever it is
             // written, before it is defined too (doc/design/SYMBOLIC-FORTH.md
@@ -1521,7 +1535,7 @@ impl Stage {
             // structure, made by words. `!` structures by the type, `2 i64!`.
             self.push(TYPE, Val::Type(t));
             Ok(())
-        } else if !w.clauses.is_empty() {
+        } else if !w.clauses.is_empty() || !self.gathered(name).is_empty() {
             self.family(name)
         } else {
             Err(self.err(Kind::NoWord, format!("no word `{name}`")))
@@ -1537,55 +1551,157 @@ impl Stage {
     }
 
     /// The word a name applies, written in a namespace: a path is itself; a
-    /// bare name is looked up in the namespace, then among its import, then
-    /// in the core, and found in two of the first is an error.
+    /// bare name is the first word the namespace finds of it, which goes on
+    /// to the rest where none of its clauses fits.
     fn find(&self, ns: &str, name: &Rc<str>) -> Result<Rc<str>> {
         if is_path(name) {
             return Ok(name.clone());
         }
-        let local = self.local(ns, name);
-        let imported = self.imported(ns, name);
-        match (local, &imported[..]) {
-            (Some(l), []) => Ok(l),
-            (None, [i]) => Ok(i.clone()),
-            (None, []) if self.in_core(name).is_some() => Ok(core_path(name)),
-            (None, []) if ns.is_empty() || !self.words.get(name).is_some_and(|w| w.user) => {
-                Ok(name.clone())
-            }
-            (None, []) => Err(self.err(
+        if let Some(found) = self.first(ns, name) {
+            return Ok(found);
+        }
+        match ns {
+            _ if ns.is_empty() || !self.words.get(name).is_some_and(|w| w.user) => Ok(name.clone()),
+            _ => Err(self.err(
                 Kind::NoWord,
                 format!("no word `{name}` in `{ns}`, its import, or the core"),
             )),
-            (l, _) => {
-                let all: Vec<String> = l
-                    .iter()
-                    .map(|p| format!("`{p}`, defined here"))
-                    .chain(imported.iter().map(|p| format!("`{p}`, imported")))
-                    .collect();
-                Err(self.err(
-                    Kind::NoWord,
-                    format!(
-                        "`{name}` names both {}: a path says which",
-                        all.join(", and ")
-                    ),
-                ))
-            }
         }
     }
 
     /// The word a name applies from a namespace, as `lookup` finds it, or
-    /// the name itself where that would be an error.
+    /// the name itself where it finds none: a word, for what is asked of
+    /// one, the first of those found where the lookup goes on.
     fn resolve_quiet(&self, ns: &str, name: &Rc<str>) -> Rc<str> {
         if is_path(name) {
             return name.clone();
         }
-        let imported = self.imported(ns, name);
-        match (self.local(ns, name), &imported[..]) {
-            (Some(l), []) => l,
-            (None, [i]) => i.clone(),
-            (None, []) => self.in_core(name).unwrap_or_else(|| name.clone()),
-            _ => name.clone(),
+        let found = self.found(ns, name);
+        found.first().cloned().unwrap_or_else(|| name.clone())
+    }
+
+    /// The words a bare name finds in a namespace, in the order it looks
+    /// (doc/design/SYMBOLIC-FORTH.md 16, 17): its own, its imports' in
+    /// their order, and the core's last, which every namespace imports.
+    fn found(&self, ns: &str, name: &str) -> Vec<Rc<str>> {
+        let mut found: Vec<Rc<str>> = self.local(ns, name).into_iter().collect();
+        for p in self
+            .imported(ns, name)
+            .into_iter()
+            .chain(self.in_core(name))
+        {
+            if !found.contains(&p) {
+                found.push(p);
+            }
         }
+        found
+    }
+
+    /// The path a bare name found is expanded to: the first word found,
+    /// which goes on to the words after it in its own namespace, `math.+`
+    /// to `core.+`. Where a namespace finds none of its own but two of its
+    /// imports', its own path, `ns.ff`, a word it does not define, so the
+    /// lookup starts there and goes on through the imports in their order.
+    fn first(&self, ns: &str, name: &Rc<str>) -> Option<Rc<str>> {
+        let found = self.found(ns, name);
+        let first = found.first()?;
+        if self.local(ns, name).is_none() && self.imported(ns, name).len() > 1 {
+            return Some(match ns {
+                "" => name.clone(),
+                _ => format!("{ns}.{name}").into(),
+            });
+        }
+        Some(first.clone())
+    }
+
+    /// The words found of a word's name after it (doc/design/SYMBOLIC-FORTH.md
+    /// 16, 17): what its namespace finds after its own, its imports' in
+    /// their order and the core's last. The core imports nothing, and a
+    /// path that names no word finds nothing, `math.dup` being no word, but
+    /// for a namespace's own path where two of its imports define the name.
+    fn after(&self, path: &str) -> Vec<Rc<str>> {
+        let (ns, name) = split_path(path);
+        if ns == CORE || ns.starts_with(&format!("{CORE}.")) {
+            return Vec::new();
+        }
+        let known = self.words.contains_key(path) || self.pending.contains(path);
+        if !known && self.imported(ns, name).len() < 2 {
+            return Vec::new();
+        }
+        let mut after = self.found(ns, name);
+        after.retain(|w| **w != *path);
+        after
+    }
+
+    /// A family's clauses as its namespace finds them, one family: its own,
+    /// then those of the families found after it, chosen among by how well
+    /// they fit, the one found first where two fit as well (Thomas,
+    /// 2026-10-24; TYPES.md 2.8). A primitive or a type found after it is
+    /// none of them.
+    fn gathered(&self, name: &str) -> Vec<Rc<Clause>> {
+        let mut all: Vec<Rc<Clause>> = self
+            .words
+            .get(name)
+            .map(|w| w.clauses.clone())
+            .unwrap_or_default();
+        for w in self.after(name) {
+            if let Some(w) = self.words.get(&w).filter(|w| is_family(w)) {
+                all.extend(w.clauses.iter().cloned());
+            }
+        }
+        all
+    }
+
+    /// Where among the words a family gathers a clause was found: its own
+    /// first.
+    fn found_at(&self, name: &str, c: &Rc<Clause>) -> usize {
+        let has = |w: &str| {
+            self.words
+                .get(w)
+                .is_some_and(|w| w.clauses.iter().any(|d| Rc::ptr_eq(d, c)))
+        };
+        if has(name) {
+            return 0;
+        }
+        self.after(name)
+            .iter()
+            .position(|w| has(w))
+            .map_or(usize::MAX, |i| i + 1)
+    }
+
+    /// The word a name applies to the values on top: a family, which
+    /// gathers the clauses of the families after it, where any of them fits;
+    /// else the first word after it that is no family, a primitive or a
+    /// type, as the core's `dup` is; else the family, which says that none
+    /// fits, or for a namespace's own path that names no word, an error by
+    /// the name.
+    fn fitting(&mut self, path: &Rc<str>) -> Result<Rc<str>> {
+        let after = self.after(path);
+        let known = self.words.contains_key(path);
+        if after.is_empty() || (!known && self.pending.contains(path)) {
+            return Ok(path.clone());
+        }
+        if self.words.get(path).is_some_and(|w| !is_family(w)) {
+            return Ok(path.clone());
+        }
+        let plain = self.clauses(path, false);
+        if !self.candidates(&plain).is_empty() {
+            return Ok(path.clone());
+        }
+        if let Some(w) = after
+            .iter()
+            .find(|w| self.words.get(*w).is_some_and(|w| !is_family(w)))
+        {
+            return Ok(w.clone());
+        }
+        if known {
+            return Ok(path.clone());
+        }
+        let arity = self.arity(path);
+        Err(self.err(
+            Kind::NoWord,
+            format!("no word `{path}` for {}", self.top_types(arity.max(1))),
+        ))
     }
 
     /// The shortest name that applies a word from the root: its last part,
@@ -1767,9 +1883,9 @@ impl Stage {
 
     /// The path of a name applied where it is written, in `ns`: a rule of
     /// the namespace's that matches it applies there, so its path is in
-    /// `ns`; a path is itself; a bare name is the namespace's own, its
-    /// import's, or the core's; and one found nowhere is the namespace's
-    /// own, defined later or never.
+    /// `ns`; a path is itself; a bare name is the first word found of it,
+    /// the namespace's own, its imports' or the core's; and one found
+    /// nowhere is the namespace's own, defined later or never.
     fn path_of(&mut self, ns: &str, name: &Rc<str>) -> Result<Rc<str>> {
         let here = || -> Rc<str> {
             match ns {
@@ -1784,16 +1900,7 @@ impl Stage {
             self.reach(ns, name);
             return Ok(name.clone());
         }
-        let local = self.local(ns, name);
-        let imported = self.imported(ns, name);
-        match (local, &imported[..]) {
-            (Some(l), []) => Ok(l),
-            (None, [i]) => Ok(i.clone()),
-            (None, []) if self.in_core(name).is_some() => Ok(core_path(name)),
-            (None, []) if ns.is_empty() => Ok(name.clone()),
-            (None, []) => Ok(here()),
-            _ => self.find(ns, name),
-        }
+        Ok(self.first(ns, name).unwrap_or_else(here))
     }
 
     /// The core's word of a name, which every namespace finds last, as
@@ -3207,10 +3314,10 @@ impl Stage {
     /// (doc/design/SYMBOLIC-FORTH.md 29). A clause that takes a trap is
     /// otherwise chosen as any is, as a word applied to a trap.
     fn has_handlers(&mut self, name: &Rc<str>) -> bool {
-        if !self.words[name].clauses.iter().any(|c| c.handles()) {
+        let handlers = self.clauses(name, true);
+        if handlers.is_empty() {
             return false;
         }
-        let handlers = self.clauses(name, true);
         let plain = self.clauses(name, false);
         if self.candidates(&plain).is_empty() {
             return false;
@@ -3401,13 +3508,12 @@ impl Stage {
         }
     }
 
-    /// A family's clauses that take a trap last, or those that do not.
+    /// A family's clauses, as gathered, that take a trap last, or those that
+    /// do not.
     fn clauses(&self, name: &str, handlers: bool) -> Vec<Rc<Clause>> {
-        self.words[name]
-            .clauses
-            .iter()
+        self.gathered(name)
+            .into_iter()
             .filter(|c| c.handles() == handlers)
-            .cloned()
             .collect()
     }
 
@@ -3417,7 +3523,7 @@ impl Stage {
     /// takes as they were (TYPES.md 3.13); if none may be, the most any
     /// signature names; and without signatures, what its definition takes.
     fn arity(&mut self, name: &Rc<str>) -> usize {
-        let clauses = self.words[name].clauses.clone();
+        let clauses = self.gathered(name);
         if clauses.iter().all(|c| c.sig.is_none()) {
             return self.effect_of(name).map_or(0, |e| e.0);
         }
@@ -3439,7 +3545,7 @@ impl Stage {
         let catching = std::mem::take(&mut self.catching);
         let clauses = match catching {
             true => self.clauses(name, true),
-            false => self.words[name].clauses.clone(),
+            false => self.gathered(name),
         };
         let mut cands = self.candidates(&clauses);
         if let Some(i) = self.union_input(arity)
@@ -3528,9 +3634,14 @@ impl Stage {
         let Some(top) = cands.iter().map(|c| c.0).max() else {
             return Ok(None);
         };
-        let mut best = cands.iter().filter(|c| c.0 == top);
-        let (_, c, env) = best.next().expect("the maximum");
-        if best.next().is_some() {
+        let mut best: Vec<&Candidate> = cands.iter().filter(|c| c.0 == top).collect();
+        if best.len() > 1 {
+            // Clauses of different words tie to the one found first.
+            let first = best.iter().map(|c| self.found_at(name, &c.1)).min();
+            best.retain(|c| Some(self.found_at(name, &c.1)) == first);
+        }
+        let (_, c, env) = best[0];
+        if best.len() > 1 {
             return Err(self.err(
                 Kind::Mismatch,
                 format!("clauses of `{name}` tie for {}", self.top_types(arity)),
@@ -3593,7 +3704,7 @@ impl Stage {
         top: bool,
         catching: bool,
     ) -> Result<()> {
-        let longest = longest(&self.words[name].clauses);
+        let longest = longest(&self.gathered(name));
         let n = cands
             .iter()
             .map(|c| length(&c.1, longest))
@@ -4013,7 +4124,7 @@ impl Stage {
     /// defaults. Inside that very instance, the call is to itself.
     fn call_instance(&mut self, name: &Rc<str>, arity: usize) -> Result<()> {
         self.need(arity)?;
-        let clauses = self.words[name].clauses.clone();
+        let clauses = self.gathered(name);
         let cands = self.candidates(&clauses);
         if let Some((_, c, env)) = primary(&cands) {
             self.settle_literals(&c, &env)?;
@@ -4198,7 +4309,7 @@ impl Stage {
     /// The outputs a family's signature promises for the values on top, if
     /// the clause that matches best says.
     fn promised(&mut self, name: &Rc<str>) -> Option<Vec<Type>> {
-        let clauses = self.words[name].clauses.clone();
+        let clauses = self.gathered(name);
         let cands = self.candidates(&clauses);
         let (_, c, env) = primary(&cands)?;
         let outs = c.sig.as_ref()?.outs.clone()?;
@@ -4868,7 +4979,14 @@ impl Stage {
     }
 
     fn word_effect(&self, name: &Rc<str>, visiting: &mut Vec<Rc<str>>) -> Option<(usize, usize)> {
-        let w = self.words.get(name)?;
+        let Some(w) = self.words.get(name) else {
+            // A namespace's path for a name only its imports define.
+            let first = self
+                .after(name)
+                .into_iter()
+                .find(|w| self.words.contains_key(w))?;
+            return self.word_effect(&first, visiting);
+        };
         if let Some((p, sig)) = &w.prim {
             return Some(match p {
                 Prim::Dup => (1, 2),
@@ -4920,11 +5038,12 @@ impl Stage {
         }
         visiting.push(name.clone());
         // A handler leaves what its word leaves, given a trap more.
-        let mut clauses: Vec<&Rc<Clause>> = w.clauses.iter().filter(|c| !c.handles()).collect();
+        let all = self.gathered(name);
+        let mut clauses: Vec<&Rc<Clause>> = all.iter().filter(|c| !c.handles()).collect();
         if clauses.is_empty() {
-            clauses = w.clauses.iter().collect();
+            clauses = all.iter().collect();
         }
-        let longest = longest(&w.clauses);
+        let longest = longest(&all);
         let r = if clauses.iter().all(|c| length(c, longest) == longest) {
             clauses.iter().find_map(|c| self.clause_effect(c, visiting))
         } else {
@@ -5309,7 +5428,12 @@ impl Stage {
         if new.ins.last() == Some(&TRAP) {
             return;
         }
-        let clauses = self.clauses(name, false);
+        let clauses: Vec<Rc<Clause>> = self.words[name]
+            .clauses
+            .iter()
+            .filter(|c| !c.handles())
+            .cloned()
+            .collect();
         for old in &clauses {
             let Some(o) = &old.sig else { continue };
             let msg = if o.ins.len() > new.ins.len() && self.overlap(new, o) {

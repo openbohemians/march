@@ -164,10 +164,10 @@ element, as `[ f64! ] map` does.
 **Namespaces** (doc/design/SYMBOLIC-FORTH.md 16, 17): a dot inside a name
 divides a path, and `;` defines at one, `math.sq: dup * ;`. Each
 source is **expanded** once it is read (2026-10-20): each name it applies
-becomes its path where it was written, looked up in its namespace, then
-among the namespace's import, then in the core, and a name found nowhere
-is the namespace's own, so a quotation of `math`'s that `map` runs still
-finds `math.sq`. The source's definitions are gathered first, and its
+becomes its path where it was written, the first word found of it, in its
+namespace, then among the namespace's imports in their order, the core's
+last, and a name found nowhere is the namespace's own, so a quotation of
+`math`'s that `map` runs still finds `math.sq`. The source's definitions are gathered first, and its
 `import#` and `export#` set, so a namespace's own later word counts; a
 definition's signature and body are expanded in its name's namespace, and
 an entry in braces in its record's, `math.pt: { ab: < cc > ; } ;` finding
@@ -177,12 +177,24 @@ global text and is never expanded: `sq' map` in `math` applies the root's
 `sq`, and `math.sq' map` or `[ sq ] map` applies `math.sq`; `Open'` equals
 `Open'` wherever written. The meta-ops are no names, and defining one is
 an error. A word of the program's root is reached from a namespace by
-importing it. **The core is the namespace `core`**, found last, as though
-every namespace imported `core.*`: `+` is `core.+`, and a program's word
-of a core name is its own, `dup: 7 ;` leaving the core's words, `over`
-among them, the core's `dup`. So a clause added to a core family is
-written by its path, `core.unit: < int#-' >. drop 0 ;`. While
-core.march is read, a bare name defined is the core's. Expanded code
+importing it. **The core is the namespace `core`**, which every namespace
+imports, last: `+` is `core.+`. **A name's clauses are one family**
+(2026-10-24): a word gathers the clauses of the families its namespace
+finds of its name after it, its imports' in their order and the core's,
+and the one that fits best is chosen, the one found first where two
+namespaces' fit as well. So the program's `+: < cash cash >. … ;` takes
+two cash, `1 2 +` and `2.0 sqrt 3.0 +` are the core's, and a program
+writes nothing into the core; it overrides a core clause at the same
+signature. Where none of a family's clauses fits, a primitive or a type
+found after it is applied, so `dup: < string >. … ;` leaves `1 dup` the
+core's. `dup: 7 ;` takes fewer values, so it is always the program's,
+leaving the core's words, `over` among them, the core's `dup`. A path to
+a word gathers from its namespace, `math.+`, where `math` defines one, the
+core's `+` too, and where a
+namespace finds a name in two of its imports and none of its own, the name
+is expanded to its own path, `ns.ff`, which names no word, so the family
+is gathered there. While core.march is read, a bare name
+defined is the core's. Expanded code
 keeps its paths; a message, a name taken out of a quotation, and
 `name#`'s symbol show the shortest name the root finds the word by, `dup`
 for `core.dup`. The core exports all of its words for now; which it keeps
@@ -192,7 +204,10 @@ namespace exports; `math.export#: [| pi |] ;` says what may be reached from
 outside, and reaching anything else warns as severe, though it compiles,
 and a namespace's children see all of it. A namespace has one import,
 which holds for all of it: a source's imports run first. A name found in
-two places is an error that a path settles.
+two places is the first's, the namespace's own before an import's, and a
+path says which. Where none of the program's guards holds, the core's
+clause is chosen, as in any family: `abs: < i64 [ 100 gt ] ? >. drop 0 ;`
+leaves `-5 abs` 5.
 
 **Recognizers** (doc/design/SYMBOLIC-FORTH.md 25) are rewrite rules: a
 pattern, a regular expression between slashes that matches a whole name,
@@ -911,10 +926,11 @@ temp: celsius ;                      an alias, `celsius` named already
   clause of its own, and forgotten where the representation's word is
   applied, so `price sqrt` is a decimal. A word of any type, `dup` or
   `max`, keeps it.
-- **A clause of its own keeps it**, added to the core's family by its
-  path as `money`'s are: `core.+: < cash cash >. < f64 f64 > ! + cash !
-  < cash >. ;`, `< f64 f64 > !` forgetting it into the core's `+`. A
-  literal takes its type from context, so `price 3 +` is that clause's.
+- **A clause of its own keeps it**, the program's `+` one family with the
+  core's: `+: < cash cash >. < f64 f64 > ! + cash ! < cash >. ;`, `< f64
+  f64 > !` forgetting it, so its body's `+` is the core's. A literal takes
+  its type from context, so `price 3 +` is that clause's, while `1 2 +`
+  is the core's, a literal's own kind fitting it best.
 - **Made by `!`** of a value of its representation, or of one that
   forgets into it, `20.0 sqrt celsius !`, and a literal becomes it as its
   representation, `{ x: 1 y: 2 } place !` where `place: point own ;`.

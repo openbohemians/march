@@ -82,16 +82,23 @@ fn a_subset_of_its_representation() {
 
 #[test]
 fn a_clause_of_its_own_keeps_it() {
-    // Added to the core's family by its path, as `money`'s are: `price 3 +`
-    // takes it, a literal taking its type from context, and a plain f64
-    // takes the core's.
-    let cash = "core.cash: f64 own ; \
-                core.+: < cash cash >. < f64 f64 > ! + cash ! < cash >. ;";
+    // The program's `+`, tried before the core's: `price 3 +` takes it, a
+    // literal taking its type from context, and a plain f64 goes on to the
+    // core's, its own body's `+` among them.
+    let cash = "cash: f64 own ; \
+                +: < cash cash >. < f64 f64 > ! + cash ! < cash >. ;";
     assert_eq!(
         typed(&format!("{cash} 2.5 cash ! = 3 + swap 2.0 sqrt +")),
         "<2> 5.5 < cash > 3.914213562373095 < f64 >"
     );
+    // The clause that fits best, wherever it is found: literals alone are
+    // the core's, a literal's own kind fitting it best (TYPES.md 2.8).
     assert_eq!(typed(&format!("{cash} 2.0 3.0 +")), "<1> 5.0 < f64 >");
+    assert_eq!(typed(&format!("{cash} 1 2 +")), "<1> 3 < i64 >");
+    assert_eq!(
+        typed(&format!("{cash} 2.0 sqrt 3.0 +")),
+        "<1> 4.414213562373095 < f64 >"
+    );
 }
 
 #[test]

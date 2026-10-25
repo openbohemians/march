@@ -6,7 +6,10 @@ march8/docs/MACHINE.md, "Not yet".
 
 ## Bugs
 
-None known.
+- **`insert` past the end of an array known only at run time** stops the
+  machine, `Error: Memory`, where it should trap as a missing element
+  does, `mismatch'`: `io.stdin.read words "y" 5 insert`. Known while
+  compiling, it is an error, "there is no gap 5".
 
 ## Next
 
@@ -40,7 +43,8 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   wanted and a map else, fields read by `at` and by a path from a
   bracket's name, `p.x`. To come: a record forgetting into a map, and `at`
   with a key known only as the program runs; a path from a word,
-  `cfg.port`; an entry by `;` of anything but a type; a record opened
+  `cfg.port`; a field replaced, `{ n: 0 } 1 n' put` being no word, which a
+  fold's state wants; an entry by `;` of anything but a type; a record opened
   into places where a word that takes it is applied, for named inputs,
   `{ term: 72 rate: 0.2 } payment` (SYMBOLIC-FORTH.md 6.31); equality of
   records; and a known array of map literals left undecided.
@@ -49,15 +53,36 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   representation's word is applied, a clause of its own keeping it. To
   come: `!` of an array of the representation, `( 1.0 2.0 ) < 2 celsius
   vec > !`; the warning where two types of their own are forgotten
-  together; a type made of itself, `tree: { left: < tree > ; … } ;`, an
-  error for now; and how a clause added to a core family, `core.+:`,
-  names the program's types, its body being expanded in `core`.
+  together; and a type made of itself, `tree: { left: < tree > ; … } ;`,
+  an error for now.
+- **How a clause is chosen,** TYPES.md 2.8's rule (Thomas, 2026-10-17):
+  slot by slot from the top, a value before a type before a union before
+  a variable, a subset before the type it is in, replacing march8's
+  scores. A name's clauses are one family since 2026-10-24, the
+  namespace's own, its imports' in their order and the core's, the first
+  found where two fit as well (SYMBOLIC-FORTH.md 16, 17), so it now
+  decides across namespaces too. Thomas: "this might be hard to reason
+  about … we can always revisit."
 - **Kinds as types,** made where defined, `err.file.notfound: { error#:
   "file not found" } trap ;`, named by `;`, a handler taking its kind
   and every kind beneath it, the core's under `err`, the compiler's and the
   machine's moved there, `fail` with its message on top
-  (SYMBOLIC-FORTH.md 6.29, decided 2026-10-22). Their names are to be
-  chosen, and a failure's data beyond its message is to be designed.
+  (SYMBOLIC-FORTH.md 6.29, decided 2026-10-22). The machine's are named
+  as now, under `err`, `err.mismatch`, `err.arithmetic`, `err.io`, the
+  symbol kinds retiring (2026-10-24). A failure's data beyond its message
+  is to be designed.
+- **Equality of arrays, tuples and records,** of which there is none:
+  `( 1 2 ) ( 1 2 ) eq` is no word. Element by element, a rule in
+  core.march (2026-10-24). By content identity later, once the store
+  holds values canonically, floats among them, 0.0 and -0.0 one value
+  and NaN one (Thomas: "state in the merkle-champ must be *canonical* for
+  proper comparison").
+- **The first compiler in March: `lower`** (2026-10-24), High Stack in
+  and Low Stack out, printed, checked against `march8 lower` on the core
+  and the examples, a fixed point as system.march's was. It needs no
+  bytes, no file written and no code handed to the machine; its tables
+  are a record handed along, as a fold hands its value, until the store
+  holds them under the paths that name its words.
 
 ## To think on
 

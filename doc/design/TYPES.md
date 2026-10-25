@@ -278,8 +278,15 @@ an error.
   too: `i64 f64 or` in a pattern matches either (3.6), and core.march names
   the numbers `num` (built 2026-10-09).
 - **Families are open:** other code, such as a money module, may add
-  clauses, scoped by namespaces and modules.
-- **The most specific clause wins; a tie is an error** for now. ("The
+  clauses, scoped by namespaces and modules. A name's clauses are one
+  family wherever they are found, the namespace's own, its imports' in
+  their order and the core's (SYMBOLIC-FORTH.md 16, 17; Thomas,
+  2026-10-24), so a program adds a clause in its own namespace, never the
+  core's, and the clause that fits best is chosen, the one found first
+  where clauses of two namespaces tie. Built in march8, by its scores.
+- **The most specific clause wins; a tie is an error** for now, between
+  clauses of one namespace; between two namespaces', the one found first
+  wins, the namespace's own before an import's (2026-10-24). ("The
   clause defined last" was considered and left open.)
 - **How a clause is chosen** (Thomas, 2026-10-17; not built). The
   shortest first (3.13); then, among clauses of one length, by the top
@@ -510,7 +517,11 @@ where one is wanted, and `at` with a key known only as the program runs;
 a path from a word, `cfg.port`, its head found as any name is; an entry
 by `;` of anything but a type; a record opened into places; equality of
 records; and a known array of map literals undecided, which settle into
-maps where a clause could want records.
+maps where a clause could want records. No container has equality yet,
+an array, a tuple or a record: it is to be element by element, a rule in
+core.march (2026-10-24), and by content identity once the store holds
+values canonically, floats among them, 0.0 and -0.0 one value (Thomas:
+"state in the merkle-champ must be *canonical* for proper comparison").
 
 Built in march8 (2026-10-24), types of their own as above: `own`, named
 by `;`, an alias when named already, an error unnamed; forgotten where

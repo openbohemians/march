@@ -55,8 +55,11 @@ fn a_word_looks_up_names_in_its_namespace_where_written() {
         "<1> 1"
     );
     // A namespace's own word counts wherever its source defines it, before
-    // the core's.
-    assert_eq!(show("ns.ff: + ; ns.+: * ; 2 3 ns.ff"), "<1> 6");
+    // the core's where they fit as well (Thomas, 2026-10-24).
+    assert_eq!(
+        show("ns.ff: + ; ns.+: < i64 i64 >. * ; 2 i64! 3 i64! ns.ff"),
+        "<1> 6"
+    );
 }
 
 #[test]
@@ -75,12 +78,13 @@ fn a_symbol_is_global_text() {
         show("ns.dbl: dup + ; ns.ff: ( 1 2 ) [ dbl ] map ; ns.ff"),
         "<1> ( 2 4 )"
     );
+    let times = "ns.+: < i64 i64 >. * ;";
     assert_eq!(
-        show("ns.+: * ; ns.ff: ( 2 3 4 ) +' reduce ; ns.ff"),
+        show(&format!("{times} ns.ff: ( 2 3 4 ) +' reduce ; ns.ff")),
         "<1> 9"
     );
     assert_eq!(
-        show("ns.+: * ; ns.ff: ( 2 3 4 ) [ + ] reduce ; ns.ff"),
+        show(&format!("{times} ns.ff: ( 2 3 4 ) [ + ] reduce ; ns.ff")),
         "<1> 24"
     );
     // It compares as text wherever written.
@@ -125,17 +129,28 @@ fn an_import_makes_names_local() {
 }
 
 #[test]
-fn a_name_found_twice_is_an_error() {
-    let (kind, msg) = error("a.ff: 1 ; b.ff: 2 ; import#: [| a.* b.* |] ; ff");
-    assert_eq!(kind, Kind::NoWord);
-    assert!(
-        msg.contains("`ff` names both `a.ff`, imported, and `b.ff`, imported"),
-        "{msg}"
+fn imports_are_looked_up_in_order() {
+    // Imports are ordered, the first one's coming first, and a name of the
+    // namespace's own before any import's.
+    let two = "a.ff: 1 ; b.ff: 2 ;";
+    assert_eq!(show(&format!("{two} import#: [| a.* b.* |] ; ff")), "<1> 1");
+    assert_eq!(show(&format!("{two} import#: [| b.* a.* |] ; ff")), "<1> 2");
+    assert_eq!(
+        show("math.pi: 3 ; pi: 4 ; import#: [| math.pi |] ; pi"),
+        "<1> 4"
     );
-    let (_, msg) = error("math.pi: 3 ; pi: 4 ; import#: [| math.pi |] ; pi");
-    assert!(
-        msg.contains("`pi`, defined here, and `math.pi`, imported"),
-        "{msg}"
+    // Clause by clause: where none of a word's clauses fits, the lookup goes
+    // on to the next import's.
+    let typed = "a.ff: < i64 >. drop 1 ; b.ff: < string >. drop 2 ;";
+    assert_eq!(
+        show(&format!("{typed} import#: [| a.* b.* |] ; 5 ff \"x\" ff")),
+        "<2> 1 2"
+    );
+    assert_eq!(
+        show(&format!(
+            "{typed} ns.import#: [| a.* b.* |] ; ns.gg: ff ; \"x\" ns.gg"
+        )),
+        "<1> 2"
     );
     // A path says which.
     assert_eq!(
@@ -205,23 +220,24 @@ fn the_core_names_its_words_by_namespace() {
 }
 
 #[test]
-fn the_core_is_a_namespace_found_last() {
-    // The core is `core`, which every namespace finds last, as though it
-    // imported `core.*`: a word of the program's of the same name is its
-    // own, and `core.dup` is still the core's.
+fn the_core_is_an_import() {
+    // The core is `core`, which every namespace imports, its words looked
+    // up after the namespace's own: a word of the program's of the same name
+    // is tried first, and `core.dup` is still the core's.
     assert_eq!(show("dup: 7 ; 1 dup 1 core.dup"), "<4> 1 7 1 1");
     assert_eq!(show("m.dup: 9 ; m.ff: dup ; 1 m.ff"), "<2> 1 9");
     // The core's words mean what they mean in the core, and a symbol
     // applied from the stack is found from the root.
     assert_eq!(show("dup: 7 ; 1 2 over"), "<3> 1 2 1");
     assert_eq!(show("dup: 7 ; 1 dup' ."), "<2> 1 7");
-    // So a program adds to a core family by its path; a clause of its own
-    // name is a family of its own.
-    let bools = "< bool >. drop 1 ; true length \"abc\" length";
-    assert_eq!(show(&format!("core.length: {bools}")), "<2> 1 3");
-    let (kind, msg) = error(&format!("length: {bools}"));
+    // A name is looked up clause by clause, so where none of the program's
+    // clauses fits, the lookup goes on to the core's, and the program writes
+    // nothing into the core (Thomas, 2026-10-24).
+    let bools = "length: < bool >. drop 1 ; true length \"abc\" length";
+    assert_eq!(show(bools), "<2> 1 3");
+    let (kind, msg) = error("length: < bool >. drop 1 ; 2.0 sqrt length");
     assert_eq!(kind, Kind::NoWord);
-    assert!(msg.starts_with("no word `length` for string"), "{msg}");
+    assert!(msg.starts_with("no word `length` for f64"), "{msg}");
     // Messages name the core's words as the root finds them.
     let (kind, msg) = error("\"a\" 1 +");
     assert_eq!(kind, Kind::NoWord);

@@ -6,10 +6,7 @@ march8/docs/MACHINE.md, "Not yet".
 
 ## Bugs
 
-- **`insert` past the end of an array known only at run time** stops the
-  machine, `Error: Memory`, where it should trap as a missing element
-  does, `mismatch'`: `io.stdin.read words "y" 5 insert`. Known while
-  compiling, it is an error, "there is no gap 5".
+None known.
 
 ## Next
 
@@ -41,10 +38,9 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   types a record type, `;` in braces making an entry, a map literal of
   symbols undecided while its values are alike, a record where one is
   wanted and a map else, fields read by `at` and by a path from a
-  bracket's name, `p.x`. To come: a record forgetting into a map, and `at`
+  bracket's name, `p.x`, and set by `put`, `r n' 5 put`. To come: a record forgetting into a map, and `at`
   with a key known only as the program runs; a path from a word,
-  `cfg.port`; a field replaced, `{ n: 0 } 1 n' put` being no word, which a
-  fold's state wants; an entry by `;` of anything but a type; a record opened
+  `cfg.port`; an entry by `;` of anything but a type; a record opened
   into places where a word that takes it is applied, for named inputs,
   `{ term: 72 rate: 0.2 } payment` (SYMBOLIC-FORTH.md 6.31); equality of
   records; and a known array of map literals left undecided.

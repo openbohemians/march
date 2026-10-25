@@ -510,7 +510,10 @@ where one is wanted, its integers floats, and a map with nothing to take
 it. A record's values are held in the order of its keys, as a tuple's
 are by position, so a field read by `at` with its key known, or by a
 path from a bracket's name, `p.x`, costs what a tuple's does, and a
-field it lacks is an error while compiling. Named inputs come of it
+field it lacks is an error while compiling; `put` with its key known
+sets one, `r n' 5 put`, a new record of the same type, so a fold hands
+it along, and an undecided literal given a key it lacks is the map it
+is. Named inputs come of it
 already, `{ term: 72 rate: 0.2 principal: 50000 } payment`, where
 `payment` takes the record. Not yet: a record forgetting into a map
 where one is wanted, and `at` with a key known only as the program runs;

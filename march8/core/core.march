@@ -346,6 +346,8 @@ get: < k v map k >. drop drop nil < v nil or >. ;
 
 -- A map with a key set to a value: a new version, the old one unchanged.
 put: < k v map k v >. map-put < k v map >. ;
+-- A record with a field set, its field named while compiling.
+put: < record sym a >. record-put ;
 
 concat: < string string >. string-concat < string >. ;
 concat: < a ary a ary >. ary-concat < a ary >. ;

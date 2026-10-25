@@ -891,11 +891,16 @@ norm: < point >. [ p | p.x dup * p.y dup * + sqrt ] . ;
   each value converted as it would be alone, at run time too, its cells
   already the record's; one of the wrong fields, missing, extra or of
   another type, is no word. Where a map is wanted the stage makes the
-  map, `keys` or `put` taking it, from the record's cells.
+  map, `keys` taking it, from the record's cells.
 - **A field is read by `at`** with its key known while compiling, `p x'
   at`, of its own type, as a tuple's position is; a path from a
   bracket's name is short for it, `p.x`, and `p.ab.cd` reads one inside
-  another. A field the record lacks is an error while compiling. An array
+  another. A field the record lacks is an error while compiling.
+- **A field is set by `put`,** its key known while compiling, `r n' 5
+  put`: a new record of the same type, its cells the old one's but that
+  one, the value taking the field's type, so a fold hands a record along,
+  `( 4 5 6 ) { n: 0 last: 0 } [ … n' swap put … ] fold`. An undecided
+  literal becomes a record, or, given a key it lacks, the map it is. An array
   of records holds them, `( { x: 1 y: "a" } { x: 2 y: "b" } ) [ y' at ]
   map`, and an array of undecided literals holds maps.
 

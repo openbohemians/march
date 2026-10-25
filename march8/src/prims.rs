@@ -105,6 +105,8 @@ pub enum Prim {
     StrPascal,
     TupleAt,
     RecordAt,
+    /// `r k' v record-put`: the record with field k set to v.
+    RecordPut,
     TupleSpread,
     MapKeys,
     MapValues,
@@ -643,6 +645,7 @@ pub const PRIMS: &[PrimDef] = &[
     ),
     d(Prim::TupleAt, "tuple-at", "< tuple i64 >.", &[]),
     d(Prim::RecordAt, "record-at", "< record sym >.", &[]),
+    d(Prim::RecordPut, "record-put", "< record sym a >.", &[]),
     d(Prim::TupleSpread, "tuple-spread", "< tuple >.", &[]),
     d(Prim::AryInsert, "ary-insert", "< b c i64 >.", &[]),
     d(Prim::AryRemove, "ary-remove", "< b i64 >.", &[]),

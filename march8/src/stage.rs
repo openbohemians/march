@@ -5009,7 +5009,7 @@ impl Stage {
                 Prim::VecConcat | Prim::Map | Prim::Compose => (2, 1),
                 Prim::Each | Prim::EachRight => (2, 0),
                 Prim::Within => (2, 1),
-                Prim::AryInsert | Prim::Zip | Prim::Table => (3, 1),
+                Prim::AryInsert | Prim::Zip | Prim::Table | Prim::RecordPut => (3, 1),
                 Prim::AryRemove => (2, 1),
                 Prim::VecSpread | Prim::TupleSpread => return None,
                 Prim::Range | Prim::Reverse => (1, 1),
@@ -6136,6 +6136,7 @@ impl Stage {
             }
             Prim::TupleAt => self.tuple_at(base)?,
             Prim::RecordAt => self.record_at(base)?,
+            Prim::RecordPut => self.record_put(base)?,
             Prim::StrToI64 => self.parse(I64, base)?,
             Prim::StrToF64 => self.parse(F64, base)?,
             // An empty array or map of a type: `string i64 map empty`.
@@ -8101,6 +8102,83 @@ impl Stage {
         self.emit_ops(2, &[P::VecAt], &[fields[i].1])
     }
 
+    /// `put` on a record and a key known while compiling: the record with
+    /// that field set, of the same type, so a fold may hand it along
+    /// (TYPES.md 2.11). The value takes the field's type, a literal
+    /// converting to it, and a value of a type of its own forgetting into
+    /// it; a field the record lacks is an error here, as for `at`.
+    fn record_put(&mut self, base: usize) -> Result<()> {
+        let mut t = self.stack[base].ty;
+        if self.types.is_record_lit(t) {
+            // An undecided map literal settles to a record, or, given a key
+            // it lacks, to the map it is.
+            let key = match &self.stack[base + 1].val {
+                Val::Name(k, _) => Some(k.clone()),
+                _ => None,
+            };
+            let fields = self.types.fields(t).expect("a record");
+            if key.is_none_or(|k| fields.iter().all(|f| f.0 != k)) {
+                let m = self.lit_map(t);
+                self.annotate(base, m)?;
+                return self.apply_word(&core_path("map-put"));
+            }
+            t = self.decided_record(t);
+            self.annotate(base, t)?;
+        }
+        let fields = self.types.fields(t).expect("a record");
+        let Val::Name(key, _) = &self.stack[base + 1].val else {
+            return Err(self.err(
+                Kind::Unknown,
+                "a record's field is named while compiling, `p x' 1 put`",
+            ));
+        };
+        let Some(i) = fields.iter().position(|(k, _)| k == key) else {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!("{} has no field `{key}`", self.types.name(t)),
+            ));
+        };
+        let (key, want) = (key.clone(), fields[i].1);
+        let have = self.stack[base + 2].ty;
+        if self.types.is_literal(have) || self.types.is_record_lit(have) {
+            self.annotate(base + 2, want)?;
+        } else if have != want && !self.forgets(want, have) {
+            return Err(self.err(
+                Kind::Mismatch,
+                format!(
+                    "the field `{key}` of {} is {}, and the value is {}",
+                    self.types.name(t),
+                    self.types.name(want),
+                    self.types.name(have)
+                ),
+            ));
+        }
+        self.stack[base + 1] = Jdg {
+            ty: I64,
+            val: Val::Int(i as i128),
+        };
+        self.emit_ops(3, &[P::VecSet], &[t])
+    }
+
+    /// The record an undecided map literal's type settles to where a record
+    /// is wanted: each field of its value's default type, `{ n: 0 }` a `{ n:
+    /// i64 }`.
+    fn decided_record(&mut self, t: Type) -> Type {
+        let fields = self.types.fields(t).expect("a record");
+        let fields = fields
+            .iter()
+            .map(|&(ref k, f)| {
+                let f = match f {
+                    _ if self.types.fields(f).is_some() => self.decided_record(f),
+                    INT_LIT | DEC_LIT | RATIO_LIT | UNIT_LIT => Self::default_of(f),
+                    _ => f,
+                };
+                (k.clone(), f)
+            })
+            .collect();
+        self.types.record(fields, false)
+    }
+
     /// `within`: an array and a quotation, run with the array's last
     /// elements as its stack, as many as it takes, and what it leaves put in
     /// their place: Joy's `infra`, on the end of an array. `( 1 2 3 ) [ ~ ]
@@ -8864,11 +8942,23 @@ impl Stage {
     /// one element type; literals take the others' type, or their default.
     fn join(&mut self, tys: &[Type]) -> Option<Type> {
         let mut t: Option<Type> = None;
-        // A map literal undecided shares what its map would.
+        // A map literal undecided shares what its map would, or a record
+        // of its keys among the types, which it would become.
+        let record = tys
+            .iter()
+            .copied()
+            .find(|&x| matches!(self.types.term(x), Term::Record(_)));
+        let keys = |s: &Self, x: Type| -> Vec<Rc<str>> {
+            let fields = s.types.fields(x).expect("a record");
+            fields.iter().map(|f| f.0.clone()).collect()
+        };
         let tys: Vec<Type> = tys
             .iter()
             .map(|&x| match self.types.is_record_lit(x) {
-                true => self.lit_map(x),
+                true => match record {
+                    Some(r) if keys(self, r) == keys(self, x) => r,
+                    _ => self.lit_map(x),
+                },
                 false => x,
             })
             .collect();

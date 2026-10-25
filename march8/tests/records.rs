@@ -106,6 +106,44 @@ fn a_field_is_read_by_at_or_a_path() {
 }
 
 #[test]
+fn a_field_is_set_by_put() {
+    // A new record with the field set, of the same type, so a fold may hand
+    // it along; the value takes the field's type, a literal converting.
+    assert_eq!(
+        typed("{ n: 0 name: \"x\" } n' 5 put"),
+        "<1> { n' 5 name' \"x\" } < { n: i64 name: string } >"
+    );
+    assert_eq!(
+        typed(&format!("{POINT} {{ x: 1 y: 2 }} point ! x' 3 put norm")),
+        "<1> 3.605551275463989 < f64 >"
+    );
+    // Undecided, a map literal becomes a record, or, given a key it lacks,
+    // the map it is.
+    assert_eq!(typed("{ n: 0 } n' 5 put"), "<1> { n' 5 } < { n: i64 } >");
+    assert_eq!(
+        typed("{ n: 0 } m' 5 put"),
+        "<1> { m' 5 n' 0 } < sym i64 map >"
+    );
+    assert_eq!(
+        typed(
+            "( 4 5 6 ) { n: 0 last: 0 } [ swap = n' at 1 + n' swap put swap last' swap put ] fold"
+        ),
+        "<1> { last' 6 n' 3 } < { last: i64 n: i64 } >"
+    );
+    // A field it lacks, or a value of another type, is an error.
+    let e = fails("{ n: 0 name: \"x\" } m' 5 put");
+    assert_eq!(e.kind, Kind::Mismatch);
+    assert!(e.msg.contains("has no field `m`"), "{e}");
+    let e = fails("{ n: 0 name: \"x\" } n' \"y\" put");
+    assert_eq!(e.kind, Kind::Mismatch);
+    assert!(
+        e.msg
+            .contains("the field `n` of { n: i64 name: string } is i64, and the value is string"),
+        "{e}"
+    );
+}
+
+#[test]
 fn an_array_holds_what_it_would_alone() {
     // Undecided map literals in an array are maps, and records records.
     assert_eq!(

@@ -283,3 +283,40 @@ fn a_trap_lives_only_while_it_is_handled() {
     .unwrap();
     assert_eq!(s.show(), "<2> \"logged\" \"ok\"");
 }
+
+#[test]
+fn a_check_is_tested_as_the_program_runs() {
+    // A check costs nothing where it holds while compiling, and is an
+    // error where it does not (doc/design/SYMBOLIC-FORTH.md 6.32).
+    let mut s = Session::new();
+    s.eval("5 < i64 positive? >.").unwrap();
+    assert_eq!(s.show(), "<1> 5");
+    let e = error("-5 < i64 positive? >.");
+    assert_eq!(e.kind, Kind::Mismatch);
+    assert!(e.msg.contains("found -5 (i64)"), "{e}");
+    // A value known only as the program runs is tested then, and fails as
+    // `fail` does: a guard, a union's member, a union of values.
+    let mut s = Session::new();
+    s.eval("-3").unwrap();
+    let (kind, why) = trap(&mut s, "< i64 positive? >.");
+    assert_eq!(kind, "mismatch");
+    assert!(why.starts_with("expected i64 where the guard"), "{why}");
+    let mut s = Session::new();
+    s.eval("{ \"a\" 1 }").unwrap();
+    s.eval("dup \"a\" get < i64 >. 1 +").unwrap();
+    assert_eq!(s.show(), "<2> { \"a\" 1 } 2");
+    let (kind, why) = trap(&mut s, "drop \"z\" get < i64 >.");
+    assert_eq!(
+        (kind.as_str(), why.as_str()),
+        ("mismatch", "expected i64, found nil")
+    );
+    let mut s = Session::new();
+    s.eval("kind: code' data' or ; pick: < i64 [ 0 gt ] ? >. drop code' ;")
+        .unwrap();
+    s.eval("pick: < i64 >. drop frob' ; 1 0").unwrap();
+    let (kind, why) = trap(&mut s, "pick < kind >. drop pick < kind >.");
+    assert_eq!(
+        (kind.as_str(), why.as_str()),
+        ("mismatch", "expected kind, found sym")
+    );
+}

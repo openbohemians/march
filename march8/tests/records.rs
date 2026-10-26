@@ -120,6 +120,52 @@ fn a_field_is_read_by_at_or_a_path() {
 }
 
 #[test]
+fn a_record_forgets_into_a_map_where_one_is_wanted() {
+    // Its values alike, a map of their type; else of their union, tagged.
+    let r = "{ x: 1 y: 2 } < { x: < i64 > ; y: < i64 > ; } >.";
+    assert_eq!(typed(&format!("{r} values length")), "<1> 2 < i64 >");
+    assert_eq!(
+        typed(&format!("{r} < sym i64 map >. x' at")),
+        "<1> 1 < i64 >"
+    );
+    assert_eq!(
+        typed("{ x: 1 y: \"a\" } y' get"),
+        "<1> \"a\" < i64 string nil or or >"
+    );
+    // A key known only as the program runs reads the map of its fields.
+    let mut s = Session::new();
+    s.eval("pick: < i64 [ 0 gt ] ? >. drop x' ; pick: < i64 >. drop y' ;")
+        .unwrap();
+    s.eval("{ x: 1 y: \"a\" } 0").unwrap();
+    s.eval("pick at").unwrap();
+    assert_eq!(s.show(), "<1> \"a\"");
+    // A map of a type the values are not is no word.
+    let e = fails("{ x: 1 y: \"a\" } < sym i64 map >.");
+    assert_eq!(e.kind, Kind::Mismatch);
+}
+
+#[test]
+fn a_path_from_a_word_reads_its_fields() {
+    // A word that takes nothing heads a path, `cfg.port` for `cfg port'
+    // at`, found as any name is, in its namespace too (TYPES.md 2.11).
+    let cfg = "cfg: { port: 80 db: { name: \"m\" size: 5 } } ;";
+    assert_eq!(
+        typed(&format!("{cfg} cfg.port cfg.db.size +")),
+        "<1> 85 < i64 >"
+    );
+    assert_eq!(
+        typed("app.cfg: { port: 80 host: \"x\" } ; app.run: cfg.port 1 + ; app.run"),
+        "<1> 81 < i64 >"
+    );
+    let e = fails(&format!("{cfg} cfg.zz"));
+    assert!(e.msg.contains("has no field `zz`"), "{e}");
+    // Words do not chain: a word that takes something heads no path.
+    let e = fails("( 3 1 2 ) sort.length");
+    assert_eq!(e.kind, Kind::NoWord);
+    assert!(e.msg.contains("`sort length`"), "{e}");
+}
+
+#[test]
 fn a_field_is_set_by_put() {
     // A new record with the field set, of the same type, so a fold may hand
     // it along; the value takes the field's type, a literal converting.

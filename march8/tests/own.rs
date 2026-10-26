@@ -115,6 +115,35 @@ fn over_a_record() {
 }
 
 #[test]
+fn held_in_an_array() {
+    // `!` gives an array of the representation's values its type, as
+    // `[ celsius ! ] map` does, each element its own, checking nothing.
+    let c = "celsius: f64 own ;";
+    assert_eq!(
+        typed(&format!("{c} ( 1.0 2.0 ) < 2 celsius vec > !")),
+        "<1> ( 1.0 2.0 ) < 2 celsius vec >"
+    );
+    assert_eq!(
+        typed(&format!("{c} ( 1.0 2.0 ) < celsius ary > ! 1 at")),
+        "<1> 1.0 < celsius >"
+    );
+    assert_eq!(
+        typed(&format!("{c} ( 1.0 \"a\" ) < ( celsius string ) > ! 1 at")),
+        "<1> 1.0 < celsius >"
+    );
+    assert_eq!(
+        typed("flag: i64 own ; ( true false ) < 2 flag vec > !"),
+        "<1> ( 1 0 ) < 2 flag vec >"
+    );
+    // Only of the representation: integers are not floats, nor an i64 a
+    // bool.
+    let e = fails(&format!("{c} ( 1 2 ) < 2 celsius vec > !"));
+    assert_eq!(e.kind, Kind::Mismatch);
+    let e = fails("( 1 0 ) < 2 bool vec > !");
+    assert_eq!(e.kind, Kind::Mismatch);
+}
+
+#[test]
 fn a_type_made_of_itself_is_to_come() {
     let e = fails("tree: { ab: < tree > ; cd: < i64 > ; } ;");
     assert_eq!(e.kind, Kind::Limit);

@@ -108,11 +108,13 @@ pub struct Guard {
 }
 
 /// What a guard tests: a quotation that leaves a flag, `[ positive? ]`, or,
-/// for a value pattern, that its input equals a value (`< 0 >`).
+/// for a value pattern, that its input equals a value (`< 0 >`), or, for a
+/// union of values, that it is one of them (`< code' data' or >`).
 #[derive(Clone, Debug)]
 pub enum Test {
     Quote(Rc<[Token]>),
     Equals(Jdg),
+    Among(Type),
 }
 
 /// Guards are equal by what they say, not where they were written, so a
@@ -128,6 +130,7 @@ impl PartialEq for Test {
                 (Val::Name(x, ..), Val::Name(y, ..)) => a.ty == b.ty && x == y,
                 _ => a == b,
             },
+            (Test::Among(a), Test::Among(b)) => a == b,
             _ => false,
         }
     }
@@ -289,6 +292,7 @@ impl Guard {
         match &self.test {
             Test::Quote(q) => format!("the guard `{}`", source_text(q)),
             Test::Equals(j) => format!("the value pattern {}", value_text(j, types)),
+            Test::Among(t) => format!("the union of values `{}`", types.name(*t)),
         }
     }
 }
@@ -473,6 +477,40 @@ impl Sig {
             _ => None,
         })
     }
+}
+
+/// The name of a symbol known while compiling, or pinned to one.
+fn known_name(j: &Jdg) -> Option<&Rc<str>> {
+    match &j.val {
+        Val::Name(n, _) => Some(n),
+        Val::Pinned(v) => match &**v {
+            Val::Name(n, _) => Some(n),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A clause's input of a union of values, `< kind >`, is a symbol tested
+/// to be one of them, as a value pattern's input is tested to equal its
+/// value (TYPES.md 3.6).
+fn among_tested(mut sig: Sig, types: &Types, at: Pos) -> Sig {
+    for k in 0..sig.ins.len() {
+        let t = sig.ins[k];
+        if types.set(t).is_some() {
+            sig.ins[k] = SYMBOL;
+            sig.guards.insert(
+                0,
+                Guard {
+                    test: Test::Among(t),
+                    slot: k,
+                    arity: 1,
+                    pos: at,
+                },
+            );
+        }
+    }
+    sig
 }
 
 impl Clause {
@@ -864,6 +902,10 @@ pub struct Stage {
     /// Each namespace's rules, by their patterns, and the core's under
     /// `CORE_RULES`.
     patterns: HashMap<Rc<str>, Patterns>,
+    /// The checks tested as the program runs, each a family of one clause,
+    /// by the check as written, and what each says, by its family's name.
+    checks: HashMap<String, Rc<str>>,
+    check_text: HashMap<Rc<str>, String>,
 }
 
 /// Where the core's rules are kept among the namespaces' (doc/design/
@@ -1178,6 +1220,8 @@ impl Stage {
             imports: HashMap::new(),
             exports: HashMap::new(),
             patterns: HashMap::new(),
+            checks: HashMap::new(),
+            check_text: HashMap::new(),
         };
         // The core is the namespace `core`, which every namespace finds
         // last, as though imported (doc/design/SYMBOLIC-FORTH.md 16).
@@ -1506,6 +1550,32 @@ impl Stage {
         Ok(())
     }
 
+    /// How many parts of a path are a word that takes nothing, the most
+    /// that are: `cfg.port`'s one, where `cfg` is such a word and no
+    /// namespace. Words do not chain, so `sort.length` is no path.
+    fn word_head(&self, name: &str) -> Option<usize> {
+        let parts: Vec<&str> = name.split('.').collect();
+        (1..parts.len()).rev().find(|&n| {
+            let head: Rc<str> = parts[..n].join(".").into();
+            self.words.contains_key(&head) && self.effect_of(&head).is_some_and(|e| e.0 == 0)
+        })
+    }
+
+    /// A path from a word, `cfg.port` (TYPES.md 2.11): the word applied,
+    /// then each part after it a field read by `at`, as a bracket's name's
+    /// path is, `p.x`.
+    fn word_path(&mut self, name: &str, n: usize) -> Result<()> {
+        let parts: Vec<&str> = name.split('.').collect();
+        let at = self.pos;
+        self.apply_word(&parts[..n].join(".").into())?;
+        for p in &parts[n..] {
+            self.pos = at;
+            self.push(SYMBOL, Val::Name((*p).into(), at));
+            self.apply_word(&core_path("at"))?;
+        }
+        Ok(())
+    }
+
     fn apply_word(&mut self, name: &Rc<str>) -> Result<()> {
         let name = &self.fitting(name)?;
         if !self.words.contains_key(name)
@@ -1542,7 +1612,11 @@ impl Stage {
                 && is_path(name)
             {
                 let prefix = format!("{space}.");
-                let msg = if self.words.keys().any(|k| k.starts_with(&prefix)) {
+                let space_is = self.words.keys().any(|k| k.starts_with(&prefix));
+                if !space_is && let Some(n) = self.word_head(name) {
+                    return self.word_path(name, n);
+                }
+                let msg = if space_is {
                     // A name written there, found nowhere, was taken as the
                     // namespace's own: the program's root is not the core.
                     let root = match self.words.get(last) {
@@ -1951,6 +2025,17 @@ impl Stage {
         }
         if is_path(name) {
             self.reach(ns, name);
+            // A path from a word, `cfg.port`, its head found as any name is
+            // (TYPES.md 2.11), where no word has the path.
+            if !self.words.contains_key(name)
+                && !self.pending.contains(name)
+                && let Some((head, rest)) = name.split_once('.')
+                && let Some(h) = self.first(ns, &head.into())
+                && (self.pending.contains(&h)
+                    || self.words.contains_key(&h) && self.effect_of(&h).is_some_and(|e| e.0 == 0))
+            {
+                return Ok(format!("{h}.{rest}").into());
+            }
             return Ok(name.clone());
         }
         Ok(self.first(ns, name).unwrap_or_else(here))
@@ -2590,7 +2675,10 @@ impl Stage {
             }
             _ => unreachable!("a body's first check and its last"),
         };
-        let sig = sig.map(|s| self.reaching(s, &q));
+        let sig = sig.map(|s| {
+            let s = among_tested(s, &self.types, at);
+            self.reaching(s, &q)
+        });
         let core = self.core;
         self.define(
             &name,
@@ -2983,16 +3071,41 @@ impl Stage {
         if self.types.is_record_lit(have) && !self.types.is_pattern(t) {
             return self.annotate_record(i, t);
         }
+        // A record given a record type of its keys, field by field: a
+        // known symbol in one becomes one of a union of values.
+        if matches!(self.types.term(have), Term::Record(_))
+            && matches!(self.types.term(t), Term::Record(_))
+            && !self.types.is_pattern(t)
+            && matches!(self.stack[i].val, Val::Seq(_))
+        {
+            return self.annotate_record(i, t);
+        }
         if self.annotate_seq(i, t)? {
             return Ok(());
         }
         // A union is a type of values too, so a tuple forgets its positions
-        // into an array of one before patterns are let through.
-        if self.forget_tuple(i, t)? {
+        // into an array of one before patterns are let through, and a
+        // record its fields into a map.
+        if self.forget_tuple(i, t)? || self.forget_record(i, t)? {
             return Ok(());
         }
         if self.types.is_pattern(t) && !self.types.is_class(t) {
             return Ok(());
+        }
+        // A symbol known while compiling becomes one of a union of values
+        // it is in.
+        if let Some(set) = self.types.set(t)
+            && have == SYMBOL
+            && let Some(n) = known_name(&self.stack[i])
+        {
+            if set.contains(n) {
+                self.stack[i].ty = t;
+                return Ok(());
+            }
+            return Err(self.err(
+                Kind::Mismatch,
+                format!("`{n}'` is not one of {}", self.types.name(t)),
+            ));
         }
         if self.forgets(t, have) {
             self.stack[i].ty = t;
@@ -3057,6 +3170,13 @@ impl Stage {
                 (Term::Base(Base::I64), Term::Base(Base::Bool)) => true,
                 // A type of its own is its representation, forgotten.
                 (_, Term::Own(_, r)) => self.forgets(t, r),
+                // A union of values is a symbol, or one of a wider union.
+                (Term::Among(_), Term::Among(_)) => {
+                    let wide = self.types.set(t).expect("a set");
+                    let narrow = self.types.set(have).expect("a set");
+                    narrow.iter().all(|m| wide.contains(m))
+                }
+                (_, Term::Among(_)) => self.forgets(t, SYMBOL),
                 // A symbol is text, its name, a string once taken as one
                 // (doc/design/SYMBOLIC-FORTH.md 28).
                 (Term::Base(Base::String), Term::Base(Base::Symbol)) => true,
@@ -3066,15 +3186,15 @@ impl Stage {
 
     /// A bracket in a body: it types the values on top.
     fn annotate_top(&mut self, sig: &Sig) -> Result<()> {
-        if !sig.guards.is_empty() {
-            return Err(self.err(
-                Kind::Syntax,
-                "guards and value patterns belong in a signature, a body's first check, \
-                 `max: < a a gt? >. drop ;`",
-            ));
-        }
         self.need(sig.ins.len())?;
-        let Some((_, env)) = self.match_sig(sig) else {
+        let matched = match sig.guards.is_empty() {
+            true => self.match_sig(sig),
+            false => None,
+        };
+        if matched.is_none() && self.tested_later(sig) {
+            return self.check_later(sig);
+        }
+        let Some((_, env)) = matched else {
             let want: Vec<_> = sig.ins.iter().map(|&t| self.types.name(t)).collect();
             return Err(self.err(
                 Kind::Mismatch,
@@ -3086,6 +3206,69 @@ impl Stage {
             ));
         };
         self.settle(sig, &env)
+    }
+
+    /// Whether a check that does not hold now may hold as the program runs
+    /// (doc/design/SYMBOLIC-FORTH.md 6.32): it has a guard or a value
+    /// pattern, or a value it takes is known only then, a union's member or
+    /// a symbol one of a union of values.
+    fn tested_later(&self, sig: &Sig) -> bool {
+        let base = self.stack.len() - sig.ins.len();
+        !sig.guards.is_empty()
+            || sig.ins.iter().enumerate().any(|(k, &p)| {
+                let j = &self.stack[base + k];
+                let among = self.types.set(p).is_some() && j.ty == SYMBOL && !j.known();
+                among || (self.is_union(j.ty) && !self.types.is_class(p))
+            })
+    }
+
+    /// A check tested as the program runs: a family of one clause, the
+    /// check its signature and nothing its body, so it is chosen as a
+    /// clause is, by its guards and by a union's tag, and fails where it
+    /// does not hold, as `fail` does (doc/design/SYMBOLIC-FORTH.md 29).
+    fn check_later(&mut self, sig: &Sig) -> Result<()> {
+        let ins: Vec<String> = sig.ins.iter().map(|&t| self.types.name(t)).collect();
+        let mut text = ins.join(" ");
+        for g in &sig.guards {
+            text += &format!(" where {} holds", g.name(&self.types));
+        }
+        let name = match self.checks.get(&text) {
+            Some(n) => n.clone(),
+            None => {
+                let n: Rc<str> = format!("check#{}", self.checks.len() + 1).into();
+                let clause = Clause {
+                    sig: Some(among_tested(sig.clone(), &self.types, self.pos)),
+                    written: Rc::from([]),
+                    body: Rc::from([]),
+                    at: self.pos,
+                    core: false,
+                };
+                self.word(&n).clauses.push(Rc::new(clause));
+                self.checks.insert(text.clone(), n.clone());
+                self.check_text.insert(n.clone(), text);
+                n
+            }
+        };
+        self.apply_family(&name)
+    }
+
+    /// What a family's application says where no clause holds: a check's,
+    /// what it expected.
+    fn no_clause(&self, name: &Rc<str>, arity: usize) -> String {
+        match self.check_text.get(name) {
+            Some(text) => {
+                let base = self.stack.len() - arity.min(self.stack.len());
+                let found: Vec<String> = self.stack[base..]
+                    .iter()
+                    .map(|j| self.describe(j))
+                    .collect();
+                format!("expected {text}, found {}", found.join(" "))
+            }
+            None => format!(
+                "no word `{name}` for {}: no clause's guard holds",
+                self.top_types(arity)
+            ),
+        }
     }
 
     // ---- Matching ----
@@ -3113,6 +3296,16 @@ impl Stage {
                     return None;
                 }
                 score += if have == p { 8 } else { 4 };
+                continue;
+            }
+            // A symbol known while compiling is in a union of values or not.
+            if let Some(set) = self.types.set(p)
+                && have == SYMBOL
+            {
+                match known_name(&self.stack[base + k]) {
+                    Some(n) if set.contains(n) => score += 8,
+                    _ => return None,
+                }
                 continue;
             }
             score += self.match_slot(sig.ins[k], have, &mut env)?;
@@ -3225,6 +3418,15 @@ impl Stage {
             // (TYPES.md 2.11), as a bool is an i64.
             (Term::Own(..), _) => (p == have).then_some(8),
             (_, Term::Own(_, r)) => Some((self.unify(p, r, env)? - 2).max(0)),
+            // A union of values takes one within it, and is a symbol where
+            // a symbol is wanted, matched a little less well.
+            (Term::Among(_), _) if p == have || self.forgets(p, have) => Some(8),
+            // A symbol in a structure may be one: its value says, where it
+            // is given the type (`annotate`), and one known only as the
+            // program runs is not.
+            (Term::Among(_), Term::Base(Base::Symbol)) => Some(2),
+            (Term::Among(_), _) => None,
+            (_, Term::Among(_)) => Some((self.unify(p, SYMBOL, env)? - 2).max(0)),
             // An atom: any type at run time that is not a container.
             (Term::Atom, Term::Base(b)) => {
                 (!matches!(b, Base::Type | Base::Symbol | Base::Quote)).then_some(2)
@@ -3317,6 +3519,12 @@ impl Stage {
                 Some(s)
             }
             (Term::AnyRecord, Term::Record(_) | Term::RecordLit(_)) => Some(4),
+            // A record is the map of its fields where a map is wanted,
+            // matched least well.
+            (Term::Map(..), Term::Record(_)) => {
+                let m = self.record_map(have);
+                self.unify(p, m, env).map(|_| 1)
+            }
             // And the map it is with nothing to take it, matched less well.
             (Term::Map(..), Term::RecordLit(_)) => {
                 let m = self.lit_map(have);
@@ -3825,23 +4033,22 @@ impl Stage {
             } else if alts.is_empty() {
                 // Said where the family was applied, not where a guard was.
                 self.pos = at;
-                return Err(self.err(
-                    Kind::NoWord,
-                    format!(
-                        "no word `{name}` for {}: no clause's guard holds",
-                        self.top_types(arity)
-                    ),
-                ));
+                let kind = match self.check_text.contains_key(name) {
+                    true => Kind::Mismatch,
+                    false => Kind::NoWord,
+                };
+                return Err(self.err(kind, self.no_clause(name, arity)));
             } else {
                 // As the program runs, it fails as it would now.
-                let msg = self.shorten(&format!(
-                    "no word `{name}` for {}: no clause's guard holds",
-                    self.top_types(arity)
-                ));
+                let msg = self.shorten(&self.no_clause(name, arity));
+                let kind = match self.check_text.contains_key(name) {
+                    true => "mismatch",
+                    false => "no-word",
+                };
                 alts.push(Some(Alt {
                     code: vec![
                         Ins::Str(msg.into()),
-                        Ins::Str("no-word".into()),
+                        Ins::Str(kind.into()),
                         Ins::Op(Op::Prim(P::Trap)),
                     ],
                     stack: None,
@@ -3972,6 +4179,8 @@ impl Stage {
         }
         if guarded && test.is_none() {
             self.pin(c.sig.as_ref().expect("guarded"));
+        } else if guarded {
+            self.narrow(c.sig.as_ref().expect("guarded"));
         }
         let unsure = !(first && test == Some(true));
         self.unsure += unsure as u32;
@@ -4536,7 +4745,17 @@ impl Stage {
             self.code.push(Ins::JumpZero(skip));
         }
         self.in_place(i, &[Op::Prim(P::UnionValue)], m)?;
-        self.apply_word(name)
+        let r = self.apply_word(name);
+        // A check fails as the program runs for a type it does not take.
+        if let Err(e) = &r
+            && let Some(text) = self.check_text.get(name)
+            && matches!(e.kind, Kind::NoWord | Kind::Mismatch)
+        {
+            let why = format!("expected {text}, found {}", self.types.name(m));
+            self.trap("mismatch", &why);
+            return Err(self.err(Kind::Fails, "fails"));
+        }
+        r
     }
 
     /// Makes the value at `i` a value of the union `u`, which has its type:
@@ -4829,6 +5048,97 @@ impl Stage {
         Ok(true)
     }
 
+    /// The map a record is where a map is wanted: of its keys, symbols, and
+    /// of the type its values share, or their union (TYPES.md 2.11).
+    fn record_map(&mut self, t: Type) -> Type {
+        let tys: Vec<Type> = self
+            .types
+            .fields(t)
+            .expect("a record")
+            .iter()
+            .map(|f| f.1)
+            .collect();
+        let v = self.join_union(&tys);
+        self.types.intern(Term::Map(SYMBOL, v))
+    }
+
+    /// Where a map is wanted, a record at `i` forgets its fields: its keys
+    /// and its values, each tagged with its type where they differ,
+    /// gathered into a map of their union, as a tuple forgets its positions
+    /// (TYPES.md 2.11). Whether it did.
+    fn forget_record(&mut self, i: usize, t: Type) -> Result<bool> {
+        let have = self.stack[i].ty;
+        let (Term::Map(k, v), Term::Record(_)) = (self.types.term(t), self.types.term(have)) else {
+            return Ok(false);
+        };
+        if !(k == SYMBOL || self.forgets(k, SYMBOL)) {
+            return Ok(false);
+        }
+        let fields = self.types.fields(have).expect("a record");
+        let plain = !self.is_union(v) && fields.iter().all(|&(_, x)| x == v || self.forgets(v, x));
+        if !plain {
+            let m = self.record_map(have);
+            let Term::Map(_, u) = self.types.term(m) else {
+                unreachable!("a map")
+            };
+            let fits = v == u
+                || (self.is_union(v)
+                    && self
+                        .types
+                        .members(u)
+                        .iter()
+                        .all(|m| self.types.members(v).contains(m)));
+            if !fits {
+                return Ok(false);
+            }
+        }
+        let mut ins = vec![
+            Ins::Op(Op::Prim(P::ScratchPush)),
+            Ins::Op(Op::Prim(P::Mark)),
+        ];
+        for (n, (key, x)) in fields.iter().enumerate() {
+            ins.push(Ins::Str(key.clone()));
+            ins.extend(
+                [
+                    Op::Lit(0),
+                    Op::Prim(P::ScratchAt),
+                    Op::Prim(P::Hold),
+                    Op::Lit(n as u64),
+                    Op::Prim(P::VecAt),
+                ]
+                .map(Ins::Op),
+            );
+            if !plain && !self.is_union(*x) {
+                ins.extend([Op::Lit(*x as u64), Op::Prim(P::UnionMake)].map(Ins::Op));
+                if self.types.counted(*x) {
+                    ins.extend([Op::Lit(2), Op::Prim(P::Holds)].map(Ins::Op));
+                }
+            }
+        }
+        ins.extend(
+            [
+                Op::Prim(P::MapGather),
+                Op::Lit(self.types.held_cells(t)),
+                Op::Prim(P::Holds),
+                Op::Prim(P::ScratchPop),
+                Op::Prim(P::Release),
+            ]
+            .map(Ins::Op),
+        );
+        self.in_place_ins(i, ins, t)?;
+        if !plain {
+            self.warn(
+                Level::Informative,
+                format!(
+                    "this makes a map of `{}` from a record: each value is tagged, \
+                     and each use of one branches",
+                    self.types.name(v)
+                ),
+            );
+        }
+        Ok(true)
+    }
+
     /// The type values of these types share, as `join` finds it, or else
     /// their union, literals taking their defaults (TYPES.md 2.9).
     fn join_union(&mut self, tys: &[Type]) -> Type {
@@ -4903,6 +5213,7 @@ impl Stage {
                     self.stack.push(v.clone());
                     self.apply_word(&core_path("eq"))
                 }
+                Test::Among(t) => self.among_test(*t),
             };
             let found = std::mem::replace(&mut self.effects, outer);
             self.effects |= found;
@@ -4998,9 +5309,56 @@ impl Stage {
         self.stack.extend(moved);
     }
 
+    /// Inside a clause a union of values chose, its input is one of them.
+    fn narrow(&mut self, sig: &Sig) {
+        let base = self.stack.len() - sig.ins.len();
+        for g in &sig.guards {
+            if let Test::Among(t) = g.test
+                && self.stack[base + g.slot].ty == SYMBOL
+            {
+                self.stack[base + g.slot].ty = t;
+            }
+        }
+    }
+
+    /// Whether the value on top, taken, is one of a union of values: known
+    /// while compiling where it is known, or its type is a union within
+    /// this one, and else tested as the program runs, `eq` each in turn.
+    fn among_test(&mut self, t: Type) -> Result<()> {
+        let set = self.types.set(t).expect("a union of values");
+        let j = self.stack.last().expect("copied").clone();
+        let known = match (&j.val, self.types.set(j.ty)) {
+            (_, Some(have)) if have.iter().all(|m| set.contains(m)) => Some(true),
+            (Val::Name(n, _), _) => Some(set.contains(n)),
+            _ => None,
+        };
+        if let Some(b) = known {
+            self.apply_word(&core_path("drop"))?;
+            self.push(BOOL, Val::Int(b as i128));
+            return Ok(());
+        }
+        let at = self.pos;
+        for (i, m) in set.iter().enumerate() {
+            let last = i + 1 == set.len();
+            if !last {
+                self.apply_word(&core_path("dup"))?;
+            }
+            self.push(SYMBOL, Val::Name(m.clone(), at));
+            self.apply_word(&core_path("eq"))?;
+            if !last {
+                self.apply_word(&core_path("swap"))?;
+            }
+        }
+        for _ in 1..set.len() {
+            self.apply_word(&core_path("or"))?;
+        }
+        Ok(())
+    }
+
     /// Inside a clause chosen by a value pattern tested at run time, its
     /// input is known to equal the value: pinned to it, as the input's type.
     fn pin(&mut self, sig: &Sig) {
+        self.narrow(sig);
         let base = self.stack.len() - sig.ins.len();
         for g in &sig.guards {
             let Test::Equals(v) = &g.test else { continue };
@@ -5071,7 +5429,6 @@ impl Stage {
                 // Its effect is its quotation's and one more, which `effect`
                 // reads where the quotation is written.
                 Prim::Dip => return None,
-                Prim::QuotePower => (2, 1),
                 Prim::Width => return None,
                 // It never returns, so it leaves whatever is wanted.
                 Prim::Fail => return None,
@@ -5591,6 +5948,7 @@ impl Stage {
             let skip = self.label();
             r = self.test(sig, skip);
             self.stack.truncate(ins.len());
+            self.narrow(sig);
         }
         self.checking += 1;
         let mut r = r.and_then(|_| self.clause(c, Env::default()));
@@ -5815,6 +6173,9 @@ impl Stage {
     /// signature says: `< type type >. < type >.` for `map` and `or`, `nil`
     /// standing for its type.
     fn constructs(&mut self, c: Con) -> bool {
+        if c == Con::Or && self.joins_values() {
+            return true;
+        }
         let ins = match c {
             Con::Ary | Con::Own => vec![TYPE],
             Con::Map | Con::Or => vec![TYPE, TYPE],
@@ -5829,6 +6190,44 @@ impl Stage {
             outs: Some(vec![TYPE]),
         };
         self.match_sig(&sig).is_some()
+    }
+
+    /// Whether `or` joins values: a symbol known while compiling, or a union
+    /// of them, among the two on top (TYPES.md 3.6).
+    fn joins_values(&self) -> bool {
+        let n = self.stack.len();
+        n >= self.floor + 2
+            && self.stack[n - 2..].iter().any(|j| {
+                matches!(j.val, Val::Name(..)) && j.ty == SYMBOL
+                    || matches!(j.val, Val::Type(t) if self.types.set(t).is_some())
+            })
+    }
+
+    /// `code' data' or`: the type of just those symbols, a subset of `sym`.
+    fn union_of_values(&mut self) -> Result<()> {
+        let mut names = Vec::new();
+        for _ in 0..2 {
+            let j = self.pop()?;
+            match &j.val {
+                Val::Name(n, _) if j.ty == SYMBOL => names.push(n.clone()),
+                Val::Type(t) if self.types.set(*t).is_some() => {
+                    names.extend(self.types.set(*t).expect("a set").iter().cloned())
+                }
+                _ => {
+                    return Err(self.err(
+                        Kind::Limit,
+                        format!(
+                            "a union of symbols and {} is not built: `or` joins symbols, \
+                             `code' data' or`, or types, `i64 nil or`",
+                            self.describe(&j)
+                        ),
+                    ));
+                }
+            }
+        }
+        let t = self.types.among(names);
+        self.push(TYPE, Val::Type(t));
+        Ok(())
     }
 
     fn construct(&mut self, c: Con) -> Result<()> {
@@ -5866,6 +6265,7 @@ impl Stage {
                 let k = self.pop_type()?;
                 Term::Map(k, v)
             }
+            Con::Or if self.joins_values() => return self.union_of_values(),
             Con::Or => {
                 let b = self.pop_type()?;
                 let a = self.pop_type()?;
@@ -6125,7 +6525,6 @@ impl Stage {
                 self.stack.swap(base, base + 1);
             }
             Prim::Dip => self.dip(name)?,
-            Prim::QuotePower => self.quote_power()?,
             Prim::Width => self.width()?,
             Prim::Fail => return Err(self.fail()),
             Prim::TrapKind => self.trap_part(1),
@@ -6682,6 +7081,9 @@ impl Stage {
     fn each(&mut self, name: &str, backward: bool) -> Result<()> {
         let q = self.words_of(name)?;
         let base = self.stack.len() - 1;
+        if let Val::Quote(xs) = self.stack[base].val.clone() {
+            return self.each_quote(&q, &xs, backward);
+        }
         if let Some(es) = self.types.elements(self.stack[base].ty) {
             let es = es.to_vec();
             return self.each_tuple(&q, es, backward);
@@ -7618,84 +8020,6 @@ impl Stage {
         }
     }
 
-    /// `w n quote-power`: w's n-th power, a quotation, as mathematics takes
-    /// it for w's kind, which its stack effect gives: a value's n copies
-    /// multiplied, `pi^2` being π²; an operation's n operands, `+^4` being
-    /// `+ + +`; and any other word applied n times, `sqrt^2` a fourth root.
-    fn quote_power(&mut self) -> Result<()> {
-        let n = self.count("power#", 0)?;
-        let w = self.stack.pop().expect("matched");
-        let code = self.code_tokens(&w, "power#")?;
-        let shown = Self::shown(&w);
-        let Some((k, m)) = self.code_effect(&w) else {
-            return Err(self.err(
-                Kind::Mismatch,
-                format!("{shown} has no power: its stack effect is not known while compiling"),
-            ));
-        };
-        let (times, products) = match (k, m) {
-            // x⁰ is the identity of x's operation, a value whose type comes
-            // where it is used, as a literal's does: `w' unit# !`. A value's
-            // power is its copies multiplied, so its operation is `⋅`.
-            (0, 1) | (2, 1) if n == 0 => (0, 0),
-            (3.., 1) if n == 0 => {
-                return Err(self.err(
-                    Kind::NoWord,
-                    format!(
-                        "the power 0 of {shown} is the identity of its operation, and an \
-                         identity is an operation's of two values; {shown} takes {k}"
-                    ),
-                ));
-            }
-            (0, 1) => (n, n - 1),
-            (2.., 1) if (n - 1).is_multiple_of(k - 1) => ((n - 1) / (k - 1), 0),
-            (2.., 1) => {
-                return Err(self.err(
-                    Kind::Mismatch,
-                    format!(
-                        "{shown} takes {k} values, so a power of it takes a multiple of {} \
-                         and one more",
-                        k - 1
-                    ),
-                ));
-            }
-            _ => (n, 0),
-        };
-        let at = self.pos;
-        let mut q: Vec<Token> = Vec::new();
-        for _ in 0..times {
-            q.extend(applied(&code, at));
-        }
-        for _ in 0..products {
-            q.push(Token {
-                tok: Tok::Name(core_path("*")),
-                pos: at,
-            });
-            q.push(Token {
-                tok: Tok::Apply,
-                pos: at,
-            });
-        }
-        if n == 0 && m == 1 && (k == 0 || k == 2) {
-            let op: Vec<Tok> = match &w.val {
-                _ if k == 0 => vec![Tok::Name(core_path("*"))],
-                Val::Name(name, ..) => vec![Tok::Name(name.clone())],
-                _ => std::iter::once(Tok::Open(b'['))
-                    .chain(code.iter().map(|t| t.tok.clone()))
-                    .chain([Tok::Close(b']')])
-                    .collect(),
-            };
-            let unit = [
-                Tok::Name(core_path("unit#")),
-                Tok::Name("!".into()),
-                Tok::Apply,
-            ];
-            q.extend(op.into_iter().chain(unit).map(|tok| Token { tok, pos: at }));
-        }
-        self.push(QUOTE, Val::Quote(q.into()));
-        Ok(())
-    }
-
     /// `w n width#`: w applied n wide, as the core's rule spells `dup_2`
     /// (doc/design/SYMBOLIC-FORTH.md 22). Each value w moves is a group of n,
     /// but the code handed to it, on the stack now, runs once, as written, on
@@ -8051,6 +8375,26 @@ impl Stage {
         Ok(())
     }
 
+    /// `each` over a quotation, while compiling: q applied to each element
+    /// as data, unrolled, so a walk of one, `fold` and `reduce` among them,
+    /// goes no deeper for its length (doc/design/SYMBOLIC-FORTH.md 6.6).
+    fn each_quote(&mut self, q: &[Token], xs: &[Token], backward: bool) -> Result<()> {
+        let mut es = self.elements(xs)?;
+        if backward {
+            es.reverse();
+        }
+        self.stack.pop();
+        for e in &es {
+            let x = self.element_value(e);
+            self.stack.push(x);
+            self.enter()?;
+            let r = self.run_quote(q);
+            self.depth -= 1;
+            r?;
+        }
+        Ok(())
+    }
+
     /// The value at `i` as type `t`: a literal by the type's clause for it, a
     /// value of another type by the type's clause for that, as a type's own
     /// clauses say how to make one; otherwise it must have the type already,
@@ -8121,7 +8465,44 @@ impl Stage {
             self.stack[i].ty = t;
             return Ok(());
         }
+        // So is an array of them, or any value holding them, by `!` of one
+        // of their representations', `( 1.0 2.0 ) < 2 celsius vec > !`.
+        let r = self.types.represented(t);
+        if r != t && !self.types.is_literal(have) && self.forgets(r, have) {
+            self.annotate(i, r)?;
+            let mut j = self.stack[i].clone();
+            self.relabel(&mut j, t);
+            self.stack[i] = j;
+            return Ok(());
+        }
         self.annotate(i, t)
+    }
+
+    /// A value given a type of the same representation, and a known one's
+    /// elements theirs.
+    fn relabel(&self, j: &mut Jdg, t: Type) {
+        j.ty = t;
+        let Val::Seq(es) = &j.val else {
+            return;
+        };
+        let shape = self.types.own_parts(t).map_or(t, |(_, r)| r);
+        let tys: Vec<Type> = match self.types.term(shape) {
+            Term::Ary(e) | Term::Vec(_, e) => vec![e; es.len()],
+            Term::Tuple(_) => self.types.elements(shape).expect("a tuple").to_vec(),
+            Term::Record(_) => self
+                .types
+                .fields(shape)
+                .expect("a record")
+                .iter()
+                .map(|f| f.1)
+                .collect(),
+            _ => return,
+        };
+        let mut es = es.to_vec();
+        for (e, ty) in es.iter_mut().zip(tys) {
+            self.relabel(e, ty);
+        }
+        j.val = Val::Seq(es.into());
     }
 
     /// `string>i64` and `string>f64`, under the conversions `"42" i64!` and
@@ -8192,11 +8573,11 @@ impl Stage {
     fn record_at(&mut self, base: usize) -> Result<()> {
         let t = self.stack[base].ty;
         let fields = self.types.fields(t).expect("a record");
+        // A key known only as the program runs reads the map of its fields.
         let Val::Name(key, _) = &self.stack[base + 1].val else {
-            return Err(self.err(
-                Kind::Unknown,
-                "a record's field is named while compiling, `p x' at`",
-            ));
+            let m = self.record_map(t);
+            self.annotate(base, m)?;
+            return self.apply_word(&core_path("map-at"));
         };
         let Some(i) = fields.iter().position(|(k, _)| k == key) else {
             return Err(self.err(
@@ -8252,7 +8633,8 @@ impl Stage {
         };
         let (key, want) = (key.clone(), fields[i].1);
         let have = self.stack[base + 2].ty;
-        if self.types.is_literal(have) || self.types.is_record_lit(have) {
+        let known_sym = have == SYMBOL && known_name(&self.stack[base + 2]).is_some();
+        if self.types.is_literal(have) || self.types.is_record_lit(have) || known_sym {
             self.annotate(base + 2, want)?;
         } else if have != want && !self.forgets(want, have) {
             return Err(self.err(

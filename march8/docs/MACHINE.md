@@ -492,8 +492,9 @@ fib: < n >. dup 1 -+ fib swap 2 -+ fib + ;
   and the result is a constant, so `g: < 0 >. 1 + ;` compiles that
   clause to `drop 1`, and `< "quit" > "bye: " swap concat` to a drop and a
   constant string.
-- Value patterns belong in signatures, among the inputs: one in a bracket
-  in a body, or among the outputs, is an error.
+- Value patterns are inputs: one in a check in a body is tested there, as
+  a guard is, at run time where it must be (2026-10-26); one among the
+  outputs is an error.
 
 ### Effects
 
@@ -837,6 +838,39 @@ m "a" get 1 +                  no word `+` for nil: each type needs a clause
   union is a value of any union that holds its types, as it is. Arrays
   hold union values: `( 1 nil )` is a `2 i64 nil or vec`.
 
+### Unions of values
+
+`or` of symbols is the type of just those symbols, a subset of `sym`
+(TYPES.md 3.6; built 2026-10-26), as a value pattern is the type of one
+value. `or^7` joins seven, and `;` names it.
+
+```
+read: code' data' text' or^3 ;
+kind: read own' top' or^3 ;
+like: < kind >. code' eq ;
+code' like                       true, decided now
+frob' like                       no word `like` for frob'
+tok: { kind: < kind > ; n: < i64 > ; } ;
+```
+
+- **An input of one is a guard,** a symbol tested to be one of them, as a
+  value pattern's input is tested to equal its value: decided now on a
+  known symbol, or on a value whose type is a union of values within it,
+  and as the program runs otherwise, `eq` to each in turn.
+- **Inside its clause the input is one of them,** its type the union, so it
+  fills a field of that type, `{ kind: kd n: 1 } < tok >.`. A known symbol
+  fills one too, and `put` sets one, `kind' text' put`; a symbol known only
+  as the program runs, not through such an input, is refused while
+  compiling.
+- **Forgotten where a symbol is wanted,** matched a little less well, as a
+  type of its own is its representation, and into a wider union of values.
+  At run time it is a symbol.
+- **Not yet:** a union of symbols and a type, `code' nil or`, refused; values
+  of other types, numbers and strings, whose `or` means something else
+  (`true false or` is truth); and a known symbol in a structure made as the
+  program runs, `{ line: row kind: body' }`, which keeps only `sym`, so
+  `lower` makes such a token by `tok-of`, whose input says its kind.
+
 ### Tuples
 
 An array literal whose elements differ in type is a **tuple**, typed by
@@ -892,10 +926,19 @@ norm: < point >. [ p | p.x dup * p.y dup * + sqrt ] . ;
   already the record's; one of the wrong fields, missing, extra or of
   another type, is no word. Where a map is wanted the stage makes the
   map, `keys` taking it, from the record's cells.
+- **A record forgets into a map where one is wanted** (2026-10-26), of
+  its keys, symbols, and its values' type, or their union, each value
+  tagged, as a tuple forgets into an array, with an informative warning:
+  `{ x: 1 y: "a" } values` is `( "a" 1 )`, an `i64 string or ary`. So `at`
+  with a key known only as the program runs reads the map, its value of
+  that union.
 - **A field is read by `at`** with its key known while compiling, `p x'
   at`, of its own type, as a tuple's position is; a path from a
   bracket's name is short for it, `p.x`, and `p.ab.cd` reads one inside
-  another. A field the record lacks is an error while compiling.
+  another; so is one from a word that takes nothing, `cfg.port` for `cfg
+  port' at`, its head found as any name is, where no word has the path
+  (2026-10-26). Words do not chain, so `sort.length` is no path. A field
+  the record lacks is an error while compiling.
 - **A field is set by `put`,** its key known while compiling, `r n' 5
   put`: a new record of the same type, its cells the old one's but that
   one, the value taking the field's type, so a fold hands a record along,
@@ -940,7 +983,11 @@ temp: celsius ;                      an alias, `celsius` named already
   forgets into it, `20.0 sqrt celsius !`, and a literal becomes it as its
   representation, `{ x: 1 y: 2 } place !` where `place: point own ;`.
   Wanted by a clause, a value of the representation made as the program
-  runs is no match: `!` says it is meant.
+  runs is no match: `!` says it is meant. So is an array of them, or any
+  value holding them, by `!` of one of the representation's, `( 1.0 2.0 )
+  < 2 celsius vec > !` as `[ celsius ! ] map` gives, each element its
+  own: of the representation only, so `( 1 2 )` is no `2 celsius vec`,
+  nor `( 1 0 )` a `2 bool vec`.
 
 ### Recursion and instances
 
@@ -1015,9 +1062,11 @@ one, `3 [ dup * ] [ 1 + ] bi` leaving 9 4, each of them also n wide,
 `dup_2` and `keep_2` being FORTH's 2DUP and Factor's 2keep, the only
 meaning the core gives a subscript, and given as well to a program's word
 that only moves values or is handed code; `power#`, which makes a power, a
-quotation, `+^0` and any operation's 0th power being its identity,
-`+' unit# !`, a literal whose type comes where it is used, and a value's
-`^0` being `⋅^0`; the conversions of `unit#` to each type, and the facts
+quotation, by the effect of its word, `effect#`, a word applied by its
+symbol, `+' 3 power#` being `[ +' . +' . ]`, `+^0` and any operation's 0th
+power being its identity, `+' unit# !`, a literal whose type comes where it
+is used, which `quote !` makes code again, `[ + ]`, for `identity#` to find
+which it is, and a value's `^0` being `⋅^0`; the conversions of `unit#` to each type, and the facts
 they read, `unit` for each primitive operation (`i64+' unit` is 0,
 `string-concat' unit` the empty string), and `least` and `greatest` for
 each order's ends (`i64' least`, `f64' greatest` ∞, `bool' greatest`
@@ -1064,7 +1113,9 @@ at run time or nil, and on a known string the value or nil itself. An i64
 converts to an f64, `12 i64! f64!`; an f64 to an i64 only by narrowing,
 which says how it rounds. `le?`, `ge?` and `neq?`, with
 `≤`, `≥` and `≠`, are "less, or equal" rather than "not greater", so that
-NaN is at most and at least nothing. Reading is by the core's first
+NaN is at most and at least nothing. Arrays are equal element by
+element, and only as long as each other, `( 1 2 ) ( 1 2 ) eq`, a rule in
+core.march (2026-10-26); tuples and records are not yet. Reading is by the core's first
 namespaces (TYPES.md 3.12): `io.stdin.read` is standard input's text and
 `"data.csv" io.file.read` a file's, when the program runs, an effect, so a
 filter starts `io.stdin.read lines`; read while compiling, `[ "notes.txt"
@@ -1093,16 +1144,13 @@ no i64 result.
 A few are handled by the stage itself, because their types are not a
 signature's: the stack words, which move judgments, the values at run time
 among them moving, only if their order changes, by rolls or the scratch
-stack, whichever is shorter; `quote-power`, a word's or a quotation's
-power by its kind, from its effect, its 0th being `w' unit# !`, the
-identity of w's operation, a literal typed where it is used, which `quote
-!` makes code again, `[ w ]`, for core.march to find which it is;
-`quote-length`,
-`quote-at`, `quote-slice`, `quote-concat` and `quote-insert`, a quotation
-as a sequence while compiling, its elements Low Stack's, a symbol or a
-quotation, a meta-op the symbol of its name, `'.'`, which the core's
+stack, whichever is shorter; `quote-length`, `quote-at`, `quote-slice`,
+`quote-concat` and `quote-insert`, a quotation as a sequence while
+compiling, its elements Low Stack's, a symbol or a quotation, a meta-op
+the symbol of its name, `'.'`, which the core's
 `length`, `at`, `slice`, `concat`, `insert`, `first` and `rest` take
-(SYMBOLIC-FORTH.md 6.6); `clauses#`, `w ins clauses#`, the clauses of w
+(SYMBOLIC-FORTH.md 6.6), and `each`, unrolled, its quotation applied to
+each element in turn, so `fold` walks one no deeper for its length; `clauses#`, `w ins clauses#`, the clauses of w
 that dispatch would choose for inputs of the types ins gives, a type or
 code that leaves them, `< i64 i64 >`, or values, `[ i64+' ]`, a value
 pattern for another value not chosen, in the order it would try them, each
@@ -1404,9 +1452,13 @@ repo's root.
   signature a check applied, `sq: < i64 >. dup * < i64 >. ;`, `[ … ] !`
   running a quotation while compiling, and a body reaching below its
   first check taking those values too, `ff: < i64 >. + ;` taking two, a
-  letter each, where its effect is sure. Not yet: a check tested at run
-  time, where a value's type is not known while compiling; a guard in a check that is not a body's first; and a
-  map left by `[ … ] !`, read back.
+  letter each, where its effect is sure. Built 2026-10-26: a check that
+  cannot be decided while compiling, a guard or a value pattern in it, a
+  union's member, `"a" get < i64 >.`, or a symbol of a union of values,
+  `< kind >.`, tested as the program runs, a family of one clause, the
+  check its signature and nothing its body, chosen as a clause is and
+  failing by a `mismatch` trap, "expected i64, found nil", where it does
+  not hold. Not yet: a map left by `[ … ] !`, read back.
 
 - **More of traps** (doc/design/SYMBOLIC-FORTH.md 29). Handlers are built
   (above, "Errors"); not yet are kinds as types, decided 2026-10-22,
@@ -1538,11 +1590,7 @@ repo's root.
 - **More of tuples, and records.** `rest`, `most`, `slice` and `concat` on
   tuples forget their positions, where they could make tuples; `eq?` has no
   clause for them. A literal with a run among mixed elements is still an
-  error. A record forgetting into a map where one is wanted, into a map of
-  the union of its values' types, and `at` with a key known only as the
-  program runs, which it would take (TYPES.md 2.5); a path from a word,
-  `cfg.port`, its head found as any name is, where it reads only from a
-  bracket's name; an entry by `;` in braces of anything but a type; a
+  error. An entry by `;` in braces of anything but a type; a
   record opened into places, for named inputs; equality of records; and
   an array of map literals undecided, which settles into maps.
 - **More of unions.**

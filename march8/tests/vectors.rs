@@ -161,3 +161,35 @@ fn transpose_swaps_indices() {
         "<1> ( ( 5 11 ) ( 11 25 ) )"
     );
 }
+
+#[test]
+fn arrays_equal_element_by_element() {
+    assert_eq!(
+        show(&["( 1 2 ) ( 1 2 ) eq ( 1 2 ) ( 1 3 ) eq ( 1 2 ) ( 1 2 3 ) eq"]),
+        "<3> true false false"
+    );
+    // Strings, nested arrays, and floats, where 0.0 and -0.0 are equal.
+    assert_eq!(
+        show(&[
+            "( \"a\" \"b\" ) ( \"a\" \"b\" ) eq ( ( 1 2 ) ( 3 ) ) ( ( 1 2 ) ( 4 ) ) eq ( 0.0 ) ( -0.0 ) eq"
+        ]),
+        "<3> true false true"
+    );
+    // At run time too, empty arrays among them, and `≠`.
+    assert_eq!(
+        show(&[
+            "3 range 3 range",
+            "eq",
+            "0 range 0 range",
+            "eq",
+            "3 range 4 range",
+            "≠"
+        ]),
+        "<3> true true true"
+    );
+    // Elements of different types are no word, as `1 \"a\" eq` is.
+    assert_eq!(
+        session(&["( 1 2 ) ( \"a\" \"b\" ) eq"]).err(),
+        Some(Kind::NoWord)
+    );
+}

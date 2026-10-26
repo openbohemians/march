@@ -23,24 +23,28 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   retired, the core, the examples, the tests and the docs moved to it,
   `[ … ] !` running a quotation while compiling, `io.file.embed` gone,
   and a body reaching below its first check, `ff: < i64 >. + ;`, where
-  its effect is sure. To come: such a body whose effect is not sure, a
-  family of clauses of different lengths in it, still refused where it
-  is applied; a check tested at run time, where a value's type is not known while
-  compiling; a guard in a check that is not a body's first; and a map
-  left by `[ … ] !`, read back, for data read while compiling.
+  its effect is sure; and a check tested as the program runs, where it
+  cannot be decided while compiling, a guard in any check among them
+  (2026-10-26). To come: such a body whose effect is not sure, a family
+  of clauses of different lengths in it, still refused where it is
+  applied; and a map left by `[ … ] !`, read back, for data read while
+  compiling.
 - **Where a trap happened,** reported from a table beside the code, since
   a position in the code would change a word's identity with its layout.
-- **`width#`'s test and `quote-power`'s cases in March,** as the identity
-  search now is (SYMBOLIC-FORTH.md 6.6, 22).
-- **A `fold` over a quotation,** so March walks one past about sixty
-  elements, depth's bound (SYMBOLIC-FORTH.md 6.6).
+- **`width#`'s test in March,** as the identity search and `power#` now
+  are (SYMBOLIC-FORTH.md 6.6, 22; `power#` built 2026-10-26). Not small:
+  a word handed code is known by the code on the stack where it is
+  applied, which March code does not see, and a word that only moves
+  values by its clauses, through the words they apply.
 - **The rest of records** (TYPES.md 2.11). Built 2026-10-24: a map of
   types a record type, `;` in braces making an entry, a map literal of
   symbols undecided while its values are alike, a record where one is
   wanted and a map else, fields read by `at` and by a path from a
-  bracket's name, `p.x`, and set by `put`, `r n' 5 put`. To come: a record forgetting into a map, and `at`
-  with a key known only as the program runs; a path from a word,
-  `cfg.port`; an entry by `;` of anything but a type; a record opened
+  bracket's name, `p.x`, or from a word that takes nothing, `cfg.port`
+  (2026-10-26), and set by `put`, `r n' 5 put`; a record forgetting
+  into a map where one is wanted, and so `at` with a key known only as
+  the program runs (2026-10-26). To come: an entry by `;` of anything but
+  a type; a record opened
   into places where a word that takes it is applied, for named inputs,
   `{ term: 72 rate: 0.2 } payment` (SYMBOLIC-FORTH.md 6.31); equality of
   records; a known array of map literals left undecided; and a map
@@ -49,11 +53,11 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   checked, `< lab >.`.
 - **The rest of types of their own** (TYPES.md 2.11). Built 2026-10-24:
   `own`, named by `;`, a subset of its representation forgotten where the
-  representation's word is applied, a clause of its own keeping it. To
-  come: `!` of an array of the representation, `( 1.0 2.0 ) < 2 celsius
-  vec > !`; the warning where two types of their own are forgotten
-  together; and a type made of itself, `tree: { left: < tree > ; … } ;`,
-  an error for now.
+  representation's word is applied, a clause of its own keeping it;
+  `!` of an array of the representation, `( 1.0 2.0 ) < 2 celsius vec >
+  !` (2026-10-26). To come: the warning where two types of their own are
+  forgotten together, proposed, not decided; and a type made of itself,
+  `tree: { left: < tree > ; … } ;`, an error for now.
 - **How a clause is chosen,** TYPES.md 2.8's rule (Thomas, 2026-10-17):
   slot by slot from the top, a value before a type before a union before
   a variable, a subset before the type it is in, replacing march8's
@@ -70,12 +74,15 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   as now, under `err`, `err.mismatch`, `err.arithmetic`, `err.io`, the
   symbol kinds retiring (2026-10-24). A failure's data beyond its message
   is to be designed.
-- **Equality of arrays, tuples and records,** of which there is none:
-  `( 1 2 ) ( 1 2 ) eq` is no word. Element by element, a rule in
-  core.march (2026-10-24). By content identity later, once the store
-  holds values canonically, floats among them, 0.0 and -0.0 one value
-  and NaN one (Thomas: "state in the merkle-champ must be *canonical* for
-  proper comparison").
+- **Equality of tuples and records.** Arrays' is built (2026-10-26), a
+  rule in core.march, element by element and only as long as each other.
+  A tuple's elements differ in type, so a rule walks them by a known
+  position, `1` to its length, which unfolds only once a family applied
+  again on a known number does (march8/docs/MACHINE.md, "Not yet"); today
+  it becomes an instance, the number a cell. By content identity later,
+  once the store holds values canonically, floats among them, 0.0 and
+  -0.0 one value and NaN one (Thomas: "state in the merkle-champ must be
+  *canonical* for proper comparison").
 - **The first compiler in March: `lower`** (2026-10-24), High Stack in
   and Low Stack out, printed, checked against `march8 lower` on the core
   and the examples, a fixed point as system.march's was. It needs no
@@ -91,22 +98,34 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   nothing was freed. To come, though no program here uses them yet: a
   string's holes, `[| … |]`, a quotation's power and the symbol table's
   escapes.
-- **The rest of freeing** (doc/design/REPRESENTATIONS.md 4). Built
-  2026-10-25: a count of holders, a copy holding a value once more and a
-  drop once less, the stage saying which cells are values by their types,
-  every other primitive letting go of what it takes, and an edit of a
-  value nothing else holds in place: `lower` on itself peaks at 258 KB of
-  values, not 16.8 MB, and runs 37% slower. To come: a version of a value
-  held elsewhere sharing its holds by node, not a pass over its values,
-  which `lower`'s token arrays need, being most of that time, and
-  merkle-champ a way to walk a version's nodes with their counts (a field
-  taken, by the compiler or by a word a programmer writes, was refused
-  2026-10-26, REPRESENTATIONS.md 4); counting while compiling, a copy only
-  read needing no count; and what a trap throws away, by a table beside
-  the code.
+## 2.0
+
+Memory (Thomas, 2026-09-25). The model is built and its rules hold now,
+for every feature (doc/design/MEMORY.md, 1 and 3); what is left waits
+until a program needs it.
+
+- **The rest of freeing** (MEMORY.md 5). Built 2026-10-25: a count of
+  holders, a copy holding a value once more and a drop once less, the
+  stage saying which cells are values by their types, every other
+  primitive letting go of what it takes, and an edit of a value nothing
+  else holds in place: `lower` on itself peaks at 258 KB of values, not
+  16.8 MB, and runs 37% slower. To come: a version of a value held
+  elsewhere sharing its holds by node, not a pass over its values, which
+  `lower`'s token arrays need, being most of that time, and merkle-champ
+  a way to walk a version's nodes with their counts (a field taken, by
+  the compiler or by a word a programmer writes, was refused 2026-10-26,
+  REPRESENTATIONS.md 4); reads needing no count; counting while
+  compiling, a copy only read needing no count; what a trap throws away,
+  by a table beside the code; and counts changed atomically, once there
+  are threads.
 
 ## To think on
 
+- **A letter's field, `b.line`** (SYMBOLIC-FORTH.md 6.16, Thomas,
+  2026-10-26), as a bracket name's `rd.line` is. A one-letter word is
+  refused and a one-letter namespace is not, `b.ff: 1 ;`, so the two
+  would clash; refusing one-letter namespaces too would settle it. To
+  decide.
 - **Representations and sources** (doc/design/REPRESENTATIONS.md,
   2026-10-25). A value held the simplest way first, `vec#`, and moved
   where what is done to it needs another, `tree#` or `list#` (Thomas);

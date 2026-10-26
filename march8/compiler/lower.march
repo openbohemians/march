@@ -171,12 +171,17 @@ name-text: < string string >. [ stem marks | stem spelled marks "?" starts not a
 
 -- ---- Reading ----
 
--- A token, its spelling in Low Stack, its line, and its kind: a bracket
--- opened, what it is, `code`, `data`, `text`, `sig` or `body`, one closed,
--- `close`, or any other, `tok`, and the names pass's own parts with their
--- number. A label not yet closed: the depth of its bracket, where its body
--- would open, and its line.
-tok: { spelling: < string > ; line: < i64 > ; kind: < sym > ; n: < i64 > ; } ;
+-- A token's kind: as read, a bracket opened, what it is, `code`, `data`,
+-- `text`, `sig` or `body`, one closed, `close`, or any other, `tok`; or one
+-- of the names pass's own parts.
+read-kind: code' data' text' sig' body' close' tok' or^7 ;
+name-kind: own' lent' letter' under' top' or^5 ;
+kind: read-kind name-kind or ;
+
+-- A token, its spelling in Low Stack, its line, its kind, and a names
+-- pass's part's number. A label not yet closed: the depth of its bracket,
+-- where its body would open, and its line.
+tok: { spelling: < string > ; line: < i64 > ; kind: < kind > ; n: < i64 > ; } ;
 lab: { depth: < i64 > ; index: < i64 > ; line: < i64 > ; } ;
 
 -- What a parse holds: the tokens so far, the brackets open, the labels
@@ -192,10 +197,10 @@ start: { toks: < tok ary > empty opens: < string ary > empty labels: < lab ary >
 push: < a ary a >. -1 insert ;
 
 -- A token of a kind on a line given, or on the line being read.
-emit-as: < parse string sym i64 >. [ rd text made row |
+emit-as: < parse string kind i64 >. [ rd text made row |
   rd toks' rd.toks { spelling: text line: row kind: made n: 0 } push put ] . ;
 emit-at: < parse string i64 >. [ rd text row | rd text tok' row emit-as ] . ;
-emit-kind: < parse string sym >. [ rd text made | rd text made rd.line emit-as ] . ;
+emit-kind: < parse string kind >. [ rd text made | rd text made rd.line emit-as ] . ;
 emit: < parse string >. [ rd text | rd text rd.line emit-at ] . ;
 
 -- A line of three `-` or more, alone, opens a block comment, and one of
@@ -253,7 +258,7 @@ labelled: < parse string string >. drop drop ;
 closes-body: < parse [ rd | rd.labels length 0 eq ] ? >. drop false ;
 closes-body: < parse >. [ rd | rd.labels last depth' at rd.opens length eq ] . ;
 opened: < parse lab >. [ rd label |
-  rd toks' rd.toks { spelling: "[" line: label.line kind: body' n: 0 } label.index insert put
+  rd toks' rd.toks "[" label.line body' 0 tok-of label.index insert put
   labels' rd.labels -1 remove put ] . ;
 body: < parse >. [ rd | rd rd.labels last opened ] . "]" close' emit-kind ;
 
@@ -407,7 +412,7 @@ index-of: < string ary string i64 >. 1 -+ index-of < i64 >. ;
 position: < string ary string >. over length index-of ;
 
 -- A token made: a spelling, a line, a kind and a number.
-tok-of: < string i64 sym i64 >. [ text row made idx |
+tok-of: < string i64 kind i64 >. [ text row made idx |
   { spelling: text line: row kind: made n: idx } < tok >. ] . ;
 -- A letter of a place, as a token, what followed the name after it.
 letter-at: < i64 string i64 >. [ place tail row |
@@ -427,8 +432,8 @@ fresh: < tok bool >. [ item types | { open: item names: < string ary > empty dee
 
 -- Whether a bracket sees the names around it, a literal or a string, and
 -- whether one is code.
-sees: < sym >. [ made | made data' eq made text' eq or ] . ;
-code-like: < sym >. [ made | made code' eq made body' eq or ] . ;
+sees: < kind >. [ made | made data' eq made text' eq or ] . ;
+code-like: < kind >. [ made | made code' eq made body' eq or ] . ;
 
 -- Whether a frame from the k-th down names a name, and whether the
 -- bracket being read or one around it does.

@@ -137,6 +137,8 @@ fn a_symbol_is_no_type_until_applied() {
     let mut s = Session::new();
     s.symbolic = true;
     assert!(s.eval("[ ab ] str# ! string . i64 . or . !").is_ok());
+    // Unapplied, they are symbols, and `or` joins them into a union of the
+    // two symbols, which no string is (TYPES.md 3.6).
     let e = s.eval("[ ab ] str# ! string i64 or . !").unwrap_err();
-    assert_eq!(e.kind, Kind::NoWord);
+    assert_eq!(e.kind, Kind::Mismatch);
 }

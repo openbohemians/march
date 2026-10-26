@@ -143,6 +143,11 @@ pub enum Term {
     /// runs, as a union's member is. At run time, a vector of its message
     /// and its kind.
     Trap,
+    /// A union of values, symbols, `code' data' or` (TYPES.md 3.6): a type
+    /// of just those values, a subset of `sym`, as a value pattern is one
+    /// value. Kept canonical, its names sorted, without repeats, so equal
+    /// sets are one type. At run time a symbol.
+    Among(u32),
 }
 
 /// The constructors a bracket or `.` can apply.
@@ -159,8 +164,9 @@ pub enum Con {
 pub struct Types {
     terms: Vec<Term>,
     index: HashMap<Term, Type>,
-    /// The names `;` gave classes, which messages use: no value has a
-    /// class's type, so the name never hides a value's own.
+    /// The names `;` gave classes and unions of values, which messages use:
+    /// no value has a class's type, so the name never hides a value's own,
+    /// and a union of values is what its name says.
     classes: HashMap<Type, String>,
     /// Tuples' types by position, each row once.
     rows: Vec<Vec<Type>>,
@@ -172,7 +178,13 @@ pub struct Types {
     /// The names of types of their own, each once, the first empty.
     names: Vec<Rc<str>>,
     name_index: HashMap<Rc<str>, u32>,
+    /// The symbols of unions of values, each set once.
+    sets: Vec<Set>,
+    set_index: HashMap<Set, u32>,
 }
+
+/// A union of values' symbols, sorted.
+pub type Set = Rc<[Rc<str>]>;
 
 /// A record's fields: its keys, in order, each with its type.
 pub type Fields = Rc<[(Rc<str>, Type)]>;
@@ -195,6 +207,8 @@ impl Types {
             field_index: HashMap::new(),
             names: Vec::new(),
             name_index: HashMap::new(),
+            sets: Vec::new(),
+            set_index: HashMap::new(),
         };
         for (b, _) in Base::ALL {
             t.intern(Term::Base(b));
@@ -226,7 +240,7 @@ impl Types {
     pub fn is_pattern(&self, t: Type) -> bool {
         match self.term(t) {
             Term::Var(_) | Term::Atom | Term::Or(..) | Term::AnyTuple | Term::AnyRecord => true,
-            Term::Base(_) | Term::Nat(_) | Term::Trap | Term::Own(..) => false,
+            Term::Base(_) | Term::Nat(_) | Term::Trap | Term::Own(..) | Term::Among(_) => false,
             Term::Tuple(r) => self.rows[r as usize].iter().any(|&e| self.is_pattern(e)),
             Term::Record(r) | Term::RecordLit(r) => self.fields[r as usize]
                 .iter()
@@ -292,7 +306,8 @@ impl Types {
             | Term::Tuple(_)
             | Term::Record(_)
             | Term::RecordLit(_)
-            | Term::Trap => true,
+            | Term::Trap
+            | Term::Among(_) => true,
             Term::Own(_, r) => self.counted(r),
             Term::Nat(_) | Term::Var(_) | Term::Atom | Term::AnyTuple | Term::AnyRecord => false,
         }
@@ -390,6 +405,62 @@ impl Types {
             _ => None,
         }
     }
+    /// t with each type of its own in it as its representation, `2 celsius
+    /// vec` as `2 f64 vec`: what t's values are at run time.
+    pub fn represented(&mut self, t: Type) -> Type {
+        match self.term(t) {
+            Term::Own(_, r) => self.represented(r),
+            Term::Ary(e) => {
+                let e = self.represented(e);
+                self.intern(Term::Ary(e))
+            }
+            Term::Vec(n, e) => {
+                let e = self.represented(e);
+                self.intern(Term::Vec(n, e))
+            }
+            Term::Map(k, v) => {
+                let (k, v) = (self.represented(k), self.represented(v));
+                self.intern(Term::Map(k, v))
+            }
+            Term::Tuple(r) => {
+                let es = self.rows[r as usize].to_vec();
+                let es = es.into_iter().map(|e| self.represented(e)).collect();
+                self.tuple(es)
+            }
+            Term::Record(r) => {
+                let fs = self.fields[r as usize].to_vec();
+                let fs = fs
+                    .into_iter()
+                    .map(|(k, e)| (k, self.represented(e)))
+                    .collect();
+                self.record(fs, false)
+            }
+            _ => t,
+        }
+    }
+    /// The union of these symbols' values: sorted, without repeats.
+    pub fn among(&mut self, mut names: Vec<Rc<str>>) -> Type {
+        names.sort();
+        names.dedup();
+        let set: Set = names.into();
+        let n = match self.set_index.get(&set) {
+            Some(&n) => n,
+            None => {
+                let n = self.sets.len() as u32;
+                self.sets.push(set.clone());
+                self.set_index.insert(set, n);
+                n
+            }
+        };
+        self.intern(Term::Among(n))
+    }
+    /// A union of values' symbols, if it is one.
+    pub fn set(&self, t: Type) -> Option<Set> {
+        match self.term(t) {
+            Term::Among(n) => Some(self.sets[n as usize].clone()),
+            _ => None,
+        }
+    }
     /// Whether a type is, or holds, a type of its own no `;` has named.
     pub fn unnamed(&self, t: Type) -> bool {
         match self.term(t) {
@@ -450,7 +521,7 @@ impl Types {
                 let (a, b) = (self.subst(a, env), self.subst(b, env));
                 self.union(a, b)
             }
-            Term::Base(_) | Term::Nat(_) | Term::Trap | Term::Own(..) => t,
+            Term::Base(_) | Term::Nat(_) | Term::Trap | Term::Own(..) | Term::Among(_) => t,
             Term::Ary(e) => {
                 let e = self.subst(e, env);
                 self.intern(Term::Ary(e))
@@ -465,9 +536,9 @@ impl Types {
             }
         }
     }
-    /// Names a class, for messages.
+    /// Names a class, or a union of values, for messages.
     pub fn name_class(&mut self, t: Type, name: &str) {
-        if self.is_class(t) {
+        if self.is_class(t) || matches!(self.term(t), Term::Among(_)) {
             self.classes.entry(t).or_insert_with(|| name.to_string());
         }
     }
@@ -509,6 +580,16 @@ impl Types {
                 n => n.strip_prefix("core.").unwrap_or(n).to_string(),
             },
             Term::Trap => "k trap".into(),
+            // `or` joins two, and n by its power, `code' data' text' or^3`.
+            Term::Among(n) => {
+                let set = &self.sets[n as usize];
+                let names: Vec<String> = set.iter().map(|m| format!("{m}'")).collect();
+                match set.len() {
+                    1 => names[0].clone(),
+                    2 => format!("{} or", names.join(" ")),
+                    k => format!("{} or^{k}", names.join(" ")),
+                }
+            }
         }
     }
 }

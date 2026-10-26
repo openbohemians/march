@@ -103,6 +103,29 @@ fn a_word_walks_one_by_recursion() {
 }
 
 #[test]
+fn a_fold_walks_one_unrolled() {
+    // `each`, and so `fold`, applies its quotation to each element in
+    // turn, no deeper for a long one.
+    let tally = "tally: < '.' >. drop 1 ; tally: < sym >. drop 0 ; \
+                 tally: < quote >. drop 0 ;";
+    assert_eq!(
+        show(&format!("{tally} [ swap + ] 0 [ tally + ] fold")),
+        "<1> 2"
+    );
+    assert_eq!(show("[ ] 0 [ drop 1 + ] fold"), "<1> 0");
+    assert_eq!(show("3 4 [ swap -+ ] [ ] [ -1 insert ] fold ."), "<1> 1");
+    assert_eq!(
+        show("[ swap + ] [ ] [ swap 0 insert ] fold-right dup first swap length"),
+        "<2> swap' 4"
+    );
+    let long = format!("[ {}]", "swap ".repeat(100));
+    assert_eq!(show(&format!("{long} 0 [ drop 1 + ] fold")), "<1> 200");
+    // The core's walks are folds, `shuffles#` among them.
+    assert_eq!(show(&format!("{long} shuffles#")), "<1> true");
+    assert_eq!(show("[ swap + ] shuffles#"), "<1> false");
+}
+
+#[test]
 fn a_symbol_a_meta_op_would_be_taken_for_is_not_taken_apart() {
     let (kind, msg) = error("[ '.' ] length");
     assert_eq!(kind, Kind::Mismatch);

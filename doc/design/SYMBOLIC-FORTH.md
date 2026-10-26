@@ -400,11 +400,11 @@ Settled (Thomas, 2026-10-14), not built:
    Built in march8 (2026-10-20). A bracket in one is three elements,
    its quotation, its kind and `!`, `[ … ] seq# !` (section 7, step 3).
    A string is three too, `[ … ] str# !`, its text a symbol (step 4).
-   Not yet: a quotation
-   holding the symbol `'.'` pushed, which would be one with the meta-op
-   taken out; a walk past about sixty elements, depth's bound, which a
-   `fold` over a quotation would lift. At run time a quotation is code
-   only, never taken apart (30).
+   `each` over one is unrolled, its quotation applied to each element in
+   turn, so `fold` walks one past depth's bound of about sixty, as
+   `shuffles#` does (2026-10-26). Not yet: a quotation holding the symbol
+   `'.'` pushed, which would be one with the meta-op taken out. At run
+   time a quotation is code only, never taken apart (30).
 
    **A word's clauses are data too** (2026-10-20; Thomas: "that seems
    reasonable"), and its effect, so March reads a word as it reads a
@@ -823,6 +823,23 @@ Settled (Thomas, 2026-10-14), not built:
     expanded code by its shortest names, which nothing shows yet, `lower`
     and `fmt` writing source as it was typed.
 
+    **To decide: a letter's field** (Thomas, 2026-10-26). In a bracket
+    that names `rd`, `rd.line` reads a field, a path's head found as a
+    name before a namespace (TYPES.md 2.11): "that is a parameter
+    (essentially a local variable) combined with a literal name `.line`.
+    That use had not occurred to me." A letter could do the same, "`emit:
+    < parse string >. b a b.line emit-at ;`", but now does not: "no word
+    `b.line`: there is no namespace `b`". And "that presents a problem
+    because the no namespace could have a one letter name (or at least
+    not accessed like this if it did". A one-letter word is refused, `b:
+    1 ;` being "`b` is a variable, one letter, and names no word", but a
+    one-letter namespace is not, `b.ff: 1 ;` defining `b.ff`. Refusing
+    one-letter namespaces too, a namespace being a name and a one-letter
+    name a letter, would make a path headed by one letter always a
+    letter's field, read as a bracket name's is; the cost, no namespace
+    `x` or `m`. Thomas: "at the very least we note is as something that
+    needs a decision."
+
 17. **Import and export** (Thomas): a namespace's map has two keys of
     March's own, `import#` and `export#`, named so as not to take words a
     program wants, `csv.export`; a trailing `#` marks March's own names,
@@ -1042,12 +1059,14 @@ Settled (Thomas, 2026-10-15):
     superscript changes what a thing is, not whether it runs: a name still
     applies, and a quotation is still a value, for `.` to apply or `map`
     to take, `( 1 [ dup + ]^3 . )` being `( 8 )` and `( 1 2 3 ) [ dup + ]^3
-    map` being `( 8 16 24 )`. `power#` needs the effect of what it takes,
-    so the stage expands it, from known code only, as `.` applies only
-    known code (4). Where the effect is not known while compiling, for a
-    family whose clauses take different numbers of values or a symbol
-    applied at run time (19), it is an error, and the words are written
-    out.
+    map` being `( 8 16 24 )`. `power#` is March, in core.march, as the
+    search for an identity is (2026-10-26): it reads the effect of what it
+    takes, `effect#`, known of known code only, as `.` applies only known
+    code (4), and builds the quotation, a word applied by its symbol,
+    `+' 3 power#` being `[ +' . +' . ]`. Where the effect is not known
+    while compiling, for a family whose clauses take different numbers of
+    values or a symbol applied at run time (19), it is an error, and the
+    words are written out.
 
     This replaces `w*n`, n copies in a row (march7/docs/SURFACE.md,
     "Copies and operands"): `^` says all of it, a value's copies being
@@ -1772,10 +1791,12 @@ Settled (Thomas, 2026-10-15):
     clause's inputs by its signature: `;` gives the signature a letter
     for each, one it does not use, where the body's effect is sure, and
     where it is not, a family of clauses of different lengths in it, the
-    body is refused where it is applied, as before. Not yet: a map it
-    leaves, read back; a check tested as the program runs, of a value whose
-    type is known only then; and a guard in a check other than a body's
-    first. `;` in braces makes an entry of the map around it, as a
+    body is refused where it is applied, as before. A check that cannot
+    be decided while compiling, a value's type known only as the program
+    runs or a guard in any check, is tested then, a family of one clause,
+    the check its signature and nothing its body, failing as `fail` does
+    where it does not hold (built 2026-10-26). Not yet: a map it leaves,
+    read back. `;` in braces makes an entry of the map around it, as a
     one-letter key may be, `{ x: < f64 > ; }`, a record type's field
     (built with records, 2026-10-24, TYPES.md 2.11); an entry of anything
     but a type is not built yet.

@@ -161,8 +161,6 @@ pub enum Prim {
     Swap,
     /// `x q dip`: q applied with x set aside, and x put back on top.
     Dip,
-    /// `w n quote-power`: w's power, a quotation.
-    QuotePower,
     /// `w n width#`: w applied n wide.
     Width,
     /// `x fail`: fails, by a kind, `no-file' fail`, or a message and a
@@ -655,7 +653,6 @@ pub const PRIMS: &[PrimDef] = &[
     d(Prim::Drop, "drop", "< a >. < >.", &[]),
     d(Prim::Swap, "swap", "< a b >. < b a >.", &[]),
     d(Prim::Dip, "dip", "< b c >.", &[]),
-    d(Prim::QuotePower, "quote-power", "< b c >.", &[]),
     d(Prim::Width, "width#", "< b c >.", &[]),
     d(Prim::Fail, "fail", "< a >.", &[]),
     d(Prim::TrapKind, "trap-kind", "< k trap >. < sym >.", &[]),
@@ -745,7 +742,6 @@ pub fn custom(p: Prim) -> bool {
             | Drop
             | Swap
             | Dip
-            | QuotePower
             | Width
             | QuoteLength
             | QuoteAt

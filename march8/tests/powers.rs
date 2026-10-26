@@ -126,6 +126,33 @@ fn a_quotations_power_is_a_quotation() {
     assert_eq!(show(&["( 1 [ dup + ]^3 . )"]), "<1> ( 8 )");
     assert_eq!(show(&["( 1 2 3 ) [ dup + ]^3 map"]), "<1> ( 8 16 24 )");
     assert_eq!(show(&["1 2 3 [ + ]^3 ."]), "<1> 6");
+    assert_eq!(show(&["1 2 3 4 5 [ + + ]^5 ."]), "<1> 15");
+}
+
+#[test]
+fn a_power_is_march() {
+    // core.march's `power#` reads the effect, `effect#`, and builds the
+    // quotation, a word applied by its symbol.
+    assert_eq!(show(&["+' 3 power# length"]), "<1> 4");
+    assert_eq!(show(&["+' 3 power# 1 at"]), "<1> +'");
+    assert_eq!(show(&["rot' 0 power# length"]), "<1> 0");
+    // An operation of k values has a power of a multiple of k - 1 and one
+    // more; its 0th, an identity, only of two.
+    let (kind, msg) = fails("1 2 3 4 [ + + ]^4 .");
+    assert_eq!(kind, Kind::Mismatch);
+    assert_eq!(
+        msg,
+        "the quotation takes 3 values, so a power of it takes a multiple of 2 and one more"
+    );
+    let (kind, msg) = fails("[ + + ]^0 .");
+    assert_eq!(kind, Kind::NoWord);
+    assert!(
+        msg.ends_with("of two values; the quotation takes 3"),
+        "{msg}"
+    );
+    let (kind, msg) = fails("+' -1 power#");
+    assert_eq!(kind, Kind::Mismatch);
+    assert!(msg.contains("takes a count, at least 0"), "{msg}");
 }
 
 #[test]

@@ -151,3 +151,58 @@ fn a_union_made_at_run_time_is_noted() {
     assert!(s.take_warnings().is_empty());
     assert_eq!(s.show_typed(), "<1> \"yes\" < i64 string or >");
 }
+
+/// A union of values, `code' data' or` (TYPES.md 3.6): the type of just
+/// those symbols, a subset of `sym`.
+const KIND: &str = "read: code' data' text' or^3 ; name: own' top' or ; kind: read name or ;
+  like: < kind >. code' eq ;
+  tk: { kind: < kind > ; n: < i64 > ; } ;
+  tok: < kind i64 >. [ kd nn | { kind: kd n: nn } < tk >. ] . ;
+  pick: < i64 [ 0 gt ] ? >. drop code' ;
+  pick: < i64 >. drop top' ;
+  stray: < i64 [ 0 gt ] ? >. drop code' ;
+  stray: < i64 >. drop frob' ;";
+
+#[test]
+fn a_union_of_values_takes_just_them() {
+    // Known while compiling, a symbol is one of them or not.
+    assert_eq!(show(&[KIND, "code' like data' like"]), "<2> true false");
+    assert_eq!(session(&[KIND, "frob' like"]).err(), Some(Kind::NoWord));
+    // Known only as the program runs, it is tested then, and inside the
+    // clause it is one of them, so it fills a field of their type.
+    assert_eq!(show(&[KIND, "1", "pick like"]), "<1> true");
+    assert_eq!(show(&[KIND, "0", "pick 5 tok kind' at"]), "<1> top'");
+    // One that is another symbol as the program runs fails then, as a
+    // value pattern does.
+    assert!(matches!(
+        session(&[KIND, "0", "stray like"]).err(),
+        Some(Kind::Run(march8::machine::Error::Trap(k, _))) if k == "no-word"
+    ));
+    // A known symbol fills a field of their type, and `put` sets one.
+    assert_eq!(
+        show(&[KIND, "{ kind: own' n: 1 } < tk >. kind' text' put kind' at"]),
+        "<1> text'"
+    );
+    assert_eq!(
+        session(&[KIND, "{ kind: frob' n: 1 } < tk >."]).err(),
+        Some(Kind::Mismatch)
+    );
+    // A symbol known only as the program runs is no `kind` without a test.
+    let bare = "bare: < sym i64 >. [ kd nn | { kind: kd n: nn } < tk >. ] . ;";
+    assert_eq!(session(&[KIND, bare]).err(), Some(Kind::Mismatch));
+    // `or` joins symbols, or types, not one with the other.
+    assert_eq!(session(&["code' i64 or"]).err(), Some(Kind::Limit));
+}
+
+#[test]
+fn a_union_of_values_is_named_and_forgotten() {
+    // Named by `;`, and a symbol where a symbol is wanted.
+    assert_eq!(typed(&[KIND, "code' 1 tok kind' at"]), "<1> code' < kind >");
+    assert_eq!(show(&[KIND, "own' 1 tok kind' at top' eq"]), "<1> false");
+    // Unnamed, it is written as made, and a check is one where applied.
+    assert_eq!(show(&["code' < code' data' or >."]), "<1> code'");
+    let e = Session::new()
+        .eval("frob' < code' data' or >.")
+        .unwrap_err();
+    assert_eq!(e.msg, "expected code' data' or, found frob'");
+}

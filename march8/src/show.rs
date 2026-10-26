@@ -4,7 +4,7 @@ use crate::machine::Machine;
 use crate::prims::show_dec;
 use crate::read::{Tok, read};
 use crate::symbols::Symbols;
-use crate::types::{Base, Term, Type, Types};
+use crate::types::{Base, SYMBOL, Term, Type, Types};
 
 /// Elements shown of a collection, before the count of the rest.
 const SHOWN: usize = 16;
@@ -64,6 +64,8 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
         }
         // A type of its own shows as its representation does.
         Term::Own(_, r) => value(m, types, v, r, out),
+        // A union of values is a symbol.
+        Term::Among(_) => value(m, types, v, SYMBOL, out),
         // A record shows as a map does, its keys symbols (TYPES.md 2.11).
         Term::Record(_) | Term::RecordLit(_) => {
             let fs = types.fields(t).expect("a record");

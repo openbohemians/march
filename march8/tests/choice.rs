@@ -250,7 +250,9 @@ fn value_patterns_choose_by_equality() {
         show(&[bye, "\"quit\" \"hi\"", "cmd swap cmd"]),
         "<2> \"hi\" \"bye: quit\""
     );
-    // Patterns belong in signatures, and a value is not an output.
-    assert_eq!(cells(&["1 < 1 > !"]), Err(Kind::Syntax));
+    // In a check anywhere, a pattern is tested, and a value is not an
+    // output.
+    assert_eq!(cells(&["1 < 1 > !"]), Ok(vec![1]));
+    assert_eq!(cells(&["2 < 1 > !"]), Err(Kind::Mismatch));
     assert_eq!(cells(&["bb: < i64 >. < 0 >. ;"]), Err(Kind::Mismatch));
 }

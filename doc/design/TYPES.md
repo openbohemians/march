@@ -510,15 +510,17 @@ where one is wanted, its integers floats, and a map with nothing to take
 it. A record's values are held in the order of its keys, as a tuple's
 are by position, so a field read by `at` with its key known, or by a
 path from a bracket's name, `p.x`, costs what a tuple's does, and a
-field it lacks is an error while compiling; `put` with its key known
+field it lacks is an error while compiling; so does a path from a word
+that takes nothing, `cfg.port`, its head found as any name is (built
+2026-10-26), while words do not chain, `sort.length` being no path; `put` with its key known
 sets one, `r n' 5 put`, a new record of the same type, so a fold hands
 it along, and an undecided literal given a key it lacks is the map it
 is. Named inputs come of it
 already, `{ term: 72 rate: 0.2 principal: 50000 } payment`, where
-`payment` takes the record. Not yet: a record forgetting into a map
-where one is wanted, and `at` with a key known only as the program runs;
-a path from a word, `cfg.port`, its head found as any name is; an entry
-by `;` of anything but a type; a record opened into places; equality of
+`payment` takes the record. A record forgets into a map where one is
+wanted, of its keys and its values' union, each value tagged where they
+differ, and so `at` with a key known only as the program runs reads that
+map (built 2026-10-26). Not yet: an entry by `;` of anything but a type; a record opened into places; equality of
 records; and a known array of map literals undecided, which settle into
 maps where a clause could want records. No container has equality yet,
 an array, a tuple or a record: it is to be element by element, a rule in
@@ -530,10 +532,11 @@ Built in march8 (2026-10-24), types of their own as above: `own`, named
 by `;`, an alias when named already, an error unnamed; forgotten where
 the representation's word is applied, kept by a generic word and by a
 clause of its own, `price 3 +` taking that; given by `!` of the
-representation or a literal of it, over a record too. Not yet: `!` of an
-array of the representation, `( 1.0 2.0 ) < 2 celsius vec > !`, which
-`[ celsius ! ] map` does; the warning proposed above; and a type made of
-itself, `tree: { left: < tree > ; … } ;`, an error for now. A clause
+representation or a literal of it, over a record too; and by `!` of an
+array of the representation, `( 1.0 2.0 ) < 2 celsius vec > !`, as
+`[ celsius ! ] map` gives, or any value holding it (built 2026-10-26).
+Not yet: the warning proposed above; and a type made of itself, `tree:
+{ left: < tree > ; … } ;`, an error for now. A clause
 added to a core family by its path, `core.+:`, is expanded in `core`, so
 it names the program's types only once they are the core's.
 
@@ -759,6 +762,23 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
      made where run-time choices differ, families split by tag, a union
      value as one cell of tag and value, and the informative warning
      (march8/docs/MACHINE.md, "Unions").
+   - **Unions of values** (2026-10-26). A value is a type of one value,
+     `< Open' >` in a pattern, so a union of values is the type of just
+     those values. Its first use was a token's kind in
+     march8/compiler/lower.march, `< sym >`, any symbol, though only twelve
+     are made, `code` to `top`, so a misspelled `bdoy'` passed and matched
+     nothing (Thomas: "The `sym` on emit-as, it's name any symbol, doesn't
+     it have to be a "name" ?"). By an operation's power (SYMBOLIC-FORTH.md
+     6.21), Thomas's `kind: code' data' text' sig' body' close' tok' or^7 ;`.
+     `sym own` would not do: a type of its own still takes any symbol.
+     Built the same day, of symbols: an input of one a guard, tested to be
+     one of them as a value pattern's input is to equal its value, and one
+     of them inside its clause; a known symbol taken where one is wanted, in
+     a field, by `put` or a check; forgotten into `sym` where a symbol is
+     wanted (march8/docs/MACHINE.md, "Unions of values"). `lower`'s kinds
+     are `read-kind name-kind or`, the reading's seven and the names pass's
+     five. Not yet: a union of symbols and a type, and values of other
+     types, numbers and strings, whose `or` means something else.
    - **Not taken from Elixir:** gradual typing (`dynamic()`), which serves
      an existing dynamic language on a VM that tags every value; and full
      semantic subtyping, with complements of function types. March starts

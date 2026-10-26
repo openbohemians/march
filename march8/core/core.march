@@ -261,7 +261,30 @@ bi: [ keep ] dip . ;
 -- `width#` applies the word its symbol names, at that width; `+_2` is no
 -- word, `+` neither moving values nor being handed code.
 
-power#: < a b >. quote-power ;
+power#: < a int# [ swap drop 0 lt? ] ? >. swap drop "`power#` takes a count, at least 0, and is given \_" ( _ mismatch' ) fail ;
+power#: < a int# >. over effect# powers# ;
+
+-- `w n k m powers#`: the power by w's stack effect, k values taken and m
+-- left. Reading the words as data, as `identity#` does: w is applied as
+-- `[ w . ]`, a word by its symbol, so it is looked up where the power is.
+
+powers#: < a 0 0 1 >. drop drop drop drop [ *' unit# ! ] ;
+powers#: < a 0 2 1 >. drop drop drop [ ] swap -1 insert [ unit# ! ] concat ;
+powers#: < a 0 i64 1 [ drop [ drop drop ] dip 2 gt? ] ? >. drop swap drop swap named# dup rot "the power 0 of \_ is the identity of its operation, and an identity is an operation's of two values; \_ takes \_" ( _ no-word' ) fail ;
+powers#: < a int# 0 1 >. drop drop [ applying# ] dip swap over times# swap 1 -+ [ * ] swap times# concat ;
+powers#: < a int# 1 1 >. drop drop [ applying# ] dip times# ;
+powers#: < a int# i64 1 [ drop 1 -+ swap 1 -+ swap mod 0 eq? swap drop ] ? >. drop 1 -+ swap 1 -+ swap div [ applying# ] dip times# ;
+powers#: < a int# i64 1 >. drop swap drop swap named# swap dup 1 -+ "\_ takes \_ values, so a power of it takes a multiple of \_ and one more" ( _ mismatch' ) fail ;
+powers#: < a int# i64 i64 >. drop drop [ applying# ] dip times# ;
+
+-- `w applying#`, its code applied: `[ w . ]`; and `q n times#`, q's code
+-- n times over, `[ ]` for none, made onto a quotation as it goes, so that
+-- the recursion is unfolded while compiling.
+
+applying#: < a >. [ ] swap -1 insert [ . ] concat ;
+times#: < quote i64 >. [ [ ] swap ] dip onto# ;
+onto#: < quote quote i64 [ [ drop drop ] dip 0 eq? ] ? >. drop drop ;
+onto#: < quote quote i64 >. 1 -+ [ swap over concat swap ] dip onto# ;
 
 /(.+)\^([0-9]+)/: [ name# ] dip int# ! power# . ;
 /(.+)_([0-9]+)/: [ name# ] dip int# ! width# ;
@@ -328,6 +351,11 @@ length: < a ary >. ary-length < i64 >. ;
 length: < n a vec >. vec-length < i64 >. ;
 length: < tuple >. tuple-length < i64 >. ;
 length: < k v map >. map-length < i64 >. ;
+
+-- Arrays are equal element by element, and only as long as each other.
+
+eq: < a ary a ary [ length swap length i64eq? ] ? >. [ eq? ] zip true [ and ] fold < bool >. ;
+eq: < a ary a ary >. drop drop false < bool >. ;
 
 at: < string i64 >. string-at < i64 >. ;
 at: < a ary i64 >. ary-at < a >. ;
@@ -531,8 +559,7 @@ stated#: swap [ ] swap 0 insert clauses# length 0 eq? not ;
 -- Whether code only moves values, by `dup`, `drop` and `swap`, and
 -- whether it so picks one of two, `[ swap drop ]`.
 
-shuffles#: < quote [ length 0 eq? ] ? >. drop true < bool >. ;
-shuffles#: < quote >. dup first dup dup' eq? over drop' eq? or over swap' eq? or swap '.' eq? or swap rest shuffles# and < bool >. ;
+shuffles#: < quote >. true [ dup dup' eq? over drop' eq? or over swap' eq? or swap '.' eq? or and ] fold < bool >. ;
 picks#: < quote [ shuffles# not ] ? >. drop false < bool >. ;
 picks#: < quote >. effect# over -+ -1 eq? swap 3 lt? and < bool >. ;
 

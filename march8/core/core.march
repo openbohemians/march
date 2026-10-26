@@ -384,11 +384,31 @@ concat: < n a vec m a vec >. vec-concat ;
 keys: < k v map >. map-keys < k ary >. ;
 values: < k v map >. map-values < v ary >. ;
 
+-- `ordered`: whether each element is at most the next. `sorted`, a
+-- property of arrays (TYPES.md 3.17): `i64 ary sorted` is the arrays in
+-- order, which `sort` leaves and `!` gives by testing `ordered`, a value
+-- known only as the program runs tested then.
+
+ordered: < a ary [ length 2 lt ] ? >. drop true < bool >. ;
+ordered: < a ary >. dup most swap rest [ le ] zip true [ and ] fold < bool >. ;
+sorted: < a ary > [ ordered ] prop ;
+
 -- `sort`: an array in order, numbers by value and strings by text.
-sort: < i64 ary >. i64-sort < i64 ary >. ;
-sort: < f64 ary >. f64-sort < f64 ary >. ;
-sort: < money ary >. money-sort < money ary >. ;
-sort: < string ary >. string-sort < string ary >. ;
+sort: < i64 ary >. i64-sort < i64 ary sorted >. ;
+sort: < f64 ary >. f64-sort < f64 ary sorted >. ;
+sort: < money ary >. money-sort < money ary sorted >. ;
+sort: < string ary >. string-sort < string ary sorted >. ;
+
+-- `xs el add`: el put into a sorted array, after the elements at most it,
+-- and the array still sorted. The gap is found by halves, `gap#` narrowing
+-- lo and hi until they meet, about log n steps; putting it in costs what
+-- `insert` does.
+
+add: < a ary sorted a >. over over over length 0 swap gap# insert < a ary sorted >. ;
+gap#: < a ary a i64 i64 [ xs el lo hi | lo hi eq ] ? >. drop [ drop drop ] dip ;
+gap#: < a ary a i64 i64 [ xs el lo hi | xs lo hi + 2 div 1 + at el le ] ? >.
+  [ xs el lo hi | xs el lo hi + 2 div 1 + hi ] . gap# ;
+gap#: < a ary a i64 i64 >. [ xs el lo hi | xs el lo lo hi + 2 div ] . gap# ;
 
 -- `order`, `<#`: the positions that would put an array in order, APL's
 -- grade up `⍋` and R's `order` (Thomas, 2026-10-09: not "grade", too near

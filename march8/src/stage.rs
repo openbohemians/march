@@ -906,6 +906,9 @@ pub struct Stage {
     /// by the check as written, and what each says, by its family's name.
     checks: HashMap<String, Rc<str>>,
     check_text: HashMap<Rc<str>, String>,
+    /// Each property's test, by the type `prop` made for it; one with none
+    /// is a fact `!` trusts (doc/design/TYPES.md 3.17).
+    prop_tests: HashMap<Type, Rc<[Token]>>,
 }
 
 /// Where the core's rules are kept among the namespaces' (doc/design/
@@ -1222,6 +1225,7 @@ impl Stage {
             patterns: HashMap::new(),
             checks: HashMap::new(),
             check_text: HashMap::new(),
+            prop_tests: HashMap::new(),
         };
         // The core is the namespace `core`, which every namespace finds
         // last, as though imported (doc/design/SYMBOLIC-FORTH.md 16).
@@ -1237,6 +1241,7 @@ impl Stage {
             (Con::Or, "or"),
             (Con::Trap, "trap"),
             (Con::Own, "own"),
+            (Con::Prop, "prop"),
         ] {
             s.word(&core_path(name)).con = Some(con);
         }
@@ -1462,15 +1467,18 @@ impl Stage {
             // body's first check being its signature.
             Val::Type(t) => {
                 let t = self.named(t)?;
-                self.annotate_top(&Sig {
-                    ins: vec![t],
-                    guards: Vec::new(),
-                    outs: None,
-                })
+                self.typed_top(
+                    &Sig {
+                        ins: vec![t],
+                        guards: Vec::new(),
+                        outs: None,
+                    },
+                    false,
+                )
             }
             Val::Quote(q) if signature(&q) => {
                 let sig = self.bracket(&q[1..q.len() - 1])?;
-                self.annotate_top(&sig)
+                self.typed_top(&sig, false)
             }
             Val::Quote(q) => self.run_code(&q),
             // Which word a name applies is chosen while compiling.
@@ -1505,7 +1513,7 @@ impl Stage {
             Val::Name(..) if named.is_some() => named.expect("checked"),
             Val::Quote(q) if signature(&q) => {
                 let sig = self.bracket(&q[1..q.len() - 1])?;
-                return self.annotate_top(&sig);
+                return self.typed_top(&sig, true);
             }
             _ if f.ty == NIL => NIL,
             // A quotation on top is run while compiling, and its values are
@@ -1528,6 +1536,22 @@ impl Stage {
                 _ => self.pos,
             };
             return self.made(t, at);
+        }
+        // A type with properties: the type without them, then each tested
+        // (TYPES.md 3.17).
+        if let Some((b, names)) = self.types.has_parts(t) {
+            let i = self.stack.len() - 1;
+            let before = [self.stack[i].ty];
+            if self.types.is_pattern(b) {
+                self.annotate_top(&Sig {
+                    ins: vec![b],
+                    guards: Vec::new(),
+                    outs: None,
+                })?;
+            } else {
+                self.convert(i, b)?;
+            }
+            return self.props_after(i, &before, &[Some(names)], true);
         }
         if self.types.is_pattern(t) {
             let sig = Sig {
@@ -1656,6 +1680,10 @@ impl Stage {
             // its type where a type is wanted.
             self.push(NIL, Val::Int(0));
             Ok(())
+        } else if let Some(t) = w.ty
+            && let Some((name, over)) = self.types.prop_parts(t)
+        {
+            self.apply_prop(name, over)
         } else if let Some(t) = w.ty {
             // A type's name is a word that gives the type, as any word that
             // builds a value gives it (Thomas, 2026-10-12): types are
@@ -1667,6 +1695,144 @@ impl Stage {
         } else {
             Err(self.err(Kind::NoWord, format!("no word `{name}`")))
         }
+    }
+
+    // ---- Properties (doc/design/TYPES.md 3.17) ----
+
+    /// A property applied: to the type on top, one of the types it is over,
+    /// `i64 ary sorted`, or, with no type on top, to their class, `a ary
+    /// sorted`, so that `xs sorted !` gives it.
+    fn apply_prop(&mut self, name: Rc<str>, over: Type) -> Result<()> {
+        let top = match self.stack.last() {
+            Some(j) if self.stack.len() > self.floor => match j.val {
+                Val::Type(t) => Some(t),
+                _ => None,
+            },
+            _ => None,
+        };
+        let t = match top {
+            Some(t) => {
+                let bare = self.types.bare(t);
+                if self.unify(over, bare, &mut Env::default()).is_none() {
+                    let shown = name.strip_prefix("core.").unwrap_or(&name);
+                    return Err(self.err(
+                        Kind::Mismatch,
+                        format!(
+                            "`{shown}` is a property of {}, and {} is not one",
+                            self.types.name(over),
+                            self.types.name(t)
+                        ),
+                    ));
+                }
+                self.stack.pop();
+                t
+            }
+            None => over,
+        };
+        let t = self.types.has(t, &[name]);
+        self.push(TYPE, Val::Type(t));
+        Ok(())
+    }
+
+    /// A signature's types given to the values on top, properties among
+    /// them: the types without them first, then the properties, which a
+    /// check claims and `!` tests.
+    fn typed_top(&mut self, sig: &Sig, test: bool) -> Result<()> {
+        let props: Vec<Option<Set>> = sig
+            .ins
+            .iter()
+            .map(|&t| self.types.has_parts(t).map(|(_, n)| n))
+            .collect();
+        if props.iter().all(Option::is_none) {
+            return self.annotate_top(sig);
+        }
+        self.need(sig.ins.len())?;
+        let base = self.stack.len() - sig.ins.len();
+        let before: Vec<Type> = self.stack[base..].iter().map(|j| j.ty).collect();
+        let bare = Sig {
+            ins: sig.ins.iter().map(|&t| self.types.bare(t)).collect(),
+            guards: sig.guards.clone(),
+            outs: sig.outs.clone(),
+        };
+        self.annotate_top(&bare)?;
+        self.props_after(base, &before, &props, test)
+    }
+
+    /// The values from `base`, their types given without properties, given
+    /// those `props` names: what they had before, `before`, kept, and each
+    /// other claimed, by a check, or tested, by `!`. A check keeps only
+    /// those it names; `!` adds to them all, where the value is the same.
+    fn props_after(
+        &mut self,
+        base: usize,
+        before: &[Type],
+        props: &[Option<Set>],
+        test: bool,
+    ) -> Result<()> {
+        for (k, names) in props.iter().enumerate() {
+            let Some(names) = names else { continue };
+            let had = self.types.has_parts(before[k]).map(|(_, n)| n);
+            let i = base + k;
+            let was = self.types.bare(before[k]);
+            let same = test && (self.stack[i].ty == was || self.forgets(self.stack[i].ty, was));
+            let new: Vec<Rc<str>> = names
+                .iter()
+                .filter(|m| !had.as_ref().is_some_and(|h| h.contains(m)))
+                .cloned()
+                .collect();
+            let kept: Vec<Rc<str>> = had
+                .iter()
+                .flat_map(|h| h.iter())
+                .filter(|m| same || names.contains(m))
+                .cloned()
+                .collect();
+            let t = self.types.has(self.stack[i].ty, &kept);
+            self.stack[i].ty = t;
+            if test {
+                for name in &new {
+                    let tested = self.words.get(name).and_then(|w| w.ty);
+                    if let Some(q) = tested.and_then(|t| self.prop_tests.get(&t)).cloned() {
+                        self.test_prop(i, name, q)?;
+                    }
+                }
+            }
+            let t = self.types.has(self.stack[i].ty, &new);
+            self.stack[i].ty = t;
+        }
+        Ok(())
+    }
+
+    /// A property's test of the value at `i`, a check that fails where it
+    /// does not hold, while compiling where the value is known then, and
+    /// as the program runs otherwise.
+    fn test_prop(&mut self, i: usize, name: &str, test: Rc<[Token]>) -> Result<()> {
+        let ins: Vec<Type> = self.stack[i..].iter().map(|j| j.ty).collect();
+        let mut shown: Vec<String> = ins.iter().map(|&t| self.types.name(t)).collect();
+        shown[0] += &format!(" {}", name.strip_prefix("core.").unwrap_or(name));
+        let at = self.pos;
+        let sig = Sig {
+            ins,
+            guards: vec![Guard {
+                test: Test::Quote(test),
+                slot: 0,
+                arity: 1,
+                pos: at,
+            }],
+            outs: None,
+        };
+        // The test is the property's, defined elsewhere: a failure is where
+        // `!` is applied.
+        // One family for each property by its path, though two may be shown
+        // by one name, the program's `sorted` and the core's.
+        let text = shown.join(" ");
+        let r = self.check_as(&sig, format!("{text} by {name}"), text);
+        self.pos = at;
+        r.map_err(|mut e| {
+            if e.trace.is_empty() {
+                e.pos = Some(at);
+            }
+            e
+        })
     }
 
     // ---- Namespaces (doc/design/SYMBOLIC-FORTH.md 16, 17) ----
@@ -3168,6 +3334,13 @@ impl Stage {
                 (Term::Vec(n, e), Term::Vec(m, f)) => n == m && self.forgets(e, f),
                 (Term::Map(k, v), Term::Map(k2, v2)) => self.forgets(k, k2) && self.forgets(v, v2),
                 (Term::Base(Base::I64), Term::Base(Base::Bool)) => true,
+                // Properties are forgotten, and none is had that is not.
+                (Term::Has(a, m), Term::Has(b, n)) => {
+                    let (m, n) = (self.types.names_of(m), self.types.names_of(n));
+                    m.iter().all(|p| n.contains(p)) && self.forgets(a, b)
+                }
+                (Term::Has(..), _) => false,
+                (_, Term::Has(b, _)) => self.forgets(t, b),
                 // A type of its own is its representation, forgotten.
                 (_, Term::Own(_, r)) => self.forgets(t, r),
                 // A union of values is a symbol, or one of a wider union.
@@ -3232,7 +3405,13 @@ impl Stage {
         for g in &sig.guards {
             text += &format!(" where {} holds", g.name(&self.types));
         }
-        let name = match self.checks.get(&text) {
+        self.check_as(sig, text.clone(), text)
+    }
+
+    /// A check tested as the program runs, one family for each `key`, and
+    /// `text` what it says it expects.
+    fn check_as(&mut self, sig: &Sig, key: String, text: String) -> Result<()> {
+        let name = match self.checks.get(&key) {
             Some(n) => n.clone(),
             None => {
                 let n: Rc<str> = format!("check#{}", self.checks.len() + 1).into();
@@ -3244,7 +3423,7 @@ impl Stage {
                     core: false,
                 };
                 self.word(&n).clauses.push(Rc::new(clause));
-                self.checks.insert(text.clone(), n.clone());
+                self.checks.insert(key, n.clone());
                 self.check_text.insert(n.clone(), text);
                 n
             }
@@ -3402,6 +3581,30 @@ impl Stage {
                 Some(0)
             }
             Some(b) if self.forgets(b, have) => Some(0),
+            // Two with properties, neither within the other: the type with
+            // the properties both have.
+            Some(b)
+                if self.types.has_parts(b).is_some() || self.types.has_parts(have).is_some() =>
+            {
+                let (bb, hb) = (self.types.bare(b), self.types.bare(have));
+                let wide = match () {
+                    _ if self.forgets(bb, hb) => bb,
+                    _ if self.forgets(hb, bb) => hb,
+                    _ => return None,
+                };
+                let names = |t| {
+                    self.types
+                        .has_parts(t)
+                        .map_or(Vec::new(), |(_, n)| n.to_vec())
+                };
+                let theirs = names(have);
+                let common: Vec<Rc<str>> = names(b)
+                    .into_iter()
+                    .filter(|m| theirs.contains(m))
+                    .collect();
+                env.0[v] = Some(self.types.has(wide, &common));
+                Some(0)
+            }
             _ => None,
         }
     }
@@ -3413,6 +3616,18 @@ impl Stage {
         match (self.types.term(p), self.types.term(have)) {
             (Term::Var(v), _) => self.bind(v, have, env),
             (Term::Or(..), _) => self.match_union(p, have, env),
+            // A type with properties is wanted of a value that has them, and
+            // a value with them is its type where that is, matched a little
+            // less well than where they are wanted (TYPES.md 3.17).
+            (Term::Has(a, m), Term::Has(b, n)) => {
+                let (m, n) = (self.types.names_of(m), self.types.names_of(n));
+                if !m.iter().all(|p| n.contains(p)) {
+                    return None;
+                }
+                Some(self.unify(a, b, env)? + 2 * m.len() as i32)
+            }
+            (Term::Has(..), _) => None,
+            (_, Term::Has(b, _)) => Some((self.unify(p, b, env)? - 1).max(0)),
             // A type of its own is only itself where it is wanted, and where
             // its representation is, it is that, matched a little less well
             // (TYPES.md 2.11), as a bool is an i64.
@@ -3543,16 +3758,40 @@ impl Stage {
         for (k, &p) in sig.ins.iter().enumerate() {
             let t = self.types.subst(p, env);
             let mut have = self.stack[base + k].ty;
-            // A type of its own forgets itself where its representation's
-            // word is applied (TYPES.md 2.11), `price sqrt` a decimal.
-            if self.types.own_parts(have).is_some() && have != t && !forgot.contains(&have) {
-                forgot.push(have);
-            }
-            while let Some((_, r)) = self.types.own_parts(have)
-                && have != t
-            {
-                have = r;
-                self.stack[base + k].ty = r;
+            let mut own = false;
+            loop {
+                // A property is kept where the pattern names it, and
+                // forgotten where it does not (TYPES.md 3.17).
+                if let Some((b, n)) = self.types.has_parts(have)
+                    && have != t
+                {
+                    let wanted = self.types.has_parts(t).map(|(_, m)| m);
+                    let kept: Vec<Rc<str>> = n
+                        .iter()
+                        .filter(|m| wanted.as_ref().is_some_and(|w| w.contains(m)))
+                        .cloned()
+                        .collect();
+                    let to = self.types.has(b, &kept);
+                    if to != have {
+                        have = to;
+                        self.stack[base + k].ty = to;
+                        continue;
+                    }
+                }
+                // A type of its own forgets itself where its representation's
+                // word is applied (TYPES.md 2.11), `price sqrt` a decimal.
+                if let Some((_, r)) = self.types.own_parts(have)
+                    && have != t
+                {
+                    if !own && !forgot.contains(&have) {
+                        forgot.push(have);
+                    }
+                    own = true;
+                    have = r;
+                    self.stack[base + k].ty = r;
+                    continue;
+                }
+                break;
             }
             // A vec given where an array is wanted keeps its length, which
             // the body may use: it is an array, more precisely known.
@@ -5599,6 +5838,34 @@ impl Stage {
                         top => top,
                     };
                     let (a, b) = match top {
+                        // A property takes the type on top, where there is
+                        // one, and `prop` its test, where there is one
+                        // (TYPES.md 3.17).
+                        Item::Name(s)
+                            if self
+                                .words
+                                .get(&s)
+                                .and_then(|w| w.ty)
+                                .is_some_and(|t| self.types.prop_parts(t).is_some()) =>
+                        {
+                            if matches!(items.last(), Some(Item::Type | Item::Bracket(..))) {
+                                items.pop();
+                            }
+                            items.push(Item::Type);
+                            i += 1;
+                            continue;
+                        }
+                        Item::Name(s)
+                            if self
+                                .words
+                                .get(&s)
+                                .is_some_and(|w| matches!(w.con, Some(Con::Prop))) =>
+                        {
+                            match items.last() {
+                                Some(Item::Quote(..)) => (2, 1),
+                                _ => (1, 1),
+                            }
+                        }
                         Item::Name(s) if self.words.get(&s).is_some_and(|w| w.ty.is_some()) => {
                             items.push(Item::Type);
                             i += 1;
@@ -5826,10 +6093,34 @@ impl Stage {
                 ));
             }
             for (k, &o) in outs.iter().enumerate() {
-                let t = self.types.subst(o, &env);
-                self.annotate(base + k, t)?;
+                self.output(base + k, o, &env)?;
             }
         }
+        Ok(())
+    }
+
+    /// Gives an output the type its signature says, `o` under the clause's
+    /// variables. A property written there is claimed (TYPES.md 3.17); one
+    /// a variable stands for is the value's if it still has it, and
+    /// forgotten if a word inside forgot it.
+    fn output(&mut self, i: usize, o: Type, env: &Env) -> Result<()> {
+        let t = self.types.subst(o, env);
+        let Some((b, names)) = self.types.has_parts(t) else {
+            return self.annotate(i, t);
+        };
+        let written = self.types.has_parts(o).map(|(_, n)| n);
+        let had = self.types.has_parts(self.stack[i].ty).map(|(_, n)| n);
+        let given: Vec<Rc<str>> = names
+            .iter()
+            .filter(|m| {
+                written.as_ref().is_some_and(|w| w.contains(m))
+                    || had.as_ref().is_some_and(|h| h.contains(m))
+            })
+            .cloned()
+            .collect();
+        self.annotate(i, b)?;
+        let t = self.types.has(self.stack[i].ty, &given);
+        self.stack[i].ty = t;
         Ok(())
     }
 
@@ -6205,6 +6496,8 @@ impl Stage {
             Con::Vec => return true,
             // A kind or a variable, and nothing else is one: `trap` alone.
             Con::Trap => return true,
+            // The types it is over, and its test or none: `prop` alone.
+            Con::Prop => return true,
         };
         let sig = Sig {
             ins,
@@ -6303,6 +6596,25 @@ impl Stage {
                 self.push(TYPE, Val::Type(t));
                 return Ok(());
             }
+            // A property over types, with a test, a quotation that takes a
+            // value and leaves a flag, or none, named by `;` (TYPES.md
+            // 3.17), `sorted: a ary [ sorted? ] prop ;`.
+            Con::Prop => {
+                let test = match self.stack.last().map(|j| &j.val) {
+                    Some(Val::Quote(q)) => Some(q.clone()),
+                    _ => None,
+                };
+                if test.is_some() {
+                    self.stack.pop();
+                }
+                let over = self.pop_type()?;
+                let t = self.types.prop("", over);
+                if let Some(q) = test {
+                    self.prop_tests.insert(t, q);
+                }
+                self.push(TYPE, Val::Type(t));
+                return Ok(());
+            }
             // A trap's kind is in its type (doc/design/SYMBOLIC-FORTH.md 29):
             // a letter takes any, `k trap`, as `a ary` is any array, and a
             // kind is a value of the type, a trap of that kind, to match.
@@ -6341,6 +6653,11 @@ impl Stage {
             Some((n, r)) if n.is_empty() => {
                 let t = self.types.own(name, self.named(r)?);
                 self.type_names.insert(t, name.clone());
+                t
+            }
+            // A property takes the name of the path that binds it.
+            _ if matches!(self.types.prop_parts(t), Some((n, _)) if n.is_empty()) => {
+                self.types.name_prop(t, name);
                 t
             }
             _ => self.named(t)?,
@@ -6518,6 +6835,17 @@ impl Stage {
         let forgot = self.settle(sig, &env)?;
         self.forgot_together(&forgot);
         let base = self.stack.len() - n;
+        // A primitive of any type that works out its own, `ary-insert`, is
+        // given its inputs without properties, which only moving a value
+        // keeps (TYPES.md 3.17).
+        if !matches!(
+            p,
+            Prim::Dup | Prim::Drop | Prim::Swap | Prim::Dip | Prim::Def | Prim::Fail
+        ) {
+            for k in base..self.stack.len() {
+                self.stack[k].ty = self.types.bare(self.stack[k].ty);
+            }
+        }
         let len = |s: &mut Self, v: u8| match env.0[v as usize].map(|t| s.types.term(t)) {
             Some(Term::Nat(k)) => k,
             _ => unreachable!("a vec's length is bound"),

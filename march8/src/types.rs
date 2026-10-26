@@ -148,6 +148,15 @@ pub enum Term {
     /// value. Kept canonical, its names sorted, without repeats, so equal
     /// sets are one type. At run time a symbol.
     Among(u32),
+    /// A type and the properties its values have (TYPES.md 3.17), `i64 ary
+    /// sorted`: its properties a set, sorted, so the order they are written
+    /// in is no matter, and the type never one with properties itself,
+    /// which join it. At run time the type's values.
+    Has(Type, u32),
+    /// A property as `prop` defines it, `sorted: a ary [ sorted? ] prop ;`:
+    /// the types it is over, and its name, empty until `;` binds it.
+    /// Applied to a type, it gives a `Has`.
+    Prop(u32),
 }
 
 /// The constructors a bracket or `.` can apply.
@@ -159,6 +168,7 @@ pub enum Con {
     Or,
     Trap,
     Own,
+    Prop,
 }
 
 pub struct Types {
@@ -178,9 +188,12 @@ pub struct Types {
     /// The names of types of their own, each once, the first empty.
     names: Vec<Rc<str>>,
     name_index: HashMap<Rc<str>, u32>,
-    /// The symbols of unions of values, each set once.
+    /// The symbols of unions of values, and the names of a type's
+    /// properties, each set once.
     sets: Vec<Set>,
     set_index: HashMap<Set, u32>,
+    /// Properties as defined, each a name and the types it is over.
+    props: Vec<(Rc<str>, Type)>,
 }
 
 /// A union of values' symbols, sorted.
@@ -209,6 +222,7 @@ impl Types {
             name_index: HashMap::new(),
             sets: Vec::new(),
             set_index: HashMap::new(),
+            props: Vec::new(),
         };
         for (b, _) in Base::ALL {
             t.intern(Term::Base(b));
@@ -240,7 +254,13 @@ impl Types {
     pub fn is_pattern(&self, t: Type) -> bool {
         match self.term(t) {
             Term::Var(_) | Term::Atom | Term::Or(..) | Term::AnyTuple | Term::AnyRecord => true,
-            Term::Base(_) | Term::Nat(_) | Term::Trap | Term::Own(..) | Term::Among(_) => false,
+            Term::Base(_)
+            | Term::Nat(_)
+            | Term::Trap
+            | Term::Own(..)
+            | Term::Among(_)
+            | Term::Prop(_) => false,
+            Term::Has(b, _) => self.is_pattern(b),
             Term::Tuple(r) => self.rows[r as usize].iter().any(|&e| self.is_pattern(e)),
             Term::Record(r) | Term::RecordLit(r) => self.fields[r as usize]
                 .iter()
@@ -308,7 +328,8 @@ impl Types {
             | Term::RecordLit(_)
             | Term::Trap
             | Term::Among(_) => true,
-            Term::Own(_, r) => self.counted(r),
+            Term::Own(_, r) | Term::Has(r, _) => self.counted(r),
+            Term::Prop(_) => false,
             Term::Nat(_) | Term::Var(_) | Term::Atom | Term::AnyTuple | Term::AnyRecord => false,
         }
     }
@@ -343,7 +364,7 @@ impl Types {
                 bits(&mut self.fields[r as usize].iter().map(|&(_, e)| e))
             }
             Term::Trap => u64::MAX,
-            Term::Own(_, r) => self.held_cells(r),
+            Term::Own(_, r) | Term::Has(r, _) => self.held_cells(r),
             _ => 0,
         }
     }
@@ -406,10 +427,12 @@ impl Types {
         }
     }
     /// t with each type of its own in it as its representation, `2 celsius
-    /// vec` as `2 f64 vec`: what t's values are at run time.
+    /// vec` as `2 f64 vec`: what t's values are at run time. A type with
+    /// properties stays one, which `!` gives only by testing them.
     pub fn represented(&mut self, t: Type) -> Type {
         match self.term(t) {
             Term::Own(_, r) => self.represented(r),
+            Term::Has(..) => t,
             Term::Ary(e) => {
                 let e = self.represented(e);
                 self.intern(Term::Ary(e))
@@ -439,11 +462,16 @@ impl Types {
         }
     }
     /// The union of these symbols' values: sorted, without repeats.
-    pub fn among(&mut self, mut names: Vec<Rc<str>>) -> Type {
+    pub fn among(&mut self, names: Vec<Rc<str>>) -> Type {
+        let n = self.set_of(names);
+        self.intern(Term::Among(n))
+    }
+    /// A set of names, sorted, without repeats, each set once.
+    fn set_of(&mut self, mut names: Vec<Rc<str>>) -> u32 {
         names.sort();
         names.dedup();
         let set: Set = names.into();
-        let n = match self.set_index.get(&set) {
+        match self.set_index.get(&set) {
             Some(&n) => n,
             None => {
                 let n = self.sets.len() as u32;
@@ -451,8 +479,56 @@ impl Types {
                 self.set_index.insert(set, n);
                 n
             }
+        }
+    }
+    /// A property over the types `over`, a pattern, named `name`, empty
+    /// until `;` binds it.
+    pub fn prop(&mut self, name: &str, over: Type) -> Type {
+        let n = self.props.len() as u32;
+        self.props.push((name.into(), over));
+        self.intern(Term::Prop(n))
+    }
+    /// Names a property `;` binds, as `own` is named.
+    pub fn name_prop(&mut self, t: Type, name: &str) {
+        if let Term::Prop(n) = self.term(t) {
+            self.props[n as usize].0 = name.into();
+        }
+    }
+    /// A property's name and the types it is over.
+    pub fn prop_parts(&self, t: Type) -> Option<(Rc<str>, Type)> {
+        match self.term(t) {
+            Term::Prop(n) => Some(self.props[n as usize].clone()),
+            _ => None,
+        }
+    }
+    /// `t` with these properties too: one type however they are written,
+    /// `t` itself if there are none.
+    pub fn has(&mut self, t: Type, names: &[Rc<str>]) -> Type {
+        let (base, mut all) = match self.has_parts(t) {
+            Some((b, set)) => (b, set.to_vec()),
+            None => (t, Vec::new()),
         };
-        self.intern(Term::Among(n))
+        all.extend(names.iter().cloned());
+        if all.is_empty() {
+            return base;
+        }
+        let n = self.set_of(all);
+        self.intern(Term::Has(base, n))
+    }
+    /// A type with properties: the type, and their names.
+    pub fn has_parts(&self, t: Type) -> Option<(Type, Set)> {
+        match self.term(t) {
+            Term::Has(b, n) => Some((b, self.sets[n as usize].clone())),
+            _ => None,
+        }
+    }
+    /// The names in a set, as a `Has` keeps them.
+    pub fn names_of(&self, n: u32) -> Set {
+        self.sets[n as usize].clone()
+    }
+    /// `t` without its properties.
+    pub fn bare(&self, t: Type) -> Type {
+        self.has_parts(t).map_or(t, |(b, _)| b)
     }
     /// A union of values' symbols, if it is one.
     pub fn set(&self, t: Type) -> Option<Set> {
@@ -465,6 +541,7 @@ impl Types {
     pub fn unnamed(&self, t: Type) -> bool {
         match self.term(t) {
             Term::Own(n, r) => self.names[n as usize].is_empty() || self.unnamed(r),
+            Term::Has(b, _) => self.unnamed(b),
             Term::Ary(e) => self.unnamed(e),
             Term::Vec(_, e) => self.unnamed(e),
             Term::Map(k, v) | Term::Or(k, v) => self.unnamed(k) || self.unnamed(v),
@@ -521,7 +598,17 @@ impl Types {
                 let (a, b) = (self.subst(a, env), self.subst(b, env));
                 self.union(a, b)
             }
-            Term::Base(_) | Term::Nat(_) | Term::Trap | Term::Own(..) | Term::Among(_) => t,
+            Term::Base(_)
+            | Term::Nat(_)
+            | Term::Trap
+            | Term::Own(..)
+            | Term::Among(_)
+            | Term::Prop(_) => t,
+            Term::Has(b, n) => {
+                let b = self.subst(b, env);
+                let names = self.sets[n as usize].to_vec();
+                self.has(b, &names)
+            }
             Term::Ary(e) => {
                 let e = self.subst(e, env);
                 self.intern(Term::Ary(e))
@@ -580,6 +667,21 @@ impl Types {
                 n => n.strip_prefix("core.").unwrap_or(n).to_string(),
             },
             Term::Trap => "k trap".into(),
+            // Its properties after it, as they are written, `i64 ary sorted`.
+            Term::Has(b, n) => {
+                let names: Vec<&str> = self.sets[n as usize]
+                    .iter()
+                    .map(|m| m.strip_prefix("core.").unwrap_or(m))
+                    .collect();
+                format!("{} {}", self.name(b), names.join(" "))
+            }
+            Term::Prop(n) => {
+                let (name, over) = &self.props[n as usize];
+                match &**name {
+                    "" => format!("{} prop", self.name(*over)),
+                    n => n.strip_prefix("core.").unwrap_or(n).to_string(),
+                }
+            }
             // `or` joins two, and n by its power, `code' data' text' or^3`.
             Term::Among(n) => {
                 let set = &self.sets[n as usize];

@@ -87,6 +87,7 @@ not among those worth having.
 | an insert or remove in the middle, large | O(n) each | `tree#` |
 | added to and taken from at the front only | O(n) each | `list#` |
 | stored in the global store, or compared by identity | hashed each time | `tree#`, whose identity is there already |
+| sorted, then added to in order, `xs 5 add` | O(n) each, all after it moved | a tree kept in order, its place found and the element put there in about log n steps (TYPES.md 3.17) |
 
 Small or large is Thomas's subtlety. A length known while compiling, `< 3
 i64 vec >`, settles it; a bound would; otherwise the program checks as it

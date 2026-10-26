@@ -62,8 +62,9 @@ pub fn value(m: &Machine, types: &Types, v: u64, t: Type, out: &mut String) {
             }
             out.push_str(" )");
         }
-        // A type of its own shows as its representation does.
-        Term::Own(_, r) => value(m, types, v, r, out),
+        // A type of its own shows as its representation does, and a type with
+        // properties as the type.
+        Term::Own(_, r) | Term::Has(r, _) => value(m, types, v, r, out),
         // A union of values is a symbol.
         Term::Among(_) => value(m, types, v, SYMBOL, out),
         // A record shows as a map does, its keys symbols (TYPES.md 2.11).

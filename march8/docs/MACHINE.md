@@ -337,6 +337,7 @@ equal types are equal numbers.
 | `{ x: f64 y: string }` | a record: fixed keys, a type each, a map of types (TYPES.md 2.11). Known by its fields, in the order of their keys |
 | `record` | in patterns, any record: a class, as `tuple` is |
 | `celsius` | a type of its own, `celsius: f64 own ;`: its representation's values, and a type no other is (TYPES.md 2.11) |
+| `i64 ary sorted` | a type with a property, `sorted: < a ary > [ ordered ] prop ;`: the type's values that have it, the properties a set, one type in any order (TYPES.md 3.17) |
 
 **An array literal is a vec:** `( 7 8 9 )` is a `3 i64 vec`, so its length
 is a constant. A symbol beside a string makes a tuple, `( "a" b' )` being a
@@ -992,6 +993,48 @@ temp: celsius ;                      an alias, `celsius` named already
   forgetting two types of their own takes them as one, Celsius added to
   Fahrenheit, until a units system checks it. `!` of the representation,
   `< f64 f64 > !`, forgets both as meant.
+
+### Properties
+
+`prop` makes **a property** of the types it is over, with a test, a
+quotation that takes a value and leaves a flag, or with none, a fact; `;`
+names it (TYPES.md 3.17). Applied to one of those types it gives the type
+with the property; with no type on top, in code or a bracket, it is their
+class:
+
+```
+sorted: < a ary > [ ordered ] prop ;      the core's
+checked: string prop ;                    a fact, trusted
+( 3 1 2 ) sort                            ( 1 2 3 ), an i64 ary sorted
+( 1 2 3 ) sorted !                        tested: a 3 i64 vec sorted
+( 3 1 2 ) sorted !                        fails: expected 3 i64 vec sorted
+( 3 1 2 ) sort 2 add                      ( 1 2 2 3 ), still sorted
+( 3 1 2 ) sort reverse                    ( 3 2 1 ), an i64 ary: forgotten
+```
+
+- **A check claims, `!` tests.** A word's outputs, `sort`'s `< i64 ary
+  sorted >`, and any check give the property untested. `!` tests it, while
+  compiling where the value is known and as the program runs where it is
+  not, as a check with a guard is, its message the type: "expected i64 ary
+  sorted". A check keeps only the properties it names; `!` adds to the
+  ones the value has, and does not test those again.
+- **Matched where it is wanted:** a clause taking `< i64 ary sorted >`
+  takes only a value that has it, scoring 2 more for each property named,
+  so it is chosen over one taking `< i64 ary >`. A value with one is its
+  type wherever that is wanted, matched a little less well.
+- **Kept and forgotten** by the rule of types of their own: a clause whose
+  pattern does not name it forgets it, a variable keeps it. A variable in
+  a word's outputs stands for a property only while the value still has
+  it, so `ff: < a >. dup concat < a >. ;` leaves an `i64 ary` of a sorted
+  one. A variable taking two values, one with and one without, takes the
+  type with what both have. A primitive of any type that works out its
+  own result, `ary-insert`, `zip`, is given its inputs without properties;
+  `dup`, `drop`, `swap` and `dip` keep them.
+- **Nothing at run time.** A property is erased with the type; only `!` of
+  a value known only as the program runs costs anything, its test.
+- **Not built:** a property inside a type, `i64 ary sorted ary`, which `!`
+  refuses; strings have no `lt`, so `add` to a sorted string array, and
+  `!` of one, find no word.
 
 ### Recursion and instances
 

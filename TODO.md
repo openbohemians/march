@@ -58,6 +58,15 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   !`, and a minor warning where one word forgets two together, until a
   units system (2026-10-26). To come: a type made of itself, `tree: {
   left: < tree > ; … } ;`, an error for now.
+- **The rest of properties** (TYPES.md 3.17). Built 2026-10-26: `prop`
+  with a test or none, named by `;`, `i64 ary sorted` one type in any
+  order, a check claiming and `!` testing, while compiling or as the
+  program runs, clauses chosen by them, kept and forgotten as types of
+  their own are; the core's `sorted`, by `ordered`, left by `sort`, and
+  `add`, which keeps it. To come: a property inside a type, `i64 ary
+  sorted ary`, refused by `!`; `lt` of strings, for `add` and `!` of a
+  sorted string array; and the form a sorted array added to is held in,
+  a tree kept in order (REPRESENTATIONS.md 3).
 - **How a clause is chosen,** TYPES.md 2.8's rule (Thomas, 2026-10-17):
   slot by slot from the top, a value before a type before a union before
   a variable, a subset before the type it is in, replacing march8's
@@ -121,13 +130,10 @@ until a program needs it.
 
 ## To think on
 
-- **Properties** (TYPES.md open question 17, Thomas, 2026-10-26): a value
-  of more than one type at once, `i64 ary sorted`, `sorted` a word that
-  takes a type as `ary` does, a guard tested once and carried, kept and
-  forgotten by the rule of types of their own. And what is done to a
-  value, `appends#`, written in its lowered type where its form must be
-  settled early (REPRESENTATIONS.md 3). Proposed; how one is defined is
-  open.
+- **What is done to a value in its lowered type,** `appends#`, written
+  where its form must be settled early: a loop's accumulator, a recursive
+  input, a stored value (REPRESENTATIONS.md 3, Thomas, 2026-10-26). It
+  waits on a second form for arrays.
 - **A letter's field, `b.line`** (SYMBOLIC-FORTH.md 6.16, Thomas,
   2026-10-26), as a bracket name's `rd.line` is. A one-letter word is
   refused and a one-letter namespace is not, `b.ff: 1 ;`, so the two

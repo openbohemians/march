@@ -926,7 +926,7 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     `Socrates Mortal is` folds to true, as `10 fact` might to 3628800;
     where it stops, when a known recursion is too deep or too wide to
     unfold, is the question.
-17. **Properties** (Thomas, 2026-10-26; proposed). A value may have more
+17. **Properties** (Thomas, 2026-10-26; decided). A value may have more
     than one type, both at once rather than one of a union (Thomas: "Might
     we not say an object can have more than one type? I don't mean like
     an or-union"): an `i64 ary` that is `sorted` too. A type of its own
@@ -942,7 +942,7 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
       sorted (6). It takes the types it is defined for, a sequence of what
       has an order, so `i64 sorted` is no word. `and` stays the
       intersection of 6, which this does not need.
-    - **A guard remembered.** `< a ary [ sorted? ] ? >.` tests each time a
+    - **A guard remembered.** `< a ary [ ordered ] ? >.` tests each time a
       clause is chosen; `< a ary sorted >.` takes only a value known to be
       sorted, tested once, where it was made, and carried. A binary search
       that takes `< i64 ary sorted >` never tests again.
@@ -964,10 +964,60 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
       type; its values are the type's. Only a test where it is given by
       `!` to a value not known while compiling costs anything.
 
+    - **Defined by `prop`,** as a type of its own is by `own` (decided
+      2026-10-26): the types it is over and its test, `;` naming it, or
+      the types alone, a fact `!` trusts:
+
+      ```
+      sorted: < a ary > [ ordered ] prop ;
+      nonempty: < a ary > [ length 0 gt ] prop ;
+      checked: string prop ;
+      ```
+
+      The types it is over are a bracket where they have a variable: in
+      a body a letter is a place on the stack, so a bare `a ary` would take
+      a value.
+
+      Applied to a type it is over, it gives the type with the property,
+      `i64 ary sorted`; with none on top, in code or a bracket, it stands
+      for its class, `a ary sorted`, as a type with holes does unapplied
+      (14), so `xs sorted !` gives xs the property as `20.0 celsius !`
+      gives a type of its own, and `< sorted >.` takes any sorted array.
+      The guarded bracket, `< a ary [ ordered ] ? > prop`, says the same
+      and was not chosen, stack code coming first.
+    - **A check claims, `!` tests** (decided 2026-10-26). A word's outputs
+      are a check, and a check naming a property gives it, untested: the
+      word that makes a property vouches for it, so `sort: < i64 ary >.
+      i64-sort < i64 ary sorted >. ;` never reads its result again. `!`
+      gives it to a value from anywhere else, and tests. A word that
+      claims a property wrongly is a bug as any other; testing claims
+      while a program's tests run could catch one later.
+    - **What a guard does not give** (Thomas: "what does that add to it
+      that the a gueard does not already?"): a guard is tested each time
+      a clause is chosen, cannot be left by a word, always has a test,
+      and is gone once asked; a property is tested once, is left by the
+      word that makes it, may be a fact with no test, and is carried, so
+      the compiler can choose by it.
+    - **Built** (march8, 2026-10-26): `prop`, `sorted` by `ordered`, `sort`
+      leaving it, `add`, and clauses chosen by a property. A check keeps
+      only the properties it names; `!` adds to those the value has. A
+      variable in a word's outputs, `< a >`, stands for a property only
+      while the value still has it, so a word that forgets one inside does
+      not claim it by its outputs. A primitive that works out its own
+      type, `ary-insert`, is given its inputs without properties; only
+      moving a value keeps them. Not built: a property inside a type, `i64
+      ary sorted ary`, which `!` refuses; and strings have no `lt`, so
+      `sort` leaves a sorted string array, but `add` and `!` of one fail.
+
     What is done to a value, rather than what it is, is the compiler's to
-    track, to choose how the value is held (Thomas chose both, "3 and 4"):
-    REPRESENTATIONS.md 3. Open: how a property is defined, its test and
-    the types it takes, in a body as other types are (2.11).
+    track, to choose how the value is held (Thomas chose both, "3 and 4"),
+    and a property is one thing it chooses by (Thomas: "My thought was by
+    tagging say "sorted" that might lead to a concrete type that is
+    optimized for staying sorted."): REPRESENTATIONS.md 3. A sorted array
+    only read is best flat, searched by halves; one added to in order, by
+    `add`, a clause of its own that puts an element in its place, `add: <
+    a ary sorted a >. … < a ary sorted >. ;`, is best a tree kept in
+    order, which finds the place and puts it there in about log n steps.
 
 ## 4. A way to build it (proposal)
 

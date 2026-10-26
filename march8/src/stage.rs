@@ -585,6 +585,10 @@ const FUSED: &[([P; 4], P)] = &[
     ([P::ScratchPush, P::Swap, P::ScratchPop, P::Swap], P::Rot),
 ];
 
+/// As `FUSED`, a copy counted: `[ dup ] dip swap` of a value that holds
+/// memory is `over hold`.
+const FUSED_HELD: [P; 5] = [P::ScratchPush, P::Dup, P::Hold, P::ScratchPop, P::Swap];
+
 fn fuse(code: Vec<Ins>) -> Vec<Ins> {
     let prim = |i: &Ins| match i {
         Ins::Op(Op::Prim(p)) => Some(*p),
@@ -601,6 +605,11 @@ fn fuse(code: Vec<Ins>) -> Vec<Ins> {
             && prim(&out[n - 1]) == Some(P::ScratchPop)
         {
             out.truncate(n - 2);
+            continue;
+        }
+        if n >= 5 && out[n - 5..].iter().map(prim).eq(FUSED_HELD.map(Some)) {
+            out.truncate(n - 5);
+            out.extend([P::Over, P::Hold].map(|p| Ins::Op(Op::Prim(p))));
             continue;
         }
         if n < 4 {
@@ -1266,6 +1275,34 @@ impl Stage {
 
     fn emit(&mut self, op: Op) {
         self.code.push(Ins::Op(op));
+    }
+
+    /// After a copy of a value of type `t`, `hold`, if it is counted: one
+    /// more holder of it (doc/design/REPRESENTATIONS.md 4).
+    fn hold(&mut self, t: Type) {
+        if self.types.counted(t) {
+            self.emit(Op::Prim(P::Hold));
+        }
+    }
+
+    /// A drop of a value of type `t`: `release` if it is counted, one
+    /// holder fewer, else `drop`.
+    fn drop_op(&self, t: Type) -> P {
+        if self.types.counted(t) {
+            P::Release
+        } else {
+            P::Drop
+        }
+    }
+
+    /// After a container of type `t` is made, `holds`, which of its cells
+    /// are counted values, if any are.
+    fn holds(&mut self, t: Type) {
+        let h = self.types.held_cells(t);
+        if h != 0 {
+            self.emit(Op::Lit(h));
+            self.emit(Op::Prim(P::Holds));
+        }
     }
 
     fn label(&mut self) -> u32 {
@@ -3434,6 +3471,14 @@ impl Stage {
         // `handle` goes on past itself, to the body, or, given the trap, to
         // the handlers.
         let start = self.label();
+        let held = snapshot[base..]
+            .iter()
+            .filter(|j| !j.known())
+            .take(64)
+            .enumerate()
+            .filter(|(_, j)| self.types.counted(j.ty))
+            .fold(0u64, |m, (i, _)| m | 1 << i);
+        self.emit(Op::Lit(held));
         self.emit(Op::Lit(kept as u64));
         self.emit(Op::Prim(P::Handle));
         self.code.push(Ins::JumpZero(start));
@@ -4524,7 +4569,11 @@ impl Stage {
                 ),
             ));
         };
-        self.in_place(i, &[Op::Lit(m as u64), Op::Prim(P::UnionMake)], u)
+        let mut ops = vec![Op::Lit(m as u64), Op::Prim(P::UnionMake)];
+        if self.types.counted(t) {
+            ops.extend([Op::Lit(2), Op::Prim(P::Holds)]);
+        }
+        self.in_place(i, &ops, u)
     }
 
     /// Emits `ops` on the value at `i` where it lies, which leaves a value
@@ -4651,21 +4700,24 @@ impl Stage {
                 [
                     Op::Lit(0),
                     Op::Prim(P::ScratchAt),
+                    Op::Prim(P::Hold),
                     Op::Lit(k as u64),
                     Op::Prim(P::VecAt),
                 ]
                 .map(Ins::Op),
             );
         }
+        let m = self.types.intern(Term::Map(SYMBOL, v));
         ins.extend(
             [
                 Op::Prim(P::MapGather),
+                Op::Lit(self.types.held_cells(m)),
+                Op::Prim(P::Holds),
                 Op::Prim(P::ScratchPop),
-                Op::Prim(P::Drop),
+                Op::Prim(P::Release),
             ]
             .map(Ins::Op),
         );
-        let m = self.types.intern(Term::Map(SYMBOL, v));
         self.in_place_ins(i, ins, m)?;
         if m != t {
             self.annotate(i, t)?;
@@ -4746,17 +4798,24 @@ impl Stage {
             ops.extend([
                 Op::Lit(0),
                 Op::Prim(P::ScratchAt),
+                Op::Prim(P::Hold),
                 Op::Lit(k as u64),
                 Op::Prim(P::VecAt),
             ]);
             if !self.is_union(x) {
                 ops.extend([Op::Lit(x as u64), Op::Prim(P::UnionMake)]);
+                if self.types.counted(x) {
+                    ops.extend([Op::Lit(2), Op::Prim(P::Holds)]);
+                }
             }
         }
+        // An array of unions, each counted.
         ops.extend([
             Op::Prim(P::Gather),
+            Op::Lit(u64::MAX),
+            Op::Prim(P::Holds),
             Op::Prim(P::ScratchPop),
-            Op::Prim(P::Drop),
+            Op::Prim(P::Release),
         ]);
         self.in_place(i, &ops, t)?;
         self.warn(
@@ -4978,6 +5037,7 @@ impl Stage {
                 self.emit(Op::Prim(P::Pick));
             }
         }
+        self.hold(j.ty);
         self.stack.push(j);
         Ok(())
     }
@@ -5969,6 +6029,10 @@ impl Stage {
                     ins.extend(self.code_of(e)?);
                 }
                 ins.push(Ins::Op(Op::Prim(P::Gather)));
+                let h = self.types.held_cells(j.ty);
+                if h != 0 {
+                    ins.extend([Op::Lit(h), Op::Prim(P::Holds)].map(Ins::Op));
+                }
                 ins
             }
             _ => {
@@ -6042,13 +6106,15 @@ impl Stage {
                     Some(k) => self.stack.push(k),
                     None => {
                         self.emit(Op::Prim(P::Dup));
+                        self.hold(j.ty);
                         self.stack.push(j);
                     }
                 }
             }
             Prim::Drop => {
                 if !self.stack[base].known() {
-                    self.emit(Op::Prim(P::Drop));
+                    let op = self.drop_op(self.stack[base].ty);
+                    self.emit(Op::Prim(op));
                 }
                 self.stack.pop();
             }
@@ -6076,7 +6142,7 @@ impl Stage {
             Prim::VecLength => {
                 let k = len(self, 13);
                 if !self.stack[base].known() {
-                    self.emit(Op::Prim(P::Drop));
+                    self.emit(Op::Prim(P::Release));
                 }
                 self.stack.pop();
                 self.push(I64, Val::Int(k.into()));
@@ -6145,7 +6211,7 @@ impl Stage {
                     .expect("a tuple")
                     .len();
                 if !self.stack[base].known() {
-                    self.emit(Op::Prim(P::Drop));
+                    self.emit(Op::Prim(P::Release));
                 }
                 self.stack.pop();
                 self.push(I64, Val::Int(n as i128));
@@ -6182,6 +6248,7 @@ impl Stage {
                 self.stack.pop();
                 self.emit(Op::Prim(P::Mark));
                 self.emit(Op::Prim(op));
+                self.holds(t);
                 self.push(t, Val::Run);
             }
             Prim::TupleSpread => {
@@ -6196,12 +6263,13 @@ impl Stage {
                 for (k, &e) in es.iter().enumerate() {
                     self.emit(Op::Lit(0));
                     self.emit(Op::Prim(P::ScratchAt));
+                    self.emit(Op::Prim(P::Hold));
                     self.emit(Op::Lit(k as u64));
                     self.emit(Op::Prim(P::VecAt));
                     self.push(e, Val::Run);
                 }
                 self.emit(Op::Prim(P::ScratchPop));
-                self.emit(Op::Prim(P::Drop));
+                self.emit(Op::Prim(P::Release));
             }
             Prim::VecSpread => {
                 let n = len(self, 13);
@@ -6212,11 +6280,12 @@ impl Stage {
                 for i in 0..n {
                     self.emit(Op::Lit(0));
                     self.emit(Op::Prim(P::ScratchAt));
+                    self.emit(Op::Prim(P::Hold));
                     self.emit(Op::Lit(i));
                     self.emit(Op::Prim(P::VecAt));
                 }
                 self.emit(Op::Prim(P::ScratchPop));
-                self.emit(Op::Prim(P::Drop));
+                self.emit(Op::Prim(P::Release));
                 for _ in 0..n {
                     self.push(e, Val::Run);
                 }
@@ -6313,7 +6382,8 @@ impl Stage {
         // cells among the inputs, so on top.
         for j in &self.stack[base..] {
             if matches!(j.val, Val::Pinned(_)) {
-                self.code.push(Ins::Op(Op::Prim(P::Drop)));
+                let op = self.drop_op(j.ty);
+                self.code.push(Ins::Op(Op::Prim(op)));
             }
         }
         self.stack.truncate(base);
@@ -6542,12 +6612,12 @@ impl Stage {
         self.code.push(Ins::Label(top));
         self.emit(Op::Prim(P::ScratchPeek));
         self.emit(Op::Lit(2));
-        for op in [P::ScratchAt, P::VecLen, P::ILt] {
+        for op in [P::ScratchAt, P::Hold, P::VecLen, P::ILt] {
             self.emit(Op::Prim(op));
         }
         self.code.push(Ins::JumpZero(end));
         self.emit(Op::Lit(2));
-        for op in [P::ScratchAt, P::ScratchPeek, P::VecAt] {
+        for op in [P::ScratchAt, P::Hold, P::ScratchPeek, P::VecAt] {
             self.emit(Op::Prim(op));
         }
         let below = self.stack.clone();
@@ -6589,7 +6659,7 @@ impl Stage {
             P::Drop,
             P::ScratchPop,
             P::ScratchPop,
-            P::Drop,
+            P::Release,
         ] {
             self.emit(Op::Prim(op));
         }
@@ -6598,6 +6668,7 @@ impl Stage {
             None => Term::Ary(r),
         };
         let out = self.types.intern(out);
+        self.holds(out);
         self.push(out, Val::Run);
         Ok(())
     }
@@ -6632,6 +6703,7 @@ impl Stage {
         if backward {
             self.emit(Op::Lit(0));
             self.emit(Op::Prim(P::ScratchAt));
+            self.emit(Op::Prim(P::Hold));
             self.emit(Op::Prim(P::VecLen));
         } else {
             self.emit(Op::Lit(0));
@@ -6650,13 +6722,13 @@ impl Stage {
         } else {
             self.emit(Op::Prim(P::ScratchPeek));
             self.emit(Op::Lit(1));
-            for op in [P::ScratchAt, P::VecLen, P::ILt] {
+            for op in [P::ScratchAt, P::Hold, P::VecLen, P::ILt] {
                 self.emit(Op::Prim(op));
             }
             self.code.push(Ins::JumpZero(end));
         }
         self.emit(Op::Lit(1));
-        for op in [P::ScratchAt, P::ScratchPeek, P::VecAt] {
+        for op in [P::ScratchAt, P::Hold, P::ScratchPeek, P::VecAt] {
             self.emit(Op::Prim(op));
         }
         let below = self.stack.clone();
@@ -6699,7 +6771,7 @@ impl Stage {
         }
         self.code.push(Ins::Jump(top));
         self.code.push(Ins::Label(end));
-        for op in [P::ScratchPop, P::Drop, P::ScratchPop, P::Drop] {
+        for op in [P::ScratchPop, P::Drop, P::ScratchPop, P::Release] {
             self.emit(Op::Prim(op));
         }
         if let Some(t) = collect {
@@ -6865,16 +6937,32 @@ impl Stage {
         let mut ops = Vec::new();
         if !j.known() {
             let rest = &f.places[u + 1..];
-            match f.slots.iter().rev().position(|&s| s == p).expect("waiting") {
+            let counted = |j: &Option<Jdg>| j.as_ref().is_some_and(|j| self.types.counted(j.ty));
+            let copied = match f.slots.iter().rev().position(|&s| s == p).expect("waiting") {
                 0 if !rest.contains(&p) => {
                     ops.push(Op::Prim(P::ScratchPop));
                     f.slots.pop();
+                    false
                 }
-                0 => ops.push(Op::Prim(P::ScratchPeek)),
-                d => ops.extend([Op::Lit(d as u64), Op::Prim(P::ScratchAt)]),
+                0 => {
+                    ops.push(Op::Prim(P::ScratchPeek));
+                    true
+                }
+                d => {
+                    ops.extend([Op::Lit(d as u64), Op::Prim(P::ScratchAt)]);
+                    true
+                }
+            };
+            if copied && counted(&f.vals[p]) {
+                ops.push(Op::Prim(P::Hold));
             }
-            while f.slots.last().is_some_and(|s| !rest.contains(s)) {
-                ops.extend([Op::Prim(P::ScratchPop), Op::Prim(P::Drop)]);
+            while let Some(&s) = f.slots.last().filter(|s| !rest.contains(s)) {
+                let drop = if counted(&f.vals[s]) {
+                    P::Release
+                } else {
+                    P::Drop
+                };
+                ops.extend([Op::Prim(P::ScratchPop), Op::Prim(drop)]);
                 f.slots.pop();
             }
         }
@@ -6895,8 +6983,10 @@ impl Stage {
         let k = self.stack.len() - base;
         let mut at: Vec<Option<usize>> = (0..k).map(|v| Some(base + v)).collect();
         for v in (0..k).rev().filter(|v| !order.contains(v)) {
-            if !self.lift(&mut at, v).known() {
-                self.emit(Op::Prim(P::Drop));
+            let j = self.lift(&mut at, v);
+            if !j.known() {
+                let op = self.drop_op(j.ty);
+                self.emit(Op::Prim(op));
             }
         }
         let kept = 1 + order.windows(2).take_while(|w| w[0] < w[1]).count();
@@ -7083,9 +7173,10 @@ impl Stage {
 
     /// The operations that leave a trap's message and its kind, the trap
     /// on top, for `trap` to fail with them again.
-    fn rethrow() -> [Op; 6] {
+    fn rethrow() -> [Op; 7] {
         [
             Op::Prim(P::Dup),
+            Op::Prim(P::Hold),
             Op::Lit(0),
             Op::Prim(P::VecAt),
             Op::Prim(P::Swap),
@@ -7786,8 +7877,10 @@ impl Stage {
     fn wide_drop(&mut self) -> Result<()> {
         let s = self.items(1)?[0];
         for _ in 0..s {
-            if !self.stack.pop().expect("in reach").known() {
-                self.emit(Op::Prim(P::Drop));
+            let j = self.stack.pop().expect("in reach");
+            if !j.known() {
+                let op = self.drop_op(j.ty);
+                self.emit(Op::Prim(op));
             }
         }
         Ok(())
@@ -7890,6 +7983,7 @@ impl Stage {
         for (k, &e) in es.iter().enumerate() {
             self.emit(Op::Lit(1));
             self.emit(Op::Prim(P::ScratchAt));
+            self.emit(Op::Prim(P::Hold));
             self.emit(Op::Lit(k as u64));
             self.emit(Op::Prim(P::VecAt));
             let below = self.stack.clone();
@@ -7919,10 +8013,11 @@ impl Stage {
                 self.emit(Op::Prim(op));
             }
         }
-        for op in [P::ScratchPop, P::ScratchPop, P::Drop] {
+        for op in [P::ScratchPop, P::ScratchPop, P::Release] {
             self.emit(Op::Prim(op));
         }
         let t = self.types.tuple(outs);
+        self.holds(t);
         self.push(t, Val::Run);
         Ok(())
     }
@@ -7942,6 +8037,7 @@ impl Stage {
         for k in order {
             self.emit(Op::Lit(0));
             self.emit(Op::Prim(P::ScratchAt));
+            self.emit(Op::Prim(P::Hold));
             self.emit(Op::Lit(k as u64));
             self.emit(Op::Prim(P::VecAt));
             self.push(es[k], Val::Run);
@@ -7951,7 +8047,7 @@ impl Stage {
             r?;
         }
         self.emit(Op::Prim(P::ScratchPop));
-        self.emit(Op::Prim(P::Drop));
+        self.emit(Op::Prim(P::Release));
         Ok(())
     }
 
@@ -8239,6 +8335,7 @@ impl Stage {
             let ok = self.label();
             self.emit(Op::Lit(0));
             self.emit(Op::Prim(P::ScratchAt));
+            self.emit(Op::Prim(P::Hold));
             self.emit(Op::Prim(P::VecLen));
             self.emit(Op::Lit(k as u64));
             self.emit(Op::Prim(P::ILt));
@@ -8252,8 +8349,10 @@ impl Stage {
         for i in 0..k {
             self.emit(Op::Lit(0));
             self.emit(Op::Prim(P::ScratchAt));
+            self.emit(Op::Prim(P::Hold));
             self.emit(Op::Lit(0));
             self.emit(Op::Prim(P::ScratchAt));
+            self.emit(Op::Prim(P::Hold));
             self.emit(Op::Prim(P::VecLen));
             self.emit(Op::Lit((k - i) as u64));
             self.emit(Op::Prim(P::ISub));
@@ -8279,16 +8378,20 @@ impl Stage {
         }
         self.stack.truncate(depth);
         self.emit(Op::Prim(P::Gather));
+        let part = self.types.intern(Term::Ary(e));
+        self.holds(part);
         // The rest of the array, then the two joined.
         self.emit(Op::Lit(0));
         self.emit(Op::Prim(P::ScratchAt));
+        self.emit(Op::Prim(P::Hold));
         self.emit(Op::Lit(0));
         self.emit(Op::Lit(0));
         self.emit(Op::Prim(P::ScratchAt));
+        self.emit(Op::Prim(P::Hold));
         self.emit(Op::Prim(P::VecLen));
         self.emit(Op::Lit(k as u64));
         self.emit(Op::Prim(P::ISub));
-        for op in [P::Slice, P::Swap, P::Concat, P::ScratchPop, P::Drop] {
+        for op in [P::Slice, P::Swap, P::Concat, P::ScratchPop, P::Release] {
             self.emit(Op::Prim(op));
         }
         let ty = match len {
@@ -8333,6 +8436,7 @@ impl Stage {
                     None => {
                         self.materialize(base)?;
                         self.emit(Op::Prim(P::Dup));
+                        self.emit(Op::Prim(P::Hold));
                         self.emit(Op::Prim(P::VecLen));
                         self.emit(Op::Lit(k as i64 as u64));
                         self.emit(Op::Prim(P::IAdd));
@@ -8449,6 +8553,7 @@ impl Stage {
         self.code.push(Ins::JumpZero(start));
         self.emit(Op::Lit(depth));
         self.emit(Op::Prim(P::Pick));
+        self.emit(Op::Prim(P::Hold));
         self.emit(Op::Prim(P::VecLen));
         self.emit(Op::Prim(P::IAdd));
         self.code.push(Ins::Jump(done));
@@ -8468,6 +8573,7 @@ impl Stage {
         self.code.push(Ins::JumpZero(done));
         self.emit(Op::Lit(depth));
         self.emit(Op::Prim(P::Pick));
+        self.emit(Op::Prim(P::Hold));
         self.emit(Op::Prim(P::VecLen));
         self.emit(Op::Prim(P::IAdd));
         self.emit(Op::Lit(1));
@@ -8569,7 +8675,15 @@ impl Stage {
         self.materialize_top(2)?;
         if la.is_none() || lb.is_none() {
             let (bad, ok) = (self.label(), self.label());
-            for op in [P::Over, P::VecLen, P::Over, P::VecLen, P::Eq] {
+            for op in [
+                P::Over,
+                P::Hold,
+                P::VecLen,
+                P::Over,
+                P::Hold,
+                P::VecLen,
+                P::Eq,
+            ] {
                 self.emit(Op::Prim(op));
             }
             self.code.push(Ins::JumpZero(bad));
@@ -8595,13 +8709,13 @@ impl Stage {
         self.code.push(Ins::Label(top));
         self.emit(Op::Prim(P::ScratchPeek));
         self.emit(Op::Lit(2));
-        for op in [P::ScratchAt, P::VecLen, P::ILt] {
+        for op in [P::ScratchAt, P::Hold, P::VecLen, P::ILt] {
             self.emit(Op::Prim(op));
         }
         self.code.push(Ins::JumpZero(end));
         for depth in [2, 3] {
             self.emit(Op::Lit(depth));
-            for op in [P::ScratchAt, P::ScratchPeek, P::VecAt] {
+            for op in [P::ScratchAt, P::Hold, P::ScratchPeek, P::VecAt] {
                 self.emit(Op::Prim(op));
             }
         }
@@ -8620,9 +8734,9 @@ impl Stage {
             P::Drop,
             P::ScratchPop,
             P::ScratchPop,
-            P::Drop,
+            P::Release,
             P::ScratchPop,
-            P::Drop,
+            P::Release,
         ] {
             self.emit(Op::Prim(op));
         }
@@ -8634,6 +8748,7 @@ impl Stage {
             None => Term::Ary(r),
         };
         let out = self.types.intern(out);
+        self.holds(out);
         self.push(out, Val::Run);
         Ok(())
     }
@@ -8663,7 +8778,7 @@ impl Stage {
         self.code.push(Ins::Label(top_i));
         self.emit(Op::Prim(P::ScratchPeek));
         self.emit(Op::Lit(2));
-        for op in [P::ScratchAt, P::VecLen, P::ILt] {
+        for op in [P::ScratchAt, P::Hold, P::VecLen, P::ILt] {
             self.emit(Op::Prim(op));
         }
         self.code.push(Ins::JumpZero(end_i));
@@ -8675,18 +8790,19 @@ impl Stage {
         self.code.push(Ins::Label(top_j));
         self.emit(Op::Prim(P::ScratchPeek));
         self.emit(Op::Lit(5));
-        for op in [P::ScratchAt, P::VecLen, P::ILt] {
+        for op in [P::ScratchAt, P::Hold, P::VecLen, P::ILt] {
             self.emit(Op::Prim(op));
         }
         self.code.push(Ins::JumpZero(end_j));
         // x is xs at i, y is ys at j.
         self.emit(Op::Lit(4));
         self.emit(Op::Prim(P::ScratchAt));
+        self.emit(Op::Prim(P::Hold));
         self.emit(Op::Lit(2));
         self.emit(Op::Prim(P::ScratchAt));
         self.emit(Op::Prim(P::VecAt));
         self.emit(Op::Lit(5));
-        for op in [P::ScratchAt, P::ScratchPeek, P::VecAt] {
+        for op in [P::ScratchAt, P::Hold, P::ScratchPeek, P::VecAt] {
             self.emit(Op::Prim(op));
         }
         let r = self.pair_body(name, &q, ea, eb)?;
@@ -8702,6 +8818,8 @@ impl Stage {
         for op in [P::ScratchPop, P::Drop, P::ScratchPop] {
             self.emit(Op::Prim(op));
         }
+        let row = self.types.intern(Term::Ary(r));
+        self.holds(row);
         self.emit(Op::Lit(1));
         for op in [P::ScratchAt, P::Swap, P::VecPush, P::Drop, P::ScratchPop] {
             self.emit(Op::Prim(op));
@@ -8716,9 +8834,9 @@ impl Stage {
             P::Drop,
             P::ScratchPop,
             P::ScratchPop,
-            P::Drop,
+            P::Release,
             P::ScratchPop,
-            P::Drop,
+            P::Release,
         ] {
             self.emit(Op::Prim(op));
         }
@@ -8731,6 +8849,7 @@ impl Stage {
         };
         let row = sized(lb, r);
         let out = sized(la, row);
+        self.holds(out);
         self.push(out, Val::Run);
         Ok(())
     }
@@ -9129,6 +9248,7 @@ impl Stage {
             self.emit(Op::Prim(P::Reach));
         }
         self.emit(Op::Prim(op));
+        self.holds(ty);
         self.push(ty, Val::Run);
         Ok(())
     }
@@ -9226,8 +9346,9 @@ impl Stage {
             .collect();
         self.permute(start, &order);
         for _ in kept.len()..written {
-            self.emit(Op::Prim(P::Drop));
-            self.stack.pop();
+            let j = self.stack.pop().expect("written");
+            let op = self.drop_op(j.ty);
+            self.emit(Op::Prim(op));
         }
         let fields = last
             .iter()
@@ -9245,6 +9366,7 @@ impl Stage {
         }
         self.emit(Op::Prim(P::Gather));
         let t = self.types.record(fields, alike);
+        self.holds(t);
         self.push(t, Val::Run);
         Ok(())
     }

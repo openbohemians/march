@@ -1,10 +1,11 @@
 # Representations and sources
 
-Status: a study, 2026-10-25. Nothing here is decided. Thomas proposed
-both halves: that a value is held the simplest way first and moved to
-another where what is done to it needs one, and that what the compiler
-cannot know comes in only through channels in the state, which it can
-trace.
+Status: a study, 2026-10-25. Nothing here is decided but section 10's
+verdicts and section 11's reading, agreed 2026-10-26 (Thomas: "Yes, good
+analysis."). Thomas proposed both halves: that a value is held the
+simplest way first and moved to another where what is done to it needs
+one, and that what the compiler cannot know comes in only through
+channels in the state, which it can trace.
 
 Two questions, then: how a value is held, and what of it is known while
 compiling. The second answers much of the first.
@@ -49,7 +50,8 @@ the type `string` (TYPES.md, open question 4).
 | `tree#` | a merkle-champ sequence | versions that share, edits in the middle, content identity |
 
 The names are placeholders. `seq#` is taken: it is the sequence literal's
-kind, `( … )` being `[ … ] seq# !`.
+kind, `( … )` being `[ … ] seq# !`. Section 10 weighs every form, `list#`
+not among those worth having.
 
 ## 3. What decides: what is done to a value
 
@@ -73,7 +75,7 @@ after the change. `lower` (march8/compiler/lower.march) shows how subtle
 that is. A token is added as
 
 ```
-state toks' state.toks { spelling: text line: row } push put
+rd toks' rd.toks { spelling: text line: row } push put
 ```
 
 which reads the array out of the record, appends to it and puts it back.
@@ -159,7 +161,7 @@ element.
 The rule alone, the ones never copied, frees a third of the values but
 only 4% of the bytes. With copies among the stack's places, two thirds
 and 16%. Three quarters of the bytes are one pattern, the one above: the
-token array read out of the state record while the record still holds
+token array read out of the reader's record while the record still holds
 it. Its key is known while compiling, so it is counted while compiling
 too, if a record's fields count as places. Then all but 0.2% of the bytes
 are counted while compiling, in this program. What is left is what an
@@ -176,6 +178,39 @@ The record read is also where changing in place turns. A field taken
 out, the record giving it up, rather than read, and the token array is
 never shared: freed by its count, and changed in place by the rule
 above.
+
+**Built, 2026-10-25,** counted as the program runs first (Thomas: "If it
+is simple enough, yes build the freeing", and "yes build it this way and
+see how it goes"). Which cells are values the stage knows by their types,
+and the machine does not, so the stage says: a copy of one `hold`s it, a
+drop of one `release`s it, and a container made says which of its cells
+are values, `holds`; every other primitive lets go of what it takes, as a
+drop would, so all counting is `dup`'s and `drop`'s (march8/docs/MACHINE.md,
+"Code"). A value nothing else holds is edited in place. `lower` on itself
+peaks at 258 KB of values, as measured above, and 2 KB is left at the end.
+It runs 37% slower, 0.92 s, not 0.67, most of it the pattern above: each
+version of the token array made while the record still holds it holds its
+thousand strings once more, 25 million holds in all.
+
+**Taking the field, refused, 2026-10-26.** Two ways to take it were put
+to Thomas. The compiler taking it itself, where it can show that nothing
+reads the record between the read and the `put`, nor copies what was
+read: "that sounds fragile", slow, with nothing to say why, where a
+change nearby defeats it, and wrong where the showing is. And a word for
+it, `change`,
+`rd toks' tok [ push ] change`, the field taken out, changed and put back:
+"The fact that you are making an esoteric word that a programmer has to
+use for speed and *safety* just to work with a record is a big fat *red
+flag*." So the line stays as it is written, and the cost goes beneath it.
+
+The cost is not a copy. A version made while the record holds the old one
+shares its tree; the pass is the counting, each version holding every
+element it shares, and each let go when the old version is freed. Counted
+by node instead, a leaf holding its elements once and a version holding
+the nodes it makes, a version costs what it changes, whoever holds the one
+it was made from. merkle-champ's nodes are counted already, as Rust's
+`Arc`s; the machine needs a way to walk a version's nodes with their
+counts, a change to the crate.
 
 ## 5. Two ways
 
@@ -277,14 +312,20 @@ read. It would give:
 1. Small or large: where the line is, and whether a run-time check is
    worth its cost.
 2. `list#`: whether front-only use is common enough to want it, or
-   `tree#` serves.
+   `tree#` serves. `tree#` serves (section 10).
 3. Moving back to `vec#`, and when it pays.
 4. Strings: flat by default too, hashed only when compared or stored,
    rather than as each is made.
-5. Maps: a small one as a flat sorted `vec#` of pairs.
+5. Maps: a small one as a flat sorted `vec#` of pairs. Yes (section 10),
+   below a size to be measured.
 6. Identity of a flat value: hashed when asked for, or kept.
 7. Channels: their names under `io` (`io.env`, `io.clock`), and what a
    live channel's change does.
+8. Counts across threads: changed atomically where two threads hold a
+   value, or values passed between threads only through State, the
+   store counting them there.
+9. A merge's rule for each type, and identities for a sequence's elements
+   (section 11).
 
 ## 9. Order
 
@@ -298,4 +339,91 @@ read. It would give:
 4. Sources traced: `Run` split by channel (section 7).
 5. Chosen where made (the first way), and moving back.
 
-Freeing, 2.0, would follow 2, which it needs.
+Freeing came first, counted as the program runs (2026-10-25, section 4);
+2 makes most of that counting go, and counting by node (section 4,
+2026-10-26) makes what is left cost what changes, not what is shared.
+
+## 10. Forms worth having
+
+Thomas (2026-10-26): "We should also do ourselves a favor and clearly
+enumerate the types of sequences and mappings possible that we should
+support at minimum." He named the vector, the linked list, the doubly
+linked list, the skip list, the rope, RRB and the merkle sequence, and:
+"a small array will be better off as a copy", and "the ideal is for the
+compiler to optimize deciding which to use when."
+
+Two properties sort them. Whether versions can share a form's parts: a
+value never changes, so a part two versions share is safe in both. And
+whether the form is canonical, the same content the same shape, whatever
+order the edits came in, so that equality is a comparison of hashes and a
+merge passes over what is equal (section 11).
+
+Sequences:
+
+| Form | Good at | Against it | Verdict |
+|---|---|---|---|
+| Vector, `vec#` | reading by index, walking; a small array; in place where one thing holds it | changed while shared, a copy of n | **yes**: small arrays, and those one thing holds |
+| Merkle sequence, `tree#` | versions that share; canonical, so equality by hash, diff, merge, the store | hashing as it changes | **yes**: march8's arrays now; the shared, the large and the stored |
+| Rope | long text: joining, slicing and inserting in O(log n), lines counted | overhead on short strings | **yes, later**: a tree of text, measured in bytes, characters and lines |
+| RRB vector | the fastest tree to index in working memory | not canonical: its shape depends on its history, so no equality by hash or merge | **not yet**: only if the merkle sequence is too slow where it runs hot |
+| Linked list | the front in O(1), even shared | reading by index O(n), scattered in memory | **no**: the tree gives the front in O(log n), and the rest |
+| Doubly linked list | a splice at a node in O(1), changed in place | each node points both ways, so no two versions share one, and the loops defeat counting | **no** |
+| Skip list | changes in place made at once by many | randomized, so not canonical; versions do what it is for | **no** |
+| Slice, a window on its parent | slicing in O(1) | keeps its whole parent | **yes**: `lower` slices strings at every step |
+| Range | `n range` without its n cells | | **maybe**: an array made lazily, as lazy numbers are |
+
+Maps:
+
+| Form | Good at | Verdict |
+|---|---|---|
+| Record | keys known while compiling, read by position | **yes**: built (TYPES.md 2.11) |
+| Small map, pairs in a `vec#` | a dozen entries or so, where a scan beats hashing | **yes**, its size measured (open 5) |
+| CHAMP | versions that share; canonical | **yes**: march8's maps now |
+| Hash table | a large map one thing holds, in a hot loop | **maybe**, if measured: not canonical, and copied whole when shared |
+| Ordered merkle map, a prolly tree | keys in order, ranges of keys; canonical and mergeable | **maybe**: where order matters, State perhaps |
+| Trie of paths | everything under a namespace, `core.…` | **worth considering** for State's keys |
+| Skip list, red–black tree, AVL tree | | **no**: B-trees and tries do better |
+
+A set is a map to nothing, merkle-champ's `ChampSet`.
+
+So the compiler chooses among few: a vector where an array is small or
+held once, the merkle sequence where it is large and shared, CHAMP for a
+map shared or large, pairs for a small one, and later a rope for long
+text, each moved to another as what is done to it needs (sections 3 and
+5).
+
+## 11. Transactions
+
+Thomas (2026-10-26): "But there has to be transactional safety. We can't
+have an operation that fails because something changed in the midst of
+that operation taking place." And: "I was thinking about concurrency and
+wondering if our merkle tree lends itself to CRDT style *transactional*
+memory."
+
+**Within a run** nothing changes under an operation. Every value is a
+version, never changed once anything else can see it: an edit is made in
+place only where the value is alone, so no one sees it happen. A handler
+holds its inputs, so what it would put back is not alone and is not
+changed in place, and the session holds its stack while a run may fail
+(march8/tests/freeing.rs).
+
+**Across threads** the same rule gives each a snapshot. A transaction
+reads a version of State, a root, works on it, and that version cannot
+change under it. What is left is the commit, when another has committed
+since. Software transactional memory, Haskell's and Clojure's, runs the
+transaction again, which is the failure Thomas rules out. A merge
+instead: three ways, the version begun from, this one and the other.
+
+**The merkle trees lend themselves to it.** merkle-champ is canonical, so
+the equal parts of two versions have equal hashes and a merge passes over
+them: it costs what changed, not the size, as Noms and Dolt merge prolly
+trees.
+
+- **Maps.** Changes to different keys merge of themselves. The same key
+  changed both ways needs a rule, by the value's type: counters add, sets
+  join, a register keeps both or the later. These are CRDT semantics, and
+  with a rule for each type a commit cannot fail.
+- **Sequences.** Positions shift under inserts made at once, so a merge by
+  position holds only where the edits do not overlap. A sequence CRDT, RGA,
+  Fugue or Yjs's, gives each element an identity of its own. To be
+  designed (open 9).

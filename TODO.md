@@ -87,10 +87,23 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   then a bracket's names and its `_`s as letters, which lowers the whole
   core in 0.6 s as `march8 lower` does, to the byte, the examples too,
   and itself, a fixed point: lowered, it lowers itself to itself. For that
-  the machine's limits were raised to 64 MB and a million objects, since
-  nothing is freed. To come, though no program here uses them yet: a
+  the machine's limits were raised to 64 MB and a million objects, while
+  nothing was freed. To come, though no program here uses them yet: a
   string's holes, `[| … |]`, a quotation's power and the symbol table's
   escapes.
+- **The rest of freeing** (doc/design/REPRESENTATIONS.md 4). Built
+  2026-10-25: a count of holders, a copy holding a value once more and a
+  drop once less, the stage saying which cells are values by their types,
+  every other primitive letting go of what it takes, and an edit of a
+  value nothing else holds in place: `lower` on itself peaks at 258 KB of
+  values, not 16.8 MB, and runs 37% slower. To come: a version of a value
+  held elsewhere sharing its holds by node, not a pass over its values,
+  which `lower`'s token arrays need, being most of that time, and
+  merkle-champ a way to walk a version's nodes with their counts (a field
+  taken, by the compiler or by a word a programmer writes, was refused
+  2026-10-26, REPRESENTATIONS.md 4); counting while compiling, a copy only
+  read needing no count; and what a trap throws away, by a table beside
+  the code.
 
 ## To think on
 
@@ -102,7 +115,11 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   guards, splits, loops, traps and sizes where it acts (Thomas). Freeing
   by a count of holders, kept while compiling where it can be (Thomas):
   measured on `lower`, all but 0.2% of its bytes, a record's fields
-  counted as places, and its peak 258 KB, not 16.8 MB.
+  counted as places, and its peak 258 KB, not 16.8 MB; counted as the
+  program runs since 2026-10-25 (Next, above). The forms worth having,
+  sequences and maps, each with its verdict, and transactions, merged
+  rather than run again, merkle-champ's canonical trees lending themselves
+  to it (sections 10 and 11, agreed 2026-10-26).
 - **List edits by arrows,** from SYMBOL (Thomas, 2026-10-09). Its ASCII
   pairs point the way the elements move: `+>` and `<+` add an element at
   the front and the end, `->` and `<-` remove a suffix and a prefix if

@@ -100,12 +100,22 @@ impl Session {
     /// Compiles source and runs it.
     pub fn eval(&mut self, src: &str) -> error::Result<()> {
         let (ops, types) = self.compile(src)?;
+        // The stack as it was is held too, to be put back if the run fails;
+        // what a failed run leaves is not freed.
         let before = self.machine.stack.clone();
+        let counted: Vec<u64> = before
+            .iter()
+            .zip(&self.types)
+            .filter(|&(_, &t)| self.stage.types.counted(t))
+            .map(|(&c, _)| c)
+            .collect();
         let xt = self.machine.define(&ops)?;
+        self.machine.hold_all(&counted)?;
         if let Err(e) = self.machine.run(xt, self.fuel) {
             self.machine.stack = before;
             return Err(e.into());
         }
+        self.machine.release_all(&counted)?;
         assert_eq!(
             self.machine.stack.len(),
             types.len(),

@@ -179,24 +179,24 @@ name-text: < string string >. [ stem marks | stem spelled marks "?" starts not a
 tok: { spelling: < string > ; line: < i64 > ; kind: < sym > ; n: < i64 > ; } ;
 lab: { depth: < i64 > ; index: < i64 > ; line: < i64 > ; } ;
 
--- What reading holds: the tokens so far, the brackets open, the labels
+-- What a parse holds: the tokens so far, the brackets open, the labels
 -- not closed, the line and where in it, whether in a block comment or a
 -- string, and the string's text so far and the line it began on.
-st: { toks: < tok ary > ; opens: < string ary > ; labels: < lab ary > ;
+parse: { toks: < tok ary > ; opens: < string ary > ; labels: < lab ary > ;
   line: < i64 > ; pos: < i64 > ; block: < bool > ; instr: < bool > ;
   acc: < string > ; began: < i64 > ; } ;
 
 start: { toks: < tok ary > empty opens: < string ary > empty labels: < lab ary > empty
-  line: 0 pos: 1 block: false instr: false acc: "" began: 0 } < st >. ;
+  line: 0 pos: 1 block: false instr: false acc: "" began: 0 } < parse >. ;
 
 push: < a ary a >. -1 insert ;
 
 -- A token of a kind on a line given, or on the line being read.
-emit-as: < st string sym i64 >. [ state text made row |
-  state toks' state.toks { spelling: text line: row kind: made n: 0 } push put ] . ;
-emit-at: < st string i64 >. [ state text row | state text tok' row emit-as ] . ;
-emit-kind: < st string sym >. [ state text made | state text made state.line emit-as ] . ;
-emit: < st string >. [ state text | state text state.line emit-at ] . ;
+emit-as: < parse string sym i64 >. [ rd text made row |
+  rd toks' rd.toks { spelling: text line: row kind: made n: 0 } push put ] . ;
+emit-at: < parse string i64 >. [ rd text row | rd text tok' row emit-as ] . ;
+emit-kind: < parse string sym >. [ rd text made | rd text made rd.line emit-as ] . ;
+emit: < parse string >. [ rd text | rd text rd.line emit-at ] . ;
 
 -- A line of three `-` or more, alone, opens a block comment, and one of
 -- them and a period, `---.`, closes it.
@@ -207,14 +207,14 @@ one-closer: < string ary [ length 1 eq ] ? >. first [ text | text "." ends
   text text length 1 -+ upto 45 45 all and text length 4 ge and ] . ;
 one-closer: < string ary >. drop false ;
 closes-block: < string >. words one-closer ;
-block-line: < st string [ state text | text closes-block ] ? >. drop block' false put ;
-block-line: < st string >. drop ;
+block-line: < parse string [ rd text | text closes-block ] ? >. drop block' false put ;
+block-line: < parse string >. drop ;
 
 -- Labels whose bracket has closed were keys, `{ a: 1 }`, not bodies.
-retained: < st [ state | state.labels length 0 eq ] ? >. ;
-retained: < st [ state | state.labels last depth' at state.opens length gt ] ? >.
-  [ state | state labels' state.labels -1 remove put ] . retained < st >. ;
-retained: < st >. ;
+retained: < parse [ rd | rd.labels length 0 eq ] ? >. ;
+retained: < parse [ rd | rd.labels last depth' at rd.opens length gt ] ? >.
+  [ rd | rd labels' rd.labels -1 remove put ] . retained < parse >. ;
+retained: < parse >. ;
 
 -- ---- A word ----
 
@@ -225,7 +225,7 @@ stem-end: < string i64 [ text idx | text idx at mark not ] ? >. swap drop ;
 stem-end: < string i64 >. 1 -+ stem-end < i64 >. ;
 
 -- A bracket opened, and one closed, the kind of the one it closes after it.
-open: < st string >. [ state stem | state opens' state.opens stem push put ] . ;
+open: < parse string >. [ rd stem | rd opens' rd.opens stem push put ] . ;
 paired: < string string >. concat " [] () {} <> " among ;
 made-of: < string [ " ( { " among ] ? >. drop data' ;
 made-of: < string [ "<" eq ] ? >. drop sig' ;
@@ -234,135 +234,135 @@ kind-of: < string [ "(" eq ] ? >. drop " seq# !" ;
 kind-of: < string [ "{" eq ] ? >. drop " map# !" ;
 kind-of: < string [ "<" eq ] ? >. drop " sig# !" ;
 kind-of: < string >. drop "" ;
-close: < st string [ state stem | state.opens length 0 eq ] ? >.
-  [ state stem | ( "`" stem concat "` closes nothing" concat syntax' ) fail ] . ;
-close: < st string [ state stem | state.opens last stem paired not ] ? >.
-  [ state stem | ( "`" stem concat "` closes the `" concat state.opens last concat "`" concat
+close: < parse string [ rd stem | rd.opens length 0 eq ] ? >.
+  [ rd stem | ( "`" stem concat "` closes nothing" concat syntax' ) fail ] . ;
+close: < parse string [ rd stem | rd.opens last stem paired not ] ? >.
+  [ rd stem | ( "`" stem concat "` closes the `" concat rd.opens last concat "`" concat
     syntax' ) fail ] . ;
-close: < st string >. [ state stem | state opens' state.opens -1 remove put
-  "]" state.opens last kind-of concat ] . ;
+close: < parse string >. [ rd stem | rd opens' rd.opens -1 remove put
+  "]" rd.opens last kind-of concat ] . ;
 
 -- A label, `sq:`, at the depth of its bracket, its body opening after it.
-labelled: < st string string [ state stem marks | marks "" eq stem ":" marked and ] ? >.
-  drop drop [ state | state labels' state.labels
-    { depth: state.opens length index: state.toks length line: state.line } < lab >. push put ] . ;
-labelled: < st string string >. drop drop ;
+labelled: < parse string string [ rd stem marks | marks "" eq stem ":" marked and ] ? >.
+  drop drop [ rd | rd labels' rd.labels
+    { depth: rd.opens length index: rd.toks length line: rd.line } < lab >. push put ] . ;
+labelled: < parse string string >. drop drop ;
 
 -- A `;` closes a body whose label is in its bracket: `sq: dup * ;` is
 -- `sq [ dup * ] ;`.
-closes-body: < st [ state | state.labels length 0 eq ] ? >. drop false ;
-closes-body: < st >. [ state | state.labels last depth' at state.opens length eq ] . ;
-opened: < st lab >. [ state label |
-  state toks' state.toks { spelling: "[" line: label.line kind: body' n: 0 } label.index insert put
-  labels' state.labels -1 remove put ] . ;
-body: < st >. [ state | state state.labels last opened ] . "]" close' emit-kind ;
+closes-body: < parse [ rd | rd.labels length 0 eq ] ? >. drop false ;
+closes-body: < parse >. [ rd | rd.labels last depth' at rd.opens length eq ] . ;
+opened: < parse lab >. [ rd label |
+  rd toks' rd.toks { spelling: "[" line: label.line kind: body' n: 0 } label.index insert put
+  labels' rd.labels -1 remove put ] . ;
+body: < parse >. [ rd | rd rd.labels last opened ] . "]" close' emit-kind ;
 
--- (state word stem marks): a body's `;`, a bracket, marks alone, a
+-- (parse word stem marks): a body's `;`, a bracket, marks alone, a
 -- number or a name.
-lower-stem: < st string string string [ state item stem marks | item ";" eq state closes-body and ] ? >.
+lower-stem: < parse string string string [ rd item stem marks | item ";" eq rd closes-body and ] ? >.
   drop drop drop body ";" emit ;
-lower-stem: < st string string string [ state item stem marks | stem opener ] ? >.
-  [ state item stem marks | state stem open "[" marks marked-text concat stem made-of emit-kind ] . ;
-lower-stem: < st string string string [ state item stem marks | stem closer ] ? >.
-  [ state item stem marks | state stem close marks marked-text concat close' emit-kind ] . ;
-lower-stem: < st string string string [ state item stem marks | stem "" eq ] ? >.
-  [ state item stem marks | state marks marked-text 2 from emit ] . ;
-lower-stem: < st string string string [ state item stem marks | stem numeral "" eq not ] ? >.
-  [ state item stem marks | state stem numeral marks marked-text concat emit ] . ;
-lower-stem: < st string string string >. [ state item stem marks |
-  state stem marks name-text emit stem marks labelled ] . ;
+lower-stem: < parse string string string [ rd item stem marks | stem opener ] ? >.
+  [ rd item stem marks | rd stem open "[" marks marked-text concat stem made-of emit-kind ] . ;
+lower-stem: < parse string string string [ rd item stem marks | stem closer ] ? >.
+  [ rd item stem marks | rd stem close marks marked-text concat close' emit-kind ] . ;
+lower-stem: < parse string string string [ rd item stem marks | stem "" eq ] ? >.
+  [ rd item stem marks | rd marks marked-text 2 from emit ] . ;
+lower-stem: < parse string string string [ rd item stem marks | stem numeral "" eq not ] ? >.
+  [ rd item stem marks | rd stem numeral marks marked-text concat emit ] . ;
+lower-stem: < parse string string string >. [ rd item stem marks |
+  rd stem marks name-text emit stem marks labelled ] . ;
 
 -- A word, its stem and its marks.
-lower-word: < st string >. [ state item | state item item item item length stem-end split-at ] .
+lower-word: < parse string >. [ rd item | rd item item item item length stem-end split-at ] .
   lower-stem ;
 
 -- A comment runs to the end of its line.
-the-word: < st string [ state item | item "--" starts ] ? >. drop pos' 1000000000 put ;
-the-word: < st string >. swap retained swap lower-word ;
+the-word: < parse string [ rd item | item "--" starts ] ? >. drop pos' 1000000000 put ;
+the-word: < parse string >. swap retained swap lower-word ;
 
--- The word from one character to before another, the state past it.
-cut-word: < st string i64 i64 >. [ state text begin past |
-  state pos' past put text begin past 1 -+ part the-word text ] . ;
+-- The word from one character to before another, the parse past it.
+cut-word: < parse string i64 i64 >. [ rd text begin past |
+  rd pos' past put text begin past 1 -+ part the-word text ] . ;
 
 -- ---- Strings and quoted symbols ----
 
 -- The text so far, a symbol on the line it began on.
-flush: < st [ state | state.acc "" eq ] ? >. ;
-flush: < st >. [ state | state state.acc named state.began emit-at acc' "" put ] . ;
+flush: < parse [ rd | rd.acc "" eq ] ? >. ;
+flush: < parse >. [ rd | rd rd.acc named rd.began emit-at acc' "" put ] . ;
 
 -- Text taken into the string, and the characters it took.
-took: < st string string i64 >. [ state text add step |
-  state acc' state.acc add concat put pos' state.pos step + put text ] . ;
+took: < parse string string i64 >. [ rd text add step |
+  rd acc' rd.acc add concat put pos' rd.pos step + put text ] . ;
 
 -- A string, `"…"`, is `[ … ] str# !`, each run of its text a symbol and
 -- each `\_` an input, `_ .`.
-open-string: < st string >. [ state text | state "[" text' emit-kind acc' "" put began' state.line put
-  instr' true put pos' state.pos 1 + put text ] . ;
+open-string: < parse string >. [ rd text | rd "[" text' emit-kind acc' "" put began' rd.line put
+  instr' true put pos' rd.pos 1 + put text ] . ;
 
--- An escape, its `\` where the state is: `\\`, `\"`, `\_`, or a name and
+-- An escape, its `\` where the parse is: `\\`, `\"`, `\_`, or a name and
 -- `;`, `\n;`.
 escape-text: < string [ "n" eq ] ? >. drop "\n;" ;
 escape-text: < string [ "t" eq ] ? >. drop "\t;" ;
 escape-text: < string [ "r" eq ] ? >. drop "\r;" ;
 escape-text: < string >. [ esc | ( "`\\" esc concat ";` is not an escape read yet" concat
   syntax' ) fail ] . ;
-named-escape: < st string i64 >. [ state text semi | state text text state.pos 1 + semi 1 -+ part
-  escape-text semi state.pos -+ 1 + took ] . ;
-escaped: < st string i64 [ state text ch | ch 92 eq ] ? >. drop "\\" 2 took ;
-escaped: < st string i64 [ state text ch | ch 34 eq ] ? >. drop "\"" 2 took ;
-escaped: < st string i64 [ state text ch | ch 95 eq ] ? >. drop [ state text | state flush "_ ." emit
-  began' state.line put pos' state.pos 2 + put text ] . ;
-escaped: < st string i64 [ state text ch | ch 91 eq ] ? >.
+named-escape: < parse string i64 >. [ rd text semi | rd text text rd.pos 1 + semi 1 -+ part
+  escape-text semi rd.pos -+ 1 + took ] . ;
+escaped: < parse string i64 [ rd text ch | ch 92 eq ] ? >. drop "\\" 2 took ;
+escaped: < parse string i64 [ rd text ch | ch 34 eq ] ? >. drop "\"" 2 took ;
+escaped: < parse string i64 [ rd text ch | ch 95 eq ] ? >. drop [ rd text | rd flush "_ ." emit
+  began' rd.line put pos' rd.pos 2 + put text ] . ;
+escaped: < parse string i64 [ rd text ch | ch 91 eq ] ? >.
   drop ( "a string's hole is not read yet" syntax' ) fail ;
-escaped: < st string i64 >. drop [ state text | state text text state.pos 1 + 59 59 seek ] .
+escaped: < parse string i64 >. drop [ rd text | rd text text rd.pos 1 + 59 59 seek ] .
   named-escape ;
-escape: < st string >. [ state text | state text text state.pos 1 + char-at ] . escaped ;
+escape: < parse string >. [ rd text | rd text text rd.pos 1 + char-at ] . escaped ;
 
--- A string's text from where the state is: to the end of the line, its
+-- A string's text from where the parse is: to the end of the line, its
 -- `"`, or an escape, and on.
-str-chars: < st string [ state text | state.pos text length gt ] ? >. ;
-str-chars: < st string [ state text | text state.pos at 34 eq ] ? >. [ state text |
-  state flush "] str# !" close' emit-kind instr' false put pos' state.pos 1 + put text ] . ;
-str-chars: < st string [ state text | text state.pos at 92 eq ] ? >. escape str-chars
-  < st string >. ;
-str-chars: < st string >. [ state text | state text text state.pos text state.pos 34 92 seek
-  [ lo hi | lo hi 1 -+ part ] . 1 took ] . [ state text |
-    state pos' text state.pos 34 92 seek put text ] . str-chars < st string >. ;
+str-chars: < parse string [ rd text | rd.pos text length gt ] ? >. ;
+str-chars: < parse string [ rd text | text rd.pos at 34 eq ] ? >. [ rd text |
+  rd flush "] str# !" close' emit-kind instr' false put pos' rd.pos 1 + put text ] . ;
+str-chars: < parse string [ rd text | text rd.pos at 92 eq ] ? >. escape str-chars
+  < parse string >. ;
+str-chars: < parse string >. [ rd text | rd text text rd.pos text rd.pos 34 92 seek
+  [ lo hi | lo hi 1 -+ part ] . 1 took ] . [ rd text |
+    rd pos' text rd.pos 34 92 seek put text ] . str-chars < parse string >. ;
 
--- A quoted symbol, `'…'`, to the next `'` not doubled: (state line text
+-- A quoted symbol, `'…'`, to the next `'` not doubled: (parse line text
 -- so far, where its next run begins).
-quote-run: < st string string i64 [ state text acc begin | text begin 39 39 seek text length gt ] ? >.
+quote-run: < parse string string i64 [ rd text acc begin | text begin 39 39 seek text length gt ] ? >.
   drop drop drop drop ( "a quoted symbol over lines is not read yet" syntax' ) fail
-  < st string >. ;
-quote-run: < st string string i64 [ state text acc begin | text text begin 39 39 seek 1 + char-at 39 eq ] ? >.
-  [ state text acc begin | state text acc text begin text begin 39 39 seek 1 -+ part concat
-    "'" concat text begin 39 39 seek 2 + ] . quote-run < st string >. ;
-quote-run: < st string string i64 >. [ state text acc begin |
-  state acc text begin text begin 39 39 seek 1 -+ part concat named emit
+  < parse string >. ;
+quote-run: < parse string string i64 [ rd text acc begin | text text begin 39 39 seek 1 + char-at 39 eq ] ? >.
+  [ rd text acc begin | rd text acc text begin text begin 39 39 seek 1 -+ part concat
+    "'" concat text begin 39 39 seek 2 + ] . quote-run < parse string >. ;
+quote-run: < parse string string i64 >. [ rd text acc begin |
+  rd acc text begin text begin 39 39 seek 1 -+ part concat named emit
   pos' text begin 39 39 seek 1 + put text ] . ;
-quoted: < st string >. [ state text | state text "" state.pos 1 + ] . quote-run ;
+quoted: < parse string >. [ rd text | rd text "" rd.pos 1 + ] . quote-run ;
 
 -- ---- Lines ----
 
 -- A token: a string, a quoted symbol or a word.
-token: < st string [ state text | text state.pos at 34 eq ] ? >. open-string str-chars ;
-token: < st string [ state text | text state.pos at 39 eq ] ? >. quoted ;
-token: < st string >. [ state text | state text state.pos text state.pos 33 1114111 span ] . cut-word ;
+token: < parse string [ rd text | text rd.pos at 34 eq ] ? >. open-string str-chars ;
+token: < parse string [ rd text | text rd.pos at 39 eq ] ? >. quoted ;
+token: < parse string >. [ rd text | rd text rd.pos text rd.pos 33 1114111 span ] . cut-word ;
 
 -- The rest of a line, a token at a time, white space skipped.
-skip-space: < st string >. [ state text | state pos' text state.pos 0 32 span put text ] . ;
-scan-line: < st string [ state text | state.pos text length gt ] ? >. drop ;
-scan-line: < st string >. token skip-space scan-line < st >. ;
+skip-space: < parse string >. [ rd text | rd pos' text rd.pos 0 32 span put text ] . ;
+scan-line: < parse string [ rd text | rd.pos text length gt ] ? >. drop ;
+scan-line: < parse string >. token skip-space scan-line < parse >. ;
 
 -- A line: in a block comment, the rest of a string, or tokens.
-read-line: < st string [ state text | state.block ] ? >. block-line ;
-read-line: < st string [ state text | state.instr ] ? >.
-  [ state text | state acc' state.acc "\n;" concat put text ] . str-chars skip-space scan-line ;
-read-line: < st string [ state text | text opens-block ] ? >. drop block' true put ;
-read-line: < st string >. skip-space scan-line ;
+read-line: < parse string [ rd text | rd.block ] ? >. block-line ;
+read-line: < parse string [ rd text | rd.instr ] ? >.
+  [ rd text | rd acc' rd.acc "\n;" concat put text ] . str-chars skip-space scan-line ;
+read-line: < parse string [ rd text | text opens-block ] ? >. drop block' true put ;
+read-line: < parse string >. skip-space scan-line ;
 
 -- The source, a line at a time.
-next-line: < st string >. [ state text | state line' state.line 1 + put pos' 1 put text ] .
+next-line: < parse string >. [ rd text | rd line' rd.line 1 + put pos' 1 put text ] .
   read-line ;
 lowered: < string >. lines start [ next-line ] fold ;
 
@@ -502,7 +502,7 @@ barred-at: < naming tok [ acc item | acc.cur.open.kind sig' eq ] ? >.
     syntax' ) fail ;
 barred-at: < naming tok >. drop [ acc | acc cur' acc.cur head put ] . ;
 
--- A use of a name (state, token, name, how it is used, what follows): a
+-- A use of a name (parse, token, name, how it is used, what follows): a
 -- path from a name of the bracket or one around it, its own or one around
 -- it, a letter or a `_` where it names its own, a letter, a `_`, or none.
 use-step: < naming tok string i64 string [ acc item stem len tail | len 0 eq ] ? >.

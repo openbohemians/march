@@ -1133,7 +1133,7 @@ in March cost what primitives did. A final call becomes a tail call, and a
 return ends the word. Code is content-addressed as in march7,
 in its own domain, `march8/code/v1`.
 
-The machine is march7's, with fifty-four primitives added: `pick`; checked
+The machine is march7's, with fifty-seven primitives added: `pick`; checked
 signed `i64+`, `i64-`, `i64*`, `i64-quot` and `i64-rem`, which trap on
 overflow and division by zero, and `i64-divmod`, floored; signed `i64lt?`; `i64>text` and `f64>text`;
 `scratch-at`, which reads a loop's state; `range` and `reverse`;
@@ -1148,8 +1148,45 @@ array or map literal's mark by the cells its code reached below it;
 `upper`; `snake-case`, `kebab-case`, `camel-case` and `pascal-case`;
 `symbol-show`; `parse-int` and `parse-float`, which leave a value and a
 flag; `read-file` and `read-stdin`, whose failure is an `Io` error with the
-system's reason; and `handle` and `unhandle`, which keep a word's inputs
-for its handlers while it runs (above, "Errors").
+system's reason; `handle` and `unhandle`, which keep a word's inputs
+for its handlers while it runs (above, "Errors"); and `hold`, `release`
+and `holds`, which count a value's holders (below).
+
+**Freeing by counting** (doc/design/REPRESENTATIONS.md 4, built
+2026-10-25; Thomas: "a drop unlinks a link in a list or a tree, thus
+removing itself from the path of oweneship"). A value, a string, an array or a map, counts its holders:
+the cells on the stacks that are it, the containers it is in and the
+handlers that keep it. It is made with one. A copy holds it once more, and
+a drop once less, and with none left it is freed, and each value it held
+with one holder fewer, in turn. Since values never change, nothing holds
+itself, so the count is exact. Which cells are values is known only while
+compiling, by their types, so the stage says so: after a copy of one,
+`dup`, `over`, `pick` or a scratch read, it emits `hold`, and for a drop of
+one `release` in place of `drop`; after making a container whose cells are
+values, `holds`, with a mask of which: bit i its element i, every bit every
+element, and for a map 1 its keys and 2 its values, a union's set by its
+member where it is made. Numbers cost nothing. Every other primitive lets go
+of the values it takes, once done with them, as a drop would: `length`
+once it has the length, `at` once it holds the element it read. So a value
+never copied is never counted: it is made with its one holder and freed
+where it is used up. `handle` takes a mask too, of its inputs, and holds
+them while its body runs. The session holds its stack while a run may
+fail, to put it back whole. `region-free` frees raw bytes, as before, and
+lets go of a value.
+
+An edit, `put`, `insert`, `remove`, `concat`, `slice`, of a value nothing
+else holds changes it in place, the element it replaces let go of; of one
+held elsewhere it makes a version that shares the rest, which holds each
+value in it once more, a pass over them. On `lower` lowering itself, the
+run's peak is 1.3 MB, the working memory's megabyte and 258 KB of values,
+as REPRESENTATIONS.md's measure foretold, not 16.8 MB, and 2 KB is held at
+the end, the literals, which are made once and kept. It takes 0.92 s, not
+0.67, most of it 23,000 versions of token arrays still held by the record
+they were read from, `rd.toks … push put`, each a pass over a thousand
+strings. The tree is shared, not copied; the pass is the count, each
+version holding every string it shares. Counted by node, a version would
+hold only the nodes it makes (REPRESENTATIONS.md 4). A trap does not free
+what it throws away, which only a table beside the code could say.
 
 Branches are labels until the code is sealed, so each alternative of a
 choice can be compiled on its own and laid out afterwards. The stage seals
@@ -1344,9 +1381,13 @@ different lengths both may match (above).
       about a kilobyte for the leaves at each seam and a branch for each
       level above them, and never more than it would be on its own, so
       5,000 appends are charged about 9 MB, not 100 MB. `insert` and
-      `remove` are one splice. Freeing is still 2.0: about 8,000 versions
-      kept filled the 16 MB. The limits are 64 MB and a million objects
-      since 2026-10-25, so that `lower` lowers itself (Thomas).
+      `remove` are one splice. Freeing was still 2.0: about 8,000 versions
+      kept filled the 16 MB. The limits were raised to 64 MB and a million
+      objects on 2026-10-25, at Thomas's asking, so that `lower` lowered
+      itself; a value no one holds is freed since that day too, so a
+      version replaced is let go of, and an array's or a map's, nothing
+      else holding it, changes in place (above, "Code"). The limits stay,
+      a ceiling on what is held at once.
     - **Still wanted:** a way to read input, so the text is not a literal;
       and a word applied without its `.` is the easiest mistake to
       make, though the error names it. Wanted then and since built:
@@ -1467,8 +1508,17 @@ repo's root.
   an array would then be built tagged, its positions still known, read with
   no test; and a flat array, a persistent tree, or an update in place chosen
   the same way. Some of it at run time, by size or by a check that a value
-  is unshared, as Koka's Perceus does. A project of its own, beside memory
-  management (2.0).
+  is unshared, as Koka's Perceus does. A project of its own, beside
+  freeing's counting while compiling (below).
+- **The rest of freeing** (doc/design/REPRESENTATIONS.md 4). Built
+  2026-10-25: a count of holders, the stage saying which cells are values,
+  `hold`, `release` and `holds`. To come: a version of a value held
+  elsewhere sharing its holds by node, not a pass over its values, which
+  `lower`'s token arrays need (a field taken, by the compiler or by a word,
+  was refused 2026-10-26: REPRESENTATIONS.md 4); counting while compiling,
+  so that a copy only read needs no count; and what a trap throws away,
+  freed by a table beside the code of which cells are values where it can
+  happen.
 - **`fmt` to mathematics** (Thomas, 2026-10-09). `march8 fmt` rewrites
   `\name` escapes as symbols; a "mathize" mode should also render what is
   typed as what mathematics writes: `*` as `⋅`, `/` as `÷`, and a bracket's

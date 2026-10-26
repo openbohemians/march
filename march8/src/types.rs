@@ -277,6 +277,61 @@ impl Types {
         self.intern(Term::Tuple(r))
     }
     /// A tuple's types, by position.
+    /// Whether a value of `t` is counted, holding memory as the program
+    /// runs: a string, a symbol, an array, a tuple, a record, a map, a union
+    /// or a trap, which a copy holds once more and a drop once less
+    /// (doc/design/REPRESENTATIONS.md 4). Numbers, truth and quotations are
+    /// cells.
+    pub fn counted(&self, t: Type) -> bool {
+        match self.term(t) {
+            Term::Base(b) => matches!(b, Base::String | Base::Symbol),
+            Term::Ary(_)
+            | Term::Vec(..)
+            | Term::Map(..)
+            | Term::Or(..)
+            | Term::Tuple(_)
+            | Term::Record(_)
+            | Term::RecordLit(_)
+            | Term::Trap => true,
+            Term::Own(_, r) => self.counted(r),
+            Term::Nat(_) | Term::Var(_) | Term::Atom | Term::AnyTuple | Term::AnyRecord => false,
+        }
+    }
+    /// Which cells of a container of type `t` are counted values, as the
+    /// machine's `holds` takes them: bit i its element i, every bit every
+    /// element; for a map, 1 its keys and 2 its values. A union's depends on
+    /// its member, so it is set where one is made.
+    pub fn held_cells(&self, t: Type) -> u64 {
+        let bits = |ts: &mut dyn Iterator<Item = Type>| {
+            let ts: Vec<bool> = ts.map(|e| self.counted(e)).collect();
+            if ts.iter().all(|&c| c) {
+                u64::MAX
+            } else {
+                ts.iter()
+                    .take(64)
+                    .enumerate()
+                    .filter(|(_, c)| **c)
+                    .fold(0, |m, (i, _)| m | 1 << i)
+            }
+        };
+        match self.term(t) {
+            Term::Ary(e) | Term::Vec(_, e) => {
+                if self.counted(e) {
+                    u64::MAX
+                } else {
+                    0
+                }
+            }
+            Term::Map(k, v) => u64::from(self.counted(k)) | u64::from(self.counted(v)) << 1,
+            Term::Tuple(r) => bits(&mut self.rows[r as usize].iter().copied()),
+            Term::Record(r) | Term::RecordLit(r) => {
+                bits(&mut self.fields[r as usize].iter().map(|&(_, e)| e))
+            }
+            Term::Trap => u64::MAX,
+            Term::Own(_, r) => self.held_cells(r),
+            _ => 0,
+        }
+    }
     pub fn elements(&self, t: Type) -> Option<&[Type]> {
         match self.term(t) {
             Term::Tuple(r) => Some(&self.rows[r as usize]),

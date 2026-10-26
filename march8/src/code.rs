@@ -2,9 +2,10 @@ use crate::machine::Error;
 use sha2::{Digest, Sha256};
 
 pub type Cid = [u8; 32];
-/// What a machine may hold, nothing being freed yet: 64 MB and a million
-/// objects, raised from 16 MB and 100,000 so that `lower` lowers itself
-/// (Thomas, 2026-10-25).
+/// What a machine may hold at once: 64 MB and a million objects. Raised
+/// from 16 MB and 100,000 on 2026-10-25, at Thomas's asking, so that `lower`
+/// lowered itself while nothing was freed; kept since as a ceiling on what
+/// is held, now that a value no one holds is freed.
 pub const MAX_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_OBJECTS: usize = 1_000_000;
 pub const MAX_WORD_OPS: usize = 65_536;
@@ -229,14 +230,24 @@ pub enum Primitive {
     // literal whose code reached n cells below where it began
     // (doc/design/SYMBOLIC-FORTH.md 14), so its gather takes them too.
     Reach = 126,
-    // ( x1 … xm m -- x1 … xm 0 ) A handler for what follows, keeping the m
-    // cells on top: until `unhandle`, a trap puts the stack back as it was
-    // here, the m cells on it, then the trap, a vector of its message and
-    // its kind, and 1, and goes on from here (doc/design/SYMBOLIC-FORTH.md
-    // 29).
+    // ( x1 … xm h m -- x1 … xm 0 ) A handler for what follows, keeping the
+    // m cells on top, held, h's bits saying which are counted values: until
+    // `unhandle`, a trap puts the stack back as it was here, the m cells on
+    // it, then the trap, a vector of its message and its kind, and 1, and
+    // goes on from here (doc/design/SYMBOLIC-FORTH.md 29).
     Handle = 127,
-    // ( -- ) The innermost handler is done with.
+    // ( -- ) The innermost handler is done with, and lets go of its cells.
     Unhandle = 128,
+    // Counting holders (doc/design/REPRESENTATIONS.md 4): ( x -- x ) one
+    // more holder of a value, a string, an array or a map, as a copy is;
+    // ( x -- ) one fewer, as a drop is, freed when none is left, and each
+    // value it holds with one holder fewer; ( c h -- c ) which of a new
+    // container's cells are counted values, h's bit i its element i, every
+    // bit every element, and for a map 1 its keys and 2 its values. Every
+    // other primitive lets go of the values it takes, once done with them.
+    Hold = 129,
+    Release = 130,
+    Holds = 131,
 }
 impl Primitive {
     pub const ALL: &'static [(Self, &'static str)] = &[
@@ -368,6 +379,9 @@ impl Primitive {
         (Self::Reach, "reach"),
         (Self::Handle, "handle"),
         (Self::Unhandle, "unhandle"),
+        (Self::Hold, "hold"),
+        (Self::Release, "release"),
+        (Self::Holds, "holds"),
     ];
     pub fn decode(n: u8) -> Result<Self, Error> {
         Self::ALL

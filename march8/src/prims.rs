@@ -388,7 +388,7 @@ pub const PRIMS: &[PrimDef] = &[
         Prim::StrEq,
         "string-eq",
         "< string string >. < bool >.",
-        &[P::Eq],
+        &[P::Same],
     ),
     d(
         Prim::AryLength,
@@ -571,7 +571,7 @@ pub const PRIMS: &[PrimDef] = &[
     // A symbol at run time is its name, an interned string, so symbols
     // compare by the machine's `eq` and convert to and from strings as they
     // are.
-    d(Prim::SymEq, "sym-eq", "< sym sym >. < bool >.", &[P::Eq]),
+    d(Prim::SymEq, "sym-eq", "< sym sym >. < bool >.", &[P::Same]),
     d(Prim::StrToSym, "string>sym", "< string >. < sym >.", &[]),
     d(Prim::SymToStr, "sym>string", "< sym >. < string >.", &[]),
     d(

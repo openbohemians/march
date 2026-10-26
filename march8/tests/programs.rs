@@ -135,10 +135,11 @@ fn a_literal_in_a_loop_is_made_once() {
 
 #[test]
 fn a_version_is_charged_what_it_adds() {
-    // Each version shares all but its edit with the one before, so five
-    // thousand of them, all kept, since nothing is freed yet, are charged
-    // a few megabytes. Each charged whole, as it was, the array came to 100
-    // MB, the map to 200 MB and the string to 25 MB.
+    // Each version is made from the one before, which nothing else holds
+    // by then, so an array or a map changes in place, and a string, a new
+    // version each time, is charged what it adds and lets the one before
+    // go. Each charged whole and kept, as they once were, the array came to
+    // 100 MB, the map to 200 MB and the string to 25 MB.
     let bytes = |src: &str| {
         let mut s = Session::new();
         if let Err(e) = s.eval(src) {

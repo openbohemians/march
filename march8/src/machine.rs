@@ -77,6 +77,8 @@ struct Handler {
     marks: usize,
     depth: usize,
     inputs: Vec<u64>,
+    /// Which of the inputs are counted values, held while it waits.
+    held: u64,
 }
 
 impl fmt::Display for Error {
@@ -118,6 +120,39 @@ struct Region {
     /// Bytes counted against the live limit: the byte length, or 8 per
     /// element of an array.
     charged: usize,
+    /// How many hold it: cells on the stacks, the containers it is in, the
+    /// handlers that keep it. A value, a string, an array or a map, is
+    /// freed when none is left (doc/design/REPRESENTATIONS.md 4); raw bytes
+    /// only by `region-free`.
+    holders: u32,
+    /// Which of its cells are counted values, as `holds` sets them: for an
+    /// array, bit i its element i, and every bit every element; for a map,
+    /// 1 its keys and 2 its values.
+    holds: u64,
+}
+
+impl Region {
+    /// Whether it is a value, counted, rather than raw bytes.
+    fn is_value(&self) -> bool {
+        self.array.is_some() || self.text.is_some() || self.map.is_some()
+    }
+}
+
+/// Whether element i of a container is a counted value, by its mask.
+fn held(holds: u64, i: usize) -> bool {
+    holds == u64::MAX || (i < 64 && holds >> i & 1 == 1)
+}
+
+/// The mask of elements taken from another's, `from` giving, for each new
+/// element, the old one it is, or none for one put in that is not counted.
+fn remask(holds: u64, from: impl Iterator<Item = Option<usize>>) -> u64 {
+    if holds == 0 || holds == u64::MAX {
+        return holds;
+    }
+    from.enumerate()
+        .take(64)
+        .filter(|(_, o)| o.is_some_and(|o| held(holds, o)))
+        .fold(0, |m, (i, _)| m | 1 << i)
 }
 
 /// A string: UTF-8 text in a content-defined sequence, whose branches count
@@ -304,6 +339,8 @@ impl Machine {
             text: None,
             map: None,
             charged: size,
+            holders: 1,
+            holds: 0,
         });
         self.live_bytes += size;
         self.stats.allocated_bytes += size as u64;
@@ -344,6 +381,288 @@ impl Machine {
         }
         Ok(())
     }
+    /// One more holder of `r`, if it is a value: a copy of it, or a
+    /// container or a handler that keeps it.
+    fn hold(&mut self, r: u64) -> Result<(), Error> {
+        let slot = self.region_slot(r)?;
+        let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+        if region.is_value() {
+            region.holders = region.holders.checked_add(1).ok_or(Error::Limit)?;
+        }
+        Ok(())
+    }
+    /// One holder fewer of `r`, if it is a value, as `drop` has: with none
+    /// left it is freed, and each value it holds has one holder fewer.
+    fn unhold(&mut self, r: u64) -> Result<(), Error> {
+        let mut work = Vec::new();
+        let mut next = Some(r);
+        while let Some(r) = next.take().or_else(|| work.pop()) {
+            let slot = self.region_slot(r)?;
+            let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+            if !region.is_value() {
+                continue;
+            }
+            region.holders -= 1;
+            if region.holders > 0 {
+                continue;
+            }
+            let holds = region.holds;
+            if holds != 0 {
+                if let Some(a) = &region.array {
+                    for (i, &x) in a.seq.iter().chain(&a.tail).enumerate() {
+                        if held(holds, i) {
+                            work.push(x);
+                        }
+                    }
+                } else if let Some(m) = &region.map {
+                    for (&k, &v) in m.iter() {
+                        if holds & 1 != 0 {
+                            work.push(k);
+                        }
+                        if holds & 2 != 0 {
+                            work.push(v);
+                        }
+                    }
+                }
+            }
+            self.release(r)?;
+        }
+        Ok(())
+    }
+    /// Whether `r` has no holder but the one about to let it go, so that
+    /// what is made of it may take its place.
+    fn alone(&self, r: u64) -> Result<bool, Error> {
+        Ok(self.region(r)?.holders == 1)
+    }
+    /// The mask of `r`'s counted cells.
+    fn holds_of(&self, r: u64) -> Result<u64, Error> {
+        Ok(self.region(r)?.holds)
+    }
+    /// Holds once more each counted element of an array, but those at the
+    /// positions `skip` gives, which are put in rather than shared.
+    fn hold_elements(&mut self, r: u64, skip: &[usize]) -> Result<(), Error> {
+        let holds = self.holds_of(r)?;
+        if holds == 0 {
+            return Ok(());
+        }
+        let cells: Vec<u64> = {
+            let a = self.array(r)?;
+            a.seq
+                .iter()
+                .chain(&a.tail)
+                .enumerate()
+                .filter(|&(i, _)| held(holds, i) && !skip.contains(&i))
+                .map(|(_, &x)| x)
+                .collect()
+        };
+        for x in cells {
+            self.hold(x)?;
+        }
+        Ok(())
+    }
+    /// Holds once more each counted key and value of a map, but the key and
+    /// the value `skip` gives, which are put in rather than shared.
+    fn hold_entries(&mut self, r: u64, skip: Option<u64>) -> Result<(), Error> {
+        let holds = self.holds_of(r)?;
+        if holds == 0 {
+            return Ok(());
+        }
+        let mut cells = Vec::new();
+        for (&k, &v) in self.map(r)?.iter() {
+            if Some(k) == skip {
+                continue;
+            }
+            if holds & 1 != 0 {
+                cells.push(k);
+            }
+            if holds & 2 != 0 {
+                cells.push(v);
+            }
+        }
+        for x in cells {
+            self.hold(x)?;
+        }
+        Ok(())
+    }
+    /// Sets which of a new container's cells are counted values.
+    fn set_holds(&mut self, r: u64, holds: u64) -> Result<(), Error> {
+        let slot = self.region_slot(r)?;
+        self.regions[slot]
+            .region
+            .as_mut()
+            .ok_or(Error::Memory)?
+            .holds = holds;
+        Ok(())
+    }
+    /// A new array, `r`'s elements as `from` picks them, sharing with `r`:
+    /// each counted element held once more, and `r` held once less.
+    fn derived(&mut self, r: u64, cells: Vec<u64>, from: Vec<usize>) -> Result<u64, Error> {
+        let holds = self.holds_of(r)?;
+        let n = self.allocate_vector(cells.into_iter().collect())?;
+        self.set_holds(n, remask(holds, from.into_iter().map(Some)))?;
+        self.hold_elements(n, &[])?;
+        self.unhold(r)?;
+        Ok(n)
+    }
+    /// Replaces an array alone in its region by an edit of it, charged by
+    /// how its length changed.
+    fn edit_in_place(
+        &mut self,
+        r: u64,
+        seq: merkle_champ::Sequence<u64>,
+        holds: u64,
+    ) -> Result<(), Error> {
+        let slot = self.region_slot(r)?;
+        let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+        let a = region.array.as_mut().ok_or(Error::Memory)?;
+        let was = a.len() * 8;
+        let now = seq.len() * 8;
+        *a = Array {
+            seq,
+            tail: Vec::new(),
+        };
+        region.holds = holds;
+        region.charged = (region.charged + now).saturating_sub(was);
+        self.live_bytes = (self.live_bytes + now).saturating_sub(was);
+        self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(self.live_bytes);
+        Ok(())
+    }
+    /// An array with element `i` replaced by `x`: in place if nothing else
+    /// holds it, the old element let go of; else a new version sharing the
+    /// rest, each counted element of it held once more.
+    fn set_element(&mut self, r: u64, i: usize, x: u64) -> Result<u64, Error> {
+        let a = self.array(r)?;
+        let old = a.get(i).ok_or(Error::Memory)?;
+        let v = a.whole().update(i, x);
+        let holds = self.holds_of(r)?;
+        if self.alone(r)? {
+            self.edit_in_place(r, v, holds)?;
+            if held(holds, i) {
+                self.unhold(old)?;
+            }
+            return Ok(r);
+        }
+        let n = self.allocate_version(v, 1)?;
+        self.set_holds(n, holds)?;
+        self.hold_elements(n, &[i])?;
+        self.unhold(r)?;
+        Ok(n)
+    }
+    /// Two arrays joined: in the first's place if nothing else holds it,
+    /// else a new version sharing it; the second's elements shared, or taken
+    /// over if nothing else holds it.
+    fn concat(&mut self, a: u64, b: u64) -> Result<u64, Error> {
+        let (x, y) = (self.array(a)?.whole(), self.array(b)?.whole());
+        let (ha, hb) = (self.holds_of(a)?, self.holds_of(b)?);
+        let (la, lb) = (x.len(), y.len());
+        let mask = if lb == 0 {
+            ha
+        } else if la == 0 {
+            hb
+        } else if ha == hb && (ha == 0 || ha == u64::MAX) {
+            ha
+        } else {
+            (0..la + lb)
+                .take(64)
+                .filter(|&k| {
+                    if k < la {
+                        held(ha, k)
+                    } else {
+                        held(hb, k - la)
+                    }
+                })
+                .fold(0, |m, k| m | 1 << k)
+        };
+        let v = x.concat(&y);
+        let r = if a != b && self.alone(a)? {
+            self.edit_in_place(a, v, mask)?;
+            a
+        } else {
+            let r = self.allocate_version(v, 1)?;
+            self.set_holds(r, mask)?;
+            self.hold_elements(a, &[])?;
+            self.unhold(a)?;
+            r
+        };
+        if a != b && self.alone(b)? {
+            // Its region goes; its elements are the new one's now.
+            self.release(b)?;
+        } else {
+            self.hold_elements(b, &[])?;
+            self.unhold(b)?;
+        }
+        Ok(r)
+    }
+    /// Replaces a map alone in its region by an edit of it, charged 16
+    /// bytes an entry by how many it has.
+    fn map_in_place(&mut self, m: u64, map: Map) -> Result<(), Error> {
+        let slot = self.region_slot(m)?;
+        let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+        let was = region.map.as_ref().ok_or(Error::Memory)?.len() * 16;
+        let now = map.len() * 16;
+        region.map = Some(map);
+        region.charged = (region.charged + now).saturating_sub(was);
+        self.live_bytes = (self.live_bytes + now).saturating_sub(was);
+        self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(self.live_bytes);
+        Ok(())
+    }
+    /// A map with key `k` set to `v`: in place if nothing else holds it,
+    /// the value replaced let go of, and the key given too if it was there,
+    /// the map holding it already; else a new version sharing the rest.
+    fn put(&mut self, m: u64, k: u64, v: u64) -> Result<u64, Error> {
+        let holds = self.holds_of(m)?;
+        let map = self.map(m)?;
+        let old = map.get(&k).copied();
+        let new = map.update(k, v);
+        if self.alone(m)? {
+            self.map_in_place(m, new)?;
+            if let Some(old) = old {
+                if holds & 2 != 0 {
+                    self.unhold(old)?;
+                }
+                if holds & 1 != 0 {
+                    self.unhold(k)?;
+                }
+            }
+            return Ok(m);
+        }
+        let r = self.allocate_map_version(new)?;
+        self.set_holds(r, holds)?;
+        self.hold_entries(r, Some(k))?;
+        self.unhold(m)?;
+        Ok(r)
+    }
+    /// A map without key `k`: in place if nothing else holds it, the entry
+    /// let go of; else a new version sharing the rest. The key given is let
+    /// go of either way.
+    fn remove(&mut self, m: u64, k: u64) -> Result<u64, Error> {
+        let holds = self.holds_of(m)?;
+        let map = self.map(m)?;
+        let old = map.get(&k).copied();
+        let new = map.without(&k);
+        let r = if self.alone(m)? {
+            self.map_in_place(m, new)?;
+            if let Some(old) = old {
+                if holds & 2 != 0 {
+                    self.unhold(old)?;
+                }
+                if holds & 1 != 0 {
+                    self.unhold(k)?;
+                }
+            }
+            m
+        } else {
+            let r = self.allocate_map_version(new)?;
+            self.set_holds(r, holds)?;
+            self.hold_entries(r, None)?;
+            self.unhold(m)?;
+            r
+        };
+        if holds & 1 != 0 {
+            self.unhold(k)?;
+        }
+        Ok(r)
+    }
     fn region_slot(&self, r: u64) -> Result<usize, Error> {
         let index = (r & u32::MAX as u64) as usize;
         let slot = self.regions.get(index).ok_or(Error::Memory)?;
@@ -358,6 +677,7 @@ impl Machine {
     fn allocate_text(&mut self, t: Text) -> Result<u64, Error> {
         let id = t.identity();
         if let Some(&r) = self.strings.get(&id) {
+            self.hold(r)?;
             return Ok(r);
         }
         let r = self.allocate_new_text(t)?;
@@ -369,6 +689,7 @@ impl Machine {
     fn allocate_text_version(&mut self, t: Text, seams: usize) -> Result<u64, Error> {
         let id = t.identity();
         if let Some(&r) = self.strings.get(&id) {
+            self.hold(r)?;
             return Ok(r);
         }
         let size = edited(seams, t.height(), t.len());
@@ -407,6 +728,29 @@ impl Machine {
     /// The handle of an array of these cells, as `Gather` makes one.
     pub fn vector_cell(&mut self, cells: Vec<u64>) -> Result<u64, Error> {
         self.allocate_vector(cells.into_iter().collect())
+    }
+
+    /// One more holder of each of these values, as the session's copy of
+    /// the stack is.
+    pub fn hold_all(&mut self, cells: &[u64]) -> Result<(), Error> {
+        for &c in cells {
+            self.hold(c)?;
+        }
+        Ok(())
+    }
+    /// One holder fewer of each of these values.
+    pub fn release_all(&mut self, cells: &[u64]) -> Result<(), Error> {
+        for &c in cells {
+            self.unhold(c)?;
+        }
+        Ok(())
+    }
+    /// What is held now: bytes and regions.
+    pub fn live(&self) -> (usize, usize) {
+        (
+            self.live_bytes,
+            self.regions.iter().filter(|s| s.region.is_some()).count(),
+        )
     }
 
     /// Runs primitives on the stack, outside any word: what the stage does
@@ -781,6 +1125,9 @@ impl Machine {
             if self.stack.len() < h.depth {
                 return Err(Error::Stack);
             }
+            // What the trap throws away is not freed: which of its cells
+            // are values is known only while compiling, and a table of it
+            // beside the code is to come. The inputs come back, held.
             returns.truncate(h.returns);
             self.scratch.truncate(h.scratch);
             self.marks.truncate(h.marks);
@@ -789,6 +1136,7 @@ impl Machine {
             let why = self.text_cell(&why)?;
             let kind = self.text_cell(&kind)?;
             let trap = self.vector_cell(vec![why, kind])?;
+            self.set_holds(trap, u64::MAX)?;
             self.push(trap)?;
             self.push(1)?;
             at = h.at;
@@ -921,9 +1269,15 @@ impl Machine {
                 }
                 Instruction::Prim(Primitive::Handle) => {
                     let m = usize::try_from(self.pop()?).map_err(|_| Error::Stack)?;
+                    let mask = self.pop()?;
                     let depth = self.stack.len().checked_sub(m).ok_or(Error::Stack)?;
                     if handlers.len() >= 16384 {
                         return Err(Error::Stack);
+                    }
+                    for i in 0..m {
+                        if held(mask, i) {
+                            self.hold(self.stack[depth + i])?;
+                        }
                     }
                     handlers.push(Handler {
                         at: Resume {
@@ -937,11 +1291,17 @@ impl Machine {
                         marks: self.marks.len(),
                         depth,
                         inputs: self.stack[depth..].to_vec(),
+                        held: mask,
                     });
                     self.push(0)?;
                 }
                 Instruction::Prim(Primitive::Unhandle) => {
-                    handlers.pop().ok_or(Error::Stack)?;
+                    let h = handlers.pop().ok_or(Error::Stack)?;
+                    for (i, &x) in h.inputs.iter().enumerate() {
+                        if held(h.held, i) {
+                            self.unhold(x)?;
+                        }
+                    }
                 }
                 Instruction::Prim(Primitive::Mark) => {
                     if self.marks.len() >= 65536 {
@@ -1149,12 +1509,17 @@ impl Machine {
                 let r = self.allocate(vec![0; size], None)?;
                 self.push(r)?;
             }
+            // Raw bytes freed; a value let go of, as `release` does.
             RegionFree => {
                 let r = self.pop()?;
-                if self.region(r)?.read_only {
+                let region = self.region(r)?;
+                if region.is_value() {
+                    self.unhold(r)?;
+                } else if region.read_only {
                     return Err(Error::ReadOnly);
+                } else {
+                    self.release(r)?;
                 }
-                self.release(r)?;
             }
             RegionSize => {
                 let r = self.pop()?;
@@ -1207,7 +1572,10 @@ impl Machine {
                 let kind = self.pop()?;
                 let why = self.pop()?;
                 let text = |r| self.text(r)?.to_text().ok_or(Error::Memory);
-                return Err(Error::Trap(text(kind)?, text(why)?));
+                let e = Error::Trap(text(kind)?, text(why)?);
+                self.unhold(kind)?;
+                self.unhold(why)?;
+                return Err(e);
             }
             // On a string, length counts characters and `at` gives one; on a
             // map, length counts entries and `at` looks a key up.
@@ -1220,6 +1588,7 @@ impl Machine {
                 } else {
                     self.array(r)?.len()
                 };
+                self.unhold(r)?;
                 self.push(n as u64)?;
             }
             // What is not there is a trap of `mismatch'`, as it is while
@@ -1228,21 +1597,32 @@ impl Machine {
             VecAt => {
                 let i = self.pop()?;
                 let r = self.pop()?;
-                let x = if let Ok(t) = self.text(r) {
-                    u64::from(
-                        t.char_at(i)
-                            .ok_or_else(|| missing("the string has no such character".into()))?,
-                    )
+                let holds = self.holds_of(r)?;
+                let (x, counted) = if let Ok(t) = self.text(r) {
+                    let c = t
+                        .char_at(i)
+                        .ok_or_else(|| missing("the string has no such character".into()))?;
+                    (u64::from(c), false)
                 } else if let Ok(m) = self.map(r) {
-                    *m.get(&i)
-                        .ok_or_else(|| missing("the map has no such key".into()))?
+                    let x = *m
+                        .get(&i)
+                        .ok_or_else(|| missing("the map has no such key".into()))?;
+                    if holds & 1 != 0 {
+                        self.unhold(i)?;
+                    }
+                    (x, holds & 2 != 0)
                 } else {
                     let a = self.array(r)?;
-                    usize::try_from(i)
-                        .ok()
-                        .and_then(|k| a.get(k))
-                        .ok_or_else(|| missing(beyond(a.len())))?
+                    let k = usize::try_from(i).ok().filter(|&k| k < a.len());
+                    let Some(k) = k else {
+                        return Err(missing(beyond(a.len())));
+                    };
+                    (a.get(k).ok_or(Error::Memory)?, held(holds, k))
                 };
+                if counted {
+                    self.hold(x)?;
+                }
+                self.unhold(r)?;
                 self.push(x)?;
             }
             VecPush => {
@@ -1266,8 +1646,7 @@ impl Machine {
                 let Some(i) = usize::try_from(i).ok().filter(|&k| k < a.len()) else {
                     return Err(missing(beyond(a.len())));
                 };
-                let v = a.whole().update(i, x);
-                let r = self.allocate_version(v, 1)?;
+                let r = self.set_element(r, i, x)?;
                 self.push(r)?;
             }
             Text => {
@@ -1280,12 +1659,15 @@ impl Machine {
                     .is_some_and(|g| g.read_only);
                 let made = self.data_texts.get(&(r, o, n)).copied();
                 if fixed && let Some(t) = made.filter(|&t| self.text(t).is_ok()) {
+                    self.hold(t)?;
                     self.push(t)?;
                 } else {
                     let s = std::str::from_utf8(self.read(r, o, n)?).map_err(|_| Error::Memory)?;
                     let t = merkle_champ::Sequence::text(s);
                     let t = self.allocate_text(t)?;
+                    // The cache holds it too, so a literal is never freed.
                     if fixed {
+                        self.hold(t)?;
                         self.data_texts.insert((r, o, n), t);
                     }
                     self.push(t)?;
@@ -1297,12 +1679,12 @@ impl Machine {
                 let r = match (self.text(a), self.text(b)) {
                     (Ok(x), Ok(y)) => {
                         let t = x.concat(y);
-                        self.allocate_text_version(t, 1)?
+                        let r = self.allocate_text_version(t, 1)?;
+                        self.unhold(a)?;
+                        self.unhold(b)?;
+                        r
                     }
-                    _ => {
-                        let v = self.array(a)?.whole().concat(&self.array(b)?.whole());
-                        self.allocate_version(v, 1)?
-                    }
+                    _ => self.concat(a, b)?,
                 };
                 self.push(r)?;
             }
@@ -1316,7 +1698,9 @@ impl Machine {
                 let r = match self.text(a) {
                     Ok(t) => {
                         let t = t.char_slice(i..j).ok_or(Error::Memory)?;
-                        self.allocate_text_version(t, 2)?
+                        let r = self.allocate_text_version(t, 2)?;
+                        self.unhold(a)?;
+                        r
                     }
                     Err(_) => {
                         let whole = self.array(a)?.whole();
@@ -1324,7 +1708,25 @@ impl Machine {
                         if j > whole.len() {
                             return Err(Error::Memory);
                         }
-                        self.allocate_version(whole.slice(i..j), 2)?
+                        let holds = self.holds_of(a)?;
+                        let mask = remask(holds, (i..j).map(Some));
+                        if self.alone(a)? {
+                            let cut: Vec<u64> = (0..whole.len())
+                                .filter(|&k| (k < i || k >= j) && held(holds, k))
+                                .filter_map(|k| whole.get(k).copied())
+                                .collect();
+                            self.edit_in_place(a, whole.slice(i..j), mask)?;
+                            for x in cut {
+                                self.unhold(x)?;
+                            }
+                            a
+                        } else {
+                            let r = self.allocate_version(whole.slice(i..j), 2)?;
+                            self.set_holds(r, mask)?;
+                            self.hold_elements(r, &[])?;
+                            self.unhold(a)?;
+                            r
+                        }
                     }
                 };
                 self.push(r)?;
@@ -1335,7 +1737,8 @@ impl Machine {
                 let b = self.pop()?;
                 let a = self.pop()?;
                 let same = match (self.text(a), self.text(b)) {
-                    (Ok(x), Ok(y)) => x.identity() == y.identity(),
+                    // Interned, so equal text is one handle.
+                    (Ok(_), Ok(_)) => a == b,
                     _ => match (self.array(a), self.array(b)) {
                         (Ok(x), Ok(y)) => x.whole().identity() == y.whole().identity(),
                         _ => match (self.map(a), self.map(b)) {
@@ -1344,6 +1747,11 @@ impl Machine {
                         },
                     },
                 };
+                for r in [a, b] {
+                    if self.region(r).is_ok_and(Region::is_value) {
+                        self.unhold(r)?;
+                    }
+                }
                 self.push(same as u64)?;
             }
             // A new version with key k set to v, for a map; with element k
@@ -1352,17 +1760,15 @@ impl Machine {
                 let v = self.pop()?;
                 let k = self.pop()?;
                 let m = self.pop()?;
-                let r = if let Ok(map) = self.map(m) {
-                    let map = map.update(k, v);
-                    self.allocate_map_version(map)?
+                let r = if self.map(m).is_ok() {
+                    self.put(m, k, v)?
                 } else {
                     let a = self.array(m)?;
                     let i = usize::try_from(k).map_err(|_| Error::Memory)?;
                     if i >= a.len() {
                         return Err(Error::Memory);
                     }
-                    let s = a.whole().update(i, v);
-                    self.allocate_version(s, 1)?
+                    self.set_element(m, i, v)?
                 };
                 self.push(r)?;
             }
@@ -1370,13 +1776,16 @@ impl Machine {
                 let k = self.pop()?;
                 let m = self.pop()?;
                 let has = self.map(m)?.contains_key(&k);
+                if self.holds_of(m)? & 1 != 0 {
+                    self.unhold(k)?;
+                }
+                self.unhold(m)?;
                 self.push(has as u64)?;
             }
             Remove => {
                 let k = self.pop()?;
                 let m = self.pop()?;
-                let map = self.map(m)?.without(&k);
-                let r = self.allocate_map_version(map)?;
+                let r = self.remove(m, k)?;
                 self.push(r)?;
             }
             Keys | Values => {
@@ -1387,7 +1796,14 @@ impl Machine {
                 } else {
                     map.iter().map(|(_, v)| *v).collect()
                 };
+                let holds = self.holds_of(m)?;
+                let counted = holds & if p == Keys { 1 } else { 2 } != 0;
                 let r = self.allocate_vector(cells)?;
+                if counted {
+                    self.set_holds(r, u64::MAX)?;
+                    self.hold_elements(r, &[])?;
+                }
+                self.unhold(m)?;
                 self.push(r)?;
             }
             // ( r o end b -- k ) The first offset from o before end whose
@@ -1453,6 +1869,13 @@ impl Machine {
                 let mut s = String::new();
                 self.format_value(x, t, false, None, &mut s);
                 let r = self.allocate_text(merkle_champ::Sequence::text(&s))?;
+                let value = t == STRING
+                    || (MAP..=EMPTY_MAP).contains(&t)
+                    || (3..=230).contains(&t)
+                    || matches!(t, 247 | 252 | 254);
+                if value && self.region(x).is_ok_and(Region::is_value) {
+                    self.unhold(x)?;
+                }
                 self.push(r)?;
             }
             Write => {
@@ -1460,6 +1883,7 @@ impl Machine {
                 let t = self.text(r)?;
                 let bytes: Vec<u8> = t.iter().map(|b| b.0).collect();
                 self.output.extend(bytes);
+                self.unhold(r)?;
             }
             // ( a b -- n ) -1, 0 or 1 as a is before, equal to or after b, by
             // code point.
@@ -1474,6 +1898,8 @@ impl Machine {
                         .map(|x| x.0)
                         .cmp(self.text(b)?.iter().map(|x| x.0))
                 };
+                self.unhold(a)?;
+                self.unhold(b)?;
                 self.push(order as i64 as u64)?;
             }
             // ( s t -- i ) The index, in characters, of t's first occurrence
@@ -1486,6 +1912,8 @@ impl Machine {
                 let i = hay
                     .find(&needle)
                     .map_or(u64::MAX, |b| hay[..b].chars().count() as u64);
+                self.unhold(s)?;
+                self.unhold(t)?;
                 self.push(i)?;
             }
             // ( s -- n ok ) ( s -- f ok ) A string's number: a decimal integer
@@ -1501,6 +1929,7 @@ impl Machine {
                         .filter(|x| x.is_finite())
                         .map(float_bits)
                 };
+                self.unhold(s)?;
                 self.push(parsed.unwrap_or(0))?;
                 self.push(parsed.is_some() as u64)?;
             }
@@ -1553,7 +1982,14 @@ impl Machine {
                         cells = texts.into_iter().map(|t| t.1).collect();
                     }
                 }
+                // Each of its elements is somewhere in the sorted one, so a
+                // mask that is not every element or none is lost.
                 let r = self.allocate_vector(cells.into_iter().collect())?;
+                if self.holds_of(a)? == u64::MAX {
+                    self.set_holds(r, u64::MAX)?;
+                    self.hold_elements(r, &[])?;
+                }
+                self.unhold(a)?;
                 self.push(r)?;
             }
             VecInsert => {
@@ -1567,7 +2003,27 @@ impl Machine {
                         whole.len()
                     )));
                 };
-                let r = self.allocate_version(whole.insert(g, x), 1)?;
+                let holds = self.holds_of(a)?;
+                let len = whole.len();
+                let mask = remask(
+                    holds,
+                    (0..=len).map(|k| match k.cmp(&g) {
+                        std::cmp::Ordering::Less => Some(k),
+                        std::cmp::Ordering::Equal => None,
+                        std::cmp::Ordering::Greater => Some(k - 1),
+                    }),
+                );
+                let v = whole.insert(g, x);
+                let r = if self.alone(a)? {
+                    self.edit_in_place(a, v, mask)?;
+                    a
+                } else {
+                    let r = self.allocate_version(v, 1)?;
+                    self.set_holds(r, mask)?;
+                    self.hold_elements(r, &[g])?;
+                    self.unhold(a)?;
+                    r
+                };
                 self.push(r)?;
             }
             VecRemove => {
@@ -1577,7 +2033,26 @@ impl Machine {
                 let Some(i) = usize::try_from(i).ok().filter(|&i| i < whole.len()) else {
                     return Err(missing(beyond(whole.len())));
                 };
-                let r = self.allocate_version(whole.remove(i), 1)?;
+                let holds = self.holds_of(a)?;
+                let old = whole.get(i).copied().ok_or(Error::Memory)?;
+                let mask = remask(
+                    holds,
+                    (0..whole.len() - 1).map(|k| Some(k + (k >= i) as usize)),
+                );
+                let v = whole.remove(i);
+                let r = if self.alone(a)? {
+                    self.edit_in_place(a, v, mask)?;
+                    if held(holds, i) {
+                        self.unhold(old)?;
+                    }
+                    a
+                } else {
+                    let r = self.allocate_version(v, 1)?;
+                    self.set_holds(r, mask)?;
+                    self.hold_elements(r, &[])?;
+                    self.unhold(a)?;
+                    r
+                };
                 self.push(r)?;
             }
             GradeInts | GradeFloats | GradeTexts | GradeDownInts | GradeDownFloats
@@ -1604,6 +2079,7 @@ impl Machine {
                     }
                 }
                 let r = self.allocate_vector(order.into_iter().map(|i| i as u64 + 1).collect())?;
+                self.unhold(a)?;
                 self.push(r)?;
             }
             Split | Lines | Words => {
@@ -1627,6 +2103,11 @@ impl Machine {
                     cells.push(self.allocate_text(merkle_champ::Sequence::text(&part))?);
                 }
                 let r = self.allocate_vector(cells.into_iter().collect())?;
+                self.set_holds(r, u64::MAX)?;
+                self.unhold(s)?;
+                if let Some(sep) = sep {
+                    self.unhold(sep)?;
+                }
                 self.push(r)?;
             }
             Snake | Kebab | Camel | Pascal => {
@@ -1640,6 +2121,7 @@ impl Machine {
                 };
                 let out = crate::prims::restyle(&text, style);
                 let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
+                self.unhold(s)?;
                 self.push(r)?;
             }
             TextJoin => {
@@ -1649,8 +2131,10 @@ impl Machine {
                 for &t in &self.stack[at..] {
                     out.push_str(&self.text(t)?.to_text().ok_or(Error::Memory)?);
                 }
-                self.stack.truncate(at);
                 let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
+                for t in self.stack.split_off(at) {
+                    self.unhold(t)?;
+                }
                 self.push(r)?;
             }
             SymShow => {
@@ -1659,6 +2143,7 @@ impl Machine {
                 let mut out = String::new();
                 crate::show::symbol(&text, &mut out);
                 let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
+                self.unhold(s)?;
                 self.push(r)?;
             }
             Lower | Upper => {
@@ -1670,6 +2155,7 @@ impl Machine {
                     text.to_uppercase()
                 };
                 let r = self.allocate_text(merkle_champ::Sequence::text(&out))?;
+                self.unhold(s)?;
                 self.push(r)?;
             }
             ReadFile => {
@@ -1678,6 +2164,7 @@ impl Machine {
                 let text = std::fs::read_to_string(&path)
                     .map_err(|e| Error::Io(format!("cannot read {path:?}: {e}")))?;
                 let t = self.allocate_text(merkle_champ::Sequence::text(&text))?;
+                self.unhold(r)?;
                 self.push(t)?;
             }
             ReadStdin => {
@@ -1696,6 +2183,7 @@ impl Machine {
                     t.parse::<f64>().ok().map(f64::to_bits)
                 };
                 let (x, ok) = parsed.map_or((0, 0), |x| (x, 1));
+                self.unhold(s)?;
                 self.push(x)?;
                 self.push(ok)?;
             }
@@ -1710,13 +2198,15 @@ impl Machine {
                         "`keep`: the array and its mask are not as long".into(),
                     ));
                 }
-                let kept: merkle_champ::Sequence<u64> = whole
+                let from: Vec<usize> = mask
                     .iter()
-                    .zip(mask.iter())
+                    .enumerate()
                     .filter(|(_, f)| **f != 0)
-                    .map(|(&x, _)| x)
+                    .map(|(k, _)| k)
                     .collect();
-                let r = self.allocate_vector(kept)?;
+                let kept: Vec<u64> = from.iter().filter_map(|&k| whole.get(k).copied()).collect();
+                let r = self.derived(a, kept, from)?;
+                self.unhold(m)?;
                 self.push(r)?;
             }
             UnionMake => {
@@ -1729,6 +2219,10 @@ impl Machine {
                 let u = self.pop()?;
                 let k = if p == UnionTag { 0 } else { 1 };
                 let x = self.array(u)?.get(k).ok_or(Error::Memory)?;
+                if held(self.holds_of(u)?, k) {
+                    self.hold(x)?;
+                }
+                self.unhold(u)?;
                 self.push(x)?;
             }
             Reverse => {
@@ -1736,7 +2230,8 @@ impl Machine {
                 let whole = self.array(a)?.whole();
                 let mut cells: Vec<u64> = whole.iter().copied().collect();
                 cells.reverse();
-                let r = self.allocate_vector(cells.into_iter().collect())?;
+                let n = cells.len();
+                let r = self.derived(a, cells, (0..n).rev().collect())?;
                 self.push(r)?;
             }
             IntText | FloatText | MoneyText | StringShow => {
@@ -1753,7 +2248,23 @@ impl Machine {
                     }
                 };
                 let r = self.allocate_text(merkle_champ::Sequence::text(&s))?;
+                if p == StringShow {
+                    self.unhold(x)?;
+                }
                 self.push(r)?;
+            }
+            Hold => {
+                let x = *self.stack.last().ok_or(Error::Stack)?;
+                self.hold(x)?;
+            }
+            Release => {
+                let x = self.pop()?;
+                self.unhold(x)?;
+            }
+            Holds => {
+                let h = self.pop()?;
+                let c = *self.stack.last().ok_or(Error::Stack)?;
+                self.set_holds(c, h)?;
             }
             Execute | ScratchPush | ScratchPop | ScratchPeek | ScratchAt | Mark | Gather
             | MapGather | Reach | Handle | Unhandle => {

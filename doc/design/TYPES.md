@@ -480,11 +480,13 @@ are four cases:
   never wrong, only less exact, where keeping by default can be wrong: a
   bool of 2, or money times money as money. A literal takes its type from
   context, so `price 3 +` takes money's `+`, and a decimal made as the
-  program runs is converted, `money !`. Proposed, not decided: a minor
-  warning where one word forgets two types of their own, dollars and
-  euros, or Celsius and Fahrenheit, which a units system will check
-  properly (Thomas: "we will get to units system, eventually. I
-  definitely want that").
+  program runs is converted, `money !`. A minor warning where one word
+  forgets two types of their own, dollars and euros, or Celsius and
+  Fahrenheit, which a units system will check properly (Thomas: "we will
+  get to units system, eventually. I definitely want that"). Decided
+  2026-10-26 (Thomas: "1 for now. We will revisit when we do unit
+  system."); `!` of the representation, `< f64 f64 > !`, forgets both as
+  meant, and is not warned of.
 - **A kind**, a trap's, is a type of its own in a tree, its name a word
   and a namespace both, holding the kinds beneath it: like an enum
   (Thomas: "The Kind reminds me a bit of enums"), but open, since a
@@ -534,9 +536,9 @@ the representation's word is applied, kept by a generic word and by a
 clause of its own, `price 3 +` taking that; given by `!` of the
 representation or a literal of it, over a record too; and by `!` of an
 array of the representation, `( 1.0 2.0 ) < 2 celsius vec > !`, as
-`[ celsius ! ] map` gives, or any value holding it (built 2026-10-26).
-Not yet: the warning proposed above; and a type made of itself, `tree:
-{ left: < tree > ; … } ;`, an error for now. A clause
+`[ celsius ! ] map` gives, or any value holding it, and the warning
+above (built 2026-10-26). Not yet: a type made of itself, `tree: {
+left: < tree > ; … } ;`, an error for now. A clause
 added to a core family by its path, `core.+:`, is expanded in `core`, so
 it names the program's types only once they are the core's.
 
@@ -924,6 +926,48 @@ Decided 2026-10-09 (Thomas: "Iverson brackets it is").
     `Socrates Mortal is` folds to true, as `10 fact` might to 3628800;
     where it stops, when a known recursion is too deep or too wide to
     unfold, is the question.
+17. **Properties** (Thomas, 2026-10-26; proposed). A value may have more
+    than one type, both at once rather than one of a union (Thomas: "Might
+    we not say an object can have more than one type? I don't mean like
+    an or-union"): an `i64 ary` that is `sorted` too. A type of its own
+    names values its representation cannot tell apart, and two exclude
+    each other, celsius and fahrenheit having no value in common; a
+    property says what the representation cannot show, and properties
+    stack, an array being `sorted` and `nonempty` at once.
+    - **A word that takes a type,** as `ary` does (Thomas: "we might not
+      need `and` if `sorted` is a word that takes a sequence type (or any
+      sortable type), just as ary is word that takes a type"): `i64 ary
+      sorted`, and `i64 ary sorted nonempty`, one type in either order,
+      held as a type and its properties, as a union's members are kept
+      sorted (6). It takes the types it is defined for, a sequence of what
+      has an order, so `i64 sorted` is no word. `and` stays the
+      intersection of 6, which this does not need.
+    - **A guard remembered.** `< a ary [ sorted? ] ? >.` tests each time a
+      clause is chosen; `< a ary sorted >.` takes only a value known to be
+      sorted, tested once, where it was made, and carried. A binary search
+      that takes `< i64 ary sorted >` never tests again.
+    - **Defined by a test, or by its name.** With a test, `!` applies it:
+      while compiling where the value is known, and as the program runs
+      where it is not, as a check is (SYMBOLIC-FORTH.md 6.32). By its name
+      alone, a fact only some process knows, `checked`, `!` trusts it, as
+      it does a type of its own.
+    - **Made by words.** `sort` leaves `< a ary sorted >`, so a program
+      seldom writes `!` for one; where it does, `!` adds the property to
+      the value's type rather than replacing it.
+    - **Kept by the rule of types of their own** (2.11), not a list:
+      forgotten where a word that does not name it is applied, `push` and
+      `reverse` forgetting `sorted`; kept by a word of any type, `dup` or
+      `swap`, and by a clause of its own, `merge: < a ary sorted a ary
+      sorted >. … < a ary sorted >. ;`. Forgetting is safe: an array no
+      longer said to be sorted is only less exactly known.
+    - **Nothing at run time.** A property is erased with the rest of the
+      type; its values are the type's. Only a test where it is given by
+      `!` to a value not known while compiling costs anything.
+
+    What is done to a value, rather than what it is, is the compiler's to
+    track, to choose how the value is held (Thomas chose both, "3 and 4"):
+    REPRESENTATIONS.md 3. Open: how a property is defined, its test and
+    the types it takes, in a body as other types are (2.11).
 
 ## 4. A way to build it (proposal)
 

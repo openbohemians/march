@@ -21,7 +21,31 @@ while it is gathered is flat.
 
 Since 2026-10-25 a version made by an edit is charged what it adds, not
 its whole length (MACHINE.md, "What it found", 10), so the trees cost
-what they use. The idea of choosing is older: TYPES.md, open question 4,
+what they use.
+
+Measured 2026-10-26, nanoseconds an element, the sequence against Rust's
+`Vec` of u64, then the same in march8, where its own loop costs about
+130 an element:
+
+| | 10,000: `Vec` | sequence | 1,000,000: `Vec` | sequence | march8, 1,000,000 |
+|---|---|---|---|---|---|
+| made | 0.1 | 6.7 | 0.2 | 6.4 | 10, `range` |
+| walked | 0.1 | 0.5 | 0.4 | 1.1 | |
+| read by index | 0.1 | 8.8 | 0.3 | 22 | 127, `sum` |
+| mapped | 0.2 | 7.5 | 0.5 | 8.2 | 159, `[ 2 * ] map` |
+| an element set | 0.3 | 3,029 | 0.6 | 4,339 | no word yet |
+| appended | 0.6 | 1,283 | 0.6 | 2,041 | 2,347, `-1 insert` |
+
+Reading and mapping, the tree is a tenth of march8's time or less, the
+loop being the rest; compiled to native code, it would be most of it. An
+append or a set is a thousand times a `Vec`'s, the tree making a leaf
+again each time, and is nearly all of march8's: an array that grows, as
+`lower`'s tokens do, pays it on every element. So an append to an array
+nothing else holds now goes onto the flat tail the machine keeps for
+`map`, joined to the tree once, where the array is next needed whole: a
+million appends take 197 ns each, not 2,347, the loop's 133 nearly all of
+it (2026-10-26). `lower`'s are not alone, the record holding the array it
+appends to (4). The idea of choosing is older: TYPES.md, open question 4,
 says a string's structure is "a representation chosen by use, not a
 type", and MACHINE.md's "Not yet" has "Representations chosen by use"
 (2026-10-09). Neither says how.
@@ -67,6 +91,28 @@ not among those worth having.
 Small or large is Thomas's subtlety. A length known while compiling, `< 3
 i64 vec >`, settles it; a bound would; otherwise the program checks as it
 runs, or the compiler assumes large.
+
+**What is done, written in the lowered type** (2026-10-26). Thomas: "the
+idea that a sequence tagged as appends is one that needs to be an
+appendable optimized concrete type. Sure any array can be appended to via
+copying it, and for a small array that's fine. So maybe this isn't
+needed, I just thought it might be an easy way for complier to track the
+capabilities in the program flow." In straight code the stage needs no
+record of it: it evaluates each word where it is applied, so it sees the
+value made and every word applied to it, and moves the value at the word
+that needs another form (2). A record is needed where a value's form must
+be settled before the code that uses it runs: a loop's accumulator, a
+recursive word's input, a value put in the store or in a structure. There
+the stage would run the body, see what it does to the value, `push`
+appending, `insert` inserting in the middle, `at` reading by index, and
+write it in the value's lowered type, `[ … ] seq# ! appends# !`, as it
+settles a loop's types now by running the body. Which word does what
+would be facts in core.march. A program never needs to write one, and may
+to force it (Thomas: "not necessary for the programmer to do unless they
+wish to interject and force it"). The form comes of what is done and the
+size together, by this table. It waits on a second form, every array
+being a tree today (1); a property, what a value is that its
+representation cannot show, is the language's, TYPES.md open question 17.
 
 ## 4. Sharing
 

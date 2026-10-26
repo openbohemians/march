@@ -4,7 +4,7 @@
 //! as `bool` is of i64: accepted wherever that is, matched less well than a
 //! clause of its own, and forgotten where the representation's word is
 //! applied.
-use march8::{Kind, Session};
+use march8::{Kind, Level, Session};
 
 fn typed(src: &str) -> String {
     let mut s = Session::new();
@@ -141,6 +141,31 @@ fn held_in_an_array() {
     assert_eq!(e.kind, Kind::Mismatch);
     let e = fails("( 1 0 ) < 2 bool vec > !");
     assert_eq!(e.kind, Kind::Mismatch);
+}
+
+#[test]
+fn two_forgotten_together_are_warned_of() {
+    // One word forgetting two types of their own takes them as one, Celsius
+    // added to Fahrenheit, a minor warning until a units system checks it
+    // (TYPES.md 2.11). Forgetting one, or both by `!`, is meant.
+    let warned = |src: &str| {
+        let mut s = Session::new();
+        s.eval(&format!("{TEMPS} {src}")).unwrap();
+        s.take_warnings()
+    };
+    let w = warned("1.0 celsius ! 2.0 fahrenheit ! +");
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert_eq!(w[0].level, Level::Minor);
+    assert!(
+        w[0].msg
+            .starts_with("celsius and fahrenheit, two types of their own, are forgotten together"),
+        "{}",
+        w[0]
+    );
+    assert!(warned("1.0 celsius ! 2.0 celsius ! +").is_empty());
+    assert!(warned("1.0 celsius ! 2.0 +").is_empty());
+    assert!(warned("1.0 celsius ! 2.0 fahrenheit ! < f64 f64 > ! +").is_empty());
+    assert!(warned("1.0 celsius ! 2.0 fahrenheit ! swap").is_empty());
 }
 
 #[test]

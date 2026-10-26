@@ -3205,7 +3205,7 @@ impl Stage {
                 ),
             ));
         };
-        self.settle(sig, &env)
+        self.settle(sig, &env).map(drop)
     }
 
     /// Whether a check that does not hold now may hold as the program runs
@@ -3535,14 +3535,19 @@ impl Stage {
     }
 
     /// Gives the inputs the types their patterns name, so literals convert.
-    /// An untyped value pattern names no type: its input keeps its own.
-    fn settle(&mut self, sig: &Sig, env: &Env) -> Result<()> {
+    /// An untyped value pattern names no type: its input keeps its own. It
+    /// gives the types of their own it forgets.
+    fn settle(&mut self, sig: &Sig, env: &Env) -> Result<Vec<Type>> {
         let base = self.stack.len() - sig.ins.len();
+        let mut forgot: Vec<Type> = Vec::new();
         for (k, &p) in sig.ins.iter().enumerate() {
             let t = self.types.subst(p, env);
             let mut have = self.stack[base + k].ty;
             // A type of its own forgets itself where its representation's
             // word is applied (TYPES.md 2.11), `price sqrt` a decimal.
+            if self.types.own_parts(have).is_some() && have != t && !forgot.contains(&have) {
+                forgot.push(have);
+            }
             while let Some((_, r)) = self.types.own_parts(have)
                 && have != t
             {
@@ -3556,7 +3561,23 @@ impl Stage {
             }
             self.annotate(base + k, t)?;
         }
-        Ok(())
+        Ok(forgot)
+    }
+
+    /// Two types of their own forgotten by one word are taken as one,
+    /// dollars added to euros, which a units system is to check (TYPES.md
+    /// 2.11). A bracket's `!` forgets them as it says, and is no case.
+    fn forgot_together(&mut self, forgot: &[Type]) {
+        if let [a, b, ..] = forgot[..] {
+            let (a, b) = (self.types.name(a), self.types.name(b));
+            self.warn(
+                Level::Minor,
+                format!(
+                    "{a} and {b}, two types of their own, are forgotten together, so one \
+                     word takes them as one type; `!` of their representation says it is meant"
+                ),
+            );
+        }
     }
 
     // ---- Families ----
@@ -5784,7 +5805,8 @@ impl Stage {
         let Some(sig) = &c.sig else {
             return self.run_quote(&c.body);
         };
-        self.settle(sig, &env)?;
+        let forgot = self.settle(sig, &env)?;
+        self.forgot_together(&forgot);
         let base = self.stack.len() - sig.ins.len();
         self.reached(base);
         let floor = self.floor;
@@ -6493,7 +6515,8 @@ impl Stage {
                 ),
             ));
         };
-        self.settle(sig, &env)?;
+        let forgot = self.settle(sig, &env)?;
+        self.forgot_together(&forgot);
         let base = self.stack.len() - n;
         let len = |s: &mut Self, v: u8| match env.0[v as usize].map(|t| s.types.term(t)) {
             Some(Term::Nat(k)) => k,

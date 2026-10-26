@@ -55,9 +55,9 @@ what can be, and keep the Rust a stone's throw from it (Thomas,
   `own`, named by `;`, a subset of its representation forgotten where the
   representation's word is applied, a clause of its own keeping it;
   `!` of an array of the representation, `( 1.0 2.0 ) < 2 celsius vec >
-  !` (2026-10-26). To come: the warning where two types of their own are
-  forgotten together, proposed, not decided; and a type made of itself,
-  `tree: { left: < tree > ; … } ;`, an error for now.
+  !`, and a minor warning where one word forgets two together, until a
+  units system (2026-10-26). To come: a type made of itself, `tree: {
+  left: < tree > ; … } ;`, an error for now.
 - **How a clause is chosen,** TYPES.md 2.8's rule (Thomas, 2026-10-17):
   slot by slot from the top, a value before a type before a union before
   a variable, a subset before the type it is in, replacing march8's
@@ -121,6 +121,13 @@ until a program needs it.
 
 ## To think on
 
+- **Properties** (TYPES.md open question 17, Thomas, 2026-10-26): a value
+  of more than one type at once, `i64 ary sorted`, `sorted` a word that
+  takes a type as `ary` does, a guard tested once and carried, kept and
+  forgotten by the rule of types of their own. And what is done to a
+  value, `appends#`, written in its lowered type where its form must be
+  settled early (REPRESENTATIONS.md 3). Proposed; how one is defined is
+  open.
 - **A letter's field, `b.line`** (SYMBOLIC-FORTH.md 6.16, Thomas,
   2026-10-26), as a bracket name's `rd.line` is. A one-letter word is
   refused and a one-letter namespace is not, `b.ff: 1 ;`, so the two

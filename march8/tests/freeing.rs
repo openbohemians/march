@@ -79,6 +79,33 @@ fn a_failed_run_puts_back_what_it_took() {
 }
 
 #[test]
+fn an_append_to_an_array_alone_is_in_place() {
+    // Appended where nothing else holds it, an array grows its flat tail,
+    // joined to it once where it is next needed whole: shared, put in the
+    // middle of, compared, sorted or joined, it is the array it was.
+    let grown = "10 range < i64 ary > empty [ -1 insert ] fold";
+    let show = |src: &str| session(&[&format!("{grown} {src}")]).show();
+    assert_eq!(show(""), "<1> ( 1 2 3 4 5 6 7 8 9 10 )");
+    assert_eq!(show("dup 11 -1 insert length swap length"), "<2> 11 10");
+    assert_eq!(show("0 0 insert 1 3 slice"), "<1> ( 0 1 2 )");
+    assert_eq!(show("10 range eq?"), "<1> true");
+    assert_eq!(show("reverse 1 at"), "<1> 10");
+    assert_eq!(show("dup concat length"), "<1> 20");
+    // Strings appended are held by the array, and go with it.
+    let s =
+        session(&["1000 range < string ary > empty [ drop \"x\" \"y\" concat -1 insert ] fold"]);
+    let shown = s.show();
+    assert!(shown.starts_with("<1> ( \"xy\" \"xy\""), "{shown}");
+    assert!(shown.ends_with("\"xy\" … 984 more )"), "{shown}");
+    let s = session(&[
+        "1000 range < string ary > empty [ drop \"x\" \"y\" concat -1 insert ] fold length",
+    ]);
+    assert_eq!(s.show(), "<1> 1000");
+    let (bytes, _) = s.machine.live();
+    assert!(bytes < (1 << 20) + (64 << 10), "{bytes}");
+}
+
+#[test]
 fn lower_frees_as_it_goes() {
     // The first compiler in March, on itself: 16.8 MB held at its peak when
     // nothing was freed, now a few hundred kilobytes and the working

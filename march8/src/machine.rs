@@ -531,9 +531,8 @@ impl Machine {
     /// holds it, the old element let go of; else a new version sharing the
     /// rest, each counted element of it held once more.
     fn set_element(&mut self, r: u64, i: usize, x: u64) -> Result<u64, Error> {
-        let a = self.array(r)?;
-        let old = a.get(i).ok_or(Error::Memory)?;
-        let v = a.whole().update(i, x);
+        let old = self.array(r)?.get(i).ok_or(Error::Memory)?;
+        let v = self.whole(r)?.update(i, x);
         let holds = self.holds_of(r)?;
         if self.alone(r)? {
             self.edit_in_place(r, v, holds)?;
@@ -552,7 +551,7 @@ impl Machine {
     /// else a new version sharing it; the second's elements shared, or taken
     /// over if nothing else holds it.
     fn concat(&mut self, a: u64, b: u64) -> Result<u64, Error> {
-        let (x, y) = (self.array(a)?.whole(), self.array(b)?.whole());
+        let (x, y) = (self.whole(a)?, self.whole(b)?);
         let (ha, hb) = (self.holds_of(a)?, self.holds_of(b)?);
         let (la, lb) = (x.len(), y.len());
         let mask = if lb == 0 {
@@ -932,6 +931,18 @@ impl Machine {
     /// The elements an array handle holds, as one sequence.
     pub fn sequence(&self, r: u64) -> Result<merkle_champ::Sequence<u64>, Error> {
         Ok(self.array(r)?.whole())
+    }
+    /// The elements an array holds, as one sequence, its tail joined to it
+    /// for good: however often it is read whole, a tail is joined once.
+    fn whole(&mut self, r: u64) -> Result<merkle_champ::Sequence<u64>, Error> {
+        let slot = self.region_slot(r)?;
+        let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+        let a = region.array.as_mut().ok_or(Error::Memory)?;
+        if !a.tail.is_empty() {
+            a.seq = a.whole();
+            a.tail = Vec::new();
+        }
+        Ok(a.seq.clone())
     }
     fn region(&self, r: u64) -> Result<&Region, Error> {
         self.regions[self.region_slot(r)?]
@@ -1703,7 +1714,7 @@ impl Machine {
                         r
                     }
                     Err(_) => {
-                        let whole = self.array(a)?.whole();
+                        let whole = self.whole(a)?;
                         let (i, j) = (i as usize, j as usize);
                         if j > whole.len() {
                             return Err(Error::Memory);
@@ -1736,16 +1747,18 @@ impl Machine {
             Same => {
                 let b = self.pop()?;
                 let a = self.pop()?;
-                let same = match (self.text(a), self.text(b)) {
+                let texts = self.text(a).is_ok() && self.text(b).is_ok();
+                let arrays = self.array(a).is_ok() && self.array(b).is_ok();
+                let same = if texts {
                     // Interned, so equal text is one handle.
-                    (Ok(_), Ok(_)) => a == b,
-                    _ => match (self.array(a), self.array(b)) {
-                        (Ok(x), Ok(y)) => x.whole().identity() == y.whole().identity(),
-                        _ => match (self.map(a), self.map(b)) {
-                            (Ok(x), Ok(y)) => x.identity() == y.identity(),
-                            _ => a == b,
-                        },
-                    },
+                    a == b
+                } else if arrays {
+                    self.whole(a)?.identity() == self.whole(b)?.identity()
+                } else {
+                    match (self.map(a), self.map(b)) {
+                        (Ok(x), Ok(y)) => x.identity() == y.identity(),
+                        _ => a == b,
+                    }
                 };
                 for r in [a, b] {
                     if self.region(r).is_ok_and(Region::is_value) {
@@ -1967,7 +1980,7 @@ impl Machine {
             }
             SortInts | SortFloats | SortTexts => {
                 let a = self.pop()?;
-                let mut cells: Vec<u64> = self.array(a)?.whole().iter().copied().collect();
+                let mut cells: Vec<u64> = self.whole(a)?.iter().copied().collect();
                 match p {
                     SortInts => cells.sort_by_key(|&x| x as i64),
                     SortFloats => {
@@ -1996,7 +2009,25 @@ impl Machine {
                 let g = self.pop()?;
                 let x = self.pop()?;
                 let a = self.pop()?;
-                let whole = self.array(a)?.whole();
+                // An append to an array nothing else holds, its elements
+                // counted alike, goes onto its tail, in place.
+                let holds = self.holds_of(a)?;
+                if usize::try_from(g).is_ok_and(|g| g == self.array(a).map_or(0, Array::len))
+                    && (holds == 0 || holds == u64::MAX)
+                    && self.alone(a)?
+                {
+                    if self.live_bytes + 8 > MAX_BYTES {
+                        return Err(Error::Limit);
+                    }
+                    let slot = self.region_slot(a)?;
+                    let region = self.regions[slot].region.as_mut().ok_or(Error::Memory)?;
+                    region.array.as_mut().ok_or(Error::Memory)?.tail.push(x);
+                    region.charged += 8;
+                    self.live_bytes += 8;
+                    self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(self.live_bytes);
+                    return self.push(a);
+                }
+                let whole = self.whole(a)?;
                 let Some(g) = usize::try_from(g).ok().filter(|&g| g <= whole.len()) else {
                     return Err(missing(format!(
                         "the array of {} has no such gap",
@@ -2029,7 +2060,7 @@ impl Machine {
             VecRemove => {
                 let i = self.pop()?;
                 let a = self.pop()?;
-                let whole = self.array(a)?.whole();
+                let whole = self.whole(a)?;
                 let Some(i) = usize::try_from(i).ok().filter(|&i| i < whole.len()) else {
                     return Err(missing(beyond(whole.len())));
                 };
@@ -2058,7 +2089,7 @@ impl Machine {
             GradeInts | GradeFloats | GradeTexts | GradeDownInts | GradeDownFloats
             | GradeDownTexts => {
                 let a = self.pop()?;
-                let cells: Vec<u64> = self.array(a)?.whole().iter().copied().collect();
+                let cells: Vec<u64> = self.whole(a)?.iter().copied().collect();
                 let mut order: Vec<usize> = (0..cells.len()).collect();
                 // Stable either way: equal elements keep their order.
                 let down = matches!(p, GradeDownInts | GradeDownFloats | GradeDownTexts);
@@ -2190,8 +2221,8 @@ impl Machine {
             Keep => {
                 let m = self.pop()?;
                 let a = self.pop()?;
-                let mask = self.array(m)?.whole();
-                let whole = self.array(a)?.whole();
+                let mask = self.whole(m)?;
+                let whole = self.whole(a)?;
                 if mask.len() != whole.len() {
                     return Err(Error::Trap(
                         "mismatch".into(),
@@ -2227,7 +2258,7 @@ impl Machine {
             }
             Reverse => {
                 let a = self.pop()?;
-                let whole = self.array(a)?.whole();
+                let whole = self.whole(a)?;
                 let mut cells: Vec<u64> = whole.iter().copied().collect();
                 cells.reverse();
                 let n = cells.len();

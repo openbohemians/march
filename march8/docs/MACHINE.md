@@ -988,6 +988,10 @@ temp: celsius ;                      an alias, `celsius` named already
   < 2 celsius vec > !` as `[ celsius ! ] map` gives, each element its
   own: of the representation only, so `( 1 2 )` is no `2 celsius vec`,
   nor `( 1 0 )` a `2 bool vec`.
+- **Two forgotten together are warned of,** a minor warning: one word
+  forgetting two types of their own takes them as one, Celsius added to
+  Fahrenheit, until a units system checks it. `!` of the representation,
+  `< f64 f64 > !`, forgets both as meant.
 
 ### Recursion and instances
 
@@ -1225,7 +1229,11 @@ lets go of a value.
 An edit, `put`, `insert`, `remove`, `concat`, `slice`, of a value nothing
 else holds changes it in place, the element it replaces let go of; of one
 held elsewhere it makes a version that shares the rest, which holds each
-value in it once more, a pass over them. On `lower` lowering itself, the
+value in it once more, a pass over them. An append, `-1 insert`, of an
+array nothing else holds goes onto its flat tail, as `map` gathers, and
+the tail is joined to its tree once, where the array is next needed
+whole: a million appends take 197 ns each, not 2,347, the tree making a
+leaf again for each (REPRESENTATIONS.md 1). On `lower` lowering itself, the
 run's peak is 1.3 MB, the working memory's megabyte and 258 KB of values,
 as REPRESENTATIONS.md's measure foretold, not 16.8 MB, and 2 KB is held at
 the end, the literals, which are made once and kept. It takes 0.92 s, not
